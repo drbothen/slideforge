@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,9 @@ subsystem: SS-02
 capability: CAP-001
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.1 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001, F-086-P5-MED-002): EC-004 mechanism corrected. The prior text stated 'the pre-layout validator emits W-A11-002' — that mechanism is unreachable because AltTextValidator::validate() is Shape-only per ADR-018 v1.2 Decision-3; charts are never validated pre-layout. Corrected: when both decorative: true and a non-empty alt are set, resolve_alt returns AltText::Decorative (decorative wins) AND emits W-A11-002 via tracing::warn!(code = \"W-A11-002\") at Stage-2b resolution time. PC-12 alt-resolution rule reworded to make the decorative-first ordering explicit and unambiguous. No behavioral change — decorative-first was already the canonical postcondition per PC-12."]
+modified:
+  - "v1.1 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001, F-086-P5-MED-002): EC-004 mechanism corrected. The prior text stated 'the pre-layout validator emits W-A11-002' — that mechanism is unreachable because AltTextValidator::validate() is Shape-only per ADR-018 v1.2 Decision-3; charts are never validated pre-layout. Corrected: when both decorative: true and a non-empty alt are set, resolve_alt returns AltText::Decorative (decorative wins) AND emits W-A11-002 via tracing::warn!(code = \"W-A11-002\") at Stage-2b resolution time. PC-12 alt-resolution rule reworded to make the decorative-first ordering explicit and unambiguous. No behavioral change — decorative-first was already the canonical postcondition per PC-12."
+  - "v1.2 — STORY-086 pass-7 adversary finding F-086-P7-MED-001 + proactive struct-shape audit: (1) PC-7 BulletItem corrected from nonexistent {text, level} fields to real {inlines, children} shape (crates/slideforge-types/src/block.rs:31-38). (2) TextBlock struct-shape corrections throughout: TextBlock has NO tag field and TextTag does NOT exist in the codebase (block.rs:19-24). All PC-1..PC-5 TextBlock literals that referenced tag: TextTag::Title/Subtitle/Body have been corrected — the semantic distinction (title vs subtitle vs body) is expressed by block ordering position and slide field name, NOT by a tag field. The tag wording is removed from struct literals and the ordering contract (PC-13) is the authoritative specification. (3) ImageSpec field name corrected: real field is path (not src) per crates/slideforge-types/src/specs.rs:309. PC-10 and corresponding test vectors updated. (4) AltText::Unspecified corrected throughout: AltText enum has exactly 2 variants — Provided(Arc<str>) and Decorative — with no Unspecified variant (specs.rs:143-148). All references to AltText::Unspecified replaced with Option::None (the representation used by this pass) and notes that the layout layer tracks missing-alt state independently via Option<AltText> on frame types. Invariant 6 wording corrected. (5) Test-vector row for title+bullets: BulletItem shorthand replaced with concrete struct shape. No behavioral semantics changed."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -54,22 +56,27 @@ NOT populated by this threading pass.
 ### Text Content
 
 1. For each `Slide` where `fields["title"]` is `FieldValue::Literal(Value::Str(s))` with
-   `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(Arc::from(s.trim()))], tag: TextTag::Title })` is prepended to `Slide.blocks`.
+   `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: vec![InlineNode::Plain(Arc::from(s.trim()))], span: SourceSpan::default() })` is prepended to `Slide.blocks`.
+   (Semantic role — title vs body — is conveyed by block-ordering position per PC-13, not by a tag field. `TextBlock` has no `tag` field; the `TextTag` type does not exist in the codebase as of v1.2.)
 2. For each `Slide` where `fields["title"]` is `FieldValue::Inlines(nodes)`: a
-   `ContentBlock::Text(TextBlock { inlines: nodes, tag: TextTag::Title })` is prepended.
+   `ContentBlock::Text(TextBlock { inlines: nodes, span: SourceSpan::default() })` is prepended.
 3. For each `Slide` where `fields["subtitle"]` is `FieldValue::Literal(Value::Str(s))`
-   with `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: [...], tag: TextTag::Subtitle })` is appended after the title block (if present).
+   with `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: vec![InlineNode::Plain(Arc::from(s.trim()))], span: SourceSpan::default() })` is appended after the title block (if present). Exporters distinguish subtitle from title by position in `Slide.blocks` (index 1 when title is present, per PC-13).
 4. For each `Slide` where `fields["body"]` is `FieldValue::Literal(Value::Str(s))`
-   with `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(Arc::from(s.trim()))], tag: TextTag::Body })` is appended.
+   with `s.trim()` non-empty: a `ContentBlock::Text(TextBlock { inlines: vec![InlineNode::Plain(Arc::from(s.trim()))], span: SourceSpan::default() })` is appended.
 5. For each `Slide` where `fields["body"]` is `FieldValue::Inlines(nodes)`: a
-   `ContentBlock::Text(TextBlock { inlines: nodes, tag: TextTag::Body })` is appended.
+   `ContentBlock::Text(TextBlock { inlines: nodes, span: SourceSpan::default() })` is appended.
 6. Empty strings (after trim) produce NO ContentBlock. An empty `fields["title"]` is
    silently skipped; no ContentBlock::Text is emitted for it.
 
 ### Bullets
 
 7. For each `Slide` where `fields["bullets"]` is `FieldValue::Literal(Value::List(items))`:
-   a `ContentBlock::Bullets(vec![...])` is appended, with one `BulletItem { text: [InlineNode::Plain(Arc::from(item_str))], level: 0, span: SourceSpan::default() }` per list entry.
+   a `ContentBlock::Bullets(vec![...])` is appended, with one
+   `BulletItem { inlines: vec![InlineNode::Plain(Arc::from(item_str))], children: vec![], span: SourceSpan::default() }`
+   per list entry. (`BulletItem` real fields per `crates/slideforge-types/src/block.rs:31-38`:
+   `inlines: Vec<InlineNode>`, `children: Vec<BulletItem>`, `span: SourceSpan`. The fields
+   `text` and `level` do NOT exist — F-086-P7-MED-001 fix.)
    (Note: in the parser AST — pre-eval — a bullet list literal is `FieldValue::List(Vec<FieldValue>)`, added by STORY-088 per D5. Eval converts this to `FieldValue::Literal(Value::List(...))` in `Slide.fields`. This threading pass therefore always sees the post-eval `FieldValue::Literal(Value::List(...))` form, consistent with PC-2.)
 8. For each `Slide` where `fields["bullets"]` is `FieldValue::Inlines(nodes)`:
    a `ContentBlock::Bullets(...)` is appended with pre-parsed bullet nodes threaded as-is.
@@ -80,7 +87,8 @@ NOT populated by this threading pass.
    if `fields["chart_type"]` is `FieldValue::Literal(Value::Str(s))`, a `ContentBlock::Chart(ChartSpec { chart_type: Arc::from(s), alt: <alt>, decorative: <decorative>, span, data_source: ... })` is appended, where `<alt>` is resolved per the alt-resolution rule (Postcondition 12).
    If `fields["chart_type"]` is absent, emit `tracing::warn!` and skip block construction.
 10. For each `Slide` with `slide_type` in `["image", "screenshot", "bio"]`:
-    if `fields["src"]` is `FieldValue::Literal(Value::Str(path))`, a `ContentBlock::Image(ImageSpec { src: Arc::from(path), alt: <alt>, decorative: <decorative>, span })` is appended.
+    if `fields["src"]` is `FieldValue::Literal(Value::Str(p))`, a `ContentBlock::Image(ImageSpec { path: Arc::from(p), alt: <alt>, decorative: <decorative>, span })` is appended.
+    (`ImageSpec` real field is `path: Arc<str>`, NOT `src` — per `crates/slideforge-types/src/specs.rs:309`. The DSL field name that the user writes is still `src:` in the `.sf` syntax; the Rust struct field name is `path`.)
     If `fields["src"]` is absent, emit `tracing::warn!` and skip.
 11. For each `Slide` with `slide_type == "diagram"`:
     if `fields["source"]` is `FieldValue::Literal(Value::Str(s))`, a `ContentBlock::Diagram(DiagramSpec { source: Arc::from(s), alt: <alt>, decorative: <decorative>, span })` is appended.
@@ -101,9 +109,14 @@ NOT populated by this threading pass.
       `alt = Some(AltText::Provided(Arc::from(s.trim())))`, `decorative = false`.
     - Else (neither present, or `alt` is empty/whitespace-only, or `decorative` is false/absent):
       `alt = None`, `decorative = false`.
-    `None` on `ContentBlock.alt` is later mapped to `AltText::Unspecified` by
-    `thread_media_alt_into_frames` in layout (ADR-019 Decision 5.2). `AltText::Unspecified`
-    on a frame triggers E-A11-001 in `validate_post_layout` (ADR-019 Decision 5.3).
+    `None` on `ContentBlock.alt` means "no alt text supplied by Stage-2b". The layout layer
+    (`thread_media_alt_into_frames`, ADR-019 Decision 5.2) maps this `None` to a
+    "missing-alt" state on layout frames. The post-layout validator (`validate_post_layout`,
+    ADR-019 Decision 5.3) then triggers E-A11-001 on frames with no alt text. The exact
+    representation of "missing alt" on layout frame types is defined by the layout
+    implementation; `AltText` itself has only two variants (`Provided` and `Decorative`) and
+    no `Unspecified` variant — missing alt at the frame level is a separate concern outside
+    the `AltText` enum.
 
 ### Block Ordering and Shape Exclusion
 
@@ -141,9 +154,11 @@ NOT populated by this threading pass.
    produced.
 6. **Alt-resolution is total and exhaustive.** Every Chart/Image/Diagram ContentBlock
    produced by this pass has `alt` set to exactly one of: `Some(AltText::Provided(_))`,
-   `Some(AltText::Decorative)`, or `None`. The value `Some(AltText::Unspecified)` is
-   NEVER produced by this pass — `Unspecified` is exclusively assigned by layout's
-   `thread_media_alt_into_frames` (ADR-019 Decision 4).
+   `Some(AltText::Decorative)`, or `None`. `AltText` has exactly two variants
+   (`Provided(Arc<str>)` and `Decorative`) — there is no `Unspecified` variant in the enum.
+   Missing-alt state is represented as `Option::None` by this pass. The layout layer
+   (`thread_media_alt_into_frames`, ADR-019 Decision 4) handles the transition from
+   `None` to a layout-specific "missing alt" representation on frame types.
 7. **Idempotency guard.** If `Slide.blocks` is already non-empty (e.g., from a future
    pipeline change), the function appends to it rather than replacing. In the current
    pipeline, `eval_deck` always produces `Slide.blocks = vec![]`, so this guard is a
@@ -158,10 +173,10 @@ NOT populated by this threading pass.
 |----|-------------|-------------------|
 | EC-001 | `fields["title"]` is `Value::Str("")` (empty string) | No `ContentBlock::Text` for title. Empty strings are silently skipped per Postcondition 6. |
 | EC-002 | `fields["title"]` is `Value::Str("  ")` (whitespace-only) | No `ContentBlock::Text` for title. Whitespace-only after trim is treated as empty. |
-| EC-003 | `fields["alt"]` is `Value::Str("")` on a chart slide | `alt = None`. The empty-string alt is NOT treated as `AltText::Provided`. Layout will produce `AltText::Unspecified`; E-A11-001 fires in strict mode. |
+| EC-003 | `fields["alt"]` is `Value::Str("")` on a chart slide | `alt = None`. The empty-string alt is NOT treated as `AltText::Provided`. Layout maps `None` to a "missing alt" state on frames; E-A11-001 fires in strict mode. |
 | EC-004 | `fields["decorative"] = Value::Bool(true)` AND `fields["alt"] = Value::Str("desc")` on same chart slide | `alt = Some(AltText::Decorative)`, `decorative = true`. Decorative takes precedence in Stage 2b (PC-12). `resolve_alt` returns `AltText::Decorative` and emits `tracing::warn!(code = "W-A11-002")` at resolution time; the alt string "desc" is discarded. The pre-layout `AltTextValidator::validate()` does NOT emit W-A11-002 for charts/images/diagrams — that validator is Shape-only per ADR-018 v1.2 Decision-3. W-A11-002 is a Stage-2b resolution-time warning, not a validation-stage finding. (F-086-P5-MED-002 mechanism correction, 2026-06-06) |
-| EC-005 | Chart slide with no `fields["chart_type"]` | `tracing::warn!` emitted. No `ContentBlock::Chart` produced. Layout region for the chart slide will carry `AltText::Unspecified` structural placeholder; E-A11-001 fires in strict mode if no alt was provided. |
-| EC-006 | Image slide with no `fields["src"]` | `tracing::warn!` emitted. No `ContentBlock::Image` produced. Same Unspecified outcome as EC-005. |
+| EC-005 | Chart slide with no `fields["chart_type"]` | `tracing::warn!` emitted. No `ContentBlock::Chart` produced. Layout frame for the chart slide carries no alt; E-A11-001 fires in strict mode. |
+| EC-006 | Image slide with no `fields["src"]` | `tracing::warn!` emitted. No `ContentBlock::Image` produced. Same "missing alt" outcome as EC-005 at layout. (`fields["src"]` is the DSL field name; the Rust struct field is `ImageSpec::path`.) |
 | EC-007 | Slide with all three of title, body, and bullets fields | Three blocks produced: `[ContentBlock::Text(Title), ContentBlock::Text(Body), ContentBlock::Bullets(...)]` in canonical order. |
 | EC-008 | `fields["bullets"]` is `Value::List([])` (empty list) | `ContentBlock::Bullets(vec![])` is still produced. An empty bullets block is valid — it is the layout engine's job to handle zero-item bullet lists. |
 | EC-009 | Slide type not matching any known media type (e.g., `title`, `content`, `toc`) with no `fields["src"]`, `fields["chart_type"]`, or `fields["source"]` | Only text/bullet blocks are produced (per the slide's declared fields). No media block is produced. No warn emitted. |
@@ -172,17 +187,17 @@ NOT populated by this threading pass.
 
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| Deck with one `title` slide: `fields["title"] = FieldValue::Literal(Value::Str("My Title"))` | `Slide.blocks == [ContentBlock::Text(TextBlock { inlines: [Plain("My Title")], tag: TextTag::Title })]` | happy-path (text) |
-| Deck with one `content` slide: `fields["title"] = Str("H1"), fields["body"] = Str("Body text")` | `Slide.blocks == [ContentBlock::Text(Title "H1"), ContentBlock::Text(Body "Body text")]` — title first, body second | happy-path (canonical order) |
-| Deck with `chart` slide: `fields["chart_type"] = Str("bar"), fields["alt"] = Str("Q3 revenue")` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: "bar", alt: Some(AltText::Provided("Q3 revenue")), decorative: false, ... })]` | happy-path (chart + alt) |
-| Deck with `chart` slide: `fields["chart_type"] = Str("bar"), fields["decorative"] = Bool(true)` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: "bar", alt: Some(AltText::Decorative), decorative: true, ... })]` | edge-case (decorative chart) |
-| Deck with `chart` slide: `fields["chart_type"] = Str("pie")`, no `fields["alt"]`, no `fields["decorative"]` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: "pie", alt: None, decorative: false, ... })]`; layout maps `None → AltText::Unspecified`; strict mode yields E-A11-001 | error path (missing alt) |
-| Deck with `image` slide: `fields["src"] = Str("photo.png"), fields["alt"] = Str("Team photo")` | `Slide.blocks == [ContentBlock::Image(ImageSpec { src: "photo.png", alt: Some(AltText::Provided("Team photo")), decorative: false, ... })]` | happy-path (image + alt) |
-| Deck with `diagram` slide: `fields["source"] = Str("graph TD; A-->B")`, no alt | `Slide.blocks == [ContentBlock::Diagram(DiagramSpec { source: "graph TD; A-->B", alt: None, ... })]` | error path (missing alt — Unspecified triggers E-A11-001) |
+| Deck with one `title` slide: `fields["title"] = FieldValue::Literal(Value::Str("My Title"))` | `Slide.blocks == [ContentBlock::Text(TextBlock { inlines: vec![InlineNode::Plain(Arc::from("My Title"))], span: SourceSpan::default() })]` (first block = title by position) | happy-path (text) |
+| Deck with one `content` slide: `fields["title"] = Str("H1"), fields["body"] = Str("Body text")` | `Slide.blocks == [ContentBlock::Text(TextBlock { inlines: [Plain("H1")], span }), ContentBlock::Text(TextBlock { inlines: [Plain("Body text")], span })]` — title block at index 0, body block at index 1 | happy-path (canonical order) |
+| Deck with `chart` slide: `fields["chart_type"] = Str("bar"), fields["alt"] = Str("Q3 revenue")` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: Arc::from("bar"), alt: Some(AltText::Provided(Arc::from("Q3 revenue"))), decorative: false, span })]` | happy-path (chart + alt) |
+| Deck with `chart` slide: `fields["chart_type"] = Str("bar"), fields["decorative"] = Bool(true)` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: Arc::from("bar"), alt: Some(AltText::Decorative), decorative: true, span })]` | edge-case (decorative chart) |
+| Deck with `chart` slide: `fields["chart_type"] = Str("pie")`, no `fields["alt"]`, no `fields["decorative"]` | `Slide.blocks == [ContentBlock::Chart(ChartSpec { chart_type: Arc::from("pie"), alt: None, decorative: false, span })]`; layout maps `None` to "missing alt" on frames; strict mode yields E-A11-001 | error path (missing alt) |
+| Deck with `image` slide: `fields["src"] = Str("photo.png"), fields["alt"] = Str("Team photo")` | `Slide.blocks == [ContentBlock::Image(ImageSpec { path: Arc::from("photo.png"), alt: Some(AltText::Provided(Arc::from("Team photo"))), decorative: false, span })]` (`ImageSpec::path`, not `src`) | happy-path (image + alt) |
+| Deck with `diagram` slide: `fields["source"] = Str("graph TD; A-->B")`, no alt | `Slide.blocks == [ContentBlock::Diagram(DiagramSpec { source: Arc::from("graph TD; A-->B"), alt: None, decorative: false, span })]`; layout maps `None` to "missing alt"; E-A11-001 in strict mode | error path (missing alt) |
 | Deck with slide: `fields["title"] = Str("")` | `Slide.blocks == []` — empty title string produces no block | edge-case (empty string) |
-| Deck with `title` slide: `fields["title"] = Str("T"), fields["bullets"] = Value::List([Str("A"), Str("B")])` | `Slide.blocks == [ContentBlock::Text(Title "T"), ContentBlock::Bullets([BulletItem("A"), BulletItem("B")])]` | happy-path (title + bullets) |
-| `thread_fields_to_blocks(&mut deck)` called with shape: block already in `slide.shapes` | `Slide.blocks` contains only text/media ContentBlocks; no `ContentBlock::Shape` in result; `slide.shapes` unchanged | invariant (shape exclusion) |
-| Deck with `chart` slide: `fields["alt"] = Str("  ")` (whitespace-only) | `alt = None` — whitespace-only treated as absent; `AltText::Unspecified` at layout; E-A11-001 in strict mode | edge-case (whitespace alt) |
+| Deck with `title` slide: `fields["title"] = Str("T"), fields["bullets"] = Value::List([Str("A"), Str("B")])` | `Slide.blocks == [ContentBlock::Text(TextBlock { inlines: vec![Plain("T")], span }), ContentBlock::Bullets(vec![BulletItem { inlines: vec![Plain("A")], children: vec![], span }, BulletItem { inlines: vec![Plain("B")], children: vec![], span }])]` | happy-path (title + bullets) |
+| `thread_fields_to_blocks(&mut deck)` called with shape block already in `slide.shapes` | `Slide.blocks` contains only text/media ContentBlocks; no `ContentBlock::Shape` in result; `slide.shapes` unchanged | invariant (shape exclusion) |
+| Deck with `chart` slide: `fields["alt"] = Str("  ")` (whitespace-only) | `alt = None` — whitespace-only treated as absent; layout maps `None` to "missing alt"; E-A11-001 in strict mode | edge-case (whitespace alt) |
 
 ## Verification Properties
 
@@ -210,8 +225,8 @@ NOT populated by this threading pass.
 - BC-5.01.001 — depends on (this pass establishes `ContentBlock.alt` values that AltTextValidator ultimately checks)
 - BC-5.02.001 — depends on (the AltTextValidator's post-layout pass relies on `Slide.blocks` being populated by this threading pass)
 - BC-3.04.001 — related to (shape blocks are explicitly NOT in this pass's scope; shape threading remains in layout::run)
-- BC-4.01.001 — downstream dependency (PPTX exporter's TextTag title-placeholder routing contract requires `TextTag::Title` from this threading pass as upstream input; BC-4.01.001 v1.2 Postconditions 9–12)
-- BC-4.02.001 — downstream dependency (DOCX exporter's TextTag→Heading1 routing contract requires `TextTag::Title` from this threading pass as upstream input; BC-4.02.001 v1.2 Postconditions 8–11)
+- BC-4.01.001 — downstream dependency (PPTX exporter title-placeholder routing requires the title `ContentBlock::Text` produced by this threading pass as upstream input; routing is by block-ordering position, not by a TextTag field — `TextTag` does not exist; BC-4.01.001 references to `TextTag::Title` require corresponding correction in those BCs)
+- BC-4.02.001 — downstream dependency (DOCX exporter heading routing requires the title `ContentBlock::Text` produced by this threading pass as upstream input; same block-ordering-position convention applies; BC-4.02.001 references to `TextTag::Title` require corresponding correction in those BCs)
 
 ## Architecture Anchors
 
