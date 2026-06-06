@@ -5,7 +5,7 @@ title: "Stage 2b — post-eval field-to-block threading pass in slideforge-eval"
 status: accepted
 date: 2026-06-05
 accepted_date: 2026-06-05
-version: "1.1"
+version: "1.3"
 subsystems_affected: [SS-02, SS-03, SS-05, SS-15]
 supersedes: null
 superseded_by: null
@@ -43,6 +43,7 @@ Story A (`slide-field-to-block-threading`).
 | 2026-06-05 | v1.0 | architect | Initial ADR. Stage 2b seam contract, fields→blocks mapping, AltText::Unspecified state machine, decorative handling, purity classification, comemo compatibility. |
 | 2026-06-06 | v1.1 | architect | Amendment A: D1 (TextTag→FrameContent layout mapping; exporters unchanged) + D5 (FieldValue::List parser model). See wave4-expanded-scope-uncertainty-resolution.md for full resolution. |
 | 2026-06-06 | v1.2 | architect | Amendment B (STORY-086 pass-5 adjudication F-086-P5-CRIT-001): Decision 4.1 conflict path corrected from alt-first (BC-3.04.001 Inv-11) to decorative-first (BC-1.16.001 PC-12). BC-3.04.001 Inv-11 governs shape DSL path only; media threading at Stage 2b is governed exclusively by BC-1.16.001. W-A11-002 emission site corrected from "pre-layout validator" to "resolve_alt via tracing::warn!" — AltTextValidator.validate() is Shape-only per ADR-018 v1.2 and cannot emit W-A11-002 for charts/images/diagrams. |
+| 2026-06-06 | v1.3 | architect | Amendment C (STORY-086 pass-6 adjudication F-086-P6-MED-001): §3.1 table and §3.3 alt-rule corrected to TRIMMED storage. `InlineNode::Plain(s)` → `InlineNode::Plain(Arc::from(s.trim()))` for title/subtitle/body; `AltText::Provided(Arc::from(s))` → `AltText::Provided(Arc::from(s.trim()))` for alt. Function-level doc comment (Decision 2 inline example) updated likewise. BC-1.16.001 PC-1/PC-4/PC-12 is the authoritative contract (contract semantics per CLAUDE.md precedence rule 1); ADR-019 is brought into alignment. |
 
 ---
 
@@ -168,7 +169,7 @@ Public signature (exported from `slideforge-eval::lib.rs`):
 /// precedence (see Decision 4, AltText state machine):
 ///
 /// 1. `Slide.fields["decorative"] == Value::Bool(true)` → `ContentBlock.alt = Some(AltText::Decorative)`
-/// 2. `Slide.fields["alt"] == Value::Str(s)` (non-empty, non-whitespace) → `ContentBlock.alt = Some(AltText::Provided(Arc::from(s)))`
+/// 2. `Slide.fields["alt"] == Value::Str(s)` (non-empty, non-whitespace) → `ContentBlock.alt = Some(AltText::Provided(Arc::from(s.trim())))`
 /// 3. Neither present → `ContentBlock.alt = None`
 ///
 /// The layout `thread_media_alt_into_frames` function then maps `None` to
@@ -198,9 +199,9 @@ evaluated in the order listed; the first matching rule applies.
 
 | Slide.fields key | Value type | Produces | Notes |
 |-----------------|------------|---------|-------|
-| `"title"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(s)], tag: TextTag::Title })` | Prepended to blocks before body |
-| `"body"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(s)], tag: TextTag::Body })` | |
-| `"subtitle"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(s)], tag: TextTag::Subtitle })` | Only for slide types that use subtitle (e.g., `title`) |
+| `"title"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(Arc::from(s.trim()))], tag: TextTag::Title })` | Prepended to blocks before body; leading/trailing whitespace stripped per BC-1.16.001 PC-1 |
+| `"body"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(Arc::from(s.trim()))], tag: TextTag::Body })` | Leading/trailing whitespace stripped per BC-1.16.001 PC-4 |
+| `"subtitle"` | `FieldValue::Literal(Value::Str(s))` | `ContentBlock::Text(TextBlock { inlines: [InlineNode::Plain(Arc::from(s.trim()))], tag: TextTag::Subtitle })` | Only for slide types that use subtitle (e.g., `title`); whitespace stripped |
 | `"body"` | `FieldValue::Inlines(nodes)` | `ContentBlock::Text(TextBlock { inlines: nodes, tag: TextTag::Body })` | Rich-text body |
 | `"title"` | `FieldValue::Inlines(nodes)` | `ContentBlock::Text(TextBlock { inlines: nodes, tag: TextTag::Title })` | Rich-text title |
 
@@ -226,7 +227,7 @@ Applies when `slide.slide_type == "chart"` (or any slide type registered in the
 
 Alt resolution for chart (section 3.3.alt):
 - `fields["decorative"] == Value::Bool(true)` → `alt = Some(AltText::Decorative)`, `decorative = true`
-- `fields["alt"] == Value::Str(s)` (non-empty after trim) → `alt = Some(AltText::Provided(Arc::from(s)))`, `decorative = false`
+- `fields["alt"] == Value::Str(s)` (non-empty after trim) → `alt = Some(AltText::Provided(Arc::from(s.trim())))`, `decorative = false`
 - Neither → `alt = None`, `decorative = false`
 
 If `chart_type` is absent for a chart slide, emit `tracing::warn!` and skip block
