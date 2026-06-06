@@ -158,7 +158,7 @@ pub enum AltText {
     /// when the corresponding `ContentBlock` has `alt = None`. Triggers `E-A11-001`
     /// in the post-layout validator when strict mode is active.
     ///
-    /// See ADR-019 Decision 4 for the AltText state machine.
+    /// See ADR-019 Decision 4 for the `AltText` state machine.
     Unspecified,
 }
 

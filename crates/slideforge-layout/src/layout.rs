@@ -160,10 +160,11 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         }
 
         // NOTE: FrameContent variants in the frames produced by region_frames_for
-        // start as Empty/Image/Chart/Diagram placeholders. Richer content population
-        // (e.g., wiring slide body blocks into FrameContent::Body) is STORY-027
-        // scope. The region map establishes the geometric foundation; content
-        // resolution is a separate pass in Phase 3.
+        // start as Empty/Image/Chart/Diagram placeholders. Wiring of
+        // body/title/chart/image blocks into FrameContent is Stage 2b (ADR-019).
+        // See `slideforge-eval::field_to_block::thread_fields_to_blocks`.
+        // The region map establishes the geometric foundation; content
+        // is threaded from Slide.blocks by thread_media_alt_into_frames below.
         //
         // MED-002: Compute text_flow for text-bearing frames.
         // For title/subtitle frames, extract text from the slide's resolved fields
@@ -390,9 +391,9 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 /// # STORY-039 AC-005 / EC-006 / EC-007
 ///
 /// Region-map frames for `chart`, `diagram`, and `image`/`screenshot`/`bio` slide
-/// types carry `AltText::Decorative` as a structural placeholder. This function
-/// reads each `ContentBlock::Chart` / `Diagram` / `Image` block's `.alt` field
-/// and overwrites the corresponding placeholder frame.
+/// types carry `AltText::Unspecified` as a structural placeholder (ADR-019 Decision 5.1).
+/// This function reads each `ContentBlock::Chart` / `Diagram` / `Image` block's `.alt`
+/// field and overwrites the corresponding placeholder frame.
 ///
 /// ## Mapping rule (lossless — no normalisation, no truncation)
 ///
@@ -400,7 +401,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 /// |------------------------|----------------------|--------------------------|
 /// | `Some(Provided(s))`    | `Provided(s)`        | none                     |
 /// | `Some(Decorative)`     | `Decorative`         | none                     |
-/// | `None`                 | `Decorative`         | `tracing::warn!` (EC-006/EC-007): upstream validator miss |
+/// | `None`                 | `Unspecified`        | `tracing::warn!` (EC-006/EC-007): no author alt threaded |
 ///
 /// ## Scope discipline
 ///
@@ -432,11 +433,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "EC-006: ChartSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "EC-006: ChartSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()
@@ -462,11 +463,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "EC-007: DiagramSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "EC-007: DiagramSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()
@@ -495,11 +496,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "ImageSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "ImageSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()

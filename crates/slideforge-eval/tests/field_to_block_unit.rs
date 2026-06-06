@@ -2,7 +2,7 @@
 //!
 //! ## Acceptance Criteria covered
 //!
-//! - **AC-008**: empty title string → no ContentBlock, no text run
+//! - **AC-008**: empty title string → no `ContentBlock`, no text run
 //! - **AC-009**: `thread_fields_to_blocks` is pure / deterministic
 //! - **AC-010**: canonical block ordering (title → subtitle → body → bullets → chart)
 //! - **AC-011**: shape blocks are NOT populated by Stage 2b
@@ -27,8 +27,8 @@ use std::sync::Arc;
 use slideforge_eval::thread_fields_to_blocks;
 use slideforge_types::{
     Block, ContentBlock, Deck, DeckMetadata, FieldValue, OrderedMap, Slide, SourceSpan, Value,
-    specs::{AltText, ShapePosition, ShapeSpec, ShapeUnit},
     shape_types::{FillSpec, ShapeType},
+    specs::{AltText, ShapePosition, ShapeSpec, ShapeUnit},
 };
 
 // ─── Helper constructors ───────────────────────────────────────────────────────
@@ -96,10 +96,7 @@ fn with_body(mut slide: Slide, body: &str) -> Slide {
 
 /// Insert a `bullets` list field into the slide (as a `Value::List`).
 fn with_bullets(mut slide: Slide, bullets: &[&str]) -> Slide {
-    let items: Vec<Value> = bullets
-        .iter()
-        .map(|b| Value::Str(Arc::from(*b)))
-        .collect();
+    let items: Vec<Value> = bullets.iter().map(|b| Value::Str(Arc::from(*b))).collect();
     slide.fields.insert(
         Arc::from("bullets"),
         FieldValue::Literal(Value::List(items)),
@@ -152,9 +149,9 @@ fn with_shape_block(mut slide: Slide) -> Slide {
     slide
 }
 
-// ─── AC-008 — empty title string → no ContentBlock ────────────────────────────
+// ─── AC-008 — empty title string → no `ContentBlock` ────────────────────────────
 
-/// AC-008 / BC-1.16.001 EC-001 — empty title string produces no ContentBlock::Text.
+/// AC-008 / BC-1.16.001 EC-001 — empty title string produces no `ContentBlock::Text`.
 ///
 /// Red Gate rationale: `thread_fields_to_blocks` is a no-op stub; `Slide.blocks`
 /// is always `vec![]` after the call. This test asserts `.len() == 0` (blocks empty),
@@ -180,9 +177,11 @@ fn test_bc_1_16_001_ac008_empty_title_produces_no_content_block() {
     let slide = &deck.slides[0];
     // After implementation: no ContentBlock::Text should exist for empty title.
     // If any Text block has empty inlines, the empty-string guard was missing.
-    let text_blocks_with_empty: Vec<_> = slide.blocks.iter().filter(|b| {
-        matches!(&b.content, ContentBlock::Text(tb) if tb.inlines.is_empty())
-    }).collect();
+    let text_blocks_with_empty: Vec<_> = slide
+        .blocks
+        .iter()
+        .filter(|b| matches!(&b.content, ContentBlock::Text(tb) if tb.inlines.is_empty()))
+        .collect();
     assert!(
         text_blocks_with_empty.is_empty(),
         "AC-008: no ContentBlock::Text with empty inlines should be produced for title \"\"; \
@@ -234,7 +233,10 @@ fn test_bc_1_16_001_ac008_empty_title_zero_blocks_total() {
 fn test_bc_1_16_001_ac009_pure_same_output_on_two_calls() {
     // AC-009 / BC-1.16.001 invariant 1 and postcondition 15 (determinism).
     // Construct a slide with title + body fields.
-    let slide = with_body(with_title(make_slide("content"), "Determinism Test"), "Body text here.");
+    let slide = with_body(
+        with_title(make_slide("content"), "Determinism Test"),
+        "Body text here.",
+    );
     let mut deck = make_deck(vec![slide]);
 
     // First call.
@@ -318,7 +320,7 @@ fn test_bc_1_16_001_ac010_canonical_block_ordering_five_blocks() {
     assert!(
         matches!(&blocks[0].content, ContentBlock::Text(_)),
         "AC-010: blocks[0] must be ContentBlock::Text (title); got {:?}",
-        blocks.get(0).map(|b| b.content.kind_name())
+        blocks.first().map(|b| b.content.kind_name())
     );
 
     // Block 1 must be Text(Subtitle)
@@ -378,9 +380,17 @@ fn test_bc_1_16_001_ac010_title_block_carries_exact_text() {
     match &blocks[0].content {
         ContentBlock::Text(tb) => {
             use slideforge_types::InlineNode;
-            let text: String = tb.inlines.iter().filter_map(|n| {
-                if let InlineNode::Plain(s) = n { Some(s.as_ref()) } else { None }
-            }).collect();
+            let text: String = tb
+                .inlines
+                .iter()
+                .filter_map(|n| {
+                    if let InlineNode::Plain(s) = n {
+                        Some(s.as_ref())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             assert_eq!(
                 text, "The Title",
                 "AC-010: title ContentBlock must carry exact text 'The Title'; got '{text}'"
@@ -406,7 +416,7 @@ fn test_bc_1_16_001_ac010_title_block_carries_exact_text() {
 ///
 /// The test uses a slide that has a shape block pre-populated (simulating another pass
 /// having added it), PLUS a title field. After threading:
-/// - The title ContentBlock::Text should appear.
+/// - The title `ContentBlock::Text` should appear.
 /// - The shape count must stay at 1 (unchanged).
 ///
 /// Red Gate: stub is a no-op → blocks stay at `[Shape]` (1 shape, pre-populated) →
@@ -421,7 +431,8 @@ fn test_bc_1_16_001_ac011_stage_2b_does_not_add_shape_blocks() {
 
     // Pre-condition: 1 shape block present before threading.
     assert_eq!(
-        deck.slides[0].blocks.len(), 1,
+        deck.slides[0].blocks.len(),
+        1,
         "precondition: slide must have exactly 1 shape block before threading"
     );
     assert!(
@@ -434,9 +445,15 @@ fn test_bc_1_16_001_ac011_stage_2b_does_not_add_shape_blocks() {
     let blocks = &deck.slides[0].blocks;
 
     // Count shape blocks after threading.
-    let shape_count = blocks.iter().filter(|b| matches!(b.content, ContentBlock::Shape(_))).count();
+    let shape_count = blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Shape(_)))
+        .count();
     // Count text blocks after threading.
-    let title_count = blocks.iter().filter(|b| matches!(b.content, ContentBlock::Text(_))).count();
+    let title_count = blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Text(_)))
+        .count();
 
     // Stage 2b must NOT add more shape blocks.
     assert_eq!(
@@ -457,7 +474,7 @@ fn test_bc_1_16_001_ac011_stage_2b_does_not_add_shape_blocks() {
 }
 
 /// AC-011 (pure shape isolation variant) — slides with `.shapes` non-empty
-/// (shapes in a different field) do not produce Shape ContentBlocks from Stage 2b.
+/// (shapes in a different field) do not produce `ContentBlock::Shape` blocks from Stage 2b.
 ///
 /// This tests BC-1.16.001 invariant 4 directly: Stage 2b reads fields and
 /// produces Text/Bullets/Chart blocks, never Shape blocks.
@@ -477,7 +494,10 @@ fn test_bc_1_16_001_ac011_no_shape_blocks_in_output_of_stage_2b() {
     let blocks = &deck.slides[0].blocks;
 
     // Stage 2b must produce exactly zero Shape blocks.
-    let shape_count = blocks.iter().filter(|b| matches!(b.content, ContentBlock::Shape(_))).count();
+    let shape_count = blocks
+        .iter()
+        .filter(|b| matches!(b.content, ContentBlock::Shape(_)))
+        .count();
     assert_eq!(
         shape_count, 0,
         "AC-011: Stage 2b must not produce any ContentBlock::Shape blocks; got {shape_count}. \
@@ -545,17 +565,22 @@ fn test_bc_5_02_001_ac012_alt_text_unspecified_variant_is_distinct_from_decorati
 
     // Exhaustive match must compile (no non_exhaustive_patterns warning/error).
     // If a new variant is added without updating this match, it fails to compile.
-    let _is_missing: bool = match unspecified {
-        AltText::Provided(_) => false,
-        AltText::Decorative => false,
+    let is_missing: bool = match unspecified {
+        AltText::Provided(_) | AltText::Decorative => false,
         AltText::Unspecified => true,
     };
-    assert!(_is_missing, "AC-012: Unspecified variant must match the Unspecified arm");
+    assert!(
+        is_missing,
+        "AC-012: Unspecified variant must match the Unspecified arm"
+    );
 
     // AltText must implement Hash + Eq + Clone (comemo compatibility).
-    use std::collections::HashSet;
-    let mut set = HashSet::new();
+    let mut set = std::collections::HashSet::new();
     set.insert(AltText::Unspecified);
     set.insert(AltText::Unspecified); // duplicate
-    assert_eq!(set.len(), 1, "AltText::Unspecified must deduplicate in HashSet");
+    assert_eq!(
+        set.len(),
+        1,
+        "AltText::Unspecified must deduplicate in HashSet"
+    );
 }

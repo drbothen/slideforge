@@ -170,11 +170,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs
-                // (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
             },
@@ -207,12 +207,11 @@ pub fn region_frames_for(
         "bio" => vec![
             Frame {
                 bbox: bbox(457_200, 457_200, 2_743_200, 4_114_800),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
-                // later story. `AltText::Decorative` is the safe default when no alt has
-                // been threaded yet (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
             },
@@ -268,12 +267,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ChartSpec.alt` (STORY-039 AC-005). Content/SVG resolution is deferred
-                // to a later story. `AltText::Decorative` is the safe default when no
-                // alt has been threaded yet.
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Chart {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
             },
@@ -290,13 +288,12 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `DiagramSpec.alt` (STORY-039 AC-005). SVG content resolution is deferred
-                // to a later story. `AltText::Decorative` and `empty_placeholder()` are
-                // the safe defaults when no content has been threaded yet.
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Diagram {
                     svg: NormalizedDiagramSvg::empty_placeholder(),
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
             },
@@ -313,12 +310,11 @@ pub fn region_frames_for(
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
-                // later story. `AltText::Decorative` is the safe default when no alt has
-                // been threaded yet (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
             },

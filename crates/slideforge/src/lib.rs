@@ -314,19 +314,24 @@ pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error:
 ///
 /// Stages (ADR-016 amended by ADR-018 and ADR-019):
 ///
-/// - Stage 1: Brand loading (provider selected by `BrandSource` variant — CRIT-1 fix)
-/// - Stage 2: DSL parsing (`slideforge-syntax`)
-/// - Stage 2a: AST evaluation (`slideforge-eval::eval_deck`) — FRESH sink (OBS-1 fix)
+/// - Stage 1:  Plugin registry assembly
+/// - Stage 2:  DSL parsing (`slideforge-syntax`) → `DeckNode` (AST)
+/// - Stage 2a: AST evaluation (`slideforge-eval::eval_deck`) → `Deck` (fields resolved, blocks empty)
 /// - Stage 2b: Field-to-block threading (`slideforge-eval::thread_fields_to_blocks` — ADR-019)
-/// - Stage 3: Validation — all registered validators (CRIT-3)
-/// - Stage 4: Layout (`slideforge-layout`) — produces `LaidOutDeck`
-/// - Stage 5: Post-layout validation (`validate_post_layout` — ADR-018 Decision 1)
-/// - Stage 6: Export (selected exporter plugin)
+///   → `Deck` (blocks populated with typed `ContentBlock` entries)
+/// - Stage 3:  Brand load (`slideforge-brand`)
+/// - Stage 4:  Inject lang default (`slideforge-validate`)
+/// - Stage 5:  Validate pre-layout (all registered `Validator` plugins, on `&Deck`)
+/// - Stage 6:  Layout (`slideforge-layout`) → `LaidOutDeck`
+/// - Stage 6b: Validate post-layout (`validate_post_layout` on `&LaidOutDeck` — ADR-018 Decision 3)
+/// - Stage 7:  Export (selected exporter plugin)
 ///
-/// Stage 2b is a pure, no-I/O pass inserted after `eval_deck` completes and
-/// before any other stage. It reads resolved `Slide.fields` and populates
-/// `Slide.blocks` with typed `ContentBlock` entries, enabling layout and all
-/// exporters to produce content-bearing output (ADR-019 Decision 1 and 9).
+/// Stage 2b is a **pure** (no I/O, deterministic) pass inserted between Stage 2a
+/// and Stage 3. It reads resolved `Slide.fields` and populates `Slide.blocks`
+/// with typed `ContentBlock` entries (title, body, subtitle, bullets, chart,
+/// image, diagram), enabling the layout engine and all exporters to produce
+/// content-bearing output. See ADR-019 Decisions 1, 2, and 9 for rationale and
+/// seam contract. Implemented by STORY-086.
 ///
 /// The function exceeds clippy's default 150-line threshold because each pipeline
 /// stage requires non-trivial dispatch logic with panic-boundary wrapping
@@ -453,13 +458,12 @@ fn build_inner(
     // `ContentBlock` entries. This is a pure, no-I/O pass that runs after all
     // `{{ }}` expressions are resolved and before brand load, layout, or validation.
     //
-    // Without this pass, `Slide.blocks` is always `vec![]` (for_eval.rs:342 deferral),
-    // making all three exporters (PPTX, PDF, DOCX) produce content-empty output
-    // and making the post-layout alt-text validator unconditionally unsatisfiable
-    // for chart/image/diagram slides. See ADR-019 §Context for full diagnosis.
-    //
-    // NOTE (STORY-086 stub): `thread_fields_to_blocks` is currently a no-op.
-    // The implementation is delivered in the implementer phase (STORY-086 T6).
+    // Without this pass, `Slide.blocks` would always be `vec![]` (for_eval.rs:342
+    // original deferral), making all three exporters (PPTX, PDF, DOCX) produce
+    // content-empty output and making the post-layout alt-text validator
+    // unconditionally unsatisfiable for chart/image/diagram slides.
+    // See ADR-019 §Context for full diagnosis.
+    // Implemented in STORY-086. See `slideforge_eval::field_to_block::thread_fields_to_blocks`.
     tracing::info!("build_inner: Stage 2b — field-to-block threading (ADR-019)");
     thread_fields_to_blocks(&mut deck);
 

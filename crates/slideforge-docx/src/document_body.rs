@@ -139,7 +139,12 @@ impl DocumentBodySerializer {
 
         for slide in &deck.slides {
             // Extract title from frames — first Title frame wins.
-            let title = slide
+            // Fallback (STORY-086 / ADR-019 Stage 2b): when no FrameContent::Title is present
+            // (the normal pipeline path after Stage 2b threads title into ContentBlock::Text →
+            // FrameContent::TextRun), use the first non-empty TextRun frame as the slide title.
+            // Stage 2b canonical block ordering (ADR-019 Decision 3.6) guarantees the title
+            // ContentBlock is first, so the first TextRun frame carries the title text.
+            let title: &str = slide
                 .frames
                 .iter()
                 .find_map(|f| {
@@ -148,6 +153,28 @@ impl DocumentBodySerializer {
                     } else {
                         None
                     }
+                })
+                .or_else(|| {
+                    // Stage 2b fallback: find the first non-empty TextRun frame.
+                    slide.frames.iter().find_map(|f| {
+                        if let slideforge_layout::types::FrameContent::TextRun(inlines) = &f.content
+                        {
+                            inlines.iter().find_map(|node| {
+                                if let slideforge_types::InlineNode::Plain(s) = node {
+                                    let trimmed = s.trim();
+                                    if trimmed.is_empty() {
+                                        None
+                                    } else {
+                                        Some(s.as_ref())
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    })
                 })
                 .unwrap_or("");
 

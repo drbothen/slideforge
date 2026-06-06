@@ -37,7 +37,7 @@ expression: frames
             ),
         },
         content: Chart {
-            alt: Decorative,
+            alt: Unspecified,
         },
         text_flow: None,
     },

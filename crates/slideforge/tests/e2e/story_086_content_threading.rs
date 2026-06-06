@@ -32,6 +32,8 @@
 //! No imports from `slideforge_pptx`, `slideforge_docx`, `slideforge_pdf`, etc.
 
 #![allow(clippy::unwrap_used)] // integration tests — explicit panic on failure is correct
+#![allow(clippy::doc_markdown)] // test doc comments have unquoted identifiers (e.g. E-A11-001)
+#![allow(clippy::uninlined_format_args)] // test error messages use named format args
 
 use crate::e2e::{BrandTmpDir, fixture_source, open_zip};
 
@@ -116,7 +118,10 @@ fn test_bc_1_16_001_ac002_pdf_contains_body_text_strings() {
         )
     });
 
-    assert!(!output.bytes.is_empty(), "AC-002: PDF bytes must be non-empty");
+    assert!(
+        !output.bytes.is_empty(),
+        "AC-002: PDF bytes must be non-empty"
+    );
     assert_eq!(output.extension, "pdf", "AC-002: extension must be 'pdf'");
 
     // Search raw bytes for the text strings.
@@ -133,7 +138,10 @@ fn test_bc_1_16_001_ac002_pdf_contains_body_text_strings() {
 
     assert!(
         pdf_str.contains("Body paragraph text")
-            || output.bytes.windows(19).any(|w| w == b"Body paragraph text"),
+            || output
+                .bytes
+                .windows(19)
+                .any(|w| w == b"Body paragraph text"),
         "AC-002 Red Gate: PDF must contain text 'Body paragraph text'. \
          Stub → Slide.blocks=[] → no draw_text_at_bbox call → absent → FAILS. \
          BC-1.16.001 postcondition 4 (body ContentBlock)."
@@ -232,7 +240,10 @@ fn test_bc_1_16_001_ac004_strict_chart_with_alt_build_ok_and_pptx_carries_descr(
     });
 
     // Verify PPTX output is non-empty.
-    assert!(!output.bytes.is_empty(), "AC-004: PPTX bytes must be non-empty");
+    assert!(
+        !output.bytes.is_empty(),
+        "AC-004: PPTX bytes must be non-empty"
+    );
 
     // Open PPTX ZIP and check slide XML for the alt description.
     let mut archive = open_zip(&output.bytes, "AC-004");
@@ -299,7 +310,9 @@ fn test_bc_1_16_001_ac005_strict_chart_no_alt_returns_validation_error() {
 
     // Must be ValidationFailed with E-A11-001.
     match err {
-        slideforge::error::BuildError::ValidationFailed { ref diagnostics, .. } => {
+        slideforge::error::BuildError::ValidationFailed {
+            ref diagnostics, ..
+        } => {
             let e_a11_count = diagnostics
                 .iter()
                 .filter(|d| d.code.as_ref() == "E-A11-001")
@@ -389,9 +402,7 @@ fn test_bc_1_16_001_ac007_bullets_slide_produces_ge3_text_runs_in_pptx() {
     let opts = brand.build_options("pptx", false);
 
     let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!(
-            "AC-007: build() with bullets slide must return Ok; got Err: {e:?}"
-        )
+        panic!("AC-007: build() with bullets slide must return Ok; got Err: {e:?}")
     });
 
     let mut archive = open_zip(&output.bytes, "AC-007");
@@ -456,7 +467,10 @@ fn test_bc_5_02_001_ac018_wave4_gate3_repass_pptx_strict_ok_nonempty() {
         )
     });
 
-    assert!(!output.bytes.is_empty(), "AC-018 PPTX: bytes must be non-empty");
+    assert!(
+        !output.bytes.is_empty(),
+        "AC-018 PPTX: bytes must be non-empty"
+    );
 
     // Assert PPTX title text run is present.
     let mut archive = open_zip(&output.bytes, "AC-018-pptx");
@@ -482,8 +496,14 @@ fn test_bc_5_02_001_ac018_wave4_gate3_repass_pdf_strict_ok_nonempty() {
         )
     });
 
-    assert!(!output.bytes.is_empty(), "AC-018 PDF: bytes must be non-empty");
-    assert_eq!(output.extension, "pdf", "AC-018 PDF: extension must be 'pdf'");
+    assert!(
+        !output.bytes.is_empty(),
+        "AC-018 PDF: bytes must be non-empty"
+    );
+    assert_eq!(
+        output.extension, "pdf",
+        "AC-018 PDF: extension must be 'pdf'"
+    );
 
     // Assert PDF contains title text.
     let pdf_str = String::from_utf8_lossy(&output.bytes);
@@ -509,8 +529,14 @@ fn test_bc_5_02_001_ac018_wave4_gate3_repass_docx_strict_ok_nonempty() {
         )
     });
 
-    assert!(!output.bytes.is_empty(), "AC-018 DOCX: bytes must be non-empty");
-    assert_eq!(output.extension, "docx", "AC-018 DOCX: extension must be 'docx'");
+    assert!(
+        !output.bytes.is_empty(),
+        "AC-018 DOCX: bytes must be non-empty"
+    );
+    assert_eq!(
+        output.extension, "docx",
+        "AC-018 DOCX: extension must be 'docx'"
+    );
 
     let mut archive = open_zip(&output.bytes, "AC-018-docx");
     let doc_xml = read_zip_entry(&mut archive, "word/document.xml", "AC-018-docx");

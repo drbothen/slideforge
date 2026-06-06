@@ -7,8 +7,6 @@ slideforge_version "1"
 lang "en-US"
 
 slide content:
-  title "Agenda"
-  bullets:
-    - "Item A"
-    - "Item B"
-    - "Item C"
+  title "Item A"
+  subtitle "Item B"
+  body "Item C"

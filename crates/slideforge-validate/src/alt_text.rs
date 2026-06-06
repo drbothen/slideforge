@@ -58,8 +58,8 @@ impl Validator for AltTextValidator {
     /// Stage 5 (pre-layout) alt-text check on the semantic [`Deck`] IR.
     ///
     /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Chart`,
-    /// `ContentBlock::Image`, and `ContentBlock::Diagram` entries with missing
-    /// or blank alt text.
+    /// `ContentBlock::Image`, `ContentBlock::Diagram`, and `ContentBlock::Shape`
+    /// entries with missing or blank alt text.
     ///
     /// ## Current pipeline state
     ///
@@ -151,49 +151,28 @@ impl Validator for AltTextValidator {
     ///
     /// Iterates `laid_out.slides[*].frames` looking for `FrameContent::Chart`,
     /// `FrameContent::Image`, and `FrameContent::Diagram` entries with
-    /// `AltText::Decorative`. In the current pipeline, `AltText::Decorative` on
-    /// these frame variants is the structural placeholder set by the region map when
-    /// no alt text has been threaded from a `ContentBlock` (ADR-018 §Context;
-    /// `slideforge_eval::for_eval:342`). Since `Slide.blocks` is always `vec![]`
-    /// after eval, no alt text can be threaded before this pass.
+    /// `AltText::Unspecified` (the pipeline gap indicator — ADR-019 Decision 4).
     ///
-    /// A `FrameContent::Chart/Image/Diagram` with `AltText::Decorative` therefore
-    /// indicates a visual element whose author-supplied alt text was absent — the
-    /// authoritative evidence of a missing `alt "..."` in the DSL source.
+    /// ## `AltText` discrimination (ADR-019 Decision 5.3 / STORY-086)
     ///
-    /// Emits `E-A11-001` (Error severity) for each such frame. In strict mode,
-    /// these errors cause `BuildError::ValidationFailed`.
+    /// | Frame `alt` value            | Outcome                          |
+    /// |------------------------------|----------------------------------|
+    /// | `AltText::Unspecified`       | E-A11-001 (pipeline gap)         |
+    /// | `AltText::Decorative`        | VALID — author explicit opt-out  |
+    /// | `AltText::Provided(_)`       | VALID — author supplied alt text |
     ///
-    /// ## Current correctness (Wave 1–2 scope)
+    /// `AltText::Unspecified` is the structural placeholder set by `regions.rs`
+    /// (ADR-019 Decision 5.1). Stage 2b (`thread_fields_to_blocks`) populates
+    /// `Slide.blocks`, and `thread_media_alt_into_frames` overwrites the placeholder
+    /// with the author-supplied value. If the placeholder is never overwritten
+    /// (because the author omitted `alt "..."` and `decorative: true`), the frame
+    /// reaches this validator with `AltText::Unspecified` — a true positive for
+    /// E-A11-001.
     ///
-    /// Today `Slide.blocks` is always `vec![]` after eval, so the layout engine
-    /// never calls `thread_media_alt_into_frames` with author-supplied content.
-    /// As a result, every `FrameContent::Chart/Image/Diagram` that reaches this
-    /// pass carries the `AltText::Decorative` placeholder that the region map
-    /// set unconditionally — this placeholder means "no alt text was threaded",
-    /// which is correct evidence of a missing `alt "..."` in the DSL source.
+    /// Threading lands in Story A (`STORY-086`). See ADR-019.
     ///
-    /// ## IMPORTANT — this match MUST be revisited for Wave 3+
-    ///
-    /// When Wave 3+ stories populate `Slide.blocks` from eval-time DSL fields,
-    /// `layout::thread_media_alt_into_frames` will overwrite the placeholder with:
-    /// - `AltText::Provided(s)` for frames with author-supplied alt text.
-    /// - `AltText::Decorative` for frames explicitly marked `decorative: true`.
-    ///
-    /// At that point, an `AltText::Decorative` frame will mean EITHER:
-    /// 1. Author-supplied `decorative: true` → VALID, no error should be emitted.
-    /// 2. Missing alt text (placeholder never replaced) → INVALID, E-A11-001.
-    ///
-    /// This match arm currently cannot distinguish these two cases. Once
-    /// `thread_media_alt_into_frames` lands, flagging ANY `AltText::Decorative`
-    /// as an error will be a false positive for case 1.
-    ///
-    /// **The match logic here MUST be updated when Wave 3+ alt-text threading
-    /// lands.** Track this as follow-up in the story that implements
-    /// `thread_media_alt_into_frames` (OBS-1 from SEC-050 adversary pass).
-    ///
-    /// Traceability: ADR-018 Decision 3, BC-5.02.001 §Accessibility,
-    /// STORY-050 AC-009, CLAUDE.md §Accessibility ("alt required — compile error").
+    /// Traceability: ADR-018 Decision 3, ADR-019 Decision 5.3,
+    /// BC-5.02.001 §Accessibility, BC-5.01.001 postcondition 1.
     fn validate_post_layout(
         &self,
         laid_out: &LaidOutDeck,
@@ -208,25 +187,12 @@ impl Validator for AltTextValidator {
             for frame in &laid_out_slide.frames {
                 let slide_type = laid_out_slide.slide_type_keyword.as_ref();
                 match &frame.content {
-                    FrameContent::Chart {
-                        alt: AltText::Decorative,
-                    } => {
-                        // AltText::Decorative on a Chart frame = missing alt text
-                        // (structural placeholder; no ContentBlock threaded it yet).
-                        // NOTE (STORY-086 stub): This arm fires on Decorative.
-                        // After STORY-086 implementation, this arm will be removed
-                        // and replaced by an AltText::Unspecified arm.
-                        diagnostics.push(make_post_layout_error(
-                            "chart",
-                            slide_type,
-                            display_slide,
-                        ));
-                    },
+                    // AltText::Unspecified — pipeline gap: no author alt text was threaded.
+                    // This means the author omitted both `alt "..."` and `decorative: true`.
+                    // E-A11-001 fires in strict mode (ADR-019 Decision 5.3 / BC-5.01.001 PC-1).
                     FrameContent::Chart {
                         alt: AltText::Unspecified,
                     } => {
-                        // STORY-086 stub: Unspecified arm added for compilation.
-                        // Semantics will be wired in implementation phase.
                         diagnostics.push(make_post_layout_error(
                             "chart",
                             slide_type,
@@ -234,18 +200,8 @@ impl Validator for AltTextValidator {
                         ));
                     },
                     FrameContent::Image {
-                        alt: AltText::Decorative,
-                    } => {
-                        diagnostics.push(make_post_layout_error(
-                            "image",
-                            slide_type,
-                            display_slide,
-                        ));
-                    },
-                    FrameContent::Image {
                         alt: AltText::Unspecified,
                     } => {
-                        // STORY-086 stub: Unspecified arm added for compilation.
                         diagnostics.push(make_post_layout_error(
                             "image",
                             slide_type,
@@ -253,7 +209,7 @@ impl Validator for AltTextValidator {
                         ));
                     },
                     FrameContent::Diagram {
-                        alt: AltText::Decorative,
+                        alt: AltText::Unspecified,
                         ..
                     } => {
                         diagnostics.push(make_post_layout_error(
@@ -262,19 +218,10 @@ impl Validator for AltTextValidator {
                             display_slide,
                         ));
                     },
-                    FrameContent::Diagram {
-                        alt: AltText::Unspecified,
-                        ..
-                    } => {
-                        // STORY-086 stub: Unspecified arm added for compilation.
-                        diagnostics.push(make_post_layout_error(
-                            "diagram",
-                            slide_type,
-                            display_slide,
-                        ));
-                    },
-                    // AltText::Provided(_) — valid alt text, no diagnostic.
-                    // All other FrameContent variants are non-visual or text-bearing.
+                    // All other cases (AltText::Decorative author opt-out, AltText::Provided valid alt,
+                    // and all non-visual FrameContent variants): no diagnostic emitted.
+                    // - Decorative: author explicit opt-out (decorative: true) — valid (ADR-019 5.3 / BC-5.01.001 EC-007)
+                    // - Provided: author supplied non-empty alt text — valid
                     _ => {},
                 }
             }
@@ -349,12 +296,11 @@ fn check_visual_element(
     // `decorative: bool` is false. See design note on dual decorative representation above.
     let _ = effective_decorative;
     let is_missing = match alt {
-        None => true,
+        // None or Unspecified: no meaningful alt text — fire E-A11-001.
+        // Unspecified on ContentBlock.alt means the author did not supply alt text.
+        None | Some(AltText::Unspecified) => true,
         Some(AltText::Provided(s)) => is_blank(s),
         Some(AltText::Decorative) => false,
-        // STORY-086 stub: Unspecified on ContentBlock.alt means the author did not
-        // supply alt text. Treat as missing (same as None).
-        Some(AltText::Unspecified) => true,
     };
 
     if is_missing {
@@ -1147,12 +1093,18 @@ mod tests {
     ///
     /// Constructs a `LaidOutDeck` with two slides:
     /// - slide 0 (`source_index` 0): a Chart frame with `AltText::Provided` (valid)
-    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Decorative` (missing alt)
+    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Unspecified` (pipeline gap)
     ///
     /// Asserts that:
     /// 1. Exactly one diagnostic is emitted (the second slide, not the first).
     /// 2. The diagnostic carries code `E-A11-001`.
     /// 3. The diagnostic message contains `"slide 2"` (`source_index` 1 → 1-based = 2).
+    ///
+    /// ## ADR-019 update (STORY-086)
+    ///
+    /// Per ADR-019 Decision 5.3: `AltText::Unspecified` → E-A11-001 (pipeline gap);
+    /// `AltText::Decorative` → valid (author opt-out). This test was updated from
+    /// `Decorative` to `Unspecified` to reflect the correct post-Stage-2b semantics.
     ///
     /// Load-bearing: if `display_slide` were computed from an enumerate index
     /// instead of `source_index + 1`, this test would fail when `source_index`
@@ -1189,13 +1141,14 @@ mod tests {
             register_content: vec![],
         };
 
-        // Slide 1 (source_index=1, "content"): Chart with AltText::Decorative — E-A11-001
-        // expected with locator "slide 2".
+        // Slide 1 (source_index=1, "content"): Chart with AltText::Unspecified — E-A11-001
+        // expected with locator "slide 2". Per ADR-019 Decision 5.3: Unspecified = pipeline
+        // gap (no author alt data threaded), triggers E-A11-001. Decorative would be valid.
         let slide1 = LaidOutSlide {
             source_index: 1,
             slide_type_keyword: Arc::from("content"),
             frames: vec![make_frame(FrameContent::Chart {
-                alt: AltText::Decorative,
+                alt: AltText::Unspecified,
             })],
             speaker_notes: None,
             register_tags: vec![],
@@ -1215,7 +1168,7 @@ mod tests {
         assert_eq!(
             diags.len(),
             1,
-            "expected exactly 1 diagnostic (slide 1 has Decorative chart); got {diags:?}"
+            "expected exactly 1 diagnostic (slide 1 has Unspecified chart); got {diags:?}"
         );
 
         // Must be E-A11-001 error severity.
@@ -1327,7 +1280,7 @@ mod tests {
     /// Red Gate: the STUB `validate_post_layout` fires E-A11-001 on BOTH `Decorative`
     /// AND `Unspecified`. After implementation, `Decorative` must be VALID (no error).
     ///
-    /// This test FAILS against the stub (stub fires on Decorative → diags.len() == 1 != 0).
+    /// This test FAILS against the stub (stub fires on Decorative → `diags.len() == 1 != 0`).
     /// It PASSES after the implementer changes the `Decorative` arm to NOT emit E-A11-001.
     ///
     /// Traces: BC-5.01.001 EC-007; BC-5.02.001 EC-009; ADR-019 Decision 5.3.
@@ -1444,7 +1397,7 @@ mod tests {
     /// (current layout.rs lines 432–440). After fix: `None → AltText::Unspecified`.
     ///
     /// This test constructs a `LaidOutDeck` by calling the real layout pipeline on a
-    /// deck with a chart ContentBlock where `alt = None`, then asserts the resulting
+    /// deck with a chart `ContentBlock` where `alt = None`, then asserts the resulting
     /// chart frame carries `AltText::Unspecified`.
     ///
     /// Load-bearing: the frame content type is directly on the production path through
@@ -1461,8 +1414,7 @@ mod tests {
         use slideforge_layout::FrameContent;
         use slideforge_types::{
             AltText, Block, Brand, BrandFonts, BrandPalette, ContentBlock, Deck, DeckMetadata,
-            OrderedMap, Slide, SourceSpan,
-            specs::ChartSpec,
+            OrderedMap, Slide, SourceSpan, specs::ChartSpec,
         };
 
         // Build a minimal Brand so layout::run can proceed.
@@ -1534,14 +1486,18 @@ mod tests {
             .iter()
             .find(|f| matches!(f.content, FrameContent::Chart { .. }));
 
-        let chart_frame = chart_frame.expect(
-            "AC-013: chart slide must produce a FrameContent::Chart frame after layout"
-        );
+        let chart_frame = chart_frame
+            .expect("AC-013: chart slide must produce a FrameContent::Chart frame after layout");
 
         // Assert the alt is Unspecified (not Decorative).
         // RED GATE: stub maps None → Decorative → this assertion FAILS.
         assert!(
-            matches!(&chart_frame.content, FrameContent::Chart { alt: AltText::Unspecified }),
+            matches!(
+                &chart_frame.content,
+                FrameContent::Chart {
+                    alt: AltText::Unspecified
+                }
+            ),
             "AC-013 / AC-014 Red Gate: when ContentBlock::Chart.alt = None, \
              thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative). \
              Got: {:?}. Stub maps None → Decorative → FAILS until T4 ships. \
@@ -1633,14 +1589,18 @@ mod tests {
             .iter()
             .find(|f| matches!(f.content, FrameContent::Chart { .. }));
 
-        let chart_frame = chart_frame.expect(
-            "AC-013: chart slide must produce a FrameContent::Chart frame"
-        );
+        let chart_frame =
+            chart_frame.expect("AC-013: chart slide must produce a FrameContent::Chart frame");
 
         // The structural placeholder must be Unspecified (not Decorative).
         // RED GATE: stub uses Decorative → assertion matches Unspecified → FAILS.
         assert!(
-            matches!(&chart_frame.content, FrameContent::Chart { alt: AltText::Unspecified }),
+            matches!(
+                &chart_frame.content,
+                FrameContent::Chart {
+                    alt: AltText::Unspecified
+                }
+            ),
             "AC-013 Red Gate: regions.rs structural placeholder must be AltText::Unspecified, \
              not AltText::Decorative. Got: {:?}. \
              Stub uses Decorative → FAILS until T3 ships (regions.rs fix). \

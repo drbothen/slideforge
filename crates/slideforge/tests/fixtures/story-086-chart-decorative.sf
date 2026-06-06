@@ -9,4 +9,4 @@ lang "en-US"
 slide chart:
   title "Background"
   chart_type "area"
-  decorative: true
+  decorative true

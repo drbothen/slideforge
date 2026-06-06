@@ -302,31 +302,32 @@ fn test_bc_3_06_039_ac005_image_provided_alt_threads_through_layout_run() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test 4 — EC-006: Chart with alt == None maps to AltText::Decorative
+// Test 4 — EC-006: Chart with alt == None maps to AltText::Unspecified
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-039 EC-006 regression guard — When `ChartSpec.alt` is `None` (author did
-/// not supply alt text), `layout::run` must produce
-/// `FrameContent::Chart { alt: AltText::Decorative }`.
+/// STORY-039 EC-006 regression guard (UPDATED by STORY-086 / ADR-019 Decision 5.2) —
+/// When `ChartSpec.alt` is `None` (author did not supply alt text), `layout::run` must
+/// produce `FrameContent::Chart { alt: AltText::Unspecified }`.
 ///
-/// This is the None → Decorative fallback rule specified by EC-006 / EC-007.
+/// ## ADR-019 Decision 5.2 update
+///
+/// Prior to STORY-086, `None → Decorative` was used as a fallback sentinel.
+/// ADR-019 Decision 5.2 replaces this with `None → Unspecified` to distinguish:
+/// - `Decorative` = author explicitly opted out (decorative: true)
+/// - `Unspecified` = no author alt data threaded (pipeline gap, triggers E-A11-001)
 ///
 /// ## What this test guards
 ///
-/// `layout::run` maps `ChartSpec.alt = None` to `AltText::Decorative` (the safe
-/// sentinel) and emits `tracing::warn!` per EC-006. This test ensures the fallback
-/// cannot regress: if the threading loop were to propagate `None` or an empty string
-/// instead of `AltText::Decorative`, this assertion would catch it.
-///
-/// This test was included alongside tests 1–3 so that the correct `None → Decorative`
-/// fallback is exercised at the same time as the `Provided` threading path, making
-/// it impossible to accidentally break the fallback while implementing `Provided`
-/// threading. All four tests must pass simultaneously for a correct implementation.
+/// `layout::run` maps `ChartSpec.alt = None` to `AltText::Unspecified` and emits
+/// `tracing::warn!` per EC-006 / EC-007. This test ensures the fallback cannot
+/// regress to `Decorative` (which would make missing-alt go undetected by the
+/// post-layout validator) or to a raw `None` propagation.
 ///
 /// ## Threading contract
 ///
-/// `FrameContent::Chart { alt: AltText::Decorative }` is produced when
+/// `FrameContent::Chart { alt: AltText::Unspecified }` is produced when
 /// `ChartSpec.alt` is `None`. The `tracing::warn!` sentinel is emitted per EC-006.
+/// The post-layout validator sees `Unspecified` and emits `E-A11-001` in strict mode.
 #[test]
 fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
     // ChartSpec with alt: None — author provided NO alt text.
@@ -362,14 +363,15 @@ fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_decorative() {
         result.slides[0].frames.len()
     );
 
-    // EC-006: alt: None in ChartSpec must map to AltText::Decorative in the frame.
-    // Regression guard: ensures None is explicitly mapped to Decorative (not a
-    // propagated None or empty string) even after Provided-threading is active.
+    // EC-006 / ADR-019 Decision 5.2: alt: None in ChartSpec must map to
+    // AltText::Unspecified in the frame (pipeline gap — no author alt threaded).
+    // Regression guard: ensures None maps to Unspecified (not Decorative or raw None).
+    // Unspecified triggers E-A11-001 in the post-layout validator (strict mode).
     assert_eq!(
         chart_frame_alt[0],
-        &AltText::Decorative,
-        "EC-006: FrameContent::Chart.alt must be AltText::Decorative when ChartSpec.alt is None; \
-         got: {:?}",
+        &AltText::Unspecified,
+        "EC-006 / ADR-019: FrameContent::Chart.alt must be AltText::Unspecified when \
+         ChartSpec.alt is None; got: {:?}",
         chart_frame_alt[0]
     );
 }

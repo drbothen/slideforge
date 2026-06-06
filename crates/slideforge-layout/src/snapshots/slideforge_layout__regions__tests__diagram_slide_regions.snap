@@ -40,7 +40,7 @@ expression: frames
             svg: NormalizedDiagramSvg(
                 "",
             ),
-            alt: Decorative,
+            alt: Unspecified,
         },
         text_flow: None,
     },
