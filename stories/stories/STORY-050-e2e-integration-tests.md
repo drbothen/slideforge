@@ -19,7 +19,7 @@ depends_on:
   - STORY-049
 blocks: [STORY-055]
 estimated_days: 4
-spec_version: "1.2"
+spec_version: "1.3"
 last_updated: 2026-06-05
 ---
 
@@ -279,7 +279,12 @@ The `test-3slide.sf` fixture should include:
 | `slideforge` (self, STORY-049) | workspace | Public `build()` API under test |
 | `tracing-test` | `=0.2.5` | Span assertion in AC-007 |
 | `zip` | `=4.2.0` | ZIP structure assertion for PPTX/DOCX output (compatible with ooxmlsdk dep) |
-| `tempfile` | `=3.27.0` | Temporary directories for output file tests |
+
+Note: `tempfile` is NOT a dependency of the `slideforge` crate for this story — the E2E
+tests use in-memory output bytes (no temporary files). `tempfile` removed from
+`crates/slideforge/Cargo.toml` (unused; adversary OBS-050-P2-002, 2026-06-05).
+`tempfile = "=3.27.0"` is retained only in `slideforge-brand`, `slideforge-data`, and
+`slideforge-pdf` where it is actually used.
 
 ## File Structure Requirements
 
@@ -300,7 +305,7 @@ Status column reflects disk reality post-Red-Gate.
 | `crates/slideforge/tests/fixtures/test-3slide.sf` | EXISTS | Happy-path fixture |
 | `crates/slideforge/tests/fixtures/test-invalid-syntax.sf` | EXISTS | Error-propagation fixture |
 | `crates/slideforge/tests/fixtures/test-missing-alt.sf` | EXISTS | Validation error fixture (chart with no alt) |
-| `crates/slideforge/Cargo.toml` | EXISTS (modified) | Dev-dependencies: tracing-test, zip, tempfile |
+| `crates/slideforge/Cargo.toml` | EXISTS (modified) | Dev-dependencies: tracing-test, zip (tempfile removed — unused) |
 | `crates/slideforge-eval/src/eval.rs` | MODIFY (Gap 1 fix) | Derive DeckMetadata.title from first title slide |
 | `crates/slideforge-plugin-api/src/traits/validator.rs` | MODIFY (Gap 2 fix) | Add validate_post_layout defaulted method (ADR-018) |
 | `crates/slideforge-validate/src/alt_text.rs` | MODIFY (Gap 2 fix) | Migrate loop to validate_post_layout; no-op stub in validate() |

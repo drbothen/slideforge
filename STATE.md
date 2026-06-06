@@ -37,7 +37,7 @@ wave_5_total_points: 114
 develop_sha: "e6f7832d"
 develop_pr_count: 60
 error_taxonomy_version: "v2.14"
-workspace_tests: "~3214 (60 merged PRs; 3214/3215 pass, 1 pre-existing cold_budget flake tracked under STORY-080)"
+workspace_tests: "~3242 (60 merged PRs + STORY-050 pass-2 remediation; 3242/3242 pass, 1 pre-existing cold_budget flake tracked under STORY-080)"
 workspace_test_failures: 0
 ---
 
@@ -102,7 +102,7 @@ Gap-4 and deck-level `metadata: title` DSL feature → anchored to future DX/fea
 
 ## NEXT ACTIONS — STORY-050 RESUME PLAN (zero-context orchestrator: execute in order)
 
-**STATUS: Steps 1-4 DONE. Step 5 IN PROGRESS — adversary LOCAL cascade pass 1 complete + remediated (streak 0/3). Next action: adversary pass 2 on `feature/STORY-050` (worktree HEAD `c4e4b26e`).**
+**STATUS: Steps 1-4 DONE. Step 5 IN PROGRESS — adversary LOCAL cascade pass 2 complete + remediated (streak 0/3); next action = adversary pass 3 on `feature/STORY-050` (worktree HEAD `23481e1e`).**
 **Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` | branch: `feature/STORY-050` (pushed to origin).
 **Red Gate:** committed at `6bbe80fc` — 55 pass / 7 fail (intended Red Gate). Off develop `e6f7832d`.
 **Artifact:** `.factory/specs/story-050-gap-analysis.md` and `.factory/specs/architecture/adr/ADR-018-post-layout-validation-pass.md` committed to factory-artifacts.
@@ -225,19 +225,19 @@ Split from STORY-040 (human-authorized 2026-06-04). EPIC-08.
 
 ## Session Resume Checkpoint
 
-**CLEAN-FOR-CONTEXT-CLEAR — STORY-050 resume-ready. Pass-1 remediated (streak 0/3). Start at NEXT ACTIONS Step 5 (adversary pass 2).**
+**CLEAN-FOR-CONTEXT-CLEAR — STORY-050 resume-ready. Pass-2 remediated (streak 0/3). Start at NEXT ACTIONS Step 5 (adversary pass 3).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-05 |
-| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. Steps 1-4 DONE; Step 5 in progress — adversary pass 1 complete + remediated (streak 0/3); next = adversary pass 2. Worktree HEAD after remediation: `c4e4b26e` (branch `feature/STORY-050`, pushed to origin). All 7 Red Gate tests now green; Gaps 1/2/3 fixed. ADR-018 v1.1; STORY-050 spec v1.2; pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`. OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up. DO NOT delete `.worktrees/STORY-050`. |
+| **Position** | Wave 4: 20/21 merged. STORY-050 IN PROGRESS. Steps 1-4 DONE; Step 5 in progress — adversary passes 1 and 2 complete + remediated (streak 0/3); next = adversary pass 3. Worktree HEAD after pass-2 remediation: `23481e1e` (branch `feature/STORY-050`, pushed to origin). All 7 Red Gate tests green; Gaps 1/2/3 fixed. ADR-018 v1.1; STORY-050 spec v1.3; pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`; pass-2 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-2.md`. OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up. DO NOT delete `.worktrees/STORY-050`. |
 | **develop SHA** | `e6f7832d` (60 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` on `feature/STORY-050` (Red Gate committed at `6bbe80fc`) |
+| **Active worktrees** | `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` on `feature/STORY-050` (worktree HEAD `23481e1e`) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 (slideforge root crate populated) |
-| **Workspace tests** | ~3214/3215 pass (1 pre-existing cold_budget flake, STORY-080) |
+| **Workspace tests** | ~3242/3242 pass (all green post pass-2 remediation; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Fresh orchestrator: read STATE.md NEXT ACTIONS. Start at Step 1 (architect Gap-2 Option A design). All artifacts committed+pushed (factory-artifacts + feature/STORY-050). Zero prior context needed — this checkpoint is complete. |
+| **RESUME INSTRUCTION** | Fresh orchestrator: read STATE.md NEXT ACTIONS. Dispatch adversary pass 3 on worktree `/Users/jmagady/Dev/slideforge/.worktrees/STORY-050` (branch `feature/STORY-050`, HEAD `23481e1e`). All artifacts committed+pushed (factory-artifacts + feature/STORY-050). Zero prior context needed — this checkpoint is complete. |
 
 ---
 
@@ -309,6 +309,7 @@ No open blocking issues. BLK-001 resolved (see Decisions Log 2026-06-05 STORY-05
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-05 | STORY-050-PASS2 | STORY-050 adversary pass 2 NOT clean (3 findings: F-050-P2-HIGH-001 + OBS-050-P2-001 + OBS-050-P2-002). HIGH-001: AC-007 regression guard was itself a paper-fix — `stage="<name>"` field never emitted by production `info_span!` calls; tests asserted vacuously. REMEDIATED: added `stage=` structured field to all 6 canonical `info_span!` calls; tests rewritten; load-bearing proof: rename `evaluate`→`eval` made AC-007 FAIL, restore→PASS (commit 5d34b5ae). OBS-001: Gap-1 title None-path zero coverage. REMEDIATED: 3 eval-crate unit tests added (Some-path, None-path no-title-slide, None-path title-slide-without-title-field), all call `eval_deck_with_variant` directly (commit 10112c18). OBS-002: `tempfile` unused in `slideforge` crate. REMEDIATED: removed from crates/slideforge/Cargo.toml; retained in slideforge-brand/data/pdf (real usage confirmed); story spec aligned to v1.3 (commit b253de47). Pre-push gate: 3242/3242 pass (commit 23481e1e). Streak: 0/3. Next: adversary pass 3 on feature/STORY-050 HEAD 23481e1e. Pass-2 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-2.md`. |
 | 2026-06-05 | STORY-050-PASS1 | STORY-050 adversary pass 1 NOT clean (6 findings: F-P1-CRIT-001/HIGH-001/HIGH-002/MED-001/OBS-2/OBS-5). All remediated: CRIT-001+HIGH-001 (Gap 3 span rename + subscriber filter, commit 79d1da2e); HIGH-002 (placeholder blocks removed, 38a1d3bb); MED-001 (tempfile drift, dbcf2bd9); OBS-5 (pre-layout early-return behavior, c4e4b26e); OBS-2 (title fallback anti-pattern — spec amendment, STORY-050 v1.2). ADR-018 → v1.1 (Decision 5a error-precedence rule). OBS-1 (CanvasOverflowValidator inert) tracked as open follow-up (pre-existing; ADR-018 Decision 4 deferral). Streak: 0/3. Next: adversary pass 2 on feature/STORY-050 HEAD c4e4b26e. Pass-1 report: `.factory/cycles/STORY-050/adversarial-reviews/adversary-STORY-050-pass-1.md`. |
 | 2026-06-05 | STORY-050-GAP2-SPEC-BURST | Gap-2 spec burst LANDED (factory-artifacts). ADR-018 (post-layout validation pass) accepted. BC-5.02.001 → v1.5 (additive-defaulted `validate_post_layout` method; post-layout Stage 6b; new ECs + test vectors). BC-5.01.001 → v1.2 (alt-text enforcement moved to Stage 6b). Error taxonomy → v2.14 (E-A11-001 Stage 6b note). ARCH-INDEX.md + BC-INDEX.md updated. STORY-050 spec reconciled to spec_version 1.1 (ADR-018; real BuildError variant names; File Structure matched to disk). NEXT ACTIONS Steps 1-3 DONE — resume at Step 4 (implementer fix-burst in `.worktrees/STORY-050`). |
 | 2026-06-05 | STORY-050-GAP2-AUTHORIZED | Human AUTHORIZED Gap-2 = Option A on 2026-06-05: implement a POST-LAYOUT validation pass so alt-text (and other ContentBlock-level) validators actually fire end-to-end. This is the chosen fix for the CRITICAL "alt required" accessibility guarantee being non-functional. BLK-001 → RESOLVED (Option A authorized). STORY-050 status → in-progress (resume-ready). Red Gate committed at `6bbe80fc` in `.worktrees/STORY-050` (branch `feature/STORY-050`, pushed to origin). Resume at NEXT ACTIONS Step 1 (architect Gap-2 design). |
