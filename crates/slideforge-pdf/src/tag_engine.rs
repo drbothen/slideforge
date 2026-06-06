@@ -409,9 +409,31 @@ impl SlideTagEngine {
         }
 
         match block {
-            // Text paragraph → P
-            ContentBlock::Text(_text_block) => {
-                Ok(Some(TagGroup::new(Tag::<krilla::tagging::kind::P>::P)))
+            // Text paragraph → P, with /ActualText attribute.
+            //
+            // /ActualText is set so that the paragraph text is stored in the uncompressed
+            // structure dictionary — making it findable in raw PDF bytes even when the
+            // content stream uses FlateDecode compression. This is consistent with the
+            // TextRun → P path in `tag_slide_with_title` (which sets /ActualText for
+            // the same reason). PDF/UA-1 compliance benefits from /ActualText on P elements
+            // when the content stream glyphs may differ from logical reading order
+            // (BC-4.03.001 / STORY-086).
+            ContentBlock::Text(text_block) => {
+                let mut p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
+                let actual_text: String =
+                    text_block
+                        .inlines
+                        .iter()
+                        .fold(String::new(), |mut acc, node| {
+                            if let slideforge_types::InlineNode::Plain(s) = node {
+                                acc.push_str(s.as_ref());
+                            }
+                            acc
+                        });
+                if !actual_text.is_empty() {
+                    p_group.tag.set_actual_text(Some(actual_text));
+                }
+                Ok(Some(p_group))
             },
 
             // Bullet list → L (Disc) with LI+LBody for each item.
