@@ -12,7 +12,7 @@ purpose: >
 
 # STORY-086 Zero-Context Resume Playbook
 
-**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 11 (streak 0/3, target 3 consecutive strict-CLEAN).**
+**IMMEDIATE NEXT ACTION: Dispatch adversary LOCAL pass 13 (streak 0/3, target 3 consecutive strict-CLEAN).**
 
 ---
 
@@ -21,10 +21,10 @@ purpose: >
 | Field | Value |
 |-------|-------|
 | develop SHA | `030dec6c` (61 merged PRs; 0 open PRs) |
-| feature/STORY-086 HEAD | `05add46e` (PUSHED to origin/feature/STORY-086) |
-| Workspace tests | 3299/3300 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
+| feature/STORY-086 HEAD | `82f300db` (PUSHED to origin/feature/STORY-086) |
+| Workspace tests | 3300/3300 pass, 14 skipped (1 pre-existing cold_budget flake — STORY-080) |
 | Canonical exit gate | CLEAN (fmt + pedantic clippy + RUSTDOCFLAGS doc + nextest) |
-| Adversary LOCAL streak | 0/3 (pass 10 found F-086-P10-MED-001/002/003 — all REMEDIATED — ADR-019 v1.5; streak still 0/3; pass 11 next) |
+| Adversary LOCAL streak | 0/3 (pass 11 strict-CLEAN — streak reached 1/3; pass 12 found F-086-P12-MED-001 — REMEDIATED code-doc-only — streak reset 0/3; pass 13 next) |
 | BLK-002 | OPEN — closes on STORY-086 merge + Wave 4 re-gate pass |
 | Key spec versions | BC-1.16.001 v1.4, BC-3.04.001 v1.6, BC-4.01.001 v1.2, BC-4.02.001 v1.2, BC-5.01.001 v1.3, BC-5.02.001 v1.6, error-taxonomy v2.17, ADR-019 v1.5, STORY-086 v1.5, STORY-088 v1.2 (8 pts) |
 
@@ -73,7 +73,7 @@ Then confirm HEAD:
 git -C /Users/jmagady/Dev/slideforge/.worktrees/STORY-086 rev-parse HEAD
 ```
 
-Must equal `05add46e` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
+Must equal `82f300db` (or a later commit if the cascade advanced this session). If it is a DIFFERENT, unexpected commit, stop and investigate before proceeding.
 
 ### 0d. Confirm workspace is still CLEAN
 
@@ -87,7 +87,7 @@ Expected: ~3300 pass, 14 skipped, 0 failures. If failures exist, diagnose before
 
 ## Step 1 — Resume the LOCAL Adversary Cascade
 
-**Current position: streak 0/3. Pass 11 must run next.**
+**Current position: streak 0/3. Pass 13 must run next.**
 
 ### Discipline rules (inline — all must survive context loss)
 
@@ -147,7 +147,7 @@ All four must pass with zero failures before the next adversary pass.
 
 ### Adversary pass dispatch template (copy-paste ready)
 
-Replace `<HEAD>` with the current worktree HEAD SHA before dispatching.
+Replace `<HEAD>` with the current worktree HEAD SHA before dispatching. Next pass number is 13.
 
 ```
 ADVERSARY LOCAL PASS [N] — STORY-086
@@ -159,8 +159,8 @@ strict-CLEAN per BC-5.39.001).
 WORKING DIRECTORY (mandatory): /Users/jmagady/Dev/slideforge/.worktrees/STORY-086
 ALL Read/Grep/Glob calls MUST use this absolute worktree path.
 
-STORY-086 feature branch HEAD: 05add46e
-Review target: git diff origin/develop..05add46e
+STORY-086 feature branch HEAD: 82f300db
+Review target: git diff origin/develop..82f300db
   (the complete story diff — not just the latest commit)
 
 CONTRACT VERSIONS IN EFFECT (read from worktree .factory/ paths):
@@ -202,7 +202,9 @@ PREVIOUSLY FIXED (verified closed in passes 1-10 — do NOT reopen unless new ev
   P9-LOW-001 (extract_str_field doc comment inaccurate — corrected),
   P10-MED-001 (ADR-019 §3.2 BulletItem phantom {text,level} — replaced with real fields {inlines,children} per v1.5),
   P10-MED-002 (ADR-019 §3.4 ImageSpec phantom DSL keyword src — replaced with real Rust field path per v1.5),
-  P10-MED-003 (field_to_block.rs:60+:268 rustdoc showed untrimmed Arc::from(s) — corrected to Arc::from(s.trim()))
+  P10-MED-003 (field_to_block.rs:60+:268 rustdoc showed untrimmed Arc::from(s) — corrected to Arc::from(s.trim())),
+  P11 (strict-CLEAN — all prior findings verified closed),
+  P12-MED-001 (build_inner body stage-comments line 459 misstated brand-vs-threading order, contradicting ADR-019 Decision 1 mandate — body comments renumbered + reconciled with real physical execution order; code-doc-only fix)
 
 MANDATORY OUTPUT LINES (include verbatim at end of report):
   CLEAN (strict): yes/no
