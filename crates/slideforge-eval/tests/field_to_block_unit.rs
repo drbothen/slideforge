@@ -1169,17 +1169,14 @@ fn test_bc_1_16_001_f086_p6_med001_chart_alt_stored_trimmed() {
             Some(AltText::Provided(s)) => {
                 let s_str: &str = s.as_ref();
                 assert_eq!(
-                    s_str,
-                    "Bar chart desc",
+                    s_str, "Bar chart desc",
                     "F-086-P6-MED-001 RED GATE: chart alt must be stored TRIMMED. \
                      BC-1.16.001 PC-12 requires AltText::Provided(Arc::from(s.trim())). \
                      Current code stores untrimmed — observed: {s_str:?}, expected: \"Bar chart desc\"."
                 );
             },
             other => {
-                panic!(
-                    "F-086-P6-MED-001: chart alt must be AltText::Provided; got {other:?}"
-                );
+                panic!("F-086-P6-MED-001: chart alt must be AltText::Provided; got {other:?}");
             },
         }
     } else {

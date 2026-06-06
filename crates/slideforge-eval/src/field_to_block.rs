@@ -248,9 +248,11 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
     }
 }
 
-/// Extract a non-empty `Str` value from `slide.fields[key]` as a `&str`.
+/// Extract a `Str` value from `slide.fields[key]` as a `&str`.
 ///
-/// Returns `None` if the field is absent, not a `Literal(Str)`, or empty.
+/// Returns `None` only if the field is absent or not a `Literal(Str)`.
+/// An empty string is returned as `Some("")` — callers must apply their own
+/// empty/whitespace guard as required by their contract.
 fn extract_str_field<'s>(slide: &'s slideforge_types::Slide, key: &str) -> Option<&'s str> {
     match slide.fields.get(key) {
         Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
