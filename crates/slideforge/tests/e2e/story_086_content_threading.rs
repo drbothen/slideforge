@@ -552,97 +552,105 @@ fn test_bc_5_02_001_ac018_wave4_gate3_repass_docx_strict_ok_nonempty() {
 // ─── AC-001 PLACEMENT: title text must be in <p:ph type="title"> shape ─────────
 
 /// AC-001 PLACEMENT / BC-4.01.001 v1.2 postcondition 9 — title text "My Title"
-/// MUST appear inside a `<p:ph type="title"/>` placeholder shape, NOT a generic
-/// body shape or a shape with no `<p:ph>` element.
+/// MUST appear inside the SAME `<p:sp>` element that carries `<p:ph type="title"/>`,
+/// not merely somewhere in the document.
 ///
-/// Red Gate (scope-expansion): current HEAD ba3bcc93 maps ALL `ContentBlock::Text`
-/// → `FrameContent::TextRun` (flat). `slide_serializer.rs` renders `TextRun` as a
-/// generic body placeholder (`<p:ph type="body"/>` or no type attr), NOT a title
-/// placeholder. The title text may appear in the XML but NOT inside a
-/// `<p:ph type="title"/>` shape. This assertion MUST FAIL until layout.rs maps
-/// `TextTag::Title` → `FrameContent::Title`.
+/// Co-location assertion: parse the slide XML into individual `<p:sp>…</p:sp>`
+/// shape blocks, identify the shape whose `<p:ph>` has `type="title"` or `idx="0"`,
+/// and assert that shape's `<a:t>` runs contain "My Title". Independently confirm
+/// no other shape (body/TextRun shape) contains "My Title".
+///
+/// This PASSES on current code (TextTag routing is implemented; the title placeholder
+/// is correctly populated with title text).
 ///
 /// Traces: BC-4.01.001 v1.2 postcondition 9; BC-1.16.001 postcondition 1;
-///         architect-pass-1-adjudication Issue 2; scope-expansion AC-001.
+///         F-086-P2-MED-002 / AC-001 co-location.
+// F-086-P2-MED-002 / AC-001 co-location
 #[test]
 fn test_bc_4_01_001_ac001_pptx_title_in_title_placeholder_not_body() {
-    // AC-001 PLACEMENT: title text "My Title" must be inside <p:ph type="title"/> shape.
-    // RED GATE: current code → TextRun → body placeholder → NOT in title placeholder → FAILS.
-    let brand = BrandTmpDir::new("s086_ac001_placement");
+    // AC-001 CO-LOCATION: "My Title" must appear INSIDE the <p:sp> whose <p:ph>
+    // carries type="title" (or idx="0"), not merely anywhere in the document.
+    let brand = BrandTmpDir::new("s086_ac001_colocation");
     let source = fixture_source("story-086-title-slide.sf");
     let opts = brand.build_options("pptx", false);
 
     let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!("AC-001 PLACEMENT: build() with title slide must return Ok; got Err: {e:?}")
+        panic!("AC-001 CO-LOCATION: build() with title slide must return Ok; got Err: {e:?}")
     });
 
-    let mut archive = open_zip(&output.bytes, "AC-001-placement");
-    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide1.xml", "AC-001-placement");
+    let mut archive = open_zip(&output.bytes, "AC-001-colocation");
+    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide1.xml", "AC-001-colocation");
 
-    // Assert the XML contains a <p:ph type="title"/> or <p:ph idx="0"/> element.
-    // This is the PLACEMENT assertion: the shape containing "My Title" must have
-    // a <p:ph type="title"/> child (or idx="0" by convention).
-    // RED GATE: without TextTag routing, layout produces FrameContent::TextRun →
-    // serializer renders generic placeholder, no type="title" → FAILS.
-    let has_title_ph =
-        slide_xml.contains(r#"type="title""#) || slide_xml.contains(r#"type=\"title\""#);
+    // Parse into individual <p:sp>…</p:sp> shape blocks.
+    let shapes = extract_sp_blocks(&slide_xml);
     assert!(
-        has_title_ph,
-        "AC-001 PLACEMENT RED GATE: PPTX slide1.xml must contain a \
-         <p:ph type=\"title\"/> placeholder. \
-         Current code: TextBlock.tag is Untagged → layout maps to TextRun → \
-         serializer renders generic body placeholder → no type=\"title\" → FAILS. \
-         After TextTag routing: TextTag::Title → FrameContent::Title → \
-         slide_serializer.rs routes to type=\"title\" placeholder. \
-         BC-4.01.001 v1.2 postcondition 9. \
-         slide_xml (first 800 chars): {:.800}",
+        !shapes.is_empty(),
+        "AC-001 CO-LOCATION: slide1.xml must contain at least one <p:sp> block; got none. \
+         slide_xml (first 500 chars): {:.500}",
         slide_xml
     );
 
-    // Also assert that "My Title" actually appears WITHIN the title placeholder,
-    // not anywhere else in the XML (e.g., in a body placeholder).
-    // We do this by checking the positional relationship: the text run containing
-    // "My Title" must follow a <p:ph type="title"/> in the same <p:sp> block.
-    // As a pragmatic check: the title placeholder <p:sp> must contain both
-    // type="title" and the text "My Title".
-    // This FAILS if layout produces a generic TextRun where the title placeholder
-    // is empty and the text appears in a body placeholder.
+    // Find the title placeholder shape: <p:ph type="title"/> or <p:ph idx="0">.
+    let title_shape: Option<&str> = shapes
+        .iter()
+        .find(|sp| sp_is_title_placeholder(sp))
+        .map(String::as_str);
+
     assert!(
-        slide_xml.contains("My Title"),
-        "AC-001 PLACEMENT: slide XML must contain text 'My Title' (basic content check)"
+        title_shape.is_some(),
+        "AC-001 CO-LOCATION: slide1.xml must contain a <p:sp> with \
+         <p:ph type=\"title\"/> or <p:ph idx=\"0\"/>. \
+         Found {} shape(s) but none with title placeholder. \
+         BC-4.01.001 v1.2 postcondition 9. \
+         slide_xml (first 800 chars): {:.800}",
+        shapes.len(),
+        slide_xml
     );
+
+    let title_shape_xml = title_shape.unwrap();
+
+    // (a) The title placeholder shape MUST contain the text "My Title".
+    assert!(
+        title_shape_xml.contains("My Title"),
+        "AC-001 CO-LOCATION (a): the <p:sp> with type=\"title\" must contain \
+         <a:t> text 'My Title'. \
+         Title shape XML: {title_shape_xml}"
+    );
+
+    // (b) No non-title shape must contain "My Title".
+    for (i, sp) in shapes.iter().enumerate() {
+        if !sp_is_title_placeholder(sp) && sp.contains("My Title") {
+            panic!(
+                "AC-001 CO-LOCATION (b): 'My Title' found in a non-title <p:sp> \
+                 (shape index {i}). Text must appear ONLY inside the title placeholder. \
+                 Offending shape XML: {sp}"
+            );
+        }
+    }
 }
 
-// ─── AC-003 PLACEMENT: title must be in Heading1 paragraph (not positional fallback) ─
+// ─── AC-003 PLACEMENT: title must be in Heading1 paragraph (co-location check) ───
 
-/// AC-003 PLACEMENT / BC-4.02.001 v1.2 postcondition 8 — DOCX title text must
-/// appear in a paragraph that carries `<w:pStyle w:val="Heading1"/>`, driven by
-/// the TextTag::Title tag — NOT by the positional fallback heuristic.
+/// AC-003 CO-LOCATION / BC-4.02.001 v1.2 postcondition 8 — DOCX title text
+/// "Report Title" MUST appear inside the SAME `<w:p>` element that carries
+/// `<w:pStyle w:val="Heading1"/>`, not merely somewhere in the document.
 ///
-/// Red Gate (scope-expansion): current HEAD ba3bcc93 positional fallback emits
-/// Heading1 for the FIRST non-empty TextRun frame (document_body.rs line ~146).
-/// After TextTag routing, the exporter reads `FrameContent::Title` directly.
-/// To distinguish: the test checks that `<w:pStyle w:val="Heading1"/>` is ADJACENT
-/// to the `<w:t>Report Title</w:t>` run in the same `<w:p>` — i.e., the Heading1
-/// paragraph contains both the style element and the text. The current fallback
-/// produces this correctly via positional heuristic, but the test now explicitly
-/// checks that FrameContent::Title is produced (not TextRun).
+/// Co-location assertion: parse the document XML into individual `<w:p>…</w:p>`
+/// paragraph blocks, find the paragraph whose `<w:pPr>` contains
+/// `<w:pStyle w:val="Heading1"/>`, and confirm that paragraph's `<w:r><w:t>` runs
+/// contain "Report Title".
 ///
-/// NOTE: The test builds and asserts that the Heading1 paragraph WITH the title
-/// text is present. Currently this may PASS via positional fallback. The true Red
-/// Gate for AC-003 is AC-020 (body text must NOT get Heading1 when reversed order)
-/// and AC-023 (tag-over-position invariant). We include this test as a placement
-/// assertion that MUST pass after TextTag routing, whether or not it passes now.
+/// This PASSES on current code (FrameContent::Title routing is implemented).
 ///
 /// Traces: BC-4.02.001 v1.2 postcondition 8; BC-1.16.001 postcondition 1;
-///         architect-pass-1-adjudication Issue 2; scope-expansion AC-003.
+///         F-086-P2-MED-002 / AC-003 co-location.
+// F-086-P2-MED-002 / AC-003 co-location
 #[test]
 fn test_bc_4_02_001_ac003_docx_title_in_heading1_with_pstyle() {
-    // AC-003 PLACEMENT: DOCX word/document.xml must contain a <w:p> where
-    // <w:pStyle w:val="Heading1"/> AND <w:t>Report Title</w:t> are co-present.
-    // RED GATE: without FrameContent::Title production, the exporter may not
-    // emit Heading1 at all (if no title frame is present after TextTag routing fails).
-    let brand = BrandTmpDir::new("s086_ac003_placement");
+    // AC-003 CO-LOCATION: DOCX word/document.xml must contain a <w:p> where BOTH
+    // <w:pStyle w:val="Heading1"/> AND "Report Title" text runs are WITHIN THAT SAME
+    // paragraph block — not merely present as independent substrings in the document.
+    let brand = BrandTmpDir::new("s086_ac003_colocation");
     let source = concat!(
         "slideforge_version \"1\"\n",
         "lang \"en-US\"\n",
@@ -653,87 +661,156 @@ fn test_bc_4_02_001_ac003_docx_title_in_heading1_with_pstyle() {
     let opts = brand.build_options("docx", false);
 
     let output = slideforge::build(source, &opts).unwrap_or_else(|e| {
-        panic!("AC-003 PLACEMENT: build() with title slide (docx) must return Ok; got Err: {e:?}")
+        panic!(
+            "AC-003 CO-LOCATION: build() with title slide (docx) must return Ok; got Err: {e:?}"
+        )
     });
 
-    let mut archive = open_zip(&output.bytes, "AC-003-placement");
-    let doc_xml = read_zip_entry(&mut archive, "word/document.xml", "AC-003-placement");
+    let mut archive = open_zip(&output.bytes, "AC-003-colocation");
+    let doc_xml = read_zip_entry(&mut archive, "word/document.xml", "AC-003-colocation");
 
-    // Check that <w:pStyle w:val="Heading1"/> appears in the document.
+    // Parse into individual <w:p>…</w:p> paragraph blocks.
+    let paragraphs = extract_wp_blocks(&doc_xml);
     assert!(
-        doc_xml.contains(r#"w:val="Heading1""#),
-        "AC-003 PLACEMENT RED GATE: word/document.xml must contain \
-         <w:pStyle w:val=\"Heading1\"/> for the title paragraph. \
-         Current code: positional heuristic may produce this if first TextRun is title. \
-         After TextTag routing: FrameContent::Title → document_body.rs emits Heading1. \
-         BC-4.02.001 v1.2 postcondition 8. \
-         doc_xml (first 600 chars): {:.600}",
+        !paragraphs.is_empty(),
+        "AC-003 CO-LOCATION: word/document.xml must contain at least one <w:p> block. \
+         doc_xml (first 400 chars): {:.400}",
         doc_xml
     );
 
-    // Check that "Report Title" appears in the same document.
+    // Find a paragraph that SIMULTANEOUSLY has Heading1 style AND "Report Title" text.
+    // Both conditions must hold within the SAME <w:p>…</w:p> block.
+    let heading1_with_title: Option<&str> = paragraphs
+        .iter()
+        .find(|wp| {
+            wp.contains(r#"w:val="Heading1""#) && wp.contains("Report Title")
+        })
+        .map(String::as_str);
+
     assert!(
-        doc_xml.contains("Report Title"),
-        "AC-003 PLACEMENT: word/document.xml must contain text 'Report Title'. \
-         doc_xml (first 600 chars): {:.600}",
+        heading1_with_title.is_some(),
+        "AC-003 CO-LOCATION: word/document.xml must contain a single <w:p> block that \
+         contains BOTH <w:pStyle w:val=\"Heading1\"/> AND the text 'Report Title' \
+         within the same paragraph. \
+         Found {} paragraph(s). \
+         Check: the Heading1 pStyle and the title text run must be co-located — \
+         not in separate paragraphs. \
+         BC-4.02.001 v1.2 postcondition 8. \
+         doc_xml (first 800 chars): {:.800}",
+        paragraphs.len(),
         doc_xml
     );
 }
 
-// ─── AC-019: body routes to body placeholder, distinct from title ─────────────
+// ─── AC-019: body routes to body placeholder, co-location check ───────────────
 
-/// AC-019 / BC-4.01.001 v1.2 postcondition 11 — PPTX body text "Body paragraph text"
-/// must appear in a body placeholder shape (`<p:ph type="body"/>` or `idx="1"`),
-/// NOT the title placeholder. Title text "Heading" must NOT appear in the body
-/// placeholder. The two `<p:sp>` shapes must be distinct.
+/// AC-019 CO-LOCATION / BC-4.01.001 v1.2 postcondition 11 — PPTX slide with
+/// title "Heading" and body "Body paragraph text": these two strings must be in
+/// DISTINCT `<p:sp>` elements, each in the correct placeholder type.
 ///
-/// Red Gate: current layout maps ALL ContentBlock::Text → FrameContent::TextRun (flat).
-/// The serializer may emit multiple generic placeholders — all tagged the same way,
-/// without title/body distinction. After TextTag routing, title and body produce
-/// distinct FrameContent variants that the serializer routes separately.
+/// Co-location assertions:
+/// (a) The `<p:sp>` whose `<p:ph>` has `type="title"` or `idx="0"` MUST contain
+///     "Heading" in its `<a:t>` runs and MUST NOT contain "Body paragraph text".
+/// (b) A DISTINCT `<p:sp>` (non-title, body or generic) MUST contain
+///     "Body paragraph text" in its `<a:t>` runs and MUST NOT contain "Heading".
+/// (c) The two shapes are verified to be distinct `<p:sp>` elements (condition a
+///     and b already guarantee this since no single shape satisfies both).
 ///
-/// This test FAILS against current HEAD because:
-/// (a) layout produces no FrameContent::Title → the title `<p:ph type="title"/>` is empty
-/// (b) no routing distinction exists → no separate body `<p:ph type="body"/>`
+/// This PASSES on current code (TextTag routing is implemented for title/body).
 ///
-/// Traces: BC-4.01.001 v1.2 postcondition 11 + invariant 6; BC-1.16.001 postconditions 1, 4.
+/// Traces: BC-4.01.001 v1.2 postcondition 11 + invariant 6; BC-1.16.001 postconditions 1, 4;
+///         F-086-P2-MED-001 / AC-019 co-location.
+// F-086-P2-MED-001 / AC-019 co-location
 #[test]
 fn test_bc_4_01_001_ac019_body_text_in_body_placeholder_not_title() {
-    // AC-019: body text "Body paragraph text" must NOT appear in title placeholder.
-    // RED GATE: all TextBlock tags are Untagged → layout produces TextRun frames →
-    // serializer routes to body/generic placeholder → no title/body distinction → FAILS.
-    let brand = BrandTmpDir::new("s086_ac019_body_placement");
+    // AC-019 CO-LOCATION: title "Heading" and body "Body paragraph text" must be
+    // in DISTINCT <p:sp> elements, each with the correct placeholder type.
+    let brand = BrandTmpDir::new("s086_ac019_colocation");
     let source = fixture_source("story-086-content-slide.sf");
     let opts = brand.build_options("pptx", false);
 
     let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!("AC-019: build() with content slide (pptx) must return Ok; got Err: {e:?}")
+        panic!("AC-019 CO-LOCATION: build() with content slide (pptx) must return Ok; got Err: {e:?}")
     });
 
-    let mut archive = open_zip(&output.bytes, "AC-019");
-    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide2.xml", "AC-019");
+    let mut archive = open_zip(&output.bytes, "AC-019-colocation");
+    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide2.xml", "AC-019-colocation");
 
-    // Assert slide XML has a <p:ph type="title"/> shape containing "Heading".
+    // Parse into individual <p:sp>…</p:sp> shape blocks.
+    let shapes = extract_sp_blocks(&slide_xml);
     assert!(
-        slide_xml.contains(r#"type="title""#),
-        "AC-019 RED GATE: PPTX slide2.xml (content slide) must contain \
-         <p:ph type=\"title\"/> placeholder for the title text 'Heading'. \
-         Current code: TextTag::Untagged → TextRun → body placeholder → no type=\"title\" → FAILS. \
-         BC-4.01.001 v1.2 postcondition 9. \
-         slide_xml (first 800 chars): {:.800}",
+        shapes.len() >= 2,
+        "AC-019 CO-LOCATION: slide2.xml (content slide) must contain at least 2 <p:sp> \
+         blocks (title + body). Got {}. \
+         slide_xml (first 600 chars): {:.600}",
+        shapes.len(),
         slide_xml
     );
 
-    // Assert "Heading" appears in the XML (basic content check).
+    // Find the title placeholder shape.
+    let title_shape: Option<&str> = shapes
+        .iter()
+        .find(|sp| sp_is_title_placeholder(sp))
+        .map(String::as_str);
+
     assert!(
-        slide_xml.contains("Heading"),
-        "AC-019: slide XML must contain title text 'Heading'"
+        title_shape.is_some(),
+        "AC-019 CO-LOCATION: slide2.xml must contain a <p:sp> with \
+         <p:ph type=\"title\"/> or <p:ph idx=\"0\"/>. \
+         Found {} shape(s) but none with title placeholder. \
+         BC-4.01.001 v1.2 postcondition 9. \
+         slide_xml (first 800 chars): {:.800}",
+        shapes.len(),
+        slide_xml
+    );
+    let title_shape_xml = title_shape.unwrap();
+
+    // (a) Title shape MUST contain "Heading" and MUST NOT contain "Body paragraph text".
+    assert!(
+        title_shape_xml.contains("Heading"),
+        "AC-019 CO-LOCATION (a): the title placeholder <p:sp> must contain \
+         <a:t> text 'Heading'. \
+         Title shape XML: {title_shape_xml}"
+    );
+    assert!(
+        !title_shape_xml.contains("Body paragraph text"),
+        "AC-019 CO-LOCATION (a): the title placeholder <p:sp> must NOT contain \
+         'Body paragraph text'. Body text must be in a DISTINCT shape. \
+         Title shape XML: {title_shape_xml}"
     );
 
-    // Assert "Body paragraph text" also appears.
+    // Find a non-title shape containing "Body paragraph text".
+    let body_shape: Option<&str> = shapes
+        .iter()
+        .find(|sp| !sp_is_title_placeholder(sp) && sp.contains("Body paragraph text"))
+        .map(String::as_str);
+
     assert!(
-        slide_xml.contains("Body paragraph text"),
-        "AC-019: slide XML must contain body text 'Body paragraph text'"
+        body_shape.is_some(),
+        "AC-019 CO-LOCATION (b): slide2.xml must contain a non-title <p:sp> with \
+         'Body paragraph text' in its <a:t> runs. \
+         Found {} shape(s); none (other than title) contain this text. \
+         BC-4.01.001 v1.2 postcondition 11. \
+         slide_xml (first 800 chars): {:.800}",
+        shapes.len(),
+        slide_xml
+    );
+    let body_shape_xml = body_shape.unwrap();
+
+    // (b) Body shape MUST NOT contain "Heading" (the title text).
+    assert!(
+        !body_shape_xml.contains("Heading"),
+        "AC-019 CO-LOCATION (b): the body <p:sp> must NOT contain 'Heading'. \
+         Title text must appear ONLY in the title placeholder. \
+         Body shape XML: {body_shape_xml}"
+    );
+
+    // (c) Title and body shapes are distinct (guaranteed by disjoint predicate above,
+    // but add an explicit identity check for clarity).
+    assert_ne!(
+        title_shape_xml, body_shape_xml,
+        "AC-019 CO-LOCATION (c): title and body must be DISTINCT <p:sp> elements. \
+         BC-4.01.001 v1.2 invariant 6."
     );
 }
 
@@ -895,6 +972,57 @@ fn test_bc_4_02_001_ac022_docx_subtitle_in_heading2() {
          doc_xml (first 600 chars): {:.600}",
         doc_xml
     );
+}
+
+// ─── Co-location XML parsing helpers ─────────────────────────────────────────
+
+/// Split PPTX slide XML into individual `<p:sp>…</p:sp>` shape blocks.
+///
+/// Returns one `String` per `<p:sp>` element found in `xml`.
+/// Empty if no `<p:sp>` elements are present.
+///
+/// This is a lightweight string-split parser sufficient for co-location
+/// assertions — it does not handle nested `<p:sp>` (OOXML does not nest them)
+/// and does not require an XML library dependency.
+fn extract_sp_blocks(xml: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut remaining = xml;
+    while let Some(start) = remaining.find("<p:sp>").or_else(|| remaining.find("<p:sp ")) {
+        // Find the opening tag end (might be <p:sp> or <p:sp attr="...">)
+        let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
+        let Some(tag_end) = tag_end else { break };
+        let Some(end_offset) = remaining[tag_end..].find("</p:sp>") else { break };
+        let block_end = tag_end + end_offset + "</p:sp>".len();
+        blocks.push(remaining[start..block_end].to_owned());
+        remaining = &remaining[block_end..];
+    }
+    blocks
+}
+
+/// Return `true` if a `<p:sp>` block is a PPTX title placeholder.
+///
+/// A shape is a title placeholder if its `<p:ph>` element carries
+/// `type="title"` or `idx="0"` (OOXML ECMA-376 §19.3.1.38).
+fn sp_is_title_placeholder(sp_xml: &str) -> bool {
+    sp_xml.contains(r#"type="title""#) || sp_xml.contains(r#"idx="0""#)
+}
+
+/// Split DOCX document XML into individual `<w:p>…</w:p>` paragraph blocks.
+///
+/// Returns one `String` per `<w:p>` element found in `xml`.
+/// Empty if no `<w:p>` elements are present.
+fn extract_wp_blocks(xml: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut remaining = xml;
+    while let Some(start) = remaining.find("<w:p>").or_else(|| remaining.find("<w:p ")) {
+        let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
+        let Some(tag_end) = tag_end else { break };
+        let Some(end_offset) = remaining[tag_end..].find("</w:p>") else { break };
+        let block_end = tag_end + end_offset + "</w:p>".len();
+        blocks.push(remaining[start..block_end].to_owned());
+        remaining = &remaining[block_end..];
+    }
+    blocks
 }
 
 // ─── Helper: read a file from a ZIP archive ──────────────────────────────────
