@@ -105,7 +105,7 @@ Pass-7 fix-burst COMPLETE:
 - Worktree HEAD UNCHANGED at a055345e. Workspace 3300/3300 pass, 14 skipped. Exit gate CLEAN.
 - BC-1.16.001 now v1.3. STORY-086 now v1.5.
 
-CURRENT SUB-STEP: adversary LOCAL pass 8 DISPATCHED, streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
+CURRENT SUB-STEP: feature/STORY-086 PUSHED to origin at a055345e (durable cross-machine). Adversary LOCAL pass 8 PENDING (API 529 overload — never ran; re-dispatch on resume). Streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Full procedure in `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md`. Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
 
 ### Step 3 — Re-run failed Wave 4 gates
 
@@ -163,20 +163,17 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 ## Session Resume Checkpoint
 
-**STORY-086 adversary pass 7 RAN + REMEDIATED (BC-1.16.001 v1.3; STORY-086 v1.5; HEAD a055345e unchanged). Pass 8 DISPATCHED. Streak 0/3. NEXT: await adversary LOCAL pass 8 result (sequential per LESSON-7).**
+**STORY-086 feature/STORY-086 PUSHED to origin at a055345e (durable cross-machine). Pass 8 pending (API 529 overload — never ran). Streak 0/3. ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: adversary pass 7 COMPLETE (F-086-P7-MED-001 stale BC-1.16.001 PC-7 BulletItem type description found + REMEDIATED; recovery from corrupted v1.2 PO commit 608ec7b0; BC-1.16.001 → v1.3; STORY-086 → v1.5; worktree HEAD a055345e unchanged). Adversary LOCAL pass 8 DISPATCHED. Streak 0/3. Stories 88 / 545 pts. BLK-002 OPEN. |
-| **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e) |
-| **Open PRs** | 0 |
-| **Workspace crates** | 17 |
+| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: LOCAL adversary cascade pass 7 REMEDIATED (BC-1.16.001 v1.3; STORY-086 v1.5). feature/STORY-086 PUSHED to origin at a055345e. Pass 8 never ran (API 529 overload). Streak 0/3. Stories 88 / 545 pts. BLK-002 OPEN. |
+| **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e; origin/feature/STORY-086 == a055345e) |
 | **Workspace tests** | 3300/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088; 1 pre-existing cold_budget flake tracked under STORY-080) |
-| **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **DURABLE ARTIFACTS** | (1-6) adversary passes 1-6 at `.factory/cycles/STORY-086/adversarial-reviews/`; (7) `adversary-STORY-086-pass-7.md` (MED-001 stale BC-1.16.001 PC-7 BulletItem type; recovery from corrupted PO commit 608ec7b0 via f2261592); (8) architect adjudications: `architect-pass-1-adjudication.md` (D1-D5), `architect-pass-5-adjudication.md`, `architect-pass-6-adjudication.md` (trim canonical); (9) `ADR-019` v1.3; (10) `BC-1.16.001` v1.3; (11) `BC-3.04.001` v1.6; (12) error-taxonomy v2.17; (13) STORY-086 v1.5 + STORY-088 v1.2 (8 pts). Old checkpoint archived to `.factory/cycles/STORY-086/session-checkpoints.md`. |
-| **RESUME INSTRUCTION** | Adversary LOCAL pass 8 is IN PROGRESS (streak 0/3). Await result; if CLEAN (strict) streak advances to 1/3. Target: 3 consecutive strict-CLEAN passes (BC-5.39.001). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (independent) → merge (STANDING MERGE AUTH). After STORY-086 merges: re-run Gate 3 (adversary) + Gate 5 (holdout) on patched develop. Only after re-gate passes: advance to Wave 5. BLK-002 OPEN until STORY-086 merges + gates re-pass. |
+| **factory-artifacts** | PUSHED to origin (human-authorized 2026-06-04). Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
+| **RESUME INSTRUCTION** | **ZERO-CONTEXT RESUME: read `.factory/cycles/STORY-086/RESUME-PLAYBOOK.md` and execute from Step 0. Immediate next action: re-dispatch adversary LOCAL pass 8 (streak 0/3, target 3 strict-CLEAN). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (orchestrator dispatches independently) → merge (STANDING MERGE AUTH). After merge: re-run Wave 4 Gate 3 + Gate 5. Only then: Wave 5. BLK-002 OPEN.** |
 
 ---
 
