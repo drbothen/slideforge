@@ -1006,8 +1006,7 @@ fn test_bc_1_16_001_f086_p6_med001_title_stored_trimmed() {
                 plain_text, "Padded Title",
                 "F-086-P6-MED-001 RED GATE: title must be stored TRIMMED. \
                  BC-1.16.001 PC-1 requires InlineNode::Plain(Arc::from(s.trim())). \
-                 Current code stores untrimmed — observed: {:?}, expected: \"Padded Title\".",
-                plain_text
+                 Current code stores untrimmed — observed: {plain_text:?}, expected: \"Padded Title\"."
             );
         },
         other => {
@@ -1062,8 +1061,7 @@ fn test_bc_1_16_001_f086_p6_med001_subtitle_stored_trimmed() {
                 plain_text, "Sub",
                 "F-086-P6-MED-001 RED GATE: subtitle must be stored TRIMMED. \
                  BC-1.16.001 PC-4 requires InlineNode::Plain(Arc::from(s.trim())). \
-                 Current code stores untrimmed — observed: {:?}, expected: \"Sub\".",
-                plain_text
+                 Current code stores untrimmed — observed: {plain_text:?}, expected: \"Sub\"."
             );
         },
         other => {
@@ -1118,8 +1116,7 @@ fn test_bc_1_16_001_f086_p6_med001_body_stored_trimmed() {
                 plain_text, "Body text",
                 "F-086-P6-MED-001 RED GATE: body must be stored TRIMMED. \
                  BC-1.16.001 PC-4 requires InlineNode::Plain(Arc::from(s.trim())). \
-                 Current code stores untrimmed — observed: {:?}, expected: \"Body text\".",
-                plain_text
+                 Current code stores untrimmed — observed: {plain_text:?}, expected: \"Body text\"."
             );
         },
         other => {
@@ -1170,19 +1167,18 @@ fn test_bc_1_16_001_f086_p6_med001_chart_alt_stored_trimmed() {
     if let ContentBlock::Chart(spec) = &chart_blocks[0].content {
         match &spec.alt {
             Some(AltText::Provided(s)) => {
+                let s_str: &str = s.as_ref();
                 assert_eq!(
-                    s.as_ref(),
+                    s_str,
                     "Bar chart desc",
                     "F-086-P6-MED-001 RED GATE: chart alt must be stored TRIMMED. \
                      BC-1.16.001 PC-12 requires AltText::Provided(Arc::from(s.trim())). \
-                     Current code stores untrimmed — observed: {:?}, expected: \"Bar chart desc\".",
-                    s.as_ref()
+                     Current code stores untrimmed — observed: {s_str:?}, expected: \"Bar chart desc\"."
                 );
             },
             other => {
                 panic!(
-                    "F-086-P6-MED-001: chart alt must be AltText::Provided; got {:?}",
-                    other
+                    "F-086-P6-MED-001: chart alt must be AltText::Provided; got {other:?}"
                 );
             },
         }

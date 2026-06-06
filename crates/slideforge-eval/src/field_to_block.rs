@@ -297,7 +297,7 @@ fn resolve_alt(slide: &slideforge_types::Slide) -> Option<AltText> {
     } else if let Some(s) = alt_str
         && !s.trim().is_empty()
     {
-        Some(AltText::Provided(Arc::from(s)))
+        Some(AltText::Provided(Arc::from(s.trim())))
     } else {
         None
     }
@@ -324,7 +324,7 @@ fn is_decorative(slide: &slideforge_types::Slide) -> bool {
 fn make_text_block_tagged(text: &str, tag: TextTag) -> Block {
     Block {
         content: ContentBlock::Text(TextBlock {
-            inlines: vec![InlineNode::Plain(Arc::from(text))],
+            inlines: vec![InlineNode::Plain(Arc::from(text.trim()))],
             tag,
             span: SourceSpan::default(),
         }),
