@@ -676,10 +676,11 @@ stories:
     status: draft
     wave: 5
     priority: P1
-    points: 5
+    points: 8
+    estimated_days: 3
     epic: EPIC-02
     depends_on: [STORY-006, STORY-086]
     blocks: []
     bcs: [BC-1.01.002]
     closes_findings: []
-    notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Adds `[...]` list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs. Enables `bullets: [\"A\",\"B\",\"C\"]` without @var binding workaround. 1-crate change only: slideforge-syntax (deck.rs). TextTag follow-up story was absorbed into STORY-086 (not created here). EPIC-02 (parser)."
+    notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Scope expanded 2026-06-06 (adversary pass-5 D5 correction): @var/vars-block list-literal does NOT parse at time of STORY-086 (parser gap discovered); STORY-088 now covers BOTH bullets DSL forms (direct list-literal AND @var/vars-block binding). Points bumped 5→8, estimated_days 2→3. Adds `[...]` list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs AND @var/vars-block binding form. TextTag follow-up story was absorbed into STORY-086 (not created here). EPIC-02 (parser)."

@@ -161,9 +161,9 @@ stories_merged: 59
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
 | [STORY-087](stories/STORY-087-color-coded-slide-types.md) | EPIC-01 | Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement) | BC-1.17.001, BC-1.17.002, BC-1.17.003 | P1 | 13 | strict | draft |
-| [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 5 | strict | draft |
+| [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | draft |
 
-**Wave 5 total points: 132** _(127 prior + 5 STORY-088 bullets list-literal DSL syntax; closes STORY-086 AC-007 parser-gap note)_
+**Wave 5 total points: 135** _(127 prior + 8 STORY-088 bullets list-literal DSL syntax scope-expanded 5→8 pts, estimated_days 2→3, 2026-06-06 per adversary pass-5 D5 correction: @var/vars-block list-literal does NOT parse; both bullets DSL forms deferred to STORY-088)_
 
 ---
 
@@ -200,18 +200,22 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
 | Wave 4 | 22 | 142 | 6.5 |
-| Wave 5 | 22 | 132 | 6.0 |
+| Wave 5 | 22 | 135 | 6.1 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **88** | **542** | **6.2** |
+| **Total** | **88** | **545** | **6.2** |
 
 > STORY-086 points bumped from 13 → 21 per human-authorized scope expansion (2026-06-06):
 > TextTag enum + TextBlock.tag field + PPTX title-placeholder routing + DOCX Heading1
 > routing added to scope (adversary findings F-086-P1-MED-002/003 required placement
 > assertions, not mere text-presence). Approximately 2× original scope. TextTag follow-up
 > story absorbed into STORY-086 (not created separately). Wave 4 total adjusted from
-> 142 → 150 pts. Total 537 → 542 pts (after STORY-088 +5).
+> 142 → 150 pts. Total 537 → 542 pts (after STORY-088 +5 original).
 >
-> STORY-088 (Bullets list-literal DSL syntax, 5 pts, P1, Wave 5, EPIC-02) created
+> STORY-088 (Bullets list-literal DSL syntax, 5 pts, P1, Wave 5, EPIC-02) created.
+> STORY-088 points bumped from 5 → 8, estimated_days 2 → 3 (2026-06-06 per adversary
+> pass-5 D5 correction): @var/vars-block list-literal does NOT parse at time of STORY-086;
+> scope of STORY-088 expanded to cover BOTH bullets DSL forms. Wave 5 total adjusted from
+> 132 → 135 pts. Total 542 → 545 pts.
 > 2026-06-06 to close the STORY-086 AC-007 parser-gap note. Direct `bullets: [...]`
 > field-value syntax deferred from STORY-086; `@var` workaround valid in STORY-086.
 > Wave 5: 21 → 22 stories, 127 → 132 pts. Total: 87 → 88 stories, 537 → 542 pts.
