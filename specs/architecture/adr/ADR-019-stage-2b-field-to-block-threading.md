@@ -5,7 +5,7 @@ title: "Stage 2b — post-eval field-to-block threading pass in slideforge-eval"
 status: accepted
 date: 2026-06-05
 accepted_date: 2026-06-05
-version: "1.4"
+version: "1.5"
 subsystems_affected: [SS-02, SS-03, SS-05, SS-15]
 supersedes: null
 superseded_by: null
@@ -45,6 +45,7 @@ Story A (`slide-field-to-block-threading`).
 | 2026-06-06 | v1.2 | architect | Amendment B (STORY-086 pass-5 adjudication F-086-P5-CRIT-001): Decision 4.1 conflict path corrected from alt-first (BC-3.04.001 Inv-11) to decorative-first (BC-1.16.001 PC-12). BC-3.04.001 Inv-11 governs shape DSL path only; media threading at Stage 2b is governed exclusively by BC-1.16.001. W-A11-002 emission site corrected from "pre-layout validator" to "resolve_alt via tracing::warn!" — AltTextValidator.validate() is Shape-only per ADR-018 v1.2 and cannot emit W-A11-002 for charts/images/diagrams. |
 | 2026-06-06 | v1.3 | architect | Amendment C (STORY-086 pass-6 adjudication F-086-P6-MED-001): §3.1 table and §3.3 alt-rule corrected to TRIMMED storage. `InlineNode::Plain(s)` → `InlineNode::Plain(Arc::from(s.trim()))` for title/subtitle/body; `AltText::Provided(Arc::from(s))` → `AltText::Provided(Arc::from(s.trim()))` for alt. Function-level doc comment (Decision 2 inline example) updated likewise. BC-1.16.001 PC-1/PC-4/PC-12 is the authoritative contract (contract semantics per CLAUDE.md precedence rule 1); ADR-019 is brought into alignment. |
 | 2026-06-06 | v1.4 | architect | Amendment D (STORY-086 pass-9 adjudication F-086-P9-MED-001): §3.3 ChartSpec construction example corrected — removed phantom `data_source: ...` field. Real `ChartSpec` in `slideforge-types/src/specs.rs` has exactly four fields: `chart_type`, `alt`, `decorative`, `span`. Sibling-site sweep (TD-VSDD-060) confirmed single occurrence. |
+| 2026-06-06 | v1.5 | architect | Amendment E (STORY-086 pass-10 adjudication F-086-P10-MED-001 + F-086-P10-MED-002): exhaustive sibling-site sweep (TD-VSDD-060) across ALL struct construction examples in the ADR. §3.2 BulletItem corrected: phantom `text:` and `level:` fields removed; replaced with real fields `inlines: vec![InlineNode::Plain(item_str)], children: vec![]` per `slideforge-types/src/block.rs`. §3.4 ImageSpec corrected: phantom DSL keyword `src:` replaced with real Rust field `path:` per `slideforge-types/src/specs.rs`. Ground truth verified against STORY-086 worktree sources directly. All other struct examples (ChartSpec, DiagramSpec, TextBlock, AltText, TextTag) confirmed correct — zero remaining phantom fields. |
 
 ---
 
@@ -215,7 +216,7 @@ Empty strings (after trim): skip — do not emit a ContentBlock for an empty-str
 | `"bullets"` | `FieldValue::Literal(Value::List(items))` | `ContentBlock::Bullets(vec![BulletItem { ... }])` | One `BulletItem` per list entry |
 | `"bullets"` | `FieldValue::Inlines(nodes)` | `ContentBlock::Bullets(...)` | Pre-parsed bullet list from parser |
 
-Bullet items are constructed as `BulletItem { text: [InlineNode::Plain(item_str)], level: 0, span: SourceSpan::default() }` from string list items. Rich-text bullets from `Inlines` are threaded as-is.
+Bullet items are constructed as `BulletItem { inlines: vec![InlineNode::Plain(item_str)], children: vec![], span: SourceSpan::default() }` from string list items. Rich-text bullets from `Inlines` are threaded as-is.
 
 #### 3.3 Chart
 
@@ -240,7 +241,7 @@ Applies when `slide.slide_type` is in: `image`, `screenshot`, `bio`.
 
 | Slide.fields key | Value type | Produces | Notes |
 |-----------------|------------|---------|-------|
-| `"src"` | `FieldValue::Literal(Value::Str(path))` | `ImageSpec { src: Arc::from(path), alt: <resolved per 3.4.alt>, decorative: <resolved>, span }` | |
+| `"src"` | `FieldValue::Literal(Value::Str(path))` | `ImageSpec { path: Arc::from(path), alt: <resolved per 3.4.alt>, decorative: <resolved>, span }` | |
 
 Alt resolution: identical to chart (3.3.alt) but reads `fields["alt"]` and `fields["decorative"]`.
 
