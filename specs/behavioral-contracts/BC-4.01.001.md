@@ -34,8 +34,12 @@ and complete relationship references. The output must be openable in PowerPoint,
 Keynote, Google Slides, and LibreOffice without schema errors or missing content.
 
 Title text is routed to the PPTX title placeholder (`<p:ph type="title"/>` or `idx="0"`)
-via the `TextTag::Title` field on `ContentBlock::Text` — NOT via a positional fallback
-heuristic. This tag-based routing is the load-bearing contract for LESSON-13 positive
+via `FrameContent::Title` — NOT via a positional fallback heuristic. The pipeline is:
+Stage 2b sets `TextBlock.tag = TextTag::Title` on the semantic `ContentBlock::Text`;
+`layout::run` translates `TextTag::Title` → `FrameContent::Title(Arc<str>)` in the
+`LaidOutDeck` frames; and the PPTX exporter (`slide_serializer.rs`) routes by reading
+`FrameContent::Title` — it does NOT consult `TextBlock.tag` directly. This
+`FrameContent`-driven routing is the load-bearing contract for LESSON-13 positive
 content vectors and the Stage 2b threading pass (ADR-019).
 
 ## Preconditions
@@ -67,27 +71,40 @@ content vectors and the Stage 2b threading pass (ADR-019).
 
 ### TextTag Routing (v1.2 — ADR-019 Decision 3.1)
 
-9. **Title routing:** A slide frame derived from a `ContentBlock::Text` with
-   `tag: TextTag::Title` is serialized as a PPTX title placeholder shape — a `<p:sp>`
-   element whose `<p:ph>` child has `type="title"` (or `idx="0"` for body-first layouts).
-   The text content appears inside `<p:txBody><a:p><a:r><a:t>...</a:t></a:r></a:p></p:txBody>`
-   within that placeholder shape. This routing is determined by the `TextTag::Title` field
-   on the originating `ContentBlock::Text`; it is NOT inferred from position (e.g., "first
-   text run on the slide").
+Layer clarification: `TextTag::Title/Subtitle/Body` on `TextBlock` is the **semantic source**
+(lives in the `Deck` / inline IR). The `TextTag→FrameContent` translation is performed by
+`layout::run` (in `crates/slideforge-layout/src/layout.rs`): it maps `TextTag::Title` →
+`FrameContent::Title(Arc<str>)`, `TextTag::Subtitle` → `FrameContent::Subtitle(Arc<str>)`,
+and `TextTag::Body` → `FrameContent::Body(Vec<ContentBlock>)`. The PPTX exporter routes by
+reading `FrameContent::Title / Subtitle / Body` from the `LaidOutDeck` frames (already
+implemented in `slide_serializer.rs`) and does NOT consult `TextBlock.tag` directly.
+`FrameContent::Title` is the **geometric carrier** that the exporter consumes.
 
-10. **Subtitle routing:** A slide frame derived from a `ContentBlock::Text` with
-    `tag: TextTag::Subtitle` is serialized as the subtitle placeholder shape (`<p:ph type="subTitle"/>`)
-    when the layout has a subtitle placeholder, or as a body placeholder otherwise.
+9. **Title routing:** A slide frame carrying `FrameContent::Title(text)` (populated by
+   `layout::run` from a `ContentBlock::Text` with `tag: TextTag::Title`) is serialized as a
+   PPTX title placeholder shape — a `<p:sp>` element whose `<p:ph>` child has `type="title"`
+   (or `idx="0"` for body-first layouts). The text content appears inside
+   `<p:txBody><a:p><a:r><a:t>...</a:t></a:r></a:p></p:txBody>` within that placeholder shape.
+   This routing is determined by the `FrameContent::Title` variant on the `LaidOutDeck` frame;
+   the exporter does NOT inspect `TextBlock.tag` and does NOT infer routing from position
+   (e.g., "first text run on the slide").
 
-11. **Body routing:** A slide frame derived from a `ContentBlock::Text` with
-    `tag: TextTag::Body` is serialized as a body placeholder shape (`<p:ph type="body"/>` or
-    `idx="1"`) — distinct from the title placeholder. Body text MUST NOT appear in the title
-    placeholder shape.
+10. **Subtitle routing:** A slide frame carrying `FrameContent::Subtitle(text)` (populated by
+    `layout::run` from a `ContentBlock::Text` with `tag: TextTag::Subtitle`) is serialized as
+    the subtitle placeholder shape (`<p:ph type="subTitle"/>`) when the layout has a subtitle
+    placeholder, or as a body placeholder otherwise.
 
-12. **Tag-over-position invariant:** The PPTX exporter MUST NOT use the position of a
-    `ContentBlock::Text` within `Slide.blocks` as the primary routing signal. Routing is
-    exclusively driven by the `tag` field. A title block that appears second in `Slide.blocks`
-    (due to any future reordering) still routes to the title placeholder.
+11. **Body routing:** A slide frame carrying `FrameContent::Body(blocks)` (populated by
+    `layout::run` from a `ContentBlock::Text` with `tag: TextTag::Body`) is serialized as a
+    body placeholder shape (`<p:ph type="body"/>` or `idx="1"`) — distinct from the title
+    placeholder. Body text MUST NOT appear in the title placeholder shape.
+
+12. **FrameContent-over-position invariant:** The PPTX exporter MUST NOT use the position of a
+    frame within `LaidOutSlide.frames` as the primary routing signal. Routing is exclusively
+    driven by the `FrameContent` variant. A `FrameContent::Title` frame that appears at index 1
+    in the frames list still routes to the title placeholder. The semantic `TextBlock.tag` is
+    consumed exclusively by `layout::run`; by the time the exporter runs, the tag has been
+    translated to the appropriate `FrameContent` variant.
 
 ## Invariants
 
@@ -95,9 +112,11 @@ content vectors and the Stage 2b threading pass (ADR-019).
 2. Integer EMU coordinates only — no f64 in the OOXML output path. (DI-010)
 3. All `LaidOutDeck` IR types used in the export path implement `Hash + Eq + Clone`. (DI-011)
 4. Same `LaidOutDeck` + same `Brand` produces byte-identical output (determinism, excluding timestamps).
-5. **TextTag routing is tag-driven, not position-driven.** Title text always routes to the title
-   placeholder shape regardless of where `ContentBlock::Text(Title)` appears in `Slide.blocks`.
-   The exporter MUST NOT use list-index position as a routing signal. (ADR-019 Decision 3.1)
+5. **Routing is FrameContent-driven, not position-driven.** `layout::run` translates
+   `TextTag::Title` → `FrameContent::Title` and `TextTag::Body` → `FrameContent::Body`; the
+   PPTX exporter routes by `FrameContent` variant and MUST NOT use list-index position as a
+   routing signal. By the time the exporter runs, the semantic `TextBlock.tag` has already been
+   consumed by layout and is not consulted again. (ADR-019 Decision 3.1)
 6. **Title and body placeholders are distinct.** A title-tagged frame and a body-tagged frame
    MUST NOT share the same `<p:sp>` placeholder shape. The title placeholder carries only title
    text; the body placeholder carries only body/subtitle text. Mixed-content placeholder shapes

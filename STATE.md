@@ -55,7 +55,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 1 remediated; 0/3 streak).**
+Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 1 remediated; specs de-risked 2026-06-06; 0/3 streak). BLK-002 OPEN.**
 
 - `develop` = `030dec6c` (61 merged PRs; origin/develop confirmed). **Open PRs: 0.**
 - Active worktrees: `.worktrees/STORY-086` (feature/STORY-086, HEAD ba3bcc93, pushed).
@@ -63,17 +63,19 @@ Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PR
 - Wave 4 gate ran 2026-06-06. Gate 1 PASS. Gate 2 SKIP (no DTU). Gate 3 FAIL (adversary: 1 CRITICAL + 3 HIGH). Gate 5 FAIL (holdout: mean 0.56 / min_critical 0.30 — both below threshold). Consistency audit FAIL (4 blockers, 8 warnings — swept).
 
 **Wave 4 gate FAILED.** Root cause: eval emits no slide-body ContentBlocks (for_eval.rs:342) — content-EMPTY output across all exporters + a11y strict-gate unsatisfiable even with correct alt.
-**REMEDIATION IN PROGRESS (2026-06-06).** ADR-019 accepted. STORY-086 (Wave 4 remediation, now 21 pts, P0) scope-expanded to include TextTag. Adversary pass 1 REMEDIATED (spec burst committed). BLK-002 remains OPEN until STORY-086 merges + Wave 4 gates re-pass. Wave 4 does NOT advance to Wave 5 until re-gate passes. STORY-088 (bullets list-literal DSL, Wave 5, 5 pts) created.
+**REMEDIATION SCOPED AND DE-RISKED (2026-06-06).** ADR-019 accepted. STORY-086 (Wave 4 remediation, 21 pts, P0) scope-expanded to include TextTag. Adversary pass 1 remediated. Uncertainty-scanner ran on STORY-086/087/088 — found divergences from real codebase (wrong file paths, nonexistent trait methods, mis-located work). Architect resolved D1-D5 (wave4-expanded-scope-uncertainty-resolution.md + ADR-019 v1.1). Stories corrected (086 v1.2, 087 v1.1, 088 v1.1). BCs clarified (4.01/4.02/1.16 prose, no version bump). STORY-088 (bullets list-literal DSL, Wave 5, 5 pts) created. BLK-002 remains OPEN until STORY-086 merges + Wave 4 gates re-pass.
 
 ---
 
 ## NEXT ACTIONS (zero-context orchestrator: execute in order)
 
-**STATUS: Wave 4 gate FAILED (2026-06-06). Remediation scoped. Wave 4 does NOT advance to Wave 5.**
+**STATUS: Wave 4 gate FAILED (2026-06-06). Remediation scoped + de-risked. Wave 4 does NOT advance to Wave 5.**
 
-### Step 1 — DONE: Remediation scoped
+**SPECS DE-RISKED 2026-06-06** — STORY-086/087/088 corrected to match real codebase (wrong file paths, nonexistent trait methods, mis-located work — NOT version staleness). Read `.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` FIRST. KEY: STORY-086 TextTag work is LAYOUT-side (layout.rs FrameContent mapping), NOT exporter-side. Implementer must still do an ls/grep recon per story before coding.
 
-ADR-019 (Stage 2b post-eval field-to-block threading pass) accepted. STORY-086 (slide-field-to-block threading, Wave 4 remediation, 13 pts, P0) created — closes BLK-002/F-G3-CRIT-001/F-G3-HIGH-001/002. STORY-087 (color-coded slide types, Wave 5, closes F-G3-HIGH-003) created. BCs BC-1.16.001 + BC-1.17.001/002/003 created; BC-5.02.001 v1.6; BC-5.01.001 v1.3; error-taxonomy v2.16; BC-INDEX 116 BCs.
+### Step 1 — DONE: Remediation scoped + de-risked
+
+ADR-019 (Stage 2b post-eval field-to-block threading pass) accepted (v1.1 — D1 TextTag→FrameContent routing corrected to layout-side). STORY-086 (slide-field-to-block threading, Wave 4 remediation, 21 pts, P0) created — closes BLK-002/F-G3-CRIT-001/F-G3-HIGH-001/002. STORY-087 (color-coded slide types, Wave 5, closes F-G3-HIGH-003) created. STORY-088 (bullets list-literal DSL, Wave 5, 5 pts) created. BCs BC-1.16.001 + BC-1.17.001/002/003 created; BC-5.02.001 v1.6; BC-5.01.001 v1.3; error-taxonomy v2.16; BC-INDEX 116 BCs. Stories corrected to real codebase: STORY-086 v1.2, STORY-087 v1.1, STORY-088 v1.1. BCs 4.01.001/4.02.001/1.16.001 prose clarified (no version bump).
 
 ### Step 2 — IN PROGRESS: Deliver STORY-086
 
@@ -135,21 +137,20 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 ## Session Resume Checkpoint
 
-**STORY-086 adversary pass 1 REMEDIATED (2026-06-06). Streak 0/3. NEXT: test-writer TextTag Red Gate.**
+**STORY-086 adversary pass 1 REMEDIATED. Specs de-risked (D1-D5, 2026-06-06). Streak 0/3. NEXT: test-writer TextTag Red Gate.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: pass 1 spec burst committed; scope 13→21 pts (TextTag ACs added). Stories 88 / 542 pts. BLK-002 OPEN. |
+| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: pass 1 spec burst committed; scope 13→21 pts (TextTag ACs added); stories de-risked to match real codebase. Stories 88 / 542 pts. BLK-002 OPEN. |
 | **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD ba3bcc93, pushed) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 |
 | **Workspace tests** | ~3244/3246 pass (2 perf-timing flakes under local CPU contention; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Fresh orchestrator: NEXT ACTION = test-writer adds Red Gate tests for STORY-086 TextTag ACs (title→`<p:ph type="title">`, body→body ph, DOCX Heading1 via tag, subtitle, tag-over-position) — must FAIL on current worktree HEAD ba3bcc93. Also: AC-007 variable-binding bullets fixture + Value::List unit test. Then implementer fix-burst (Issues 1/2/3). Then RESUME adversary LOCAL cascade (0/3 → 3 strict-CLEAN). Then demo → PR → security+pr-reviewer → merge. After STORY-086 merges, re-run Gate 3 (adversary) + Gate 5 (holdout) on new develop. Only after re-gate passes, advance to Wave 5. BLK-002 remains OPEN until STORY-086 merges + gates re-pass. |
-| **Pass 1 adversary report** | `.factory/cycles/STORY-086/adversarial-reviews/adversary-STORY-086-pass-1.md` — full finding details (CRIT-001 double-fire analysis, MED-001/002/003, OBS-1..5) |
-| **Architect adjudication** | `.factory/cycles/STORY-086/architect-pass-1-adjudication.md` — Issue 1 (CODE-CONFORMS, emit alt=None blocks + validate() owns Shape only), Issue 2 (TextTag IMPLEMENT NOW, scope 13→21 pts), Issue 3 (bullets → STORY-088, AC-007 var-binding form) |
+| **DURABLE ARTIFACTS** | (1) `.factory/cycles/STORY-086/adversarial-reviews/adversary-STORY-086-pass-1.md` — full pass-1 findings; (2) `.factory/cycles/STORY-086/architect-pass-1-adjudication.md` — D1-D5 Issues 1/2/3 resolution; (3) `.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` — authoritative D1-D5 resolution + real codebase mapping; (4) `.factory/specs/architecture/adr/ADR-019-stage-2b-field-to-block-threading.md` v1.1 — TextTag→FrameContent routing corrected to layout-side; (5) STORY-086 v1.2 + STORY-087 v1.1 + STORY-088 v1.1 — corrected to real codebase (real file paths, real trait sigs, correct scope); (6) BC-4.01.001/4.02.001/1.16.001 prose clarified (no version bump). |
+| **RESUME INSTRUCTION** | Read `.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` FIRST — it is the authoritative map of what is real in the codebase. KEY insight: TextTag work is LAYOUT-side (layout.rs maps tagged ContentBlock::Text to FrameContent::Title/Subtitle/Body; exporters ALREADY route correctly via slide_serializer.rs / docx, zero exporter change needed). Then: test-writer adds Red Gate tests for STORY-086 TextTag ACs (title→`<p:ph type="title">`, body→body ph, DOCX Heading1 via tag, subtitle, tag-over-position) — must FAIL on current worktree HEAD ba3bcc93. Also: AC-007 variable-binding bullets fixture + Value::List unit test. Then implementer fix-burst (Issue 1: alt=None emit + validate() Shape-only; Issue 2: TextTag enum in types + TextBlock.tag + Stage 2b tagging in eval + layout.rs FrameContent routing; Issue 3: bullets Value::List in parser/ast.rs). Then RESUME adversary LOCAL cascade (0/3 → 3 strict-CLEAN). Then demo → PR → security+pr-reviewer → merge. After STORY-086 merges, re-run Gate 3 (adversary) + Gate 5 (holdout) on new develop. Only after re-gate passes, advance to Wave 5. BLK-002 OPEN until STORY-086 merges + gates re-pass. |
 
 ---
 
@@ -232,6 +233,7 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-06 | STORY-086-UNCERTAINTY-REMOVED | Before session restart, ran durability + uncertainty-removal on the expanded scope. Uncertainty-scanner found STORY-086/087/088 DIVERGED from real codebase (wrong file paths, nonexistent trait methods, mis-located work — NOT version staleness). Architect resolved D1-D5 (wave4-expanded-scope-uncertainty-resolution.md + ADR-019 v1.1): D1 TextTag→FrameContent routing is LAYOUT-side (layout.rs maps tagged ContentBlock::Text → FrameContent::Title/Subtitle/Body; exporters ALREADY route correctly via slide_serializer.rs, zero exporter change); D2 sweep ~168 AltText sites/15 files + ~18 TextBlock sites + slideforge-pdf/pptx; D3 real SlideType trait id()/lay_out()/render_hint()/validate(); D4 progress_bar geometry in lay_out(), severity_cards keyword gap; D5 FieldValue::List in parser/deck.rs+ast.rs, chumsky token-stream idiom. Stories corrected (086 v1.2, 087 v1.1, 088 v1.1). BCs 4.01/4.02/1.16 prose clarified, no version bump. No external research needed. Pinned versions + ooxmlsdk/DOCX-styles confirmed clean. Factory-artifacts committed + pushed (single atomic commit, TD-VSDD-053). |
 | 2026-06-06 | STORY-086-PASS1 | Adversary LOCAL pass 1 found F-086-P1-CRIT-001 (Stage 2b skipped emitting alt=None media blocks, violating BC-1.16.001 PC-9/10/11 — to avoid E-A11-001 double-fire) + 3 MED (AC-007 bullets path untested; title not in PPTX title placeholder / DOCX Heading1 — TextTag mechanism never built). Architect adjudicated: CRIT-001 = code-conforms (emit alt=None blocks per BC + pre-layout validate() owns ONLY Shape; Chart/Image/Diagram post-layout-only → single-fire; ADR-018 v1.2 amendment). Human chose IMPLEMENT TextTag in STORY-086 (scope 13→21 pts; BC-4.01.001/4.02.001 → v1.2 specify tag routing; no BC amendment). Bullets list-literal DSL syntax gap → STORY-088 (Wave 5, 5 pts). TextTag follow-up absorbed into STORY-086. Streak reset 0/3. |
 | 2026-06-06 | WAVE4-REMEDIATION-SETUP | Wave 4 gate FAILED remediation scoped + approved by human. ADR-019 (Stage 2b post-eval field-to-block threading pass) accepted; AltText::Unspecified state machine bundled. STORY-086 (Wave 4 remediation, 13 pts, P0) created — closes BLK-002/F-G3-CRIT-001/F-G3-HIGH-001/002. STORY-087 (Wave 5, color-coded slide types) created — closes F-G3-HIGH-003. BCs: BC-1.16.001 + BC-1.17.001/002/003 created; BC-5.02.001 v1.6; BC-5.01.001 v1.3; error-taxonomy v2.16; BC-INDEX 116 BCs / 78 P0; STORY-INDEX 87 stories / total 537 pts. |
 | 2026-06-06 | WAVE4-GATE-FAIL | Wave 4 integration gate RAN and FAILED. Gate 1 PASS (3244/3246; 2 perf-timing flakes under local CPU contention — CI green on dedicated runners). Gate 2 SKIP (no DTU). Gate 3 (adversary) FAIL: 1 CRITICAL (F-G3-CRIT-001: default strict build of ANY chart/diagram/image/screenshot/bio deck unconditionally fails E-A11-001 even with correct alt — eval sets slide.blocks=vec![] so thread_media_alt_into_frames never runs; decorative:true won't parse so no remedy) + 3 HIGH (F-G3-HIGH-002: inert pre-layout validators broader than OBS-1 — AltText pre-layout + LabelCheck also inert = 3/5 validators dead; F-G3-HIGH-003: LabelCheck COLOR_CODED_TYPES match no registered slide types → WCAG 1.4.1 dead; F-G3-HIGH-004: misleading for_eval.rs:336-341 comment). Gate 5 (holdout) FAIL: mean 0.56 (<0.85), min_critical 0.30 (<0.60) — exporters produce content-EMPTY output: PPTX empty spTree, PDF blank pages (title only in metadata), DOCX drops slide titles. Root cause: eval emits no slide-body ContentBlocks (for_eval.rs:342). Mutation testing SKIP (0 facade stories). Consistency audit FAIL (4 blockers, 8 warnings — swept in this burst). BLK-002 opened. Wave 4 does NOT advance to Wave 5. Remediation plan: see NEXT ACTIONS Steps 1-5. |

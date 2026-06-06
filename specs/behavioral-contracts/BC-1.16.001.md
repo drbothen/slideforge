@@ -70,6 +70,7 @@ NOT populated by this threading pass.
 
 7. For each `Slide` where `fields["bullets"]` is `FieldValue::Literal(Value::List(items))`:
    a `ContentBlock::Bullets(vec![...])` is appended, with one `BulletItem { text: [InlineNode::Plain(Arc::from(item_str))], level: 0, span: SourceSpan::default() }` per list entry.
+   (Note: in the parser AST — pre-eval — a bullet list literal is `FieldValue::List(Vec<FieldValue>)`, added by STORY-088 per D5. Eval converts this to `FieldValue::Literal(Value::List(...))` in `Slide.fields`. This threading pass therefore always sees the post-eval `FieldValue::Literal(Value::List(...))` form, consistent with PC-2.)
 8. For each `Slide` where `fields["bullets"]` is `FieldValue::Inlines(nodes)`:
    a `ContentBlock::Bullets(...)` is appended with pre-parsed bullet nodes threaded as-is.
 

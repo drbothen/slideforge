@@ -10,9 +10,9 @@ points: 21
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 last_updated: "2026-06-06"
-target_module: slideforge-eval, slideforge-types, slideforge-layout, slideforge-validate, slideforge-pptx, slideforge-docx
+target_module: slideforge-types, slideforge-eval, slideforge-layout, slideforge-validate, slideforge-pptx, slideforge-pdf
 subsystems: [SS-02, SS-03, SS-05, SS-06, SS-07, SS-15]
 behavioral_contracts: [BC-1.16.001, BC-5.02.001, BC-5.01.001]
 # BC-4.01.001 v1.2 and BC-4.02.001 v1.2 traced via AC footnotes (PO-confirmed pattern: exporter BCs are not
@@ -50,6 +50,25 @@ scope_expansion_context: >
 
 # STORY-086: Stage 2b — Post-Eval Field-to-Block Threading Pass + TextTag Routing (AltText::Unspecified)
 
+## Uncertainty Resolution (2026-06-06)
+
+This spec was corrected against the real codebase on `develop` @ 030dec6c. Full resolution:
+`.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` (D1, D2).
+
+Key corrections applied:
+- **TextTag → FrameContent routing belongs in `layout.rs`, NOT in exporters.** The PPTX
+  `slide_serializer.rs` and DOCX `document_body.rs` already route `FrameContent::Title/Body`
+  correctly — zero exporter changes needed. The new work is in `layout.rs` ~line 297.
+- **TextTag enum belongs in `slideforge-types/src/block.rs`** (alongside `TextBlock`), not in
+  `specs.rs`.
+- **TextTag has 4 variants:** `Title`, `Subtitle`, `Body`, `Untagged` (not 3). Default for
+  all non-Stage-2b construction sites is `TextTag::Untagged`.
+- **Sweep blast radius:** ~168 `AltText::Decorative` occurrences across ~15 files; ~18
+  `TextBlock` construction sites across ~8 files. Numbers updated throughout.
+- **No `src/serialize_slide.rs`** exists in `slideforge-pptx` or `slideforge-docx`. Real
+  files: `crates/slideforge-pptx/src/slide_serializer.rs` and
+  `crates/slideforge-docx/src/document_body.rs`.
+
 ## Subsystem Anchor Justifications
 
 - SS-02 (Evaluator, `slideforge-eval`) owns the new `field_to_block.rs` module and the
@@ -69,24 +88,28 @@ scope_expansion_context: >
   The layout crate already owns these files; the changes are targeted bug fixes within
   SS-05 scope.
 
-- SS-15 (Types, `slideforge-types`) receives the new `AltText::Unspecified` variant in
-  `specs.rs` AND the new `TextTag` enum (`TextTag::Title`, `TextTag::Subtitle`,
-  `TextTag::Body`) added to `TextBlock`. SS-15 is the foundational types crate;
-  `AltText` and `TextBlock` are both defined there. A sibling-site sweep (TD-VSDD-060)
-  must cover every `AltText` match site across all crates that import `slideforge-types`.
+- SS-15 (Types, `slideforge-types`) receives two changes: (1) the new `AltText::Unspecified`
+  variant in `specs.rs`, and (2) the new `TextTag` enum (`TextTag::Title`, `TextTag::Subtitle`,
+  `TextTag::Body`, `TextTag::Untagged`) and `TextBlock.tag` field added to `block.rs`
+  (where `TextBlock` is defined). SS-15 is the foundational types crate; both `AltText`
+  (`specs.rs`) and `TextBlock` (`block.rs`) are defined there. A sibling-site sweep
+  (TD-VSDD-060) must cover every `AltText` match site across all crates that import
+  `slideforge-types`, and every `TextBlock` construction site to add `tag: TextTag::Untagged`.
 
-- SS-06 (PPTX Exporter, `slideforge-pptx`) receives the tag-based title-placeholder
-  routing per BC-4.01.001 v1.2 PC-9–12. The existing `serialize_slide` function is
-  updated to route `TextTag::Title` frames to `<p:ph type="title"/>` (or `idx="0"`)
-  and `TextTag::Body` frames to `<p:ph type="body"/>` — NOT by position heuristic.
-  ARCH-INDEX assigns all PPTX serialization to SS-06. The routing change is a targeted
-  bug fix within SS-06 scope.
+- SS-06 (PPTX Exporter, `slideforge-pptx`) is touched ONLY for the `AltText::Unspecified`
+  sibling sweep: test match arms on `AltText` in `slide_serializer.rs` must add an
+  `Unspecified` arm (approximately 8 sites in test code). The PPTX serializer's routing
+  from `FrameContent::Title → <p:ph type="title">` and `FrameContent::Body → <p:ph
+  type="body">` is ALREADY CORRECT in `slide_serializer.rs` and requires no routing
+  change. Per D1 of the uncertainty resolution, exporters need zero routing changes once
+  layout produces the correct `FrameContent` variants from `TextTag`-tagged blocks.
 
-- SS-07 (DOCX Exporter, `slideforge-docx`) receives the tag-based Heading1 routing per
-  BC-4.02.001 v1.2 PC-8–11. The existing `serialize_slide_heading` function is updated
-  to route `TextTag::Title` frames to `<w:pStyle w:val="Heading1"/>` paragraphs and
-  `TextTag::Body` frames to Normal paragraphs. ARCH-INDEX assigns all DOCX serialization
-  to SS-07. The routing change is a targeted bug fix within SS-07 scope.
+- SS-07 (DOCX Exporter, `slideforge-docx`) requires NO changes. `document_body.rs`
+  already finds `FrameContent::Title(t)` from `slide.frames` to emit `Heading1` paragraphs
+  and `Register::Report` content as `Normal` paragraphs. The routing is correct once
+  `layout::run` populates `FrameContent::Title` from `TextTag::Title`-tagged ContentBlocks.
+  There are no `AltText` match sites in `document_body.rs` that require the Unspecified
+  sweep. No file in `slideforge-docx` is modified by this story.
 
 The `slideforge/src/lib.rs` (root crate, SS-01 pipeline driver) receives the Stage 2b
 call insertion and `build_inner` doc comment update. SS-01 owns pipeline wiring per
@@ -103,25 +126,32 @@ placement means the implementation must also deliver the correct placement mecha
 
 **What is added to scope:**
 
-1. **`TextTag` enum in `slideforge-types`:** Three variants — `TextTag::Title`,
-   `TextTag::Subtitle`, `TextTag::Body` — added to `specs.rs`. All existing
-   `TextBlock { inlines, .. }` references gain the `tag: TextTag` field.
-   Derives: `Hash + Eq + Clone + Debug`.
+1. **`TextTag` enum in `slideforge-types`:** Four variants — `TextTag::Title`,
+   `TextTag::Subtitle`, `TextTag::Body`, `TextTag::Untagged` — added to `block.rs`
+   (alongside `TextBlock`, not in `specs.rs`). All existing `TextBlock { inlines, span }`
+   construction sites gain `tag: TextTag::Untagged` as the default; Stage 2b sets
+   semantic tags. Derives: `Hash + Eq + Clone + Debug`.
 
 2. **`TextBlock.tag` field population in Stage 2b (`field_to_block.rs`):** The threading
    pass already specified setting the tag field (BC-1.16.001 PC-1–5 listed
    `TextTag::Title/Subtitle/Body` explicitly). This was already in the BC spec; the scope
    expansion formalizes that the implementer MUST also deliver the exporter-side routing.
 
-3. **PPTX title-placeholder routing (`slideforge-pptx`):** `serialize_slide` routes
-   `TextTag::Title` frames to `<p:ph type="title"/>` (or `idx="0"` for body-first
-   layouts). `TextTag::Body` routes to `<p:ph type="body"/>`. `TextTag::Subtitle` routes
-   to `<p:ph type="subTitle"/>` when available, otherwise body placeholder.
-   This satisfies BC-4.01.001 v1.2 PC-9–12 and invariants 5–6.
+3. **PPTX title-placeholder routing — via layout, NOT exporter change:** The mechanism
+   is that `layout::run` in `crates/slideforge-layout/src/layout.rs` maps
+   `ContentBlock::Text(tag: TextTag::Title)` → `FrameContent::Title(Arc<str>)`, placing
+   the title text into the title region frame (frame index 0 in the frame vector).
+   `slide_serializer.rs` in `slideforge-pptx` already routes `FrameContent::Title →
+   <p:ph type="title">` correctly — it needs ZERO changes. The observable outcome (title
+   text in `<p:ph type="title">`) is achieved by teaching layout to produce the right
+   `FrameContent` variant, not by changing the exporter. This satisfies BC-4.01.001 v1.2
+   PC-9–12 and invariants 5–6.
 
-4. **DOCX Heading1 routing (`slideforge-docx`):** `serialize_slide_heading` routes
-   `TextTag::Title` frames to `<w:pStyle w:val="Heading1"/>` paragraphs. `TextTag::Body`
-   to Normal paragraphs. `TextTag::Subtitle` to `<w:pStyle w:val="Heading2"/>`.
+4. **DOCX Heading1 routing — via layout, NOT exporter change:** Same mechanism.
+   `document_body.rs` in `slideforge-docx` already finds `FrameContent::Title(t)` from
+   `slide.frames` and emits `Heading1` paragraphs — it needs ZERO changes. The observable
+   outcome (title text in `<w:pStyle w:val="Heading1"/>`) is achieved by teaching layout
+   to populate `FrameContent::Title` from `TextTag::Title`-tagged ContentBlocks.
    This satisfies BC-4.02.001 v1.2 PC-8–11 and invariants 5–6.
 
 **What is NOT in scope (absorbed correctly):**
@@ -217,10 +247,13 @@ a `<p:sp>` shape whose `<p:nvSpPr><p:nvPr><p:ph>` child has `type="title"` (or
 PLACEMENT assertion: the text run MUST appear inside the title placeholder shape —
 a `<p:ph type="title"/>` or `<p:ph idx="0">` element. The run MUST NOT appear
 inside a generic body placeholder (`<p:ph type="body"/>`) or a shape with no `<p:ph>`
-at all. The routing is driven by `TextTag::Title` on the `ContentBlock::Text`, NOT by
-the position of the frame in `Slide.blocks`.
+at all. The routing mechanism is: `layout::run` in `crates/slideforge-layout/src/layout.rs`
+maps `ContentBlock::Text(tag: TextTag::Title)` to `FrameContent::Title(text)` in the
+title region frame (index 0). `slide_serializer.rs` in `slideforge-pptx` already routes
+`FrameContent::Title → <p:ph type="title">` with NO changes needed in the exporter.
 (traces to BC-1.16.001 postcondition 1 — title field produces ContentBlock::Text(tag: TextTag::Title);
-secondary trace: BC-4.01.001 v1.2 postcondition 9 — TextTag::Title → `<p:ph type="title"/>` placement)
+secondary trace: BC-4.01.001 v1.2 postcondition 9 — TextTag::Title → `<p:ph type="title"/>` placement
+achieved via layout producing FrameContent::Title, not via exporter change)
 
 ### AC-002 — Content slide body text visible in PDF via show_text operator (LESSON-13 positive content vector)
 A fixture deck with a `slide content:` block containing `title "Heading"` and
@@ -236,11 +269,15 @@ to DOCX. The DOCX `word/document.xml` contains at least one `<w:p>` paragraph wh
 `<w:pPr>` child contains `<w:pStyle w:val="Heading1"/>` AND whose `<w:r><w:t>` run
 contains "Report Title". PLACEMENT assertion: the title text MUST appear in a
 `Heading1`-styled paragraph — a paragraph carrying `<w:pStyle w:val="Heading1"/>`.
-The routing is driven by `TextTag::Title` on the `ContentBlock::Text`; it is NOT
-based on the position of the frame in the frame list (e.g., "first text run" heuristic).
+The routing mechanism is: `layout::run` in `crates/slideforge-layout/src/layout.rs`
+maps `ContentBlock::Text(tag: TextTag::Title)` to `FrameContent::Title(text)` in the
+title region frame. `document_body.rs` in `slideforge-docx` already finds
+`FrameContent::Title(t)` from `slide.frames` to emit `Heading1` paragraphs with NO
+changes needed in the exporter. The routing is tag-driven; the exporter is NOT changed.
 The Heading1 paragraph must be non-empty.
 (traces to BC-1.16.001 postcondition 1 — title ContentBlock has tag: TextTag::Title;
-secondary trace: BC-4.02.001 v1.2 postcondition 8 — TextTag::Title → `<w:pStyle w:val="Heading1"/>` placement)
+secondary trace: BC-4.02.001 v1.2 postcondition 8 — TextTag::Title → `<w:pStyle w:val="Heading1"/>` placement
+achieved via layout producing FrameContent::Title, not via exporter change)
 
 ### AC-019 — Body text routes to PPTX body placeholder, NOT the title placeholder (scope expansion: TextTag routing)
 A fixture deck with a `slide content:` block containing `title "Heading"` and
@@ -290,13 +327,18 @@ The Heading2 paragraph must appear after the Heading1 for the same slide.
 secondary trace: BC-4.02.001 v1.2 postcondition 9 — Subtitle → Heading2 paragraph)
 
 ### AC-023 — TextTag::Title is tag-driven not position-driven (invariant verification)
-A unit test constructs a `Slide` where `Slide.blocks` has `ContentBlock::Text(Body)` at
-index 0 and `ContentBlock::Text(Title)` at index 1 (reversed order, simulating a
-hypothetical future reorder). When the PPTX serializer processes this slide:
-(a) The Title block routes to the title placeholder regardless of its list position.
-(b) The Body block routes to the body placeholder regardless of its list position.
-No position-based routing heuristic fires. This test would fail if the serializer used
-`blocks[0]` as its "title detection" logic.
+A unit test constructs a `Slide` where `Slide.blocks` has `ContentBlock::Text(tag: TextTag::Body)` at
+index 0 and `ContentBlock::Text(tag: TextTag::Title)` at index 1 (reversed order, simulating a
+hypothetical future reorder). When `layout::run` in `crates/slideforge-layout/src/layout.rs`
+processes this slide:
+(a) The `TextTag::Title` block produces `FrameContent::Title(text)` in the title region frame,
+    regardless of its position in `Slide.blocks`.
+(b) The `TextTag::Body` block produces `FrameContent::Body(...)` in the body region frame,
+    regardless of its position in `Slide.blocks`.
+The resulting `LaidOutSlide.frames` has `FrameContent::Title` in the expected frame slot.
+`slide_serializer.rs` then routes `FrameContent::Title → <p:ph type="title">` as it already
+does. No position-based routing heuristic fires anywhere in the pipeline. This test would
+fail if `layout::run` used `blocks[0]` as its title-detection logic.
 (traces to BC-4.01.001 v1.2 postcondition 12 — tag-over-position invariant;
 BC-4.01.001 v1.2 invariant 5 — routing is tag-driven, not position-driven)
 
@@ -344,13 +386,14 @@ runs corresponding to the 3 bullet items. Each run must carry non-empty text con
 matching the declared bullet strings. A Stage 2b unit test must cover the
 `Value::List → ContentBlock::Bullets` path directly (not just the E2E path).
 
-NOTE: Direct `bullets: ["Item A", "Item B", "Item C"]` list-literal field syntax does
-NOT parse in the current DSL parser (`deck.rs` field-value parser does not yet handle
-`[...]` list-literal tokens as a `FieldValue`). This is a parser gap, not a Stage 2b
-gap. The `@var` binding form routes through `Value::List` to `ContentBlock::Bullets`
-correctly via the existing evaluator. The direct list-literal syntax is deferred to
-STORY-088 (Wave 5, "Bullets list-literal field-value DSL syntax"). This AC is valid
-and load-bearing for the `@var`-binding path; it does NOT test the deferred syntax.
+NOTE: The `@var` binding form is confirmed to produce `Value::List` from the existing
+evaluator (per architect D5 resolution). The path `@var items = [...] → eval → Value::List
+→ Stage 2b → ContentBlock::Bullets` is fully exercisable with STORY-086 alone. Direct
+`bullets: ["Item A", "Item B", "Item C"]` list-literal field syntax does NOT parse in the
+current DSL parser (`crates/slideforge-syntax/src/parser/deck.rs` field-value parser does
+not yet handle `[...]` as a `FieldValue::List`). This is a parser gap, not a Stage 2b gap.
+The direct list-literal syntax is deferred to STORY-088 (Wave 5). This AC is valid and
+load-bearing for the `@var`-binding path; it does NOT test the deferred syntax.
 
 (traces to BC-1.16.001 postcondition 7 — `Value::List(items)` produces ContentBlock::Bullets;
 BC-1.16.001 invariant 2 — canonical block order: title before bullets)
@@ -464,11 +507,12 @@ LESSON-13/LESSON-14 positive content vectors)
 | `thread_fields_to_blocks` | `slideforge-eval` | `src/field_to_block.rs` (NEW) | New module + function | Pure |
 | `lib.rs` export | `slideforge-eval` | `src/lib.rs` | Add `pub mod field_to_block; pub use` | Pure |
 | `build_inner` Stage 2b call | `slideforge` | `src/lib.rs` | Insert call + update doc comment + add use | Effectful (pipeline driver) |
-| `TextTag` enum | `slideforge-types` | `src/specs.rs` | Add enum: `Title`, `Subtitle`, `Body` (with `Hash + Eq + Clone + Debug`) | Pure (type addition) |
-| `TextBlock.tag` field | `slideforge-types` | `src/specs.rs` | Add `tag: TextTag` field to `TextBlock` struct | Pure (type change) |
+| `TextTag` enum | `slideforge-types` | `src/block.rs` | Add enum: `Title`, `Subtitle`, `Body`, `Untagged` (with `Hash + Eq + Clone + Debug`) | Pure (type addition) |
+| `TextBlock.tag` field | `slideforge-types` | `src/block.rs` | Add `tag: TextTag` field to `TextBlock` struct; default `TextTag::Untagged` | Pure (type change) |
 | `AltText::Unspecified` | `slideforge-types` | `src/specs.rs` | Add variant to enum | Pure (type change) |
-| PPTX title placeholder routing | `slideforge-pptx` | `src/serialize_slide.rs` (or equivalent) | Route `TextTag::Title` → `<p:ph type="title"/>`, `TextTag::Body` → `<p:ph type="body"/>`, `TextTag::Subtitle` → `<p:ph type="subTitle"/>` | Pure |
-| DOCX Heading1 routing | `slideforge-docx` | `src/serialize_slide.rs` (or equivalent) | Route `TextTag::Title` → `<w:pStyle w:val="Heading1"/>`, `TextTag::Body` → Normal, `TextTag::Subtitle` → `<w:pStyle w:val="Heading2"/>` | Pure |
+| TextTag → FrameContent routing | `slideforge-layout` | `src/layout.rs` | Map `ContentBlock::Text(tag: Title)` → `FrameContent::Title`, `Subtitle` → `FrameContent::Subtitle`, `Body` → `FrameContent::Body`, `Untagged` → `FrameContent::TextRun` in the inline text pass (~line 297). Replaces current flat `TextRun` mapping. | Pure |
+| PPTX — AltText sweep only | `slideforge-pptx` | `src/slide_serializer.rs` | Add `AltText::Unspecified` arm to ~8 test match expressions (no routing change — already correct) | Pure (test-code sweep) |
+| DOCX — no changes | `slideforge-docx` | `src/document_body.rs` | ALREADY routes `FrameContent::Title → Heading1` correctly. Zero changes required. | Pure (no change) |
 | `regions.rs` 5 sites | `slideforge-layout` | `src/regions.rs` | `Decorative` → `Unspecified` on structural placeholders | Pure |
 | `thread_media_alt_into_frames` 3 arms | `slideforge-layout` | `src/layout.rs` | Fallback `Decorative` → `Unspecified`; warn msg update | Pure |
 | Comment at layout.rs:163–166 | `slideforge-layout` | `src/layout.rs` | Update stale STORY-027 reference | Comment only |
@@ -487,11 +531,15 @@ LESSON-13/LESSON-14 positive content vectors)
 - `slideforge-types::specs::AltText` and `slideforge-types::specs::TextTag` MUST remain in
   `slideforge-types` (the leaf crate). They MUST NOT be moved to any crate higher in the
   dependency graph.
-- The PPTX placeholder routing logic (`TextTag → <p:ph type="...">`) MUST reside in
-  `slideforge-pptx`. It MUST NOT be placed in `slideforge-layout` or `slideforge-eval`.
-  ADR-005 boundary: layout produces `FrameContent` + tag data; PPTX serialization consumes it.
-- The DOCX Heading routing logic (`TextTag → <w:pStyle>`) MUST reside in `slideforge-docx`.
-  Same boundary constraint as above.
+- The TextTag → FrameContent routing logic (mapping `ContentBlock::Text(tag)` →
+  `FrameContent::Title/Subtitle/Body/TextRun`) MUST reside in `slideforge-layout/src/layout.rs`.
+  ADR-005 boundary: layout produces `FrameContent` geometric carriers; exporters consume them.
+  The `FrameContent::Title/Subtitle/Body` variants are already correctly routed by both
+  `slide_serializer.rs` (PPTX) and `document_body.rs` (DOCX) with no changes needed.
+- The PPTX serializer (`slideforge-pptx/src/slide_serializer.rs`) and DOCX serializer
+  (`slideforge-docx/src/document_body.rs`) MUST NOT be modified for routing. Their existing
+  `FrameContent` match arms already handle Title/Subtitle/Body correctly. Any modification
+  to their routing logic is a scope violation and an ADR-005 misapplication.
 
 ## Token Budget Estimate
 
@@ -516,8 +564,8 @@ LESSON-13/LESSON-14 positive content vectors)
 | `crates/slideforge-validate/src/alt_text.rs` (validate_post_layout) | ~1,500 |
 | `crates/slideforge-types/src/block.rs` (produces_structure_group) | ~500 |
 | `crates/slideforge/src/lib.rs` (build_inner) | ~1,500 |
-| `crates/slideforge-pptx/src/` (serialize_slide, placeholder routing) | ~3,000 |
-| `crates/slideforge-docx/src/` (serialize_slide_heading, heading routing) | ~2,500 |
+| `crates/slideforge-layout/src/layout.rs` (TextTag routing in inline text pass ~line 297) | ~2,000 |
+| `crates/slideforge-pptx/src/slide_serializer.rs` (AltText sweep, test match arms only) | ~1,500 |
 | Unit test files (new + expanded) | ~4,500 |
 | E2E fixture + integration test file (expanded with TextTag ACs) | ~3,000 |
 | Tool outputs (compiler messages, test results) | ~3,000 |
@@ -550,10 +598,15 @@ and E2E integration suite. Key lessons from Batch C:
   doc comments or renames. The adversary will independently verify that each AC has a test
   that would fail if the implementation regressed.
 - STORY-039 (alt-threading): 11-pass cascade found silent fallbacks, missing AltText arms,
-  and incorrect match semantics. Expect the sibling-site sweep for `AltText::Unspecified`
-  to surface 8-12 match sites across 5+ crates. The implementer must grep
-  `AltText::Decorative` workspace-wide and audit every hit before the sweep is declared
-  complete.
+  and incorrect match semantics. The D2 measurement found ~168 `AltText::Decorative`
+  occurrences across ~15 files; most are in tests and doc-comment examples. Production-code
+  match sites requiring `Unspecified` arms are concentrated in: `layout.rs` (3 sites),
+  `regions.rs` (5 sites), `alt_text.rs` (~4 sites), `block.rs` (2 sites),
+  `slide_serializer.rs` (~8 test sites). The implementer must grep `AltText::Decorative`
+  workspace-wide and audit every hit before the sweep is declared complete. The
+  `TextBlock` construction sweep covers ~18 construction sites across ~8 files —
+  each must gain `tag: TextTag::Untagged` as the default (Stage 2b sites use semantic tags;
+  all other sites use `Untagged`).
 
 ## Architecture Compliance Rules
 
@@ -597,17 +650,20 @@ Violating any of these constitutes a CRIT finding in adversarial review.
    impl (it is a unit variant; derives propagate automatically). The new `TextTag` enum
    and `TextBlock.tag` field must also derive `Hash + Eq + Clone + Debug`.
 
-9. **TextTag routing is tag-driven, not position-driven (BC-4.01.001 v1.2 Invariant 5,
-   BC-4.02.001 v1.2 Invariant 5).** The PPTX serializer and DOCX serializer MUST NOT
-   use `blocks[0]`, list index, or any positional heuristic to determine heading vs. body
-   vs. title content. The `TextTag` field on `TextBlock` is the sole routing signal.
-   Any positional routing logic is a CRIT finding in adversarial review.
+9. **TextTag → FrameContent routing belongs in layout, not exporters (D1 of uncertainty
+   resolution).** `layout::run` in `crates/slideforge-layout/src/layout.rs` MUST be the
+   single translation point: `ContentBlock::Text(tag: Title)` → `FrameContent::Title`,
+   etc. The PPTX `slide_serializer.rs` and DOCX `document_body.rs` already route
+   `FrameContent::Title/Subtitle/Body` correctly with no changes needed. Any attempt to
+   implement `TextTag` → placeholder routing in the exporter crates instead of `layout.rs`
+   is an ADR-005 violation and a CRIT finding in adversarial review.
 
 10. **TextTag type boundary (ADR-005).** The `TextTag` enum is defined in `slideforge-types`
-    (the leaf crate). The routing implementation belongs in the exporter crates
-    (`slideforge-pptx`, `slideforge-docx`). Neither `slideforge-eval` nor `slideforge-layout`
-    should import exporter-specific placeholder type constants. The layout crate passes
-    `TextTag` through the `FrameContent` IR; the exporters read and act on it.
+    `src/block.rs` (the leaf crate, alongside `TextBlock`). The routing implementation
+    belongs in `slideforge-layout/src/layout.rs`. The exporters (`slideforge-pptx/src/
+    slide_serializer.rs`, `slideforge-docx/src/document_body.rs`) consume `FrameContent`
+    variants only — they do NOT inspect `TextTag` directly. The layout crate performs the
+    `TextTag → FrameContent` translation; exporters see only `FrameContent`.
 
 ## Library and Framework Requirements
 
@@ -636,15 +692,23 @@ Files to MODIFY:
 ```
 crates/slideforge-eval/src/lib.rs              [pub mod field_to_block; pub use]
 crates/slideforge-eval/src/for_eval.rs         [update comment lines 336-342]
-crates/slideforge-types/src/specs.rs           [add AltText::Unspecified variant; add TextTag enum {Title, Subtitle, Body}; add tag: TextTag field to TextBlock struct]
-crates/slideforge-types/src/block.rs           [produces_structure_group Unspecified arm; update TextBlock constructions for tag field]
-crates/slideforge-layout/src/regions.rs        [5 sites: Decorative→Unspecified for structural placeholders]
-crates/slideforge-layout/src/layout.rs         [3 sites in thread_media_alt_into_frames: Decorative→Unspecified fallback; update comment 163-166; pass TextTag through FrameContent if not already present]
+crates/slideforge-types/src/specs.rs           [add AltText::Unspecified variant ONLY]
+crates/slideforge-types/src/block.rs           [add TextTag enum {Title, Subtitle, Body, Untagged} with Hash+Eq+Clone+Debug;
+                                                add tag: TextTag field to TextBlock struct (default TextTag::Untagged);
+                                                produces_structure_group Unspecified arm;
+                                                update ALL TextBlock {inlines, span} construction sites to add tag: TextTag::Untagged]
+crates/slideforge-layout/src/regions.rs        [5 sites: AltText::Decorative→AltText::Unspecified for structural placeholders]
+crates/slideforge-layout/src/layout.rs         [TextTag→FrameContent routing: ContentBlock::Text(tag) match → Title/Subtitle/Body/TextRun in inline pass ~line 297;
+                                                3 sites in thread_media_alt_into_frames: Decorative→Unspecified fallback;
+                                                update comment 163-166]
 crates/slideforge-validate/src/alt_text.rs     [match arms: Unspecified→E-A11-001, Decorative→valid; update comment 175-193]
-crates/slideforge-pptx/src/serialize_slide.rs  [or equivalent: route TextTag::Title → <p:ph type="title"/>, TextTag::Body → <p:ph type="body"/>, TextTag::Subtitle → <p:ph type="subTitle"/>]
-crates/slideforge-docx/src/serialize_slide.rs  [or equivalent: route TextTag::Title → <w:pStyle Heading1>, TextTag::Body → Normal, TextTag::Subtitle → <w:pStyle Heading2>]
+crates/slideforge-pptx/src/slide_serializer.rs [AltText::Unspecified arm in ~8 test match expressions ONLY — no routing changes]
 crates/slideforge/src/lib.rs                   [insert Stage 2b call; update build_inner doc comment; add use]
 ```
+NOTE: `slideforge-docx/src/document_body.rs` is NOT modified — it already routes
+`FrameContent::Title → Heading1` correctly. No serialize_slide.rs exists in either
+`slideforge-pptx` or `slideforge-docx` — the real files are `slide_serializer.rs` and
+`document_body.rs` respectively.
 
 Files that RECEIVE new tests or test updates:
 ```
@@ -652,8 +716,7 @@ crates/slideforge-eval/tests/field_to_block_unit.rs    [new: unit tests for Stag
 tests/integration/e2e_build_tests.rs                   [update: add placement assertions for Wave 4 Gate 3 re-pass (AC-001..AC-007, AC-018, AC-019, AC-020, AC-021, AC-022, AC-023)]
 crates/slideforge-validate/src/alt_text.rs             [cfg(test) block: add AC-013, AC-014, AC-015 unit tests]
 crates/slideforge-layout/src/regions.rs                [cfg(test) block: add AC-013 unit test for Unspecified placeholder]
-crates/slideforge-pptx/src/                           [unit tests for TextTag routing: AC-019, AC-021, AC-023]
-crates/slideforge-docx/src/                           [unit tests for TextTag routing: AC-020, AC-022]
+crates/slideforge-layout/src/layout.rs                 [cfg(test) block: add AC-023 tag-over-position invariant test; AC-019/AC-020 TextTag routing unit tests]
 ```
 
 Forbidden: Do NOT create `crates/slideforge-layout/src/field_to_block.rs` or any
@@ -671,9 +734,16 @@ exclusively owned by `slideforge-eval`.
 
 - [ ] **T2 — Add TextTag enum + AltText::Unspecified variant + sibling-site sweeps**
   - [ ] T2.1: Add `Unspecified` variant to `AltText` enum in `slideforge-types/src/specs.rs` with rustdoc.
-  - [ ] T2.2: Add `TextTag` enum to `slideforge-types/src/specs.rs` with variants `Title`, `Subtitle`, `Body` and rustdoc. Derives: `Hash + Eq + Clone + Debug + Default` (default = `Body` to maintain backward compat for any pre-existing TextBlock construction that doesn't specify a tag).
-  - [ ] T2.3: Add `tag: TextTag` field to `TextBlock` struct in `slideforge-types/src/specs.rs`. Run `grep -r "TextBlock {" crates/` — update all construction sites to supply a `tag` value.
-  - [ ] T2.4: Run `grep -r "AltText::Decorative" crates/` — document all N match sites found.
+  - [ ] T2.2: Add `TextTag` enum to `slideforge-types/src/block.rs` (alongside `TextBlock`) with variants
+    `Title`, `Subtitle`, `Body`, `Untagged` and rustdoc. Derives: `Hash + Eq + Clone + Debug`.
+    The default for new TextBlock construction sites is `TextTag::Untagged`. Stage 2b explicitly
+    sets `TextTag::Title/Subtitle/Body`; all other constructors use `Untagged`.
+  - [ ] T2.3: Add `tag: TextTag` field to `TextBlock` struct in `slideforge-types/src/block.rs`.
+    Run `grep -r "TextBlock {" crates/` — expect ~18 construction sites across ~8 files.
+    Update ALL construction sites to supply `tag: TextTag::Untagged`. Only Stage 2b
+    (`field_to_block.rs`) sets semantic tags; every other site uses `Untagged`.
+  - [ ] T2.4: Run `grep -r "AltText::Decorative" crates/` — expect ~168 hits across ~15 files.
+    Document all N production-code match sites (exclude doc-comment hits with `//`).
   - [ ] T2.5: For each AltText match site: determine whether `Unspecified` requires a new arm or shares semantics with `Decorative`. Add `Unspecified` arms everywhere they are semantically distinct.
   - [ ] T2.6: Update `produces_structure_group()` in `block.rs` — `Unspecified` has same non-structure-producing semantics as `Decorative`.
   - [ ] T2.7: Run `cargo build --workspace` — verify no `non_exhaustive_patterns` warnings and no missing-field errors on `TextBlock` construction sites.
@@ -708,17 +778,31 @@ exclusively owned by `slideforge-eval`.
   - [ ] T6.4: Update `for_eval.rs` comment at lines 336–342 to cite Stage 2b (ADR-019).
   - [ ] T6.5: Run unit tests T1.1 — all must now pass.
 
-- [ ] **T6b — Implement TextTag routing in PPTX and DOCX exporters (scope expansion)**
-  - [ ] T6b.1: In `slideforge-pptx/src/serialize_slide.rs` (or equivalent), locate the text frame serialization path. Replace any positional heuristic (e.g., "first frame → title placeholder") with a match on `TextTag`:
-    - `TextTag::Title` → serialize as `<p:ph type="title"/>` shape (or `idx="0"` for body-first layouts)
-    - `TextTag::Body` → serialize as `<p:ph type="body"/>` shape (or `idx="1"`)
-    - `TextTag::Subtitle` → serialize as `<p:ph type="subTitle"/>` when layout has it; fallback to body placeholder
-  - [ ] T6b.2: In `slideforge-docx/src/serialize_slide.rs` (or equivalent), replace any positional heuristic with TextTag routing:
-    - `TextTag::Title` → `<w:pStyle w:val="Heading1"/>`
-    - `TextTag::Body` → Normal paragraph (no explicit style or `<w:pStyle w:val="Normal"/>`)
-    - `TextTag::Subtitle` → `<w:pStyle w:val="Heading2"/>`
+- [ ] **T6b — Implement TextTag → FrameContent routing in layout.rs (scope expansion)**
+  IMPORTANT: The routing is in `slideforge-layout/src/layout.rs`, NOT in the exporters.
+  `slide_serializer.rs` (PPTX) and `document_body.rs` (DOCX) already route FrameContent
+  correctly and receive ZERO changes for routing.
+  - [ ] T6b.1: In `crates/slideforge-layout/src/layout.rs`, locate the inline text pass
+    that currently maps `ContentBlock::Text(text_block)` → `FrameContent::TextRun` at
+    approximately line 297. Replace with a match on `text_block.tag`:
+    - `TextTag::Title` → find the title region frame (frame at index 0 with
+      `FrameContent::Empty` or the pre-allocated title slot from `region_frames_for`),
+      set its content to `FrameContent::Title(Arc::from(extract_plain_text(&text_block.inlines)))`,
+      and set `text_flow` via `compute_text_flow`. Do NOT emit a separate TextRun frame.
+    - `TextTag::Subtitle` → find the subtitle region frame (index 1 for
+      title/closing/section_break slide types) and set `FrameContent::Subtitle`.
+    - `TextTag::Body` → find the body region frame (index 1 for content/agenda/etc.)
+      and set `FrameContent::Body(vec![ContentBlock::Text(text_block.clone())])`.
+    - `TextTag::Untagged` → existing path: push a new `FrameContent::TextRun` frame.
+  - [ ] T6b.2: Confirm `slide_serializer.rs` and `document_body.rs` require ZERO changes.
+    Read both files briefly to confirm existing routing handles Title/Subtitle/Body.
+    Do NOT modify them.
   - [ ] T6b.3: Run T1.4 tests (AC-019, AC-020, AC-021, AC-022, AC-023) — all must now pass.
-  - [ ] T6b.4: Confirm AC-023 (tag-over-position invariant) by constructing a reversed-order `Slide.blocks` test that still routes correctly.
+  - [ ] T6b.4: Confirm AC-023 (tag-over-position invariant): write a unit test in
+    `layout.rs` `#[cfg(test)] mod tests` that constructs `Slide.blocks` with
+    `[ContentBlock::Text(Body), ContentBlock::Text(Title)]` (reversed) and asserts that
+    `layout::run` produces frames with `FrameContent::Title` in the title slot regardless
+    of block list position.
 
 - [ ] **T7 — Wire Stage 2b into build_inner**
   - [ ] T7.1: In `crates/slideforge/src/lib.rs`, add `use slideforge_eval::thread_fields_to_blocks;` to imports.

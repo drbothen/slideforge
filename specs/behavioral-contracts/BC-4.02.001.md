@@ -34,12 +34,17 @@ the document. The `detail` register becomes supplementary sections. PPTX-only co
 structural markers (slide heading) but no synthetic narrative. This is the primary
 mechanism for the "one source, PPTX + DOCX report" value proposition.
 
-Slide headings in the DOCX are derived from `ContentBlock::Text` frames with
-`tag: TextTag::Title` (produced by the Stage 2b threading pass, BC-1.16.001). Title
-text routes to a DOCX `Heading1` paragraph (`<w:pStyle w:val="Heading1">`) via this
-tag — NOT via a positional fallback heuristic such as "first text run on the slide."
-This tag-based routing is the contract the implementer must satisfy; the adversary will
-verify that `Heading1` generation is driven by `TextTag::Title` and not by position.
+Slide headings in the DOCX are derived from `FrameContent::Title(text)` frames in the
+`LaidOutDeck`. The pipeline is: Stage 2b sets `TextBlock.tag = TextTag::Title` on the
+semantic `ContentBlock::Text`; `layout::run` translates `TextTag::Title` →
+`FrameContent::Title(Arc<str>)` in the `LaidOutDeck` frames (populating the frame that
+`document_body.rs` already finds at line 146 to emit a `Heading1` paragraph); the DOCX
+exporter reads `FrameContent::Title(t)` from `LaidOutDeck.slides[*].frames` (already
+implemented in `document_body.rs`; styles.xml already defines `Heading1/2/Normal`) and
+does NOT consult `TextBlock.tag` or `ContentBlock` list position directly. This
+`FrameContent`-driven routing is the contract the implementer must satisfy; the adversary
+will verify that `Heading1` generation is driven by `FrameContent::Title` and not by
+`ContentBlock` position.
 
 ## Preconditions
 
@@ -48,9 +53,11 @@ verify that `Heading1` generation is driven by `TextTag::Title` and not by posit
 2. A Brand struct is available for DOCX styling (fonts, colors, heading styles).
 3. The target output directory exists and is writable.
 4. `Slide.blocks` has been populated by the Stage 2b threading pass
-   (`thread_fields_to_blocks`) per BC-1.16.001. Specifically, title text arrives as
-   `ContentBlock::Text(TextBlock { tag: TextTag::Title, .. })` in the `LaidOutDeck`
-   frame data consumed by the DOCX exporter.
+   (`thread_fields_to_blocks`) per BC-1.16.001, and `layout::run` has translated the
+   `TextTag::Title`-tagged `ContentBlock::Text` blocks into `FrameContent::Title(text)`
+   frames in the `LaidOutDeck`. The DOCX exporter reads `FrameContent::Title(t)` from
+   `LaidOutDeck.slides[*].frames` (via `document_body.rs`) — it does NOT read
+   `ContentBlock.tag` directly from the semantic IR.
 
 ## Postconditions
 
@@ -67,26 +74,41 @@ verify that `Heading1` generation is driven by `TextTag::Title` and not by posit
 
 ### TextTag Routing (v1.2 — ADR-019 Decision 3.1)
 
-8. **Title → Heading1:** A slide frame derived from a `ContentBlock::Text` with
-   `tag: TextTag::Title` is serialized as a DOCX `Heading1` paragraph. The paragraph
-   element carries `<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>` and the title text
-   appears in `<w:r><w:t>...</w:t></w:r>` within that paragraph. This routing is
-   determined by the `TextTag::Title` field; it is NOT based on the position of the
-   frame within `Slide.blocks` or the frame's list index.
+Layer clarification: `TextTag::Title/Subtitle/Body` on `TextBlock` is the **semantic source**
+(lives in the `Deck` / inline IR). The `TextTag→FrameContent` translation is performed by
+`layout::run` (in `crates/slideforge-layout/src/layout.rs`): it maps `TextTag::Title` →
+`FrameContent::Title(Arc<str>)`, `TextTag::Subtitle` → `FrameContent::Subtitle(Arc<str>)`,
+and `TextTag::Body` → `FrameContent::Body(Vec<ContentBlock>)`. The DOCX exporter reads
+`FrameContent::Title(t)` from `LaidOutDeck.slides[*].frames` (already implemented in
+`document_body.rs`; `styles.xml` already defines `Heading1/2/Normal`) and does NOT consult
+`TextBlock.tag` directly. `FrameContent::Title` is the **geometric carrier** that the exporter
+consumes.
 
-9. **Subtitle → Heading2 (when present):** A slide frame derived from
-   `ContentBlock::Text` with `tag: TextTag::Subtitle` is serialized as a DOCX
-   `Heading2` paragraph (`<w:pStyle w:val="Heading2"/>`), appearing immediately after
-   the Heading1 paragraph for its slide.
+8. **Title → Heading1:** A slide frame carrying `FrameContent::Title(text)` (populated by
+   `layout::run` from a `ContentBlock::Text` with `tag: TextTag::Title`) is serialized as a
+   DOCX `Heading1` paragraph. The paragraph element carries
+   `<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>` and the title text appears in
+   `<w:r><w:t>...</w:t></w:r>` within that paragraph. This routing is determined by the
+   `FrameContent::Title` variant on the `LaidOutDeck` frame; the exporter does NOT inspect
+   `TextBlock.tag` and does NOT infer routing from frame list position.
 
-10. **Body → Normal paragraph:** A slide frame derived from `ContentBlock::Text` with
-    `tag: TextTag::Body` is serialized as a standard body paragraph (`Normal` style or
-    no explicit style), NOT as a heading. Body text MUST NOT receive Heading1 styling.
+9. **Subtitle → Heading2 (when present):** A slide frame carrying
+   `FrameContent::Subtitle(text)` (populated by `layout::run` from a `ContentBlock::Text`
+   with `tag: TextTag::Subtitle`) is serialized as a DOCX `Heading2` paragraph
+   (`<w:pStyle w:val="Heading2"/>`), appearing immediately after the Heading1 paragraph
+   for its slide.
 
-11. **Tag-over-position invariant:** The DOCX exporter MUST NOT use the position of a
-    `ContentBlock::Text` within the frame list as the primary routing signal for heading
-    style. Routing is exclusively driven by the `tag` field. A title frame that appears
-    at list index 1 instead of 0 still routes to `Heading1`.
+10. **Body → Normal paragraph:** A slide frame carrying `FrameContent::Body(blocks)`
+    (populated by `layout::run` from a `ContentBlock::Text` with `tag: TextTag::Body`) is
+    serialized as a standard body paragraph (`Normal` style or no explicit style), NOT as a
+    heading. Body text MUST NOT receive Heading1 styling.
+
+11. **FrameContent-over-position invariant:** The DOCX exporter MUST NOT use the position of a
+    frame within `LaidOutSlide.frames` as the primary routing signal for heading style. Routing
+    is exclusively driven by the `FrameContent` variant. A `FrameContent::Title` frame that
+    appears at list index 1 instead of 0 still routes to `Heading1`. The semantic
+    `TextBlock.tag` is consumed exclusively by `layout::run`; by the time the exporter runs,
+    the tag has been translated to the appropriate `FrameContent` variant.
 
 ## Invariants
 
@@ -97,9 +119,11 @@ verify that `Heading1` generation is driven by `TextTag::Title` and not by posit
 3. Two-IR model: the DOCX exporter reads from `LaidOutDeck` only, preserving all
    semantic content. (DI-009)
 4. Same .sf source + same brand → same .docx content (determinism, excluding timestamps).
-5. **TextTag routing is tag-driven, not position-driven.** Heading1 generation is
-   triggered by `TextTag::Title`; the exporter MUST NOT use list-index position as a
-   routing signal. (ADR-019 Decision 3.1)
+5. **Routing is FrameContent-driven, not position-driven.** `layout::run` translates
+   `TextTag::Title` → `FrameContent::Title` and `TextTag::Body` → `FrameContent::Body`;
+   the DOCX exporter routes by `FrameContent` variant and MUST NOT use list-index position
+   as a routing signal. By the time the exporter runs, the semantic `TextBlock.tag` has
+   already been consumed by layout and is not consulted again. (ADR-019 Decision 3.1)
 6. **Heading1 and body paragraphs are distinct.** A `TextTag::Title` frame produces a
    Heading1 paragraph. A `TextTag::Body` frame produces a Normal paragraph. These must
    not be confused or merged.

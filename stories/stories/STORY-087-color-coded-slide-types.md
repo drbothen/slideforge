@@ -9,6 +9,8 @@ points: 13
 priority: P1
 tdd_mode: strict
 status: draft
+spec_version: "1.1"
+last_updated: "2026-06-06"
 target_module: slideforge-plugin-api, slideforge-syntax, slideforge-layout, slideforge-validate
 subsystems: [SS-14, SS-01, SS-05, SS-03]
 behavioral_contracts: [BC-1.17.001, BC-1.17.002, BC-1.17.003]
@@ -25,6 +27,25 @@ estimated_days: 5
 
 # STORY-087: Color-Coded Slide Types — status, progress_bar, weighted_composite
 
+## Uncertainty Resolution (2026-06-06)
+
+This spec was corrected against the real codebase on `develop` @ 030dec6c. Full resolution:
+`.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` (D3, D4).
+
+Key corrections applied:
+- **Real `SlideType` trait methods** (from `crates/slideforge-plugin-api/src/traits/slide_type.rs`):
+  `id()`, `required_fields()`, `optional_fields()`, `layout_name()`, `lay_out()`.
+  There is NO `keyword()`, `region_spec()`, or `validate_fields()` method on the trait.
+- **Custom value-range validation** (progress_bar [0,100]; weighted_composite weight>0/score[0,100])
+  goes in `lay_out()` returning `Err(LayoutError::FieldTypeMismatch)`, NOT in a trait method.
+- **Region registration function** is `region_frames_for(keyword, w, h) -> Option<Vec<Frame>>`
+  in `crates/slideforge-layout/src/regions.rs`, NOT `slide_type_regions()` / `RegionSpec`.
+- **`severity_cards` keyword gap:** present in `COLOR_CODED_TYPES` and `regions.rs` but
+  ABSENT from `SLIDE_TYPE_KEYWORDS` in `keywords.rs`. STORY-087 must add it.
+- **Registration path:** each type is registered via `r.register(Box::new(TypeImpl::new()))`
+  in `crates/slideforge-plugin-api/src/slide_types/registry.rs::Default::default()`.
+- **Template pattern:** `crates/slideforge-plugin-api/src/slide_types/stat_callout.rs`.
+
 ## Subsystem Anchor Justifications
 
 - SS-14 (Plugin API, `slideforge-plugin-api`) owns the `SlideType` trait implementations
@@ -40,10 +61,13 @@ estimated_days: 5
   built at compile time; new keywords are added to the `phf_set!` macro in `keywords.rs`.
 
 - SS-05 (Layout Engine, `slideforge-layout`) owns the region map in `regions.rs`. Each
-  slide type keyword requires an entry in the `slide_type_regions()` match arm that returns
-  its `RegionSpec`. Without this, `layout::run` emits `LayoutError::UnknownSlideType`.
-  The three new types each require a region spec defining their visual layout regions
-  (color indicator area + label area + optional value/component areas).
+  slide type keyword requires a match arm in `region_frames_for(slide_type_keyword, w, h)
+  -> Option<Vec<Frame>>` returning a static frame skeleton. Without this entry,
+  `layout::run` returns `None` from `region_frames_for` and emits
+  `LayoutError::UnknownSlideType`. The three new types each require frame skeletons
+  defining their static geometry (color indicator frame + label/title frame + optional
+  bar background frame). Value-proportional geometry (e.g., progress_bar fill width) is
+  NOT computed here — that goes in `SlideType::lay_out()` which has field access.
 
 - SS-03 (Validation, `slideforge-validate`) owns `LabelCheckValidator`. The finding
   F-G3-HIGH-003 confirmed that `COLOR_CODED_TYPES` in `LabelCheckValidator` already
@@ -87,19 +111,26 @@ for these types end-to-end.
 
 The human authorized `status`, `progress_bar`, and `weighted_composite` as v1.0 in-scope
 types on 2026-06-05 (recorded in ADR-019 `human_gate_resolved` field). This story
-implements all three types using the same plugin-first pattern as the 31 existing types:
-SlideType registration in `slideforge-plugin-api/src/slide_types/`, keyword registration
-in `keywords.rs`, and region map registration in `regions.rs`. This completes the
-`COLOR_CODED_TYPES` guard in LabelCheckValidator, making WCAG co-encoding enforcement
-functional for all three types.
+implements all three types using the same plugin-first pattern as the 31 existing types.
+The implementation template is `crates/slideforge-plugin-api/src/slide_types/stat_callout.rs`.
 
-**Combined story justification:** The three types share the same implementation pattern:
-PHF keyword registration, SlideType plugin trait impl, region map entry, and LabelCheck
-enforcement. Splitting into three stories would require three identical scaffolding steps
-with no meaningful boundary between them. The 13-point estimate reflects the non-trivial
-scope: `weighted_composite` adds per-component label iteration to LabelCheck, the
-`progress_bar` adds value range validation (0–100), and all three require layout region
-specs and exporter rendering paths.
+Each new type requires four registration steps:
+1. `SlideType` trait implementation in `slideforge-plugin-api/src/slide_types/<type>.rs`
+   with methods: `id()`, `required_fields()`, `optional_fields()`, `layout_name()`, `lay_out()`.
+2. Keyword registration: add to `SLIDE_TYPE_KEYWORDS` PHF set in `keywords.rs`.
+3. Region skeleton: add match arm in `region_frames_for()` in `regions.rs`.
+4. Registry wiring: call `r.register(Box::new(<Type>::new()))` in `registry.rs::Default::default()`.
+
+This story ALSO adds `"severity_cards"` to `SLIDE_TYPE_KEYWORDS` — an existing gap where
+`severity_cards` appears in `COLOR_CODED_TYPES` and `regions.rs` but is absent from the PHF
+keyword set (D4 gap). The AC-024 consistency assertion will fail without this fix.
+
+**Combined story justification:** The three types share the same implementation pattern.
+Splitting into three stories would require three identical scaffolding steps. The 13-point
+estimate reflects non-trivial scope: `weighted_composite` adds per-component label iteration
+to LabelCheck, `progress_bar` adds value range validation (0–100) in `lay_out()` via
+`LayoutError::FieldTypeMismatch`, and all three require region frame skeletons and
+`lay_out()` implementations.
 
 ## Narrative
 
@@ -293,14 +324,17 @@ returns `LayoutError::UnknownSlideType`. This is the direct closure of F-G3-HIGH
 (traces to BC-1.17.001 invariant 5, BC-1.17.002 invariant 6, BC-1.17.003 precondition 3 —
 keyword must be registered before the pipeline runs; F-G3-HIGH-003 finding description)
 
-#### AC-024 — All three types present in COLOR_CODED_TYPES and the registration is consistent
+#### AC-024 — All COLOR_CODED_TYPES entries are present in SLIDE_TYPE_KEYWORDS (consistency invariant)
 A unit test asserts that `LabelCheckValidator::COLOR_CODED_TYPES` (the `&[&str]` constant)
-contains `"status"`, `"progress_bar"`, and `"weighted_composite"`, AND that all three
-are present in `SLIDE_TYPE_KEYWORDS`. The two sets are consistent: no type is in
-`COLOR_CODED_TYPES` but missing from `SLIDE_TYPE_KEYWORDS`. This eliminates the dead-guard
-scenario that constituted F-G3-HIGH-003.
+contains `"status"`, `"progress_bar"`, `"weighted_composite"`, AND `"severity_cards"`.
+The unit test also asserts that ALL entries in `COLOR_CODED_TYPES` are present in
+`SLIDE_TYPE_KEYWORDS` — no type in the label-check guard is missing from the parser's
+keyword set. Before this story, `"severity_cards"` is in `COLOR_CODED_TYPES` but NOT in
+`SLIDE_TYPE_KEYWORDS` (D4 gap). After this story, all four types appear in both sets.
+This eliminates the dead-guard scenario that constituted F-G3-HIGH-003.
 (traces to BC-1.17.001 postcondition 5 — type in COLOR_CODED_TYPES AND SLIDE_TYPE_KEYWORDS;
-BC-1.17.002 postcondition 3 same; BC-1.17.003 precondition 3 same)
+BC-1.17.002 postcondition 3 same; BC-1.17.003 precondition 3 same;
+D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 
 ## Architecture Mapping
 
@@ -311,9 +345,10 @@ BC-1.17.002 postcondition 3 same; BC-1.17.003 precondition 3 same)
 | `WeightedCompositeSlideType` | `slideforge-plugin-api` | `src/slide_types/weighted_composite.rs` (NEW) | New SlideType impl | Pure |
 | `slide_types/mod.rs` export | `slideforge-plugin-api` | `src/slide_types/mod.rs` | Add 3 pub mod + re-exports | Pure |
 | PHF keyword registration | `slideforge-syntax` | `src/keywords.rs` | Add 3 keywords to `SLIDE_TYPE_KEYWORDS` phf_set! | Pure |
-| Region map entries | `slideforge-layout` | `src/regions.rs` | Add 3 match arms to `slide_type_regions()` | Pure |
+| Region frame skeletons | `slideforge-layout` | `src/regions.rs` | Add 4 match arms to `region_frames_for()`: `"status"`, `"progress_bar"`, `"weighted_composite"`, and `"severity_cards"` (existing keyword gap, D4) | Pure |
+| `lay_out()` implementations | `slideforge-plugin-api` | `src/slide_types/status.rs`, `progress_bar.rs`, `weighted_composite.rs` | Value-range validation (progress_bar [0,100]; weighted_composite weight>0/score[0,100]) in `lay_out()` → `Err(LayoutError::FieldTypeMismatch)` | Pure |
 | LabelCheck `COLOR_CODED_TYPES` verification | `slideforge-validate` | `src/label_check.rs` | Verify consistency (no code change expected if guard is already present; add assertions) | Pure |
-| Plugin registry registration | `slideforge` or `slideforge-plugin-api` | `src/registry.rs` or equivalent | Register 3 new SlideType impls | Effectful (registry assembly) |
+| Plugin registry registration | `slideforge-plugin-api` | `src/slide_types/registry.rs` | Add `r.register(Box::new(StatusSlideType::new()))` etc. in `Default::default()` | Effectful (registry assembly) |
 
 **Forbidden Dependencies:**
 - `slideforge-plugin-api::slide_types::status/progress_bar/weighted_composite` MUST NOT
@@ -350,16 +385,25 @@ BC-1.17.002 postcondition 3 same; BC-1.17.003 precondition 3 same)
 This story follows STORY-086 (Stage 2b threading) and STORY-003 (31 SlideType implementations).
 
 From STORY-003 and STORY-083/084/085 cascades:
-- The SlideType trait implementation pattern is: create `src/slide_types/<type>.rs`,
-  implement `SlideType` trait methods (`keyword()`, `required_fields()`, `region_spec()`),
-  re-export from `src/slide_types/mod.rs`, and register in the plugin registry. Follow
-  this pattern exactly — deviations trigger CRIT findings in adversarial review.
+- The real `SlideType` trait surface (from `crates/slideforge-plugin-api/src/traits/slide_type.rs`):
+  `id() -> &'static str`, `required_fields() -> &[FieldDef]`, `optional_fields() -> &[FieldDef]`,
+  `layout_name() -> &'static str`, `lay_out(&self, slide, brand, canvas) -> Result<LaidOutSlide, LayoutError>`.
+  There is NO `keyword()`, NO `region_spec()`, NO `validate_fields()` trait method.
+  Template: `crates/slideforge-plugin-api/src/slide_types/stat_callout.rs`.
+- Custom validation (value ranges, non-empty checks) goes in `lay_out()` returning
+  `Err(LayoutError::FieldTypeMismatch)` or `Err(LayoutError::MissingRequiredField)`.
+  The `validate_fields` FREE FUNCTION in `registry.rs` checks required/optional field
+  presence only — not value ranges.
 - PHF keyword registration uses the `phf_set!` macro in `keywords.rs`. Forgetting to
   add the keyword here causes the parser to emit E-PAR-NNN (unknown slide type) even
-  when the SlideType impl exists. This is the root cause of F-G3-HIGH-003.
-- The `regions.rs` region map is a `match` arm block. New entries must be added in
-  alphabetical order (per codebase convention). An entry missing here causes
-  `LayoutError::UnknownSlideType` even after PHF registration.
+  when the SlideType impl exists. This is the root cause of F-G3-HIGH-003. Also add
+  `"severity_cards"` which has the same gap.
+- The region function is `region_frames_for(keyword, w, h) -> Option<Vec<Frame>>` in
+  `regions.rs`. New match arms return `Some(vec![...])` with static `FrameContent::Empty`
+  frames (the geometry skeleton). An arm missing here causes `LayoutError::UnknownSlideType`.
+  Value-proportional geometry (e.g., progress_bar fill width proportional to `value` field)
+  is computed in `lay_out()`, NOT in `region_frames_for()` (which has no field access).
+- Registration: `r.register(Box::new(TypeImpl::new()))` in `registry.rs::Default::default()`.
 - LabelCheck reads `Slide.fields["label"]` directly (Stage 5 pre-layout). It does NOT
   read `Slide.blocks`. Do not add any Stage 2b dependency to LabelCheck — it must work
   even when blocks are empty.
@@ -441,25 +485,33 @@ crates/slideforge-plugin-api/tests/color_coded_slide_types.rs    [integration te
 Files to MODIFY:
 ```
 crates/slideforge-plugin-api/src/slide_types/mod.rs              [add pub mod status; pub mod progress_bar; pub mod weighted_composite; re-exports]
-crates/slideforge-syntax/src/keywords.rs                         [add "status", "progress_bar", "weighted_composite" to phf_set! in SLIDE_TYPE_KEYWORDS]
-crates/slideforge-layout/src/regions.rs                          [add 3 match arms to slide_type_regions() for the new types]
+crates/slideforge-plugin-api/src/slide_types/registry.rs         [add r.register(Box::new(StatusSlideType::new())),
+                                                                   r.register(Box::new(ProgressBarSlideType::new())),
+                                                                   r.register(Box::new(WeightedCompositeSlideType::new()))
+                                                                   in Default::default()]
+crates/slideforge-syntax/src/keywords.rs                         [add "status", "progress_bar", "weighted_composite", AND "severity_cards" (existing gap, D4)
+                                                                   to phf_set! in SLIDE_TYPE_KEYWORDS;
+                                                                   update test_bc_1_09_008_is_slide_type_keyword_all_31_types to include severity_cards]
+crates/slideforge-layout/src/regions.rs                          [add 4 match arms to region_frames_for(): "status", "progress_bar", "weighted_composite",
+                                                                   "severity_cards" (already in registry/regions but absent from PHF — verify/add)]
 crates/slideforge-validate/src/label_check.rs                    [extend validate() to iterate weighted_composite components; add AC-022, AC-024 consistency assertion unit tests]
 ```
 
-Files that may need registration update:
-```
-crates/slideforge/src/registry.rs or equivalent                   [register StatusSlideType, ProgressBarSlideType, WeightedCompositeSlideType with the PluginRegistry]
-```
+**Region frame skeleton guidance for `region_frames_for()` (static geometry only — no field access):**
+- `status`: two `FrameContent::Empty` frames — a color indicator frame (left/top strip EMUs)
+  and a label+title text frame (main body). Follow the two-frame pattern used by `severity_cards`
+  already in `regions.rs`.
+- `progress_bar`: three `FrameContent::Empty` frames — title frame (top), bar background frame
+  (full-width fixed height), and label text frame (below bar). The bar fill frame with
+  value-proportional width is constructed in `ProgressBarSlideType::lay_out()`, NOT here.
+  `region_frames_for` returns the STATIC skeleton; `lay_out()` adds the dynamic bar fill frame.
+- `weighted_composite`: title frame + aggregate label frame at top; N fixed-height component
+  row frames. Since N is not known at region-skeleton time, return a reasonable fixed set
+  (e.g., title + label + 5 component row slots as Empty frames). `lay_out()` constructs the
+  actual per-component geometry from the resolved `components` field.
 
-**Region spec guidance for the three types (layout input):**
-- `status`: two regions — a color indicator region (left or top strip) and a label+title
-  text region (main body). Use the `TwoRegion` or equivalent layout pattern consistent
-  with `severity_cards`.
-- `progress_bar`: three regions — title region (top), progress bar fill region (middle,
-  width proportional to `value`%), and label text region (below or overlapping bar).
-- `weighted_composite`: multi-region layout — title + aggregate label at top; per-component
-  rows (N rows, each with component name, score bar, and component label). The layout
-  engine handles the geometry; the region spec defines the slot structure.
+All frames returned by `region_frames_for` have `FrameContent::Empty`; `lay_out()` overrides
+them with actual content and may add additional frames.
 
 ## Tasks
 
@@ -471,22 +523,51 @@ crates/slideforge/src/registry.rs or equivalent                   [register Stat
   - [ ] T1.5: Verify Red Gate density ≥0.5 before implementation starts.
 
 - [ ] **T2 — Keyword registration (slideforge-syntax)**
-  - [ ] T2.1: Add `"status"`, `"progress_bar"`, `"weighted_composite"` to `SLIDE_TYPE_KEYWORDS` PHF set in `keywords.rs`.
-  - [ ] T2.2: Run `cargo build -p slideforge-syntax` — verify PHF compiles without error (PHF is built at compile time; syntax errors surface here).
-  - [ ] T2.3: Run parser-level AC-001, AC-007, AC-014 tests — verify parse no longer emits E-PAR-NNN.
+  - [ ] T2.1: Add `"status"`, `"progress_bar"`, `"weighted_composite"`, AND `"severity_cards"` (D4 gap fix)
+    to `SLIDE_TYPE_KEYWORDS` phf_set! in `keywords.rs`. Four additions total.
+  - [ ] T2.2: Update the test `test_bc_1_09_008_is_slide_type_keyword_all_31_types` in `keywords.rs`
+    (or its test file) to include `"severity_cards"` in the expected set.
+  - [ ] T2.3: Run `cargo build -p slideforge-syntax` — verify PHF compiles without error.
+  - [ ] T2.4: Run parser-level AC-001, AC-007, AC-014 tests — verify parse no longer emits E-PAR-NNN.
 
-- [ ] **T3 — Region map registration (slideforge-layout)**
-  - [ ] T3.1: Add region specs for `status`, `progress_bar`, `weighted_composite` to the `slide_type_regions()` match arm in `regions.rs`.
-  - [ ] T3.2: Define region specs: status = color indicator + label/title area; progress_bar = title + fill-proportional bar + label; weighted_composite = title + label header + N component rows.
+- [ ] **T3 — Region frame skeleton registration (slideforge-layout)**
+  - [ ] T3.1: Add match arms for `"status"`, `"progress_bar"`, `"weighted_composite"` to `region_frames_for()`
+    in `regions.rs`. Each arm returns `Some(vec![...])` with static `FrameContent::Empty` frames.
+    Also verify `"severity_cards"` is already present in `region_frames_for()` (it should be per D4).
+  - [ ] T3.2: Frame skeletons: status = [color_indicator Empty, label_title Empty];
+    progress_bar = [title Empty, bar_bg Empty, label Empty];
+    weighted_composite = [title Empty, aggregate_label Empty, row0..row4 Empty (5 fixed slots)].
+    Value-proportional geometry goes in `lay_out()`, NOT here.
   - [ ] T3.3: Run `cargo build -p slideforge-layout` — verify no UnknownSlideType for the three types.
   - [ ] T3.4: Run AC-023 — must now pass.
 
 - [ ] **T4 — SlideType implementations (slideforge-plugin-api)**
-  - [ ] T4.1: Create `status.rs` — implement `StatusSlideType`: `keyword()` returns `"status"`, `required_fields()` returns `["title", "label"]`, `validate_fields()` checks title non-empty + label non-empty → E-A11-002. Rustdoc all public items.
-  - [ ] T4.2: Create `progress_bar.rs` — implement `ProgressBarSlideType`: `keyword()` returns `"progress_bar"`, `required_fields()` returns `["title", "label", "value"]`, `validate_fields()` checks label non-empty + value in [0,100] range. Value range error message: "progress_bar value must be between 0 and 100; got N." Rustdoc all public items.
-  - [ ] T4.3: Create `weighted_composite.rs` — implement `WeightedCompositeSlideType`: `keyword()` returns `"weighted_composite"`, `required_fields()` returns `["title", "label", "components"]`. `validate_fields()` checks top-level label + non-empty components list + per-component { name, weight (positive), score (0-100), label (non-empty) }. Accumulate ALL errors before returning. Rustdoc all public items.
+  Real trait methods (from `crates/slideforge-plugin-api/src/traits/slide_type.rs`):
+  `id()`, `required_fields()`, `optional_fields()`, `layout_name()`, `lay_out()`.
+  Template: `crates/slideforge-plugin-api/src/slide_types/stat_callout.rs`.
+  - [ ] T4.1: Create `status.rs` — implement `StatusSlideType`:
+    `id()` returns `"status"`, `required_fields()` returns `[FieldDef { name: "title", .. }, FieldDef { name: "label", .. }]`,
+    `optional_fields()` returns `&[]`, `layout_name()` returns the PPTX layout name string.
+    `lay_out()` extracts title + label from `slide.fields`; returns
+    `Err(LayoutError::MissingRequiredField { field: "label", .. })` when label absent/empty.
+    Value-range validation is not needed for status (label is a string). Rustdoc all public items.
+  - [ ] T4.2: Create `progress_bar.rs` — implement `ProgressBarSlideType`:
+    `id()` returns `"progress_bar"`, `required_fields()` includes "title", "label", "value".
+    `lay_out()` extracts `value` from `slide.fields`; returns
+    `Err(LayoutError::FieldTypeMismatch { field: "value", expected_type: "integer 0–100", actual_type: format!("{n} — out of range"), .. })` when value is outside [0,100].
+    Bar fill width = `bar_bg_width * value / 100` computed here and emitted as a Shape frame.
+    Rustdoc all public items.
+  - [ ] T4.3: Create `weighted_composite.rs` — implement `WeightedCompositeSlideType`:
+    `id()` returns `"weighted_composite"`, `required_fields()` includes "title", "label", "components".
+    `lay_out()` extracts `components` as `Value::List` of `Value::Map` entries; iterates and validates:
+    each component must have `weight > 0` (else `LayoutError::FieldTypeMismatch`) and
+    `score ∈ [0,100]` (else `LayoutError::FieldTypeMismatch`). Accumulate ALL errors via
+    `Vec<LayoutError>` before returning. Rustdoc all public items.
   - [ ] T4.4: Export all three from `slide_types/mod.rs`.
-  - [ ] T4.5: Register all three `SlideType` impls in the plugin registry assembly.
+  - [ ] T4.5: Register all three in `registry.rs::Default::default()`:
+    `r.register(Box::new(StatusSlideType::new()))`,
+    `r.register(Box::new(ProgressBarSlideType::new()))`,
+    `r.register(Box::new(WeightedCompositeSlideType::new()))`.
 
 - [ ] **T5 — LabelCheck extension for weighted_composite component iteration**
   - [ ] T5.1: In `label_check.rs`, extend `validate()` to handle `slide_type == "weighted_composite"`: iterate `Slide.fields["components"]` (a resolved `Value::List` of `Value::Map` entries) and check each component's `"label"` sub-field. Emit E-A11-002 per component with missing label.

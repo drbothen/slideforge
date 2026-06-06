@@ -5,7 +5,7 @@ title: "Stage 2b — post-eval field-to-block threading pass in slideforge-eval"
 status: accepted
 date: 2026-06-05
 accepted_date: 2026-06-05
-version: "1.0"
+version: "1.1"
 subsystems_affected: [SS-02, SS-03, SS-05, SS-15]
 supersedes: null
 superseded_by: null
@@ -41,6 +41,7 @@ Story A (`slide-field-to-block-threading`).
 | Date | Version | Author | Change |
 |------|---------|--------|--------|
 | 2026-06-05 | v1.0 | architect | Initial ADR. Stage 2b seam contract, fields→blocks mapping, AltText::Unspecified state machine, decorative handling, purity classification, comemo compatibility. |
+| 2026-06-06 | v1.1 | architect | Amendment A: D1 (TextTag→FrameContent layout mapping; exporters unchanged) + D5 (FieldValue::List parser model). See wave4-expanded-scope-uncertainty-resolution.md for full resolution. |
 
 ---
 
@@ -495,6 +496,51 @@ actual `ContentBlock::Chart/Image/Diagram` entries and overwrite the
 ADR-018 requires no amendment. The `AltText::Unspecified` addition (Decision 4
 of this ADR) is purely additive to the types crate and consistent with ADR-018's
 Decision 3 logic.
+
+---
+
+## Amendment A (v1.1, 2026-06-06): TextTag + FieldValue::List
+
+This amendment records two design decisions resolved by reading the codebase at
+`develop` @ 030dec6c. Full resolution with per-story corrected file paths is in
+`.factory/specs/wave4-expanded-scope-uncertainty-resolution.md`.
+
+### A1: TextTag → FrameContent Layout Mapping (D1)
+
+Decision 3 Table 3.1 references `TextBlock { inlines, tag: TextTag::Title }` but
+**the `tag` field does not yet exist on `TextBlock`**. This amendment makes it explicit:
+
+- `TextBlock` gains `tag: TextTag` (new enum in `slideforge-types::block`).
+- `TextTag` variants: `Title`, `Subtitle`, `Body`, `Untagged` (default for all
+  existing construction sites outside Stage 2b).
+- Stage 2b (`thread_fields_to_blocks`) sets `TextTag::Title/Subtitle/Body` when
+  constructing TextBlocks from `Slide.fields["title"]`, `["subtitle"]`, `["body"]`.
+- `layout::run`'s inline pass maps tagged `ContentBlock::Text` to the correct
+  region frame slot:
+  - `TextTag::Title` → find Empty frame at index 0 → set `FrameContent::Title(Arc<str>)`
+  - `TextTag::Subtitle` → find Empty frame at index 1 (for types with subtitle) → `FrameContent::Subtitle(Arc<str>)`
+  - `TextTag::Body` → find Empty frame at index 1 (for content/agenda/etc.) → `FrameContent::Body(vec![block])`
+  - `TextTag::Untagged` → existing path: push `FrameContent::TextRun` frame (unchanged)
+
+**PPTX and DOCX exporters need zero changes.** Both already route FrameContent
+variants correctly. The routing that Decision 3 implied was "new exporter work" is
+in fact already implemented in `slide_serializer.rs` and `document_body.rs`.
+
+### A2: FieldValue::List Parser Model (D5)
+
+Decision 3 Table 3.2 references `FieldValue::Literal(Value::List(items))`. This form
+**does not exist in the parser**. `FieldValue` in `deck.rs` has no `List` variant and
+`value_parser()` does not parse list literals. Amendment:
+
+- `FieldValue::List(Vec<FieldValue>)` is added to the AST (`slideforge-syntax::ast`).
+- `value_parser()` in `deck.rs` is extended with a list arm using `Token::LBracket`
+  / `Token::RBracket` / `Token::Comma` (confirmed present in the token set).
+- Eval maps `FieldValue::List` → `Value::List(Vec<Value>)`.
+- The chumsky 0.10 idiom for this is confirmed in `expr.rs` lines 96–103.
+
+**Decision 3 Table 3.2 remains correct in intent.** The `FieldValue::Inlines` path
+for pre-parsed bullet lists is unchanged. The new `FieldValue::List(items)` path is
+what STORY-088 delivers, making `bullets: ["A","B","C"]` parseable at the field level.
 
 ---
 
