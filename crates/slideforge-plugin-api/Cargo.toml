@@ -25,5 +25,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# ordered-float: needed for constructing Value::Float(...) in color-coded slide type tests (STORY-087)
+ordered-float = { workspace = true }
 # tracing-test: load-bearing test capturing tracing::debug! for Footnote deferral log (F-010 / STORY-085)
 tracing-test = "=0.2.5"

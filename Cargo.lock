@@ -2625,6 +2625,7 @@ name = "slideforge-plugin-api"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "ordered-float",
  "slideforge-layout",
  "slideforge-types",
  "strsim",

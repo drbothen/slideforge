@@ -608,4 +608,302 @@ mod tests {
             "low contrast must still produce E-A11-004 even when label is also missing; got {diags:?}"
         );
     }
+
+    // ── STORY-087 Red Gate tests ──────────────────────────────────────────────
+    //
+    // Tests for BC-1.17.001 (AC-006), BC-1.17.003 (AC-018, AC-022), and
+    // F-G3-HIGH-003 (dead-guard regression + AC-024 consistency invariant).
+    //
+    // ALL tests in this block MUST FAIL before implementation begins.
+    // - AC-018 fails because component iteration is NOT yet in validate().
+    // - AC-022 fails for the same reason.
+    // - AC-006 should PASS (status top-level label check already works).
+    // - AC-024 should PASS (keywords.rs already has severity_cards from Step 1 stubs).
+    // - F-G3-HIGH-003 regression test should PASS (severity_cards already works).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: build a `weighted_composite` slide with resolved `components` in fields.
+    fn make_weighted_composite_with_components(
+        top_label: Option<&str>,
+        components: Vec<OrderedMap<Arc<str>, FieldValue>>,
+    ) -> Slide {
+        use slideforge_types::Value;
+        let mut fields: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Vendor A"))),
+        );
+        if let Some(lbl) = top_label {
+            fields.insert(
+                Arc::from("label"),
+                FieldValue::Literal(Value::Str(Arc::from(lbl))),
+            );
+        }
+        // components: List of Maps (each Map uses Value::* not FieldValue::*)
+        let component_list: Vec<Value> = components
+            .into_iter()
+            .map(|comp_fv| {
+                // Convert FieldValue::Literal(Value) map to Value::Map(OrderedMap<Arc<str>, Value>)
+                let mut m: OrderedMap<Arc<str>, Value> = OrderedMap::new();
+                for (k, fv) in comp_fv.iter() {
+                    if let FieldValue::Literal(v) = fv {
+                        m.insert(Arc::clone(k), v.clone());
+                    }
+                }
+                Value::Map(m)
+            })
+            .collect();
+        fields.insert(
+            Arc::from("components"),
+            FieldValue::Literal(Value::List(component_list)),
+        );
+        Slide {
+            slide_type: Arc::from("weighted_composite"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        }
+    }
+
+    /// Helper: build a component as `OrderedMap<Arc<str>, FieldValue>`.
+    fn make_component_fv(name: &str, label: Option<&str>) -> OrderedMap<Arc<str>, FieldValue> {
+        use slideforge_types::Value;
+        let mut m: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+        m.insert(
+            Arc::from("name"),
+            FieldValue::Literal(Value::Str(Arc::from(name))),
+        );
+        if let Some(lbl) = label {
+            m.insert(
+                Arc::from("label"),
+                FieldValue::Literal(Value::Str(Arc::from(lbl))),
+            );
+        }
+        m
+    }
+
+    // ── BC-1.17.001 AC-006 / invariant 3 ─────────────────────────────────────
+
+    /// BC-1.17.001 AC-006 / invariant 3: LabelCheck fires E-A11-002 for `status`
+    /// even when `Slide.blocks = vec![]` (pre-Stage-2b). Verifies LabelCheck reads
+    /// `Slide.fields["label"]`, NOT `Slide.blocks`.
+    ///
+    /// This test exercises the Stage 2b independence guarantee. It should PASS at
+    /// Red Gate because the basic status label check is already implemented.
+    #[test]
+    fn test_BC_1_17_001_ac006_status_label_check_reads_fields_not_blocks() {
+        // No label AND no blocks — Stage 2b has NOT run
+        let slide = Slide {
+            slide_type: Arc::from("status"),
+            fields: OrderedMap::new(), // no label
+            blocks: vec![],             // Stage 2b has NOT populated blocks
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert_eq!(
+            label_errors.len(),
+            1,
+            "BC-1.17.001 AC-006: LabelCheck must fire E-A11-002 for 'status' with \
+             empty fields even when blocks=vec![] (Stage 2b independence); got {diags:?}"
+        );
+    }
+
+    // ── BC-1.17.003 AC-018 / DI-018 accumulation ─────────────────────────────
+
+    /// BC-1.17.003 AC-018 / invariant 5 / DI-018: When top-level label is absent
+    /// AND both components are missing labels, LabelCheckValidator must accumulate
+    /// exactly 3 E-A11-002 diagnostics (1 top-level + 2 component).
+    ///
+    /// FAILS at Red Gate: component iteration is NOT yet implemented in validate().
+    /// Current behavior: emits only 1 E-A11-002 (top-level). Expected: 3.
+    #[test]
+    fn test_BC_1_17_003_ac018_weighted_composite_accumulates_3_label_errors() {
+        let comp1 = make_component_fv("Quality", None);
+        let comp2 = make_component_fv("Price", None);
+        // No top-level label AND no component labels → should produce 3 E-A11-002
+        let slide = make_weighted_composite_with_components(None, vec![comp1, comp2]);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert_eq!(
+            label_errors.len(),
+            3,
+            "BC-1.17.003 AC-018 / DI-018: top-label absent + 2 components missing labels \
+             must produce exactly 3 E-A11-002 diagnostics (1 top + 2 component); \
+             got {} E-A11-002 diagnostics: {diags:?}",
+            label_errors.len()
+        );
+    }
+
+    // ── BC-1.17.003 AC-022 / invariant 8 ─────────────────────────────────────
+
+    /// BC-1.17.003 AC-022 / invariant 8: LabelCheckValidator iterates
+    /// `Slide.fields["components"]` to check per-component labels.
+    /// Top-level label is PRESENT; component 2 is missing its label.
+    /// `Slide.blocks = vec![]` (pre-Stage-2b).
+    ///
+    /// FAILS at Red Gate: component iteration is NOT yet in validate().
+    /// Current behavior: 0 E-A11-002 (top-label present, no component iteration).
+    /// Expected: 1 E-A11-002 for the missing component label.
+    #[test]
+    fn test_BC_1_17_003_ac022_weighted_composite_label_check_component_iteration() {
+        let comp_ok = make_component_fv("Quality", Some("Excellent"));
+        let comp_no_label = make_component_fv("Price", None); // missing label
+        // Top-level label IS present; only one component is missing its label
+        let slide =
+            make_weighted_composite_with_components(Some("Overall: Good"), vec![comp_ok, comp_no_label]);
+        assert!(
+            slide.blocks.is_empty(),
+            "test precondition: blocks must be empty (Stage 2b independence)"
+        );
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert_eq!(
+            label_errors.len(),
+            1,
+            "BC-1.17.003 AC-022: LabelCheck must fire exactly 1 E-A11-002 for the \
+             component 'Price' missing its label (top-level label is present); \
+             got {} diagnostics: {diags:?}",
+            label_errors.len()
+        );
+        // The error message must identify the component
+        assert!(
+            label_errors[0].message.contains("Price")
+                || label_errors[0].message.contains("component")
+                || label_errors[0].message.contains("weighted_composite"),
+            "E-A11-002 message must identify the failing component; got: {}",
+            label_errors[0].message
+        );
+    }
+
+    // ── F-G3-HIGH-003 regression ──────────────────────────────────────────────
+
+    /// F-G3-HIGH-003 regression: `severity_cards` LabelCheck must STILL fire
+    /// E-A11-002 for a missing label after STORY-087 changes. No regression
+    /// from COLOR_CODED_TYPES modifications.
+    #[test]
+    fn test_F_G3_HIGH_003_severity_cards_label_check_regression() {
+        let slide = make_color_coded_slide("severity_cards", None, None, None, false);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert_eq!(
+            label_errors.len(),
+            1,
+            "F-G3-HIGH-003: severity_cards must STILL produce E-A11-002 for missing \
+             label after STORY-087 (no regression); got {diags:?}"
+        );
+    }
+
+    // ── AC-024 / F-G3-HIGH-003 dead-guard consistency invariant ──────────────
+
+    /// BC-1.17.001 postcondition 5 / AC-024: Every entry in `COLOR_CODED_TYPES`
+    /// must appear in `SLIDE_TYPE_KEYWORDS`.
+    ///
+    /// Before STORY-087, `"severity_cards"` was in `COLOR_CODED_TYPES` but ABSENT
+    /// from `SLIDE_TYPE_KEYWORDS` (D4 gap), making LabelCheck a dead letter for it.
+    /// After STORY-087, all 4 entries must be in both sets.
+    ///
+    /// This test directly closes F-G3-HIGH-003.
+    #[test]
+    fn test_BC_1_17_001_ac024_all_color_coded_types_in_slide_type_keywords() {
+        use slideforge_syntax::keywords::is_slide_type_keyword;
+
+        for color_type in COLOR_CODED_TYPES {
+            assert!(
+                is_slide_type_keyword(color_type),
+                "F-G3-HIGH-003 / AC-024: COLOR_CODED_TYPES entry '{}' must be present in \
+                 SLIDE_TYPE_KEYWORDS — otherwise LabelCheck is a dead letter for this type",
+                color_type
+            );
+        }
+        // Explicit membership assertions
+        assert!(COLOR_CODED_TYPES.contains(&"status"), "must contain 'status'");
+        assert!(COLOR_CODED_TYPES.contains(&"progress_bar"), "must contain 'progress_bar'");
+        assert!(COLOR_CODED_TYPES.contains(&"weighted_composite"), "must contain 'weighted_composite'");
+        assert!(
+            COLOR_CODED_TYPES.contains(&"severity_cards"),
+            "must contain 'severity_cards' (D4 gap fix)"
+        );
+    }
+
+    // ── NFR-021/022/023 positive paths ───────────────────────────────────────
+
+    /// NFR-021: `status` with valid label → LabelCheck emits no E-A11-002.
+    #[test]
+    fn test_BC_1_17_001_nfr021_status_with_valid_label_passes_label_check() {
+        let slide = make_color_coded_slide("status", Some("On Track"), None, None, false);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert!(
+            label_errors.is_empty(),
+            "status with valid label must produce no E-A11-002; got {diags:?}"
+        );
+    }
+
+    /// NFR-022: `progress_bar` with valid label → no E-A11-002.
+    #[test]
+    fn test_BC_1_17_002_nfr022_progress_bar_with_valid_label_passes_label_check() {
+        let slide = make_color_coded_slide("progress_bar", Some("75% complete"), None, None, false);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert!(
+            label_errors.is_empty(),
+            "progress_bar with valid label must produce no E-A11-002; got {diags:?}"
+        );
+    }
+
+    /// NFR-023: `weighted_composite` with valid top-level label → no top-level E-A11-002.
+    ///
+    /// (Component label checking is the AC-022 behavior, tested separately above.)
+    #[test]
+    fn test_BC_1_17_003_nfr023_weighted_composite_top_label_present_no_top_error() {
+        let slide = make_color_coded_slide("weighted_composite", Some("Overall: Good"), None, None, false);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+        let label_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_002)
+            .collect();
+        assert!(
+            label_errors.is_empty(),
+            "weighted_composite with valid top-level label must produce no E-A11-002 \
+             from top-level label check; got {diags:?}"
+        );
+    }
 }
