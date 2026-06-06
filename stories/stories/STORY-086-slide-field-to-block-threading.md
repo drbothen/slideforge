@@ -10,7 +10,7 @@ points: 21
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 last_updated: "2026-06-06"
 target_module: slideforge-types, slideforge-eval, slideforge-layout, slideforge-validate, slideforge-pptx, slideforge-pdf
 subsystems: [SS-02, SS-03, SS-05, SS-06, SS-07, SS-15]
@@ -54,6 +54,14 @@ scope_expansion_context: >
 
 This spec was corrected against the real codebase on `develop` @ 030dec6c. Full resolution:
 `.factory/specs/wave4-expanded-scope-uncertainty-resolution.md` (D1, D2).
+
+**Pass-5 adjudication (2026-06-06):** EC-004 mechanism corrected (W-A11-002 is emitted by
+Stage-2b `resolve_alt` at resolution time, NOT by pre-layout validate() — per ADR-018 v1.2
+Decision-3, pre-layout validate() is Shape-only). AC-007 NOTE rescoped: ALL DSL-level
+bullets-list syntax is deferred to STORY-088; the `@var` form does NOT parse today (corrected
+D5 resolution — `deck.rs::value_parser()` has no list-literal arm). AC-007 load-bearing
+coverage is the Stage-2b unit test only; the E2E `.sf` bullets fixture is a placeholder
+pending STORY-088.
 
 Key corrections applied:
 - **TextTag → FrameContent routing belongs in `layout.rs`, NOT in exporters.** The PPTX
@@ -391,14 +399,22 @@ runs corresponding to the 3 bullet items. Each run must carry non-empty text con
 matching the declared bullet strings. A Stage 2b unit test must cover the
 `Value::List → ContentBlock::Bullets` path directly (not just the E2E path).
 
-NOTE: The `@var` binding form is confirmed to produce `Value::List` from the existing
-evaluator (per architect D5 resolution). The path `@var items = [...] → eval → Value::List
-→ Stage 2b → ContentBlock::Bullets` is fully exercisable with STORY-086 alone. Direct
-`bullets: ["Item A", "Item B", "Item C"]` list-literal field syntax does NOT parse in the
-current DSL parser (`crates/slideforge-syntax/src/parser/deck.rs` field-value parser does
-not yet handle `[...]` as a `FieldValue::List`). This is a parser gap, not a Stage 2b gap.
-The direct list-literal syntax is deferred to STORY-088 (Wave 5). This AC is valid and
-load-bearing for the `@var`-binding path; it does NOT test the deferred syntax.
+NOTE (corrected per pass-5 adjudication + corrected D5): ALL DSL-level bullets-list syntax is
+deferred to STORY-088 (Wave 5). Both the direct `bullets: ["Item A", "Item B", "Item C"]`
+field list-literal AND the `@var items = [...] / bullets: items` variable-binding form fail
+to parse today — `crates/slideforge-syntax/src/parser/deck.rs::value_parser()` has no
+list-literal arm, so neither `bullets: [...]` literals nor `@var`/vars-block list assignments
+produce a parseable `FieldValue::List`. The D5 claim that "the @var form is confirmed to
+produce Value::List from the existing evaluator" was incorrect; both forms hit the same
+parser gap. The load-bearing test for this AC is therefore the Stage-2b UNIT test in
+`crates/slideforge-eval/tests/field_to_block_unit.rs` (test name:
+`test_..._ac007_value_list_produces_content_block_bullets`), which exercises the
+`Value::List → ContentBlock::Bullets` path programmatically by constructing a
+`Value::List` directly — bypassing the DSL parser. The E2E `.sf` bullets fixture
+referencing `bullets: items` (or `bullets: [...]`) is a PLACEHOLDER and will remain
+`#[ignore]` until STORY-088 delivers the parser support. This AC does NOT claim
+end-to-end DSL bullets coverage in STORY-086; that coverage is the responsibility of
+STORY-088 AC-007.
 
 (traces to BC-1.16.001 postcondition 7 — `Value::List(items)` produces ContentBlock::Bullets;
 BC-1.16.001 invariant 2 — canonical block order: title before bullets)
@@ -856,7 +872,7 @@ exclusively owned by `slideforge-eval`.
 | EC-001 | BC-1.16.001 EC-001 | `fields["title"] = Value::Str("")` | No ContentBlock::Text produced; empty string silently skipped |
 | EC-002 | BC-1.16.001 EC-002 | `fields["title"] = Value::Str("  ")` whitespace-only | No ContentBlock::Text produced; whitespace-only treated as empty after trim |
 | EC-003 | BC-1.16.001 EC-003 | `fields["alt"] = Value::Str("")` on chart slide | alt = None; layout produces AltText::Unspecified; E-A11-001 in strict mode |
-| EC-004 | BC-1.16.001 EC-004 | Both `decorative: true` AND `fields["alt"] = Str("desc")` on chart | `alt = Some(AltText::Decorative)`, `decorative = true`; pre-layout emits W-A11-002; frame carries Decorative |
+| EC-004 | BC-1.16.001 EC-004 | Both `decorative: true` AND `fields["alt"] = Str("desc")` on chart | `alt = Some(AltText::Decorative)`, `decorative = true`; decorative wins, alt string is discarded; W-A11-002 is emitted by Stage-2b `resolve_alt` via `tracing::warn!(code="W-A11-002")` at resolution time (NOT by the pre-layout validator — ADR-018 v1.2 Decision-3 restricts pre-layout validate() to Shape-only checks); frame carries Decorative |
 | EC-005 | BC-1.16.001 EC-005 | Chart slide with no `fields["chart_type"]` | `tracing::warn!` emitted; no ContentBlock::Chart produced; layout region carries Unspecified placeholder; E-A11-001 in strict mode |
 | EC-006 | BC-1.16.001 EC-006 | Image slide with no `fields["src"]` | `tracing::warn!` emitted; no ContentBlock::Image produced; same Unspecified outcome |
 | EC-007 | BC-1.16.001 EC-007 | Slide with title + body + bullets all set | Three blocks produced: [Text(Title), Text(Body), Bullets(...)] in canonical order |
