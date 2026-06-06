@@ -2824,9 +2824,7 @@ mod tests {
         let title_field = FieldNode {
             name: Spanned::new("title".to_string(), dummy_span()),
             value: Spanned::new(
-                FieldValue::Template(vec![TemplateChunk::Literal(
-                    "My Presentation".to_string(),
-                )]),
+                FieldValue::Template(vec![TemplateChunk::Literal("My Presentation".to_string())]),
                 dummy_span(),
             ),
         };
@@ -2895,12 +2893,12 @@ mod tests {
         let mut sink = DiagnosticSink::new();
 
         let deck = eval_deck_with_variant(&deck_node, &config, None, &mut sink);
-        let deck = deck.expect("eval_deck_with_variant must return Some for valid deck without title slide");
+        let deck = deck
+            .expect("eval_deck_with_variant must return Some for valid deck without title slide");
         assert!(sink.is_empty(), "no errors expected");
 
         assert_eq!(
-            deck.metadata.title,
-            None,
+            deck.metadata.title, None,
             "Gap-1 None-path: metadata.title must be None when no title-type slide exists \
              (STORY-050 Gap-1 adjudication: no fabricated fallback, PDF/UA-1 enforcement downstream)"
         );
@@ -2919,7 +2917,7 @@ mod tests {
             SlideNode {
                 kind: Spanned::new("title".to_string(), dummy_span()),
                 tags: vec![],
-                fields: vec![],   // no title field
+                fields: vec![], // no title field
                 inline_items: vec![],
             },
             dummy_span(),
@@ -2937,8 +2935,7 @@ mod tests {
         assert!(sink.is_empty(), "no errors expected");
 
         assert_eq!(
-            deck.metadata.title,
-            None,
+            deck.metadata.title, None,
             "Gap-1 None-path variant 2: metadata.title must be None when the title-type \
              slide exists but has no 'title' field (title_str() returns None)"
         );

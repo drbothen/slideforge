@@ -401,7 +401,8 @@ fn build_inner(
     // AC-007: "parse" is one of the 6 canonical pipeline stage spans.
     // `stage` field is the canonical span name for structured-field assertions.
     let deck_node = {
-        let _span = tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
+        let _span =
+            tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
         tracing::info!("pipeline stage: parse");
         let mut source_map = SourceMap::new();
         let file_id = source_map.add_file(
@@ -461,7 +462,8 @@ fn build_inner(
     let validator_opts = ValidatorOptions::default();
     let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
     {
-        let _span = tracing::info_span!("validate", stage = "validate", strict = options.strict).entered();
+        let _span =
+            tracing::info_span!("validate", stage = "validate", strict = options.strict).entered();
         tracing::info!("pipeline stage: validate");
         for validator in registry.iter_validators() {
             let validator_id = validator.id().to_owned();
