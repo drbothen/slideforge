@@ -200,6 +200,8 @@ NOT populated by this threading pass.
 - BC-5.01.001 — depends on (this pass establishes `ContentBlock.alt` values that AltTextValidator ultimately checks)
 - BC-5.02.001 — depends on (the AltTextValidator's post-layout pass relies on `Slide.blocks` being populated by this threading pass)
 - BC-3.04.001 — related to (shape blocks are explicitly NOT in this pass's scope; shape threading remains in layout::run)
+- BC-4.01.001 — downstream dependency (PPTX exporter's TextTag title-placeholder routing contract requires `TextTag::Title` from this threading pass as upstream input; BC-4.01.001 v1.2 Postconditions 9–12)
+- BC-4.02.001 — downstream dependency (DOCX exporter's TextTag→Heading1 routing contract requires `TextTag::Title` from this threading pass as upstream input; BC-4.02.001 v1.2 Postconditions 8–11)
 
 ## Architecture Anchors
 

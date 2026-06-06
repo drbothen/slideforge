@@ -5,8 +5,8 @@ title: Post-layout validation pass for ContentBlock-level accessibility checks
 status: accepted
 date: 2026-06-05
 accepted_date: 2026-06-05
-version: "1.1"
-amended: 2026-06-05
+version: "1.2"
+amended: 2026-06-06
 subsystems_affected: [SS-03, SS-05, SS-14]
 supersedes: null
 superseded_by: null
@@ -37,6 +37,7 @@ Implementation may proceed without further authorization.
 |------|---------|--------|--------|
 | 2026-06-05 | v1.0 | architect | Initial ADR. Decisions 1–5 (post-layout validation pass, additive-defaulted `validate_post_layout`, AltTextValidator migration, validator classification rule, strict-mode aggregation contract). |
 | 2026-06-05 | v1.1 | architect | Added Decision 5a: error-precedence rule — when `layout::run` returns `Err` and pre-layout Error-severity diagnostics exist, `build()` returns `BuildError::ValidationFailed` (not `BuildError::Layout`). Root-cause reporting: validation errors take precedence over downstream layout symptoms. This rule was implemented during STORY-050 fix burst; codified here to prevent regression in future refactors and to make EC-001 traceability explicit. Implementation note wording corrected to match as-built STORY-050 worktree code: the pre-layout early-return gate was removed (OBS-5 fix); the single combined gate fires after Stage 6b, not before layout. |
+| 2026-06-06 | v1.2 | architect | Added Decision 3 amendment (STORY-086, 2026-06-06): AltTextValidator.validate() classification clarified as pre-layout for ContentBlock::Shape only; no-op for Chart/Image/Diagram. See amendment note in Decision 3 below. |
 
 ## Context
 
@@ -204,6 +205,18 @@ the semantic `Deck.slides[*].blocks` are always `vec![]` after eval (for_eval.rs
 and will remain so until a future story populates them from eval-time DSL fields.
 Any pre-layout alt-text check on `Deck.slides[*].blocks` would be dead code and
 misleadingly silent.
+
+> **Decision 3 amendment (STORY-086, 2026-06-06):** With Stage 2b (ADR-019)
+> populating `Slide.blocks`, `AltTextValidator.validate()` is no longer
+> unconditionally a no-op. Its classification is: **pre-layout for
+> `ContentBlock::Shape` only; no-op for Chart/Image/Diagram.** Shapes have no
+> `FrameContent` counterpart that the post-layout pass inspects; they are validated
+> pre-layout exclusively. Chart/Image/Diagram alt text is post-layout-only per
+> Decision 4 (validator classification table). Implementing pre-layout validation
+> of Chart/Image/Diagram would double-fire E-A11-001 (once in `validate()` on
+> `ContentBlock.alt == None`, once in `validate_post_layout()` on
+> `AltText::Unspecified`). The authoritative gate for media elements is
+> `validate_post_layout`.
 
 ### Decision 4: Validator classification rule
 

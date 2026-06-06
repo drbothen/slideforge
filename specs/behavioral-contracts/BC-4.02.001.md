@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-016
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["1.2: Added TextTag::Title → Heading1 routing contract; replaced fragile positional fallback with tag-based routing (STORY-086 — ADR-019 Decision 3.1)"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -34,12 +34,23 @@ the document. The `detail` register becomes supplementary sections. PPTX-only co
 structural markers (slide heading) but no synthetic narrative. This is the primary
 mechanism for the "one source, PPTX + DOCX report" value proposition.
 
+Slide headings in the DOCX are derived from `ContentBlock::Text` frames with
+`tag: TextTag::Title` (produced by the Stage 2b threading pass, BC-1.16.001). Title
+text routes to a DOCX `Heading1` paragraph (`<w:pStyle w:val="Heading1">`) via this
+tag — NOT via a positional fallback heuristic such as "first text run on the slide."
+This tag-based routing is the contract the implementer must satisfy; the adversary will
+verify that `Heading1` generation is driven by `TextTag::Title` and not by position.
+
 ## Preconditions
 
 1. A valid `LaidOutDeck` IR exists with report/detail register content resolved
    (BC-1.14.002, BC-1.14.003).
 2. A Brand struct is available for DOCX styling (fonts, colors, heading styles).
 3. The target output directory exists and is writable.
+4. `Slide.blocks` has been populated by the Stage 2b threading pass
+   (`thread_fields_to_blocks`) per BC-1.16.001. Specifically, title text arrives as
+   `ContentBlock::Text(TextBlock { tag: TextTag::Title, .. })` in the `LaidOutDeck`
+   frame data consumed by the DOCX exporter.
 
 ## Postconditions
 
@@ -54,6 +65,29 @@ mechanism for the "one source, PPTX + DOCX report" value proposition.
 7. Inline formatting (bold, italic, code, hyperlinks, etc.) from BC-3.05.001 is
    preserved in DOCX paragraph runs using the correct Word XML run properties.
 
+### TextTag Routing (v1.2 — ADR-019 Decision 3.1)
+
+8. **Title → Heading1:** A slide frame derived from a `ContentBlock::Text` with
+   `tag: TextTag::Title` is serialized as a DOCX `Heading1` paragraph. The paragraph
+   element carries `<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>` and the title text
+   appears in `<w:r><w:t>...</w:t></w:r>` within that paragraph. This routing is
+   determined by the `TextTag::Title` field; it is NOT based on the position of the
+   frame within `Slide.blocks` or the frame's list index.
+
+9. **Subtitle → Heading2 (when present):** A slide frame derived from
+   `ContentBlock::Text` with `tag: TextTag::Subtitle` is serialized as a DOCX
+   `Heading2` paragraph (`<w:pStyle w:val="Heading2"/>`), appearing immediately after
+   the Heading1 paragraph for its slide.
+
+10. **Body → Normal paragraph:** A slide frame derived from `ContentBlock::Text` with
+    `tag: TextTag::Body` is serialized as a standard body paragraph (`Normal` style or
+    no explicit style), NOT as a heading. Body text MUST NOT receive Heading1 styling.
+
+11. **Tag-over-position invariant:** The DOCX exporter MUST NOT use the position of a
+    `ContentBlock::Text` within the frame list as the primary routing signal for heading
+    style. Routing is exclusively driven by the `tag` field. A title frame that appears
+    at list index 1 instead of 0 still routes to `Heading1`.
+
 ## Invariants
 
 1. The `report` register is the primary DOCX body content; `notes` register content
@@ -63,46 +97,60 @@ mechanism for the "one source, PPTX + DOCX report" value proposition.
 3. Two-IR model: the DOCX exporter reads from `LaidOutDeck` only, preserving all
    semantic content. (DI-009)
 4. Same .sf source + same brand → same .docx content (determinism, excluding timestamps).
+5. **TextTag routing is tag-driven, not position-driven.** Heading1 generation is
+   triggered by `TextTag::Title`; the exporter MUST NOT use list-index position as a
+   routing signal. (ADR-019 Decision 3.1)
+6. **Heading1 and body paragraphs are distinct.** A `TextTag::Title` frame produces a
+   Heading1 paragraph. A `TextTag::Body` frame produces a Normal paragraph. These must
+   not be confused or merged.
 
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | Slide with only `notes` content (no report/detail) | DOCX: slide heading + empty body paragraph; no notes text in body |
+| EC-001 | Slide with only `notes` content (no report/detail) | DOCX: Heading1 paragraph with slide title (if title tagged frame present) + empty body paragraph; no notes text in body |
 | EC-002 | Slide with `report` multi-paragraph prose | Multiple `<w:p>` elements; paragraph breaks preserved |
 | EC-003 | report content contains a hyperlink | DOCX hyperlink with correct `w:hyperlink r:id` relationship |
-| EC-004 | Deck with 50 slides | .docx has 50 heading sections; all content present; file opens without error |
+| EC-004 | Deck with 50 slides | .docx has 50 Heading1 sections; all content present; file opens without error |
 | EC-005 | report content contains bold inside italic | Correct nested `<w:rPr>` with `<w:b>` and `<w:i>` run properties |
+| EC-006 | `ContentBlock::Text` with `tag: TextTag::Title` appears second in frame list | Title text still serialized as Heading1; position within frame list is not consulted |
+| EC-007 | Slide has both `TextTag::Title` and `TextTag::Body` frames | Heading1 paragraph with title text, followed by Normal paragraph with body text; they are separate `<w:p>` elements |
+| EC-008 | Slide has no `TextTag::Title` frame (no title field in .sf source) | No Heading1 paragraph for that slide; report/detail content begins directly; no crash |
 
 ## Canonical Test Vectors
 
 | Input | Expected Output | Category |
 |-------|----------------|----------|
-| 2-slide deck with `report "Analysis follows."` on each slide | .docx has 2 headings + 2 body paragraphs with "Analysis follows." | happy-path |
-| Slide with `notes "Presenter only"` and no report | .docx heading present; body paragraph empty; "Presenter only" not in .docx | edge-case |
+| Slide `title "Report Title"` + `report "Analysis."` | DOCX `word/document.xml` has `<w:pStyle w:val="Heading1"/>` paragraph whose `<w:t>` run contains "Report Title"; followed by Normal paragraph containing "Analysis." | happy-path (TextTag→Heading1 routing) |
+| 2-slide deck with `report "Analysis follows."` on each slide | .docx has 2 Heading1 sections + 2 Normal body paragraphs with "Analysis follows." | happy-path |
+| Slide with `notes "Presenter only"` and no report | .docx heading present (if title frame exists); body paragraph empty; "Presenter only" not in .docx | edge-case |
 | Slide with `report "**Bold** and *italic*"` | .docx: paragraph with run `<w:b/>` and run `<w:i/>` | happy-path |
 | Same deck built twice | Byte-identical .docx (excluding ZIP timestamps) | edge-case (determinism) |
+| Slide with `tag: TextTag::Body` frame only (no title) | No `<w:pStyle w:val="Heading1"/>` element for that slide; body text in Normal paragraph | edge-case (body-not-heading) |
 
 ## Verification Properties
 
 | VP-NNN | Property | Proof Method |
 |--------|----------|-------------|
 | VP-TBD | notes register content absent from .docx body text | integration test: unzip .docx, grep body XML for notes content |
-| VP-TBD | report register content present in .docx body, one section per slide | integration test: parse .docx body XML, count headings |
+| VP-TBD | report register content present in .docx body, one Heading1 section per slide | integration test: parse .docx body XML, count `<w:pStyle w:val="Heading1"/>` elements |
 | VP-TBD | .docx passes OOXML schema validation | integration test: validate with docx validator library |
+| VP-TBD | Title-tagged ContentBlock serialized to `<w:pStyle w:val="Heading1"/>` paragraph (not Normal style) | integration test: parse document.xml, assert pStyle val (LESSON-13 positive content vector) |
+| VP-TBD | Body-tagged ContentBlock does NOT receive Heading1 style | integration test: parse document.xml, assert no Heading1 on body paragraphs |
 
 ## Traceability
 
 | Field | Value |
 |-------|-------|
 | L2 Capability | CAP-016 ("DOCX Export") per capabilities.md §CAP-016 |
-| Capability Anchor Justification | CAP-016 ("DOCX Export") per capabilities.md §CAP-016 — "consuming the report and detail writing registers as narrative body content" is verbatim from CAP-016 |
+| Capability Anchor Justification | CAP-016 ("DOCX Export") per capabilities.md §CAP-016 — "consuming the report and detail writing registers as narrative body content" is verbatim from CAP-016; TextTag-based Heading1 routing is the mechanism for producing structured document headings from slide titles |
 | L2 Domain Invariants | DI-009 (Two-IR model integrity), DI-012 (single source → all formats consistent; register routing) |
 | Architecture Module | slideforge-docx crate (filled by architect) |
-| Stories | (filled by story-writer) |
+| Stories | STORY-086 (Stage 2b threading — provides TextTag-tagged ContentBlocks that feed this heading routing); exporter story TBD |
 
 ## Related BCs
 
+- BC-1.16.001 — depends on (Stage 2b threading produces TextTag::Title/Body/Subtitle on ContentBlocks; this BC's Heading1 routing requires those tagged frames as upstream input)
 - BC-1.14.002 — depends on (report register routing enforced upstream)
 - BC-1.14.003 — depends on (detail register routing enforced upstream)
 - BC-4.02.002 — composes with (auto-generated document sections are part of DOCX structure)

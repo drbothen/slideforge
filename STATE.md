@@ -15,8 +15,8 @@ prd_vps: 15
 prd_supplements: 4
 spikes_resolved: 7
 spikes_total: 7
-total_stories: 87
-total_points: 511
+total_stories: 88
+total_points: 542
 total_waves: 6
 total_epics: 21
 dtu_required: false
@@ -32,8 +32,8 @@ wave_4_merged: 21
 story_050_status: DONE
 wave_4_started: 2026-05-31
 wave_4_total_stories: 21
-wave_4_total_points: 129
-wave_5_total_points: 114
+wave_4_total_points: 150
+wave_5_total_points: 132
 develop_sha: "030dec6c"
 develop_pr_count: 61
 error_taxonomy_version: "v2.16"
@@ -55,15 +55,15 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. Remediation scoped — STORY-086 ready to deliver.**
+Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 1 remediated; 0/3 streak).**
 
 - `develop` = `030dec6c` (61 merged PRs; origin/develop confirmed). **Open PRs: 0.**
-- Active worktrees: none.
+- Active worktrees: `.worktrees/STORY-086` (feature/STORY-086, HEAD ba3bcc93, pushed).
 - Workspace: ~3244/3246 pass (Gate 1: 2 perf-timing flakes under local CPU contention — CI green on dedicated runners). 0 CI failures on CI.
 - Wave 4 gate ran 2026-06-06. Gate 1 PASS. Gate 2 SKIP (no DTU). Gate 3 FAIL (adversary: 1 CRITICAL + 3 HIGH). Gate 5 FAIL (holdout: mean 0.56 / min_critical 0.30 — both below threshold). Consistency audit FAIL (4 blockers, 8 warnings — swept).
 
 **Wave 4 gate FAILED.** Root cause: eval emits no slide-body ContentBlocks (for_eval.rs:342) — content-EMPTY output across all exporters + a11y strict-gate unsatisfiable even with correct alt.
-**REMEDIATION SCOPED (2026-06-06).** ADR-019 accepted. STORY-086 (Wave 4 remediation, 13 pts, P0) created. BLK-002 remains OPEN until STORY-086 merges + Wave 4 gates re-pass. Wave 4 does NOT advance to Wave 5 until re-gate passes.
+**REMEDIATION IN PROGRESS (2026-06-06).** ADR-019 accepted. STORY-086 (Wave 4 remediation, now 21 pts, P0) scope-expanded to include TextTag. Adversary pass 1 REMEDIATED (spec burst committed). BLK-002 remains OPEN until STORY-086 merges + Wave 4 gates re-pass. Wave 4 does NOT advance to Wave 5 until re-gate passes. STORY-088 (bullets list-literal DSL, Wave 5, 5 pts) created.
 
 ---
 
@@ -75,9 +75,9 @@ Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. Remediation scoped — S
 
 ADR-019 (Stage 2b post-eval field-to-block threading pass) accepted. STORY-086 (slide-field-to-block threading, Wave 4 remediation, 13 pts, P0) created — closes BLK-002/F-G3-CRIT-001/F-G3-HIGH-001/002. STORY-087 (color-coded slide types, Wave 5, closes F-G3-HIGH-003) created. BCs BC-1.16.001 + BC-1.17.001/002/003 created; BC-5.02.001 v1.6; BC-5.01.001 v1.3; error-taxonomy v2.16; BC-INDEX 116 BCs.
 
-### Step 2 — NEXT: Deliver STORY-086
+### Step 2 — IN PROGRESS: Deliver STORY-086
 
-Deliver STORY-086 via full per-story-delivery pipeline: stubs → failing tests → TDD green → LOCAL adversary 3-CLEAN → demo-recorder per-AC → push → pr-manager 9-step PR cycle → security-reviewer + pr-reviewer → squash-merge → state-manager post-merge burst.
+STORY-086 adversary LOCAL pass 1 REMEDIATED. Streak 0/3. Scope expanded 13→21 pts (TextTag AC-019..023). NEXT SUB-STEP: test-writer adds Red Gate tests for the new TextTag ACs (title→`<p:ph type="title">`, body→body ph, DOCX Heading1 via tag, subtitle, tag-over-position) — must FAIL on current worktree HEAD ba3bcc93 (tag-less) — plus AC-007 variable-binding bullets fixture + Value::List unit test. Then implementer fix-burst: Issue 1 (emit alt=None media blocks + validate() owns only Shape + update conflicting alt_text tests + invert test_chart_no_alt_skips_block) + Issue 2 (TextTag: enum + TextBlock.tag across ~7 crates + Stage 2b tagging + layout title-frame routing + PPTX `<p:ph>` + DOCX Heading1, replace positional fallback) + Issue 3 (bullets path). Turn all Red green; full canonical exit gate. Then RESUME adversary LOCAL cascade from pass 1 (0/3 → 3 strict-CLEAN). Then demo → PR → security+pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
 
 ### Step 3 — Re-run failed Wave 4 gates
 
@@ -105,7 +105,7 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 | Market intelligence | DONE 2026-05-23 | GO with medium confidence |
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (112 BCs, 15 HS, 4 supplements) + arch (14 ADRs (+4 added Phase 3: ADR-015..018), 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
-| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 87 stories, 21 epics, 6 waves, 537 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04; STORY-086/087 added 2026-06-06 +26 pts). 22 passes, 96+ findings, 3/3 clean. |
+| Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 88 stories, 21 epics, 6 waves, 542 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04; STORY-086/087 added 2026-06-06 +26 pts; STORY-086 scope 13→21 pts + STORY-088 added 2026-06-06 +5 pts net). 22 passes, 96+ findings, 3/3 clean. |
 | Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 21/21 merged. Wave 4 gate RAN 2026-06-06 — FAILED (Gate 3: 1 CRIT + 3 HIGH; Gate 5: holdout 0.56/0.30 below threshold). Remediation in progress. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
@@ -135,19 +135,19 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 ## Session Resume Checkpoint
 
-**Wave 4 gate FAILED (2026-06-06). Remediation scoped — STORY-086 ready to deliver.**
+**STORY-086 adversary pass 1 REMEDIATED (2026-06-06). Streak 0/3. NEXT: test-writer TextTag Red Gate.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. Remediation scoped: ADR-019 accepted, STORY-086 (Wave 4 remediation) + STORY-087 (Wave 5 color-coded slides) created. BCs 116 / 78 P0. Stories 87 / 537 pts. BLK-002 OPEN. |
+| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: pass 1 spec burst committed; scope 13→21 pts (TextTag ACs added). Stories 88 / 542 pts. BLK-002 OPEN. |
 | **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed) |
-| **Active worktrees** | None |
+| **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD ba3bcc93, pushed) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 |
 | **Workspace tests** | ~3244/3246 pass (2 perf-timing flakes under local CPU contention; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Fresh orchestrator: NEXT ACTION = deliver STORY-086 via full per-story-delivery (stubs → failing tests → TDD → LOCAL adversary 3-CLEAN → demo → PR → security+pr-reviewer → merge). After STORY-086 merges, re-run Gate 3 (adversary) + Gate 5 (holdout) on new develop. Only after re-gate passes, advance to Wave 5 (STORY-087, STORY-082, STORY-081, etc.). Do NOT start Wave 5 work until Wave 4 re-gate passes. BLK-002 remains OPEN until STORY-086 merges + gates re-pass. |
+| **RESUME INSTRUCTION** | Fresh orchestrator: NEXT ACTION = test-writer adds Red Gate tests for STORY-086 TextTag ACs (title→`<p:ph type="title">`, body→body ph, DOCX Heading1 via tag, subtitle, tag-over-position) — must FAIL on current worktree HEAD ba3bcc93. Also: AC-007 variable-binding bullets fixture + Value::List unit test. Then implementer fix-burst (Issues 1/2/3). Then RESUME adversary LOCAL cascade (0/3 → 3 strict-CLEAN). Then demo → PR → security+pr-reviewer → merge. After STORY-086 merges, re-run Gate 3 (adversary) + Gate 5 (holdout) on new develop. Only after re-gate passes, advance to Wave 5. BLK-002 remains OPEN until STORY-086 merges + gates re-pass. |
 
 ---
 
@@ -230,6 +230,7 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-06 | STORY-086-PASS1 | Adversary LOCAL pass 1 found F-086-P1-CRIT-001 (Stage 2b skipped emitting alt=None media blocks, violating BC-1.16.001 PC-9/10/11 — to avoid E-A11-001 double-fire) + 3 MED (AC-007 bullets path untested; title not in PPTX title placeholder / DOCX Heading1 — TextTag mechanism never built). Architect adjudicated: CRIT-001 = code-conforms (emit alt=None blocks per BC + pre-layout validate() owns ONLY Shape; Chart/Image/Diagram post-layout-only → single-fire; ADR-018 v1.2 amendment). Human chose IMPLEMENT TextTag in STORY-086 (scope 13→21 pts; BC-4.01.001/4.02.001 → v1.2 specify tag routing; no BC amendment). Bullets list-literal DSL syntax gap → STORY-088 (Wave 5, 5 pts). TextTag follow-up absorbed into STORY-086. Streak reset 0/3. |
 | 2026-06-06 | WAVE4-REMEDIATION-SETUP | Wave 4 gate FAILED remediation scoped + approved by human. ADR-019 (Stage 2b post-eval field-to-block threading pass) accepted; AltText::Unspecified state machine bundled. STORY-086 (Wave 4 remediation, 13 pts, P0) created — closes BLK-002/F-G3-CRIT-001/F-G3-HIGH-001/002. STORY-087 (Wave 5, color-coded slide types) created — closes F-G3-HIGH-003. BCs: BC-1.16.001 + BC-1.17.001/002/003 created; BC-5.02.001 v1.6; BC-5.01.001 v1.3; error-taxonomy v2.16; BC-INDEX 116 BCs / 78 P0; STORY-INDEX 87 stories / total 537 pts. |
 | 2026-06-06 | WAVE4-GATE-FAIL | Wave 4 integration gate RAN and FAILED. Gate 1 PASS (3244/3246; 2 perf-timing flakes under local CPU contention — CI green on dedicated runners). Gate 2 SKIP (no DTU). Gate 3 (adversary) FAIL: 1 CRITICAL (F-G3-CRIT-001: default strict build of ANY chart/diagram/image/screenshot/bio deck unconditionally fails E-A11-001 even with correct alt — eval sets slide.blocks=vec![] so thread_media_alt_into_frames never runs; decorative:true won't parse so no remedy) + 3 HIGH (F-G3-HIGH-002: inert pre-layout validators broader than OBS-1 — AltText pre-layout + LabelCheck also inert = 3/5 validators dead; F-G3-HIGH-003: LabelCheck COLOR_CODED_TYPES match no registered slide types → WCAG 1.4.1 dead; F-G3-HIGH-004: misleading for_eval.rs:336-341 comment). Gate 5 (holdout) FAIL: mean 0.56 (<0.85), min_critical 0.30 (<0.60) — exporters produce content-EMPTY output: PPTX empty spTree, PDF blank pages (title only in metadata), DOCX drops slide titles. Root cause: eval emits no slide-body ContentBlocks (for_eval.rs:342). Mutation testing SKIP (0 facade stories). Consistency audit FAIL (4 blockers, 8 warnings — swept in this burst). BLK-002 opened. Wave 4 does NOT advance to Wave 5. Remediation plan: see NEXT ACTIONS Steps 1-5. |
 | 2026-06-06 | STORY-050-MERGE | STORY-050 MERGED PR #61 (030dec6c, 2026-06-06T02:23:41Z). Title: "feat(slideforge): E2E integration suite + PDF/a11y/observability pipeline fixes". All CI green (21/21 aggregate + 4-platform tests, clippy, fmt, doctest, snapshots, bench, perf-smoke, visual-regression, pdf-ua1 ×2, supply-chain, audit, msrv, semgrep, panic-profile, pinning-audit, check-pdf-deps, docs). Security-reviewer APPROVE/CLEAN (SEC-050-001 CWE-116 fixed in-scope). pr-reviewer APPROVE/CLEAN. LOCAL cascade 5 passes, 3/3 strict-CLEAN (passes 3-4-5). 3 critical pipeline gaps in already-merged code FIXED in-scope: Gap 1 (PDF non-functional since STORY-044 — title derivation in eval.rs); Gap 2 (alt-text enforcement bypassed end-to-end — ADR-018 post-layout validation pass); Gap 3 (observability spans never renamed — info_span! with stage= field). ADR-018 v1.1, BC-5.02.001 v1.5, BC-5.01.001 v1.2, error-taxonomy v2.15, STORY-050 spec v1.3. DRIFT-CRITICAL-1 + DRIFT-CRITICAL-2 RESOLVED. Wave 4 = 21/21 COMPLETE. Next: vsdd-factory:wave-gate (human-approval checkpoint). |

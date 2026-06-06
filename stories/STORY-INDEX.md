@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 87
-stories_written: 87
+total_stories: 88
+stories_written: 88
 stories_ready: 0
 stories_in_progress: 0
 stories_merged: 59
@@ -34,9 +34,9 @@ stories_merged: 59
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
 | Wave 4 | 22 | 1 | 0 | 0 | 21 | 0 |
-| Wave 5 | 21 | 21 | 0 | 0 | 0 | 0 |
+| Wave 5 | 22 | 22 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **87** | **28** | **0** | **0** | **59** | **0** |
+| **Total** | **88** | **29** | **0** | **0** | **59** | **0** |
 
 ---
 
@@ -130,13 +130,13 @@ stories_merged: 59
 | [STORY-076](stories/STORY-076-brand-srgbclr-transform-extraction.md) | EPIC-06 | Brand Loader: Transform-Aware Theme Color Extraction (srgbClr lumMod/tint/shade) | BC-2.01.001, BC-2.01.003 | P1 | 3 | strict | merged |
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
-| [STORY-086](stories/STORY-086-slide-field-to-block-threading.md) | EPIC-03 | Stage 2b: Post-Eval Field-to-Block Threading Pass (AltText::Unspecified) | BC-1.16.001, BC-5.02.001, BC-5.01.001 | P0 | 13 | strict | draft |
+| [STORY-086](stories/STORY-086-slide-field-to-block-threading.md) | EPIC-03 | Stage 2b: Post-Eval Field-to-Block Threading Pass (AltText::Unspecified) + TextTag Routing | BC-1.16.001, BC-5.02.001, BC-5.01.001, BC-4.01.001, BC-4.02.001 | P0 | 21 | strict | draft |
 
-**Wave 4 total points: 142** _(129 original + 13 STORY-086 remediation; closes BLK-002, F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002; must re-pass Gate 3 + Gate 5)_
+**Wave 4 total points: 150** _(129 original + 21 STORY-086 remediation [bumped 13→21 per human-authorized scope expansion 2026-06-06: TextTag routing]; closes BLK-002, F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002; must re-pass Gate 3 + Gate 5)_
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (20 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (22 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
@@ -161,8 +161,9 @@ stories_merged: 59
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
 | [STORY-087](stories/STORY-087-color-coded-slide-types.md) | EPIC-01 | Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement) | BC-1.17.001, BC-1.17.002, BC-1.17.003 | P1 | 13 | strict | draft |
+| [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 5 | strict | draft |
 
-**Wave 5 total points: 127** _(114 original + 13 STORY-087 color-coded slide types; closes F-G3-HIGH-003)_
+**Wave 5 total points: 132** _(127 prior + 5 STORY-088 bullets list-literal DSL syntax; closes STORY-086 AC-007 parser-gap note)_
 
 ---
 
@@ -199,17 +200,27 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
 | Wave 4 | 22 | 142 | 6.5 |
-| Wave 5 | 21 | 127 | 6.0 |
+| Wave 5 | 22 | 132 | 6.0 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **87** | **537** | **6.2** |
+| **Total** | **88** | **542** | **6.2** |
 
-> No story exceeds 13 points. STORY-023 (brand synthesis — 13 pts), STORY-037
+> STORY-086 points bumped from 13 → 21 per human-authorized scope expansion (2026-06-06):
+> TextTag enum + TextBlock.tag field + PPTX title-placeholder routing + DOCX Heading1
+> routing added to scope (adversary findings F-086-P1-MED-002/003 required placement
+> assertions, not mere text-presence). Approximately 2× original scope. TextTag follow-up
+> story absorbed into STORY-086 (not created separately). Wave 4 total adjusted from
+> 142 → 150 pts. Total 537 → 542 pts (after STORY-088 +5).
+>
+> STORY-088 (Bullets list-literal DSL syntax, 5 pts, P1, Wave 5, EPIC-02) created
+> 2026-06-06 to close the STORY-086 AC-007 parser-gap note. Direct `bullets: [...]`
+> field-value syntax deferred from STORY-086; `@var` workaround valid in STORY-086.
+> Wave 5: 21 → 22 stories, 127 → 132 pts. Total: 87 → 88 stories, 537 → 542 pts.
+>
+> No story exceeds 21 points (STORY-086 is the sole exception to the standard 13-pt cap —
+> human-authorized scope expansion). STORY-023 (brand synthesis — 13 pts), STORY-037
 > (PPTX core serialization — 13 pts), STORY-077 (SectionBlock IR + inline-markup parser
-> — 13 pts), STORY-081 (slide-level inline markup — 13 pts), STORY-086 (Stage 2b
-> field-to-block threading — 13 pts, Wave 4 remediation), and STORY-087 (color-coded
-> slide types — 13 pts) are the largest stories. All have well-defined scope that
-> warrants their size and were not split further to preserve coherent implementation units.
-> All other stories are 3-8 points.
+> — 13 pts), STORY-081 (slide-level inline markup — 13 pts), and STORY-087 (color-coded
+> slide types — 13 pts) are the other large stories. All other stories are 3-8 points.
 >
 > Wave 4 expanded from 13 → 16 stories (85 → 96 pts) per human approval 2026-05-31:
 > STORY-073 (bullets-layout, 5 pts, P1), STORY-075 (footer detection, 3 pts, P1),

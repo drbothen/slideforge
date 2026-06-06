@@ -2,20 +2,26 @@
 document_type: story
 traces_to: .factory/stories/STORY-INDEX.md
 story_id: STORY-086
-title: "Stage 2b: Post-Eval Field-to-Block Threading Pass (AltText::Unspecified)"
+title: "Stage 2b: Post-Eval Field-to-Block Threading Pass + TextTag Routing (AltText::Unspecified)"
 epic: EPIC-03
 wave: 4
 wave_designation: "4-REMEDIATION"
-points: 13
+points: 21
 priority: P0
 tdd_mode: strict
 status: draft
-target_module: slideforge-eval, slideforge-types, slideforge-layout, slideforge-validate
-subsystems: [SS-02, SS-03, SS-05, SS-15]
+spec_version: "1.1"
+last_updated: "2026-06-06"
+target_module: slideforge-eval, slideforge-types, slideforge-layout, slideforge-validate, slideforge-pptx, slideforge-docx
+subsystems: [SS-02, SS-03, SS-05, SS-06, SS-07, SS-15]
 behavioral_contracts: [BC-1.16.001, BC-5.02.001, BC-5.01.001]
+# BC-4.01.001 v1.2 and BC-4.02.001 v1.2 traced via AC footnotes (PO-confirmed pattern: exporter BCs are not
+# in frontmatter array because this story does not own the exporter delivery — it owns the upstream
+# threading infrastructure that satisfies the exporter BCs' preconditions).
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023]
 closes_findings: [BLK-002, F-G3-CRIT-001, F-G3-HIGH-001, F-G3-HIGH-002]
+scope_expansion: "human-authorized 2026-06-06"
 depends_on:
   - STORY-049
   - STORY-050
@@ -23,16 +29,26 @@ blocks:
   - STORY-046
   - STORY-055
   - STORY-056
-estimated_days: 5
+estimated_days: 8
 remediation_context: >
   Wave 4 integration gate (2026-06-05) confirmed Slide.blocks is always vec![] after eval,
   making all three exporters content-empty and the strict a11y gate unconditionally
   unsatisfiable for chart/image/diagram slides. This story implements the Stage 2b fix
   authorized by the human on 2026-06-05 (ADR-019). It must merge and re-pass Wave 4
   Gate 3 (strict-mode) and Gate 5 (holdout) before Wave 5 advances.
+scope_expansion_context: >
+  Human authorized on 2026-06-06: TextTag enum + TextBlock.tag field + tag-based routing to
+  PPTX title placeholder and DOCX Heading1 are implemented IN this story (not deferred).
+  This scope expansion was driven by adversary findings F-086-P1-MED-002/003 (AC-001 and
+  AC-003 were too weak — asserting mere text presence, not placement in the correct
+  placeholder/heading). The TextTag mechanism is specified in BC-4.01.001 v1.2 (PC-9–12)
+  and BC-4.02.001 v1.2 (PC-8–11) as downstream routing contracts enabled by BC-1.16.001
+  postconditions 1–5 (TextTag fields on TextBlock). TextTag follow-up story absorbed into
+  this story — NOT created separately. Only the bullets list-literal DSL syntax gap
+  (direct `bullets: [...]` without @var binding) is deferred to STORY-088 (Wave 5).
 ---
 
-# STORY-086: Stage 2b — Post-Eval Field-to-Block Threading Pass (AltText::Unspecified)
+# STORY-086: Stage 2b — Post-Eval Field-to-Block Threading Pass + TextTag Routing (AltText::Unspecified)
 
 ## Subsystem Anchor Justifications
 
@@ -54,13 +70,74 @@ remediation_context: >
   SS-05 scope.
 
 - SS-15 (Types, `slideforge-types`) receives the new `AltText::Unspecified` variant in
-  `specs.rs`. SS-15 is the foundational types crate; `AltText` is defined there. A
-  sibling-site sweep (TD-VSDD-060) must cover every `AltText` match site across
-  all crates that import `slideforge-types`.
+  `specs.rs` AND the new `TextTag` enum (`TextTag::Title`, `TextTag::Subtitle`,
+  `TextTag::Body`) added to `TextBlock`. SS-15 is the foundational types crate;
+  `AltText` and `TextBlock` are both defined there. A sibling-site sweep (TD-VSDD-060)
+  must cover every `AltText` match site across all crates that import `slideforge-types`.
+
+- SS-06 (PPTX Exporter, `slideforge-pptx`) receives the tag-based title-placeholder
+  routing per BC-4.01.001 v1.2 PC-9–12. The existing `serialize_slide` function is
+  updated to route `TextTag::Title` frames to `<p:ph type="title"/>` (or `idx="0"`)
+  and `TextTag::Body` frames to `<p:ph type="body"/>` — NOT by position heuristic.
+  ARCH-INDEX assigns all PPTX serialization to SS-06. The routing change is a targeted
+  bug fix within SS-06 scope.
+
+- SS-07 (DOCX Exporter, `slideforge-docx`) receives the tag-based Heading1 routing per
+  BC-4.02.001 v1.2 PC-8–11. The existing `serialize_slide_heading` function is updated
+  to route `TextTag::Title` frames to `<w:pStyle w:val="Heading1"/>` paragraphs and
+  `TextTag::Body` frames to Normal paragraphs. ARCH-INDEX assigns all DOCX serialization
+  to SS-07. The routing change is a targeted bug fix within SS-07 scope.
 
 The `slideforge/src/lib.rs` (root crate, SS-01 pipeline driver) receives the Stage 2b
 call insertion and `build_inner` doc comment update. SS-01 owns pipeline wiring per
 ADR-016 and ADR-019 Decision 9.
+
+## Scope Expansion (Human-Authorized 2026-06-06): TextTag Mechanism
+
+**Authorization date:** 2026-06-06
+**Scope delta:** Approximately 2× original story scope (13 → 21 points)
+**Driver:** Adversary findings F-086-P1-MED-002 and F-086-P1-MED-003 established that
+AC-001 (PPTX title) and AC-003 (DOCX Heading1) were too weak — they asserted text
+presence only, not correct placeholder placement. Fixing the assertions to require
+placement means the implementation must also deliver the correct placement mechanism.
+
+**What is added to scope:**
+
+1. **`TextTag` enum in `slideforge-types`:** Three variants — `TextTag::Title`,
+   `TextTag::Subtitle`, `TextTag::Body` — added to `specs.rs`. All existing
+   `TextBlock { inlines, .. }` references gain the `tag: TextTag` field.
+   Derives: `Hash + Eq + Clone + Debug`.
+
+2. **`TextBlock.tag` field population in Stage 2b (`field_to_block.rs`):** The threading
+   pass already specified setting the tag field (BC-1.16.001 PC-1–5 listed
+   `TextTag::Title/Subtitle/Body` explicitly). This was already in the BC spec; the scope
+   expansion formalizes that the implementer MUST also deliver the exporter-side routing.
+
+3. **PPTX title-placeholder routing (`slideforge-pptx`):** `serialize_slide` routes
+   `TextTag::Title` frames to `<p:ph type="title"/>` (or `idx="0"` for body-first
+   layouts). `TextTag::Body` routes to `<p:ph type="body"/>`. `TextTag::Subtitle` routes
+   to `<p:ph type="subTitle"/>` when available, otherwise body placeholder.
+   This satisfies BC-4.01.001 v1.2 PC-9–12 and invariants 5–6.
+
+4. **DOCX Heading1 routing (`slideforge-docx`):** `serialize_slide_heading` routes
+   `TextTag::Title` frames to `<w:pStyle w:val="Heading1"/>` paragraphs. `TextTag::Body`
+   to Normal paragraphs. `TextTag::Subtitle` to `<w:pStyle w:val="Heading2"/>`.
+   This satisfies BC-4.02.001 v1.2 PC-8–11 and invariants 5–6.
+
+**What is NOT in scope (absorbed correctly):**
+
+- The TextTag follow-up story discussed during PO handoff is ABSORBED into this story
+  and is NOT created as a separate story. The TextTag mechanism is implemented here
+  end-to-end (types + threading + routing).
+
+- Direct `bullets: ["A", "B", "C"]` DSL list-literal syntax (without `@var` binding)
+  is NOT in scope. AC-007 is fixed to use the variable-binding form as the workaround.
+  The list-literal field parser gap is deferred to STORY-088 (Wave 5), which was created
+  specifically for this purpose.
+
+**Code conforms to BC — no BC amendment required.** The TextTag routing contracts are
+already fully specified in BC-4.01.001 v1.2 (added by PO) and BC-4.02.001 v1.2 (added
+by PO). This story implements those existing contracts; no BC text changes are needed.
 
 ## Dependency Anchor Justifications
 
@@ -119,18 +196,31 @@ but empty shells.
 
 | BC | Title | Version | Role in This Story |
 |----|-------|---------|-------------------|
-| BC-1.16.001 | Post-Eval Field-to-Block Threading Pass | v1.0 | Primary: defines the Stage 2b function signature, fields→blocks mapping, alt-resolution rule, block ordering, purity contract, and all edge cases |
+| BC-1.16.001 | Post-Eval Field-to-Block Threading Pass | v1.0 | Primary: defines Stage 2b function signature, fields→blocks mapping, TextTag field population (PC-1–5), alt-resolution rule, block ordering, purity contract, and all edge cases |
 | BC-5.02.001 | All 10 Plugin Trait Surfaces (Validator post-layout dispatch) | v1.6 | AltTextValidator post-layout dispatch now fires on `AltText::Unspecified`; Postcondition 7 and EC-005, EC-009 define the exact discrimination semantics |
 | BC-5.01.001 | Missing alt on Visual Element Is Compile Error | v1.3 | E-A11-001 fires on `AltText::Unspecified` (pipeline gap) not `AltText::Decorative` (author opt-out); Invariant 2 defines the post-layout enforcement contract |
 
+**Exporter BCs (traced via AC footnotes; not in frontmatter `behavioral_contracts:` array — PO-confirmed pattern):**
+
+| BC | Title | Version | Role in This Story |
+|----|-------|---------|-------------------|
+| BC-4.01.001 | Serialize LaidOutDeck to Valid .pptx | v1.2 | TextTag routing contract: PC-9 (Title → title placeholder), PC-10 (Subtitle → subTitle ph), PC-11 (Body → body placeholder), PC-12 (tag-over-position invariant). This story delivers the upstream `TextTag`-tagged ContentBlocks AND the PPTX-side routing implementation. |
+| BC-4.02.001 | Serialize Deck to .docx | v1.2 | TextTag→Heading routing contract: PC-8 (Title → Heading1), PC-9 (Subtitle → Heading2), PC-10 (Body → Normal, not Heading1), PC-11 (tag-over-position invariant). This story delivers DOCX-side routing. |
+
 ## Acceptance Criteria
 
-### AC-001 — Titled deck builds to PPTX with visible title text (LESSON-13 positive content vector)
+### AC-001 — Title text routes to PPTX title placeholder, NOT a generic body shape (PLACEMENT assertion — F-086-P1-MED-002 fix)
 A fixture deck with a `slide title:` block containing `title "My Title"` builds
 successfully with `strict: true`. The resulting PPTX ZIP contains a slide XML where
-the `<p:sp>` title placeholder carries at least one `<a:r><a:t>` text run with
-text "My Title". The run is non-empty; the text node content matches the declared title.
-(traces to BC-1.16.001 postcondition 1 — title field produces ContentBlock::Text(Title))
+a `<p:sp>` shape whose `<p:nvSpPr><p:nvPr><p:ph>` child has `type="title"` (or
+`idx="0"`) contains a `<p:txBody><a:p><a:r><a:t>` text run with text "My Title".
+PLACEMENT assertion: the text run MUST appear inside the title placeholder shape —
+a `<p:ph type="title"/>` or `<p:ph idx="0">` element. The run MUST NOT appear
+inside a generic body placeholder (`<p:ph type="body"/>`) or a shape with no `<p:ph>`
+at all. The routing is driven by `TextTag::Title` on the `ContentBlock::Text`, NOT by
+the position of the frame in `Slide.blocks`.
+(traces to BC-1.16.001 postcondition 1 — title field produces ContentBlock::Text(tag: TextTag::Title);
+secondary trace: BC-4.01.001 v1.2 postcondition 9 — TextTag::Title → `<p:ph type="title"/>` placement)
 
 ### AC-002 — Content slide body text visible in PDF via show_text operator (LESSON-13 positive content vector)
 A fixture deck with a `slide content:` block containing `title "Heading"` and
@@ -140,12 +230,75 @@ text content (e.g., via `pdftotext` or internal text-run extraction), contains b
 at least one `show_text` or `Tj` operator carrying non-empty text.
 (traces to BC-1.16.001 postconditions 1, 4 — title and body produce ContentBlock::Text)
 
-### AC-003 — DOCX Heading1 run carries title text (LESSON-13 positive content vector)
+### AC-003 — Title routes to DOCX Heading1 via TextTag (NOT positional fallback) (PLACEMENT assertion — F-086-P1-MED-003 fix)
 A fixture deck with a `slide title:` block containing `title "Report Title"` builds
 to DOCX. The DOCX `word/document.xml` contains at least one `<w:p>` paragraph whose
-first `<w:r><w:t>` run contains "Report Title" (the Heading1 path). The heading run
-must be non-empty.
-(traces to BC-1.16.001 postcondition 1 — title ContentBlock threads to Heading1 in DOCX exporter)
+`<w:pPr>` child contains `<w:pStyle w:val="Heading1"/>` AND whose `<w:r><w:t>` run
+contains "Report Title". PLACEMENT assertion: the title text MUST appear in a
+`Heading1`-styled paragraph — a paragraph carrying `<w:pStyle w:val="Heading1"/>`.
+The routing is driven by `TextTag::Title` on the `ContentBlock::Text`; it is NOT
+based on the position of the frame in the frame list (e.g., "first text run" heuristic).
+The Heading1 paragraph must be non-empty.
+(traces to BC-1.16.001 postcondition 1 — title ContentBlock has tag: TextTag::Title;
+secondary trace: BC-4.02.001 v1.2 postcondition 8 — TextTag::Title → `<w:pStyle w:val="Heading1"/>` placement)
+
+### AC-019 — Body text routes to PPTX body placeholder, NOT the title placeholder (scope expansion: TextTag routing)
+A fixture deck with a `slide content:` block containing `title "Heading"` and
+`body "Body paragraph text"` builds to PPTX. The resulting slide XML contains
+TWO distinct `<p:sp>` placeholder shapes: one with `<p:ph type="title"/>` carrying
+"Heading", and a separate one with `<p:ph type="body"/>` (or `<p:ph idx="1"/>`)
+carrying "Body paragraph text". PLACEMENT assertions:
+(a) "Body paragraph text" MUST NOT appear inside the title placeholder shape.
+(b) "Heading" MUST NOT appear inside the body placeholder shape.
+(c) The two placeholder shapes are distinct `<p:sp>` elements with no content overlap.
+Routing is driven by `TextTag::Title` and `TextTag::Body` respectively; position within
+`Slide.blocks` is not consulted.
+(traces to BC-1.16.001 postconditions 1, 4 — title and body produce ContentBlock::Text with distinct tags;
+secondary trace: BC-4.01.001 v1.2 postcondition 11 — Body → body placeholder, NOT title placeholder;
+BC-4.01.001 v1.2 invariant 6 — title and body placeholders are distinct)
+
+### AC-020 — DOCX body text routes to Normal paragraph, NOT Heading1 (scope expansion: TextTag routing)
+A fixture deck with a `slide content:` block containing `title "Heading"` and
+`body "Body text"` builds to DOCX. The resulting `word/document.xml` contains:
+(a) A `<w:p>` with `<w:pStyle w:val="Heading1"/>` carrying "Heading".
+(b) A separate `<w:p>` with NO `<w:pStyle w:val="Heading1"/>` carrying "Body text"
+    (Normal style or no explicit style).
+PLACEMENT assertions: body text MUST NOT receive Heading1 styling. The two paragraphs
+are separate `<w:p>` elements. The Heading1 paragraph must precede the Normal paragraph.
+(traces to BC-1.16.001 postconditions 1, 4 — title/body produce ContentBlock::Text with TextTag::Title/Body;
+secondary trace: BC-4.02.001 v1.2 postcondition 10 — Body → Normal paragraph, NOT Heading1;
+BC-4.02.001 v1.2 invariant 6 — Heading1 and body paragraphs are distinct)
+
+### AC-021 — PPTX subtitle routes to subtitle placeholder (or body fallback) (scope expansion: TextTag routing)
+A fixture deck with a slide containing both `title "Main Title"` and `subtitle "Subtitle text"`
+builds to PPTX. When the slide layout carries a subtitle placeholder (`<p:ph type="subTitle"/>`),
+the subtitle text "Subtitle text" appears in that subtitle placeholder shape. When no
+subtitle placeholder exists in the layout, the subtitle text falls back to the body
+placeholder without a schema error. In both cases, "Main Title" remains in the title
+placeholder and does NOT share a `<p:sp>` with "Subtitle text".
+(traces to BC-1.16.001 postcondition 3 — subtitle field produces ContentBlock::Text(tag: TextTag::Subtitle);
+secondary trace: BC-4.01.001 v1.2 postcondition 10 — Subtitle → subTitle ph or body fallback)
+
+### AC-022 — DOCX subtitle routes to Heading2 paragraph (scope expansion: TextTag routing)
+A fixture deck with a slide containing `title "Main Title"` and `subtitle "Chapter Subtitle"`
+builds to DOCX. The `word/document.xml` contains:
+(a) A `<w:p>` with `<w:pStyle w:val="Heading1"/>` carrying "Main Title".
+(b) A `<w:p>` with `<w:pStyle w:val="Heading2"/>` carrying "Chapter Subtitle" immediately
+    following the Heading1 paragraph.
+The Heading2 paragraph must appear after the Heading1 for the same slide.
+(traces to BC-1.16.001 postcondition 3 — subtitle produces ContentBlock::Text(tag: TextTag::Subtitle);
+secondary trace: BC-4.02.001 v1.2 postcondition 9 — Subtitle → Heading2 paragraph)
+
+### AC-023 — TextTag::Title is tag-driven not position-driven (invariant verification)
+A unit test constructs a `Slide` where `Slide.blocks` has `ContentBlock::Text(Body)` at
+index 0 and `ContentBlock::Text(Title)` at index 1 (reversed order, simulating a
+hypothetical future reorder). When the PPTX serializer processes this slide:
+(a) The Title block routes to the title placeholder regardless of its list position.
+(b) The Body block routes to the body placeholder regardless of its list position.
+No position-based routing heuristic fires. This test would fail if the serializer used
+`blocks[0]` as its "title detection" logic.
+(traces to BC-4.01.001 v1.2 postcondition 12 — tag-over-position invariant;
+BC-4.01.001 v1.2 invariant 5 — routing is tag-driven, not position-driven)
 
 ### AC-004 — strict + chart WITH alt → build Ok, PPTX placeholder carries descr (LESSON-13 positive content vector)
 A fixture deck with `slide chart: title "Q3 Revenue" chart_type "bar" alt "Bar chart showing Q3 revenue by region"`
@@ -178,12 +331,28 @@ throughout the pipeline.
 (traces to BC-1.16.001 postcondition 12 — decorative=true produces AltText::Decorative;
 BC-5.01.001 EC-007 — Decorative is valid; BC-5.02.001 EC-009 — Decorative → Ok)
 
-### AC-007 — Bullets slide produces ≥N text runs in PPTX output (LESSON-13 positive content vector)
-A fixture deck with `slide content: title "Agenda" bullets: ["Item A", "Item B", "Item C"]`
+### AC-007 — Bullets via @var binding produce ≥3 text runs in PPTX output (LESSON-13 positive content vector)
+A fixture deck using the variable-binding form:
+```
+@var items = ["Item A", "Item B", "Item C"]
+slide content:
+  title "Agenda"
+  bullets: items
+```
 builds successfully. The PPTX slide XML for this slide contains at least 3 `<a:r>` text
 runs corresponding to the 3 bullet items. Each run must carry non-empty text content
-matching the declared bullet strings.
-(traces to BC-1.16.001 postcondition 7 — bullets field produces ContentBlock::Bullets;
+matching the declared bullet strings. A Stage 2b unit test must cover the
+`Value::List → ContentBlock::Bullets` path directly (not just the E2E path).
+
+NOTE: Direct `bullets: ["Item A", "Item B", "Item C"]` list-literal field syntax does
+NOT parse in the current DSL parser (`deck.rs` field-value parser does not yet handle
+`[...]` list-literal tokens as a `FieldValue`). This is a parser gap, not a Stage 2b
+gap. The `@var` binding form routes through `Value::List` to `ContentBlock::Bullets`
+correctly via the existing evaluator. The direct list-literal syntax is deferred to
+STORY-088 (Wave 5, "Bullets list-literal field-value DSL syntax"). This AC is valid
+and load-bearing for the `@var`-binding path; it does NOT test the deferred syntax.
+
+(traces to BC-1.16.001 postcondition 7 — `Value::List(items)` produces ContentBlock::Bullets;
 BC-1.16.001 invariant 2 — canonical block order: title before bullets)
 
 ### AC-008 — Empty title string produces no ContentBlock and no text run in output
@@ -295,7 +464,11 @@ LESSON-13/LESSON-14 positive content vectors)
 | `thread_fields_to_blocks` | `slideforge-eval` | `src/field_to_block.rs` (NEW) | New module + function | Pure |
 | `lib.rs` export | `slideforge-eval` | `src/lib.rs` | Add `pub mod field_to_block; pub use` | Pure |
 | `build_inner` Stage 2b call | `slideforge` | `src/lib.rs` | Insert call + update doc comment + add use | Effectful (pipeline driver) |
+| `TextTag` enum | `slideforge-types` | `src/specs.rs` | Add enum: `Title`, `Subtitle`, `Body` (with `Hash + Eq + Clone + Debug`) | Pure (type addition) |
+| `TextBlock.tag` field | `slideforge-types` | `src/specs.rs` | Add `tag: TextTag` field to `TextBlock` struct | Pure (type change) |
 | `AltText::Unspecified` | `slideforge-types` | `src/specs.rs` | Add variant to enum | Pure (type change) |
+| PPTX title placeholder routing | `slideforge-pptx` | `src/serialize_slide.rs` (or equivalent) | Route `TextTag::Title` → `<p:ph type="title"/>`, `TextTag::Body` → `<p:ph type="body"/>`, `TextTag::Subtitle` → `<p:ph type="subTitle"/>` | Pure |
+| DOCX Heading1 routing | `slideforge-docx` | `src/serialize_slide.rs` (or equivalent) | Route `TextTag::Title` → `<w:pStyle w:val="Heading1"/>`, `TextTag::Body` → Normal, `TextTag::Subtitle` → `<w:pStyle w:val="Heading2"/>` | Pure |
 | `regions.rs` 5 sites | `slideforge-layout` | `src/regions.rs` | `Decorative` → `Unspecified` on structural placeholders | Pure |
 | `thread_media_alt_into_frames` 3 arms | `slideforge-layout` | `src/layout.rs` | Fallback `Decorative` → `Unspecified`; warn msg update | Pure |
 | Comment at layout.rs:163–166 | `slideforge-layout` | `src/layout.rs` | Update stale STORY-027 reference | Comment only |
@@ -303,7 +476,7 @@ LESSON-13/LESSON-14 positive content vectors)
 | Comment at alt_text.rs:175–193 | `slideforge-validate` | `src/alt_text.rs` | Cite STORY-086 instead of "Wave 3+" | Comment only |
 | `for_eval.rs` comment | `slideforge-eval` | `src/for_eval.rs` | Update stale blocks:vec![] deferral comment | Comment only |
 | `block.rs` AltText match | `slideforge-types` | `src/block.rs` | `produces_structure_group()` Unspecified arm | Pure |
-| Sibling-site sweep | all crates | various | All `match AltText` sites updated | Mixed |
+| Sibling-site sweep | all crates | various | All `match AltText` sites + all `TextBlock` construction sites updated | Mixed |
 
 **Forbidden Dependencies:**
 - `slideforge-eval::field_to_block` MUST NOT import `slideforge-layout`, `slideforge-pptx`,
@@ -311,37 +484,50 @@ LESSON-13/LESSON-14 positive content vectors)
   any output-format crate would be an ADR-005 violation. Build-time enforcement: if the
   `slideforge-eval` crate dependency graph includes any exporter crate, the build MUST fail
   (cargo deny / dependency-check).
-- `slideforge-types::specs::AltText` MUST remain in `slideforge-types` (the leaf crate).
-  It MUST NOT be moved to any crate higher in the dependency graph.
+- `slideforge-types::specs::AltText` and `slideforge-types::specs::TextTag` MUST remain in
+  `slideforge-types` (the leaf crate). They MUST NOT be moved to any crate higher in the
+  dependency graph.
+- The PPTX placeholder routing logic (`TextTag → <p:ph type="...">`) MUST reside in
+  `slideforge-pptx`. It MUST NOT be placed in `slideforge-layout` or `slideforge-eval`.
+  ADR-005 boundary: layout produces `FrameContent` + tag data; PPTX serialization consumes it.
+- The DOCX Heading routing logic (`TextTag → <w:pStyle>`) MUST reside in `slideforge-docx`.
+  Same boundary constraint as above.
 
 ## Token Budget Estimate
 
 | Context Source | Estimated Tokens |
 |---------------|-----------------|
-| This story spec | ~4,000 |
+| This story spec (expanded v1.1) | ~7,000 |
 | ADR-019 full text | ~6,500 |
 | ADR-005 (Two-IR model) | ~1,500 |
 | ADR-016 (pipeline driver, excerpt) | ~1,500 |
 | ADR-018 (post-layout validation, excerpt) | ~1,500 |
 | BC-1.16.001 full text | ~3,000 |
+| BC-4.01.001 v1.2 full text (TextTag routing contract) | ~2,500 |
+| BC-4.02.001 v1.2 full text (Heading routing contract) | ~2,000 |
 | BC-5.02.001 relevant sections | ~2,000 |
 | BC-5.01.001 full text | ~1,500 |
 | `wave4-content-threading-assessment.md` key sections | ~2,500 |
 | `crates/slideforge-eval/src/for_eval.rs` (excerpt around lines 330-350) | ~500 |
 | `crates/slideforge-eval/src/lib.rs` (current) | ~500 |
-| `crates/slideforge-types/src/specs.rs` (AltText + ContentBlock defs) | ~1,500 |
+| `crates/slideforge-types/src/specs.rs` (AltText + TextBlock + ContentBlock defs) | ~2,000 |
 | `crates/slideforge-layout/src/regions.rs` (5 structural placeholder sites) | ~2,000 |
 | `crates/slideforge-layout/src/layout.rs` (thread_media_alt_into_frames) | ~2,000 |
 | `crates/slideforge-validate/src/alt_text.rs` (validate_post_layout) | ~1,500 |
 | `crates/slideforge-types/src/block.rs` (produces_structure_group) | ~500 |
 | `crates/slideforge/src/lib.rs` (build_inner) | ~1,500 |
-| Unit test files (new) | ~3,000 |
-| E2E fixture + integration test file | ~2,000 |
+| `crates/slideforge-pptx/src/` (serialize_slide, placeholder routing) | ~3,000 |
+| `crates/slideforge-docx/src/` (serialize_slide_heading, heading routing) | ~2,500 |
+| Unit test files (new + expanded) | ~4,500 |
+| E2E fixture + integration test file (expanded with TextTag ACs) | ~3,000 |
 | Tool outputs (compiler messages, test results) | ~3,000 |
-| **TOTAL ESTIMATED** | **~41,500 tokens** |
+| **TOTAL ESTIMATED** | **~58,000 tokens** |
 
-41,500 tokens is ~20% of a 200k context window — within the 20-30% per-story budget.
-Read only the excerpts listed above; do NOT read full crate files end-to-end.
+58,000 tokens is ~29% of a 200k context window — at the upper bound of the 20-30%
+per-story budget. This is acceptable given the human-authorized scope expansion.
+The implementer MUST read only the excerpts listed above; do NOT read full crate
+files end-to-end. If context pressure becomes acute, the TextTag exporter routing
+(AC-019..AC-023) can be done in a second micro-burst using only the exporter files.
 
 ## Previous Story Intelligence
 
@@ -408,7 +594,20 @@ Violating any of these constitutes a CRIT finding in adversarial review.
 
 8. **`Hash + Eq + Clone` on all new types** — All `ContentBlock`, `TextBlock`, `BulletItem`
    types already implement these. Verify `AltText::Unspecified` does not break any derived
-   impl (it is a unit variant; derives propagate automatically).
+   impl (it is a unit variant; derives propagate automatically). The new `TextTag` enum
+   and `TextBlock.tag` field must also derive `Hash + Eq + Clone + Debug`.
+
+9. **TextTag routing is tag-driven, not position-driven (BC-4.01.001 v1.2 Invariant 5,
+   BC-4.02.001 v1.2 Invariant 5).** The PPTX serializer and DOCX serializer MUST NOT
+   use `blocks[0]`, list index, or any positional heuristic to determine heading vs. body
+   vs. title content. The `TextTag` field on `TextBlock` is the sole routing signal.
+   Any positional routing logic is a CRIT finding in adversarial review.
+
+10. **TextTag type boundary (ADR-005).** The `TextTag` enum is defined in `slideforge-types`
+    (the leaf crate). The routing implementation belongs in the exporter crates
+    (`slideforge-pptx`, `slideforge-docx`). Neither `slideforge-eval` nor `slideforge-layout`
+    should import exporter-specific placeholder type constants. The layout crate passes
+    `TextTag` through the `FrameContent` IR; the exporters read and act on it.
 
 ## Library and Framework Requirements
 
@@ -437,20 +636,24 @@ Files to MODIFY:
 ```
 crates/slideforge-eval/src/lib.rs              [pub mod field_to_block; pub use]
 crates/slideforge-eval/src/for_eval.rs         [update comment lines 336-342]
-crates/slideforge-types/src/specs.rs           [add AltText::Unspecified variant]
-crates/slideforge-types/src/block.rs           [produces_structure_group Unspecified arm]
+crates/slideforge-types/src/specs.rs           [add AltText::Unspecified variant; add TextTag enum {Title, Subtitle, Body}; add tag: TextTag field to TextBlock struct]
+crates/slideforge-types/src/block.rs           [produces_structure_group Unspecified arm; update TextBlock constructions for tag field]
 crates/slideforge-layout/src/regions.rs        [5 sites: Decorative→Unspecified for structural placeholders]
-crates/slideforge-layout/src/layout.rs         [3 sites in thread_media_alt_into_frames: Decorative→Unspecified fallback; update comment 163-166]
+crates/slideforge-layout/src/layout.rs         [3 sites in thread_media_alt_into_frames: Decorative→Unspecified fallback; update comment 163-166; pass TextTag through FrameContent if not already present]
 crates/slideforge-validate/src/alt_text.rs     [match arms: Unspecified→E-A11-001, Decorative→valid; update comment 175-193]
+crates/slideforge-pptx/src/serialize_slide.rs  [or equivalent: route TextTag::Title → <p:ph type="title"/>, TextTag::Body → <p:ph type="body"/>, TextTag::Subtitle → <p:ph type="subTitle"/>]
+crates/slideforge-docx/src/serialize_slide.rs  [or equivalent: route TextTag::Title → <w:pStyle Heading1>, TextTag::Body → Normal, TextTag::Subtitle → <w:pStyle Heading2>]
 crates/slideforge/src/lib.rs                   [insert Stage 2b call; update build_inner doc comment; add use]
 ```
 
 Files that RECEIVE new tests or test updates:
 ```
-crates/slideforge-eval/tests/field_to_block_unit.rs    [new: unit tests for Stage 2b]
-tests/integration/e2e_build_tests.rs                   [update: add positive content vector assertions for Wave 4 Gate 3 re-pass (AC-001..AC-007, AC-018)]
+crates/slideforge-eval/tests/field_to_block_unit.rs    [new: unit tests for Stage 2b (AC-007 Value::List path, AC-009, AC-010, AC-011)]
+tests/integration/e2e_build_tests.rs                   [update: add placement assertions for Wave 4 Gate 3 re-pass (AC-001..AC-007, AC-018, AC-019, AC-020, AC-021, AC-022, AC-023)]
 crates/slideforge-validate/src/alt_text.rs             [cfg(test) block: add AC-013, AC-014, AC-015 unit tests]
 crates/slideforge-layout/src/regions.rs                [cfg(test) block: add AC-013 unit test for Unspecified placeholder]
+crates/slideforge-pptx/src/                           [unit tests for TextTag routing: AC-019, AC-021, AC-023]
+crates/slideforge-docx/src/                           [unit tests for TextTag routing: AC-020, AC-022]
 ```
 
 Forbidden: Do NOT create `crates/slideforge-layout/src/field_to_block.rs` or any
@@ -460,17 +663,20 @@ exclusively owned by `slideforge-eval`.
 ## Tasks
 
 - [ ] **T1 — Red Gate: write all failing tests first**
-  - [ ] T1.1: Write unit tests for `thread_fields_to_blocks` (AC-009, AC-010, AC-011, AC-008) in `field_to_block.rs` `#[cfg(test)] mod tests` block. All tests must FAIL (function not yet implemented — `todo!()`).
+  - [ ] T1.1: Write unit tests for `thread_fields_to_blocks` (AC-007 Value::List path, AC-009, AC-010, AC-011, AC-008) in `field_to_block.rs` `#[cfg(test)] mod tests` block. All tests must FAIL (function not yet implemented — `todo!()`).
   - [ ] T1.2: Write unit tests for `AltText::Unspecified` match discrimination (AC-012, AC-013, AC-014, AC-015) in respective `#[cfg(test)]` blocks. Tests must FAIL.
-  - [ ] T1.3: Update E2E integration tests (AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-018) to assert VISIBLE CONTENT (text runs, heading text, show_text operators) in all three output formats. Tests must FAIL.
-  - [ ] T1.4: Verify Red Gate density ≥0.5: count `todo!()` sites vs. non-trivial function bodies. Gate must pass BEFORE implementation starts.
+  - [ ] T1.3: Update E2E integration tests (AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-018) to assert PLACEMENT (title in title placeholder / Heading1 via tag), not just text presence. Tests must FAIL until routing is implemented.
+  - [ ] T1.4: Write unit tests for TextTag routing (AC-019, AC-020, AC-021, AC-022, AC-023) in PPTX and DOCX crate test modules. Tests must FAIL until routing is implemented.
+  - [ ] T1.5: Verify Red Gate density ≥0.5: count `todo!()` sites vs. non-trivial function bodies. Gate must pass BEFORE implementation starts.
 
-- [ ] **T2 — Add AltText::Unspecified variant + sibling-site sweep**
+- [ ] **T2 — Add TextTag enum + AltText::Unspecified variant + sibling-site sweeps**
   - [ ] T2.1: Add `Unspecified` variant to `AltText` enum in `slideforge-types/src/specs.rs` with rustdoc.
-  - [ ] T2.2: Run `grep -r "AltText::Decorative" crates/` — document all N match sites found.
-  - [ ] T2.3: For each match site: determine whether `Unspecified` requires a new arm or shares semantics with `Decorative`. Add `Unspecified` arms everywhere they are semantically distinct.
-  - [ ] T2.4: Update `produces_structure_group()` in `block.rs` — `Unspecified` has same non-structure-producing semantics as `Decorative`.
-  - [ ] T2.5: Run `cargo build --workspace` — verify no `non_exhaustive_patterns` warnings.
+  - [ ] T2.2: Add `TextTag` enum to `slideforge-types/src/specs.rs` with variants `Title`, `Subtitle`, `Body` and rustdoc. Derives: `Hash + Eq + Clone + Debug + Default` (default = `Body` to maintain backward compat for any pre-existing TextBlock construction that doesn't specify a tag).
+  - [ ] T2.3: Add `tag: TextTag` field to `TextBlock` struct in `slideforge-types/src/specs.rs`. Run `grep -r "TextBlock {" crates/` — update all construction sites to supply a `tag` value.
+  - [ ] T2.4: Run `grep -r "AltText::Decorative" crates/` — document all N match sites found.
+  - [ ] T2.5: For each AltText match site: determine whether `Unspecified` requires a new arm or shares semantics with `Decorative`. Add `Unspecified` arms everywhere they are semantically distinct.
+  - [ ] T2.6: Update `produces_structure_group()` in `block.rs` — `Unspecified` has same non-structure-producing semantics as `Decorative`.
+  - [ ] T2.7: Run `cargo build --workspace` — verify no `non_exhaustive_patterns` warnings and no missing-field errors on `TextBlock` construction sites.
 
 - [ ] **T3 — Fix regions.rs structural placeholders (5 sites)**
   - [ ] T3.1: In `regions.rs`, change all 5 occurrences of `FrameContent::Chart/Image/Diagram { alt: AltText::Decorative }` structural placeholders to `alt: AltText::Unspecified`.
@@ -502,6 +708,18 @@ exclusively owned by `slideforge-eval`.
   - [ ] T6.4: Update `for_eval.rs` comment at lines 336–342 to cite Stage 2b (ADR-019).
   - [ ] T6.5: Run unit tests T1.1 — all must now pass.
 
+- [ ] **T6b — Implement TextTag routing in PPTX and DOCX exporters (scope expansion)**
+  - [ ] T6b.1: In `slideforge-pptx/src/serialize_slide.rs` (or equivalent), locate the text frame serialization path. Replace any positional heuristic (e.g., "first frame → title placeholder") with a match on `TextTag`:
+    - `TextTag::Title` → serialize as `<p:ph type="title"/>` shape (or `idx="0"` for body-first layouts)
+    - `TextTag::Body` → serialize as `<p:ph type="body"/>` shape (or `idx="1"`)
+    - `TextTag::Subtitle` → serialize as `<p:ph type="subTitle"/>` when layout has it; fallback to body placeholder
+  - [ ] T6b.2: In `slideforge-docx/src/serialize_slide.rs` (or equivalent), replace any positional heuristic with TextTag routing:
+    - `TextTag::Title` → `<w:pStyle w:val="Heading1"/>`
+    - `TextTag::Body` → Normal paragraph (no explicit style or `<w:pStyle w:val="Normal"/>`)
+    - `TextTag::Subtitle` → `<w:pStyle w:val="Heading2"/>`
+  - [ ] T6b.3: Run T1.4 tests (AC-019, AC-020, AC-021, AC-022, AC-023) — all must now pass.
+  - [ ] T6b.4: Confirm AC-023 (tag-over-position invariant) by constructing a reversed-order `Slide.blocks` test that still routes correctly.
+
 - [ ] **T7 — Wire Stage 2b into build_inner**
   - [ ] T7.1: In `crates/slideforge/src/lib.rs`, add `use slideforge_eval::thread_fields_to_blocks;` to imports.
   - [ ] T7.2: Insert `thread_fields_to_blocks(&mut deck);` call immediately after `eval_deck` returns and before brand load.
@@ -509,11 +727,13 @@ exclusively owned by `slideforge-eval`.
   - [ ] T7.4: Run `cargo test -p slideforge` — verify pipeline wiring does not break existing tests.
 
 - [ ] **T8 — Green pass: all ACs passing**
-  - [ ] T8.1: Run `cargo nextest run -p slideforge-eval --no-fail-fast` — all field_to_block unit tests pass.
+  - [ ] T8.1: Run `cargo nextest run -p slideforge-eval --no-fail-fast` — all field_to_block unit tests pass (AC-007 Value::List path, AC-009, AC-010, AC-011).
   - [ ] T8.2: Run `cargo nextest run -p slideforge-validate --no-fail-fast` — AC-015 tests pass.
   - [ ] T8.3: Run `cargo nextest run -p slideforge-layout --no-fail-fast` — AC-013, AC-014 tests pass.
-  - [ ] T8.4: Run `cargo nextest run -p slideforge --no-fail-fast` — E2E tests (AC-001..AC-007, AC-018) pass.
-  - [ ] T8.5: Run `just check` (full workspace pre-push gate: fmt + clippy pedantic + nextest + doctests).
+  - [ ] T8.4: Run `cargo nextest run -p slideforge-pptx --no-fail-fast` — AC-019, AC-021, AC-023 tests pass (TextTag PPTX routing).
+  - [ ] T8.5: Run `cargo nextest run -p slideforge-docx --no-fail-fast` — AC-020, AC-022 tests pass (TextTag DOCX routing).
+  - [ ] T8.6: Run `cargo nextest run -p slideforge --no-fail-fast` — E2E tests (AC-001..AC-007, AC-018, AC-019, AC-020) pass with PLACEMENT assertions.
+  - [ ] T8.7: Run `just check` (full workspace pre-push gate: fmt + clippy pedantic + nextest + doctests).
 
 - [ ] **T9 — Wave 4 Gate re-check**
   - [ ] T9.1: Confirm the E2E fixture that previously triggered Gate 3 failure now produces non-empty PPTX, PDF, DOCX output.
