@@ -342,7 +342,6 @@ fn build_inner(
 
     let format = options.format.as_deref().unwrap_or("pptx");
     tracing::info!(
-        stage = "pipeline_start",
         format,
         strict = options.strict,
         "build_inner: starting pipeline"
@@ -360,56 +359,59 @@ fn build_inner(
     //
     // H1: BrandProvider::load is a plugin surface — wrap in dispatch_plugin to
     // catch panics from third-party brand providers. (EC-003 / AC-008.)
-    tracing::info!(
-        stage = "brand_load",
-        "build_inner: loading brand configuration"
-    );
+    //
+    // AC-007: "brand" is one of the 6 canonical pipeline stage spans.
     let brand_source = options
         .brand_source
         .as_ref()
         .ok_or(error::BuildError::NoBrandSource)?;
+    let brand = {
+        let _span = tracing::info_span!("brand").entered();
+        tracing::info!("pipeline stage: brand");
 
-    // Select the correct provider id based on the BrandSource variant.
-    //
-    // `BrandSource` is `#[non_exhaustive]`. The wildcard arm ensures that
-    // future source types (e.g., `ApiEndpoint`) route to `BrandLoader` as a
-    // reasonable default. If the provider can't handle the new type it will
-    // return `Err(BrandError::ValidationError)` with an actionable message.
-    let provider_id: &str = match brand_source {
-        BrandSource::TomlFile(_) => "slideforge-brand-synthesizer",
-        // All other variants (PptxFile, DocxFile, and future non-exhaustive variants)
-        // route to BrandLoader.
-        _ => "slideforge-brand/default",
+        // Select the correct provider id based on the BrandSource variant.
+        //
+        // `BrandSource` is `#[non_exhaustive]`. The wildcard arm ensures that
+        // future source types (e.g., `ApiEndpoint`) route to `BrandLoader` as a
+        // reasonable default. If the provider can't handle the new type it will
+        // return `Err(BrandError::ValidationError)` with an actionable message.
+        let provider_id: &str = match brand_source {
+            BrandSource::TomlFile(_) => "slideforge-brand-synthesizer",
+            // All other variants (PptxFile, DocxFile, and future non-exhaustive variants)
+            // route to BrandLoader.
+            _ => "slideforge-brand/default",
+        };
+
+        let brand_provider = registry
+            .lookup_brand_provider(provider_id)
+            .ok_or(error::BuildError::NoBrandProvider)?;
+        let brand_provider_id = brand_provider.id();
+        dispatch::dispatch_plugin(brand_provider_id, || brand_provider.load(brand_source))
+            .map_err(error::BuildError::Plugin)?
+            .map_err(error::BuildError::Brand)?
     };
-
-    let brand_provider = registry
-        .lookup_brand_provider(provider_id)
-        .ok_or(error::BuildError::NoBrandProvider)?;
-    let brand_provider_id = brand_provider.id();
-    let brand = dispatch::dispatch_plugin(brand_provider_id, || brand_provider.load(brand_source))
-        .map_err(error::BuildError::Plugin)?
-        .map_err(error::BuildError::Brand)?;
 
     // Stage 3: parse the DSL source.
     //
     // M1 fix: on parse failure, carry the full structured DiagnosticSink
     // diagnostics (not just a count) so callers retain file:line:col + hints.
-    tracing::info!(
-        stage = "parse",
-        source_len = source.len(),
-        "build_inner: parsing DSL source"
-    );
-    let mut source_map = SourceMap::new();
-    let file_id = source_map.add_file(
-        std::sync::Arc::from("<build>"),
-        std::sync::Arc::from(source),
-    );
-    let mut sink = DiagnosticSink::new();
-    let deck_node = parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
-        let diagnostics = diag_util::collect_diagnostics(sink.errors(), "E-PAR-???");
-        let count = diagnostics.len();
-        error::BuildError::ParseFailed { diagnostics, count }
-    })?;
+    //
+    // AC-007: "parse" is one of the 6 canonical pipeline stage spans.
+    let deck_node = {
+        let _span = tracing::info_span!("parse", source_len = source.len()).entered();
+        tracing::info!("pipeline stage: parse");
+        let mut source_map = SourceMap::new();
+        let file_id = source_map.add_file(
+            std::sync::Arc::from("<build>"),
+            std::sync::Arc::from(source),
+        );
+        let mut sink = DiagnosticSink::new();
+        parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
+            let diagnostics = diag_util::collect_diagnostics(sink.errors(), "E-PAR-???");
+            let count = diagnostics.len();
+            error::BuildError::ParseFailed { diagnostics, count }
+        })?
+    };
 
     // Stage 4: evaluate the AST into a semantic Deck.
     //
@@ -420,17 +422,19 @@ fn build_inner(
     // be called after the validator loop without rebinding. The Validator trait
     // takes `&Deck` (immutable), so the mutation is deferred to after all
     // validator dispatch is complete.
-    tracing::info!(
-        stage = "eval",
-        "build_inner: evaluating AST into semantic Deck"
-    );
-    let eval_config = EvalConfig::default();
-    let mut eval_sink = DiagnosticSink::new();
-    let mut deck = eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
-        let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
-        let count = diagnostics.len();
-        error::BuildError::EvalFailed { diagnostics, count }
-    })?;
+    //
+    // AC-007: "evaluate" is one of the 6 canonical pipeline stage spans.
+    let mut deck = {
+        let _span = tracing::info_span!("evaluate").entered();
+        tracing::info!("pipeline stage: evaluate");
+        let eval_config = EvalConfig::default();
+        let mut eval_sink = DiagnosticSink::new();
+        eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
+            let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
+            let count = diagnostics.len();
+            error::BuildError::EvalFailed { diagnostics, count }
+        })?
+    };
 
     // Stage 5 (ADR-016 Decision 3): run all registered Validators.
     //
@@ -442,54 +446,34 @@ fn build_inner(
     //
     // HIGH-2 fix: collect ALL diagnostics (Error + Warning) into
     // all_validator_diagnostics. Never silently drop warnings.
-    // Decision to fail (strict=true) is made by checking for ANY Error-severity
-    // diagnostic. The ValidationFailed error carries ALL collected diagnostics
-    // so callers see the complete picture.
     //
-    // strict=true  → ValidationFailed if any Error-severity diagnostic present;
-    //                carries ALL diagnostics (Error + Warning + Info).
-    // strict=false → emit tracing::warn for each diagnostic, then continue.
-    tracing::info!(
-        stage = "validate",
-        strict = options.strict,
-        "build_inner: running validators"
-    );
+    // OBS-5 / ADR-018 Decision 5: NO pre-layout strict gate here. We collect
+    // Stage 5 diagnostics, then run layout, then collect Stage 6b diagnostics,
+    // then apply ONE strict gate on the combined list. This ensures both passes
+    // complete before any failure is raised.
+    //
+    // AC-007: "validate" is one of the 6 canonical pipeline stage spans.
     let validator_opts = ValidatorOptions::default();
     let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
-    for validator in registry.iter_validators() {
-        let validator_id = validator.id().to_owned();
-        let diags =
-            dispatch::dispatch_plugin(&validator_id, || validator.validate(&deck, &validator_opts))
-                .map_err(error::BuildError::Plugin)?;
-        for diag in &diags {
-            tracing::warn!(
-                validator = %validator_id,
-                code = %diag.code,
-                severity = %diag.severity,
-                message = %diag.message,
-                "validator diagnostic"
-            );
-        }
-        all_validator_diagnostics.extend(diags);
-    }
-
-    if options.strict {
-        // HIGH-2: decide strict-failure by "any Error-severity present".
-        let has_error = all_validator_diagnostics
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error);
-        if has_error {
-            // Carry ALL collected diagnostics (Error + Warning + Info) in the
-            // ValidationFailed error — nothing is silently dropped.
-            // count = number of Error-severity diagnostics (for the Display message).
-            let error_count = all_validator_diagnostics
-                .iter()
-                .filter(|d| d.severity == DiagnosticSeverity::Error)
-                .count();
-            return Err(error::BuildError::ValidationFailed {
-                diagnostics: all_validator_diagnostics,
-                count: error_count,
-            });
+    {
+        let _span = tracing::info_span!("validate", strict = options.strict).entered();
+        tracing::info!("pipeline stage: validate");
+        for validator in registry.iter_validators() {
+            let validator_id = validator.id().to_owned();
+            let diags = dispatch::dispatch_plugin(&validator_id, || {
+                validator.validate(&deck, &validator_opts)
+            })
+            .map_err(error::BuildError::Plugin)?;
+            for diag in &diags {
+                tracing::warn!(
+                    validator = %validator_id,
+                    code = %diag.code,
+                    severity = %diag.severity,
+                    message = %diag.message,
+                    "validator diagnostic"
+                );
+            }
+            all_validator_diagnostics.extend(diags);
         }
     }
 
@@ -505,15 +489,58 @@ fn build_inner(
     // Returns `true` if a default was injected (lang was absent or blank),
     // `false` if lang was already set. The return value is not used here (the
     // diagnostic was already emitted by LangValidator above if needed).
-    tracing::info!(
-        stage = "inject_lang_default",
-        "build_inner: injecting lang default (post-validate)"
-    );
+    tracing::info!("build_inner: injecting lang default (post-validate)");
     slideforge_validate::inject_lang_default(&mut deck);
 
     // Stage 6: lay out the Deck into a LaidOutDeck.
-    tracing::info!(stage = "layout", "build_inner: laying out Deck");
-    let laid_out = layout_run(&deck, &brand).map_err(error::BuildError::Layout)?;
+    //
+    // OBS-5 / ADR-018 Decision 5: layout runs before the combined strict gate,
+    // so that Stage 6b post-layout validators can also add diagnostics before
+    // the single gate evaluates.
+    //
+    // Layout–validator interaction: if layout itself returns Err (e.g., EmptyDeck),
+    // the layout error may be a CONSEQUENCE of pre-layout validation errors (e.g.,
+    // ZeroSlideValidator already flagged E-LAY-002). In that case, returning
+    // ValidationFailed (with the root-cause validator diagnostics) is more
+    // informative than returning a raw LayoutError. Therefore:
+    //
+    // - If layout returns Err AND we have pre-layout Error-severity diagnostics
+    //   AND strict=true → return ValidationFailed (root cause takes priority).
+    // - If layout returns Err AND there are no Error-severity pre-layout
+    //   diagnostics (or strict=false) → return Layout(err) as usual.
+    //
+    // layout::run is wrapped in catch_unwind (STORY-049), so a panic on an
+    // invalid deck becomes BuildError::Layout, not a crash.
+    //
+    // AC-007: "layout" is one of the 6 canonical pipeline stage spans.
+    let layout_result = {
+        let _span = tracing::info_span!("layout").entered();
+        tracing::info!("pipeline stage: layout");
+        layout_run(&deck, &brand)
+    };
+    let laid_out = match layout_result {
+        Ok(lo) => lo,
+        Err(layout_err) => {
+            // If there are pre-layout Error diagnostics, they are the root cause.
+            // Return ValidationFailed (more informative) in strict mode.
+            if options.strict {
+                let pre_layout_errors: Vec<slideforge_plugin_api::Diagnostic> =
+                    all_validator_diagnostics
+                        .iter()
+                        .filter(|d| d.severity == DiagnosticSeverity::Error)
+                        .cloned()
+                        .collect();
+                if !pre_layout_errors.is_empty() {
+                    let count = pre_layout_errors.len();
+                    return Err(error::BuildError::ValidationFailed {
+                        diagnostics: all_validator_diagnostics,
+                        count,
+                    });
+                }
+            }
+            return Err(error::BuildError::Layout(layout_err));
+        }
+    };
 
     // Stage 6b (ADR-018 Decision 1): post-layout validation pass on LaidOutDeck.
     //
@@ -527,10 +554,7 @@ fn build_inner(
     // from both passes feeds the strict-mode gate exactly once, below.
     //
     // H1: Validator::validate_post_layout is a plugin surface — wrap in dispatch_plugin.
-    tracing::info!(
-        stage = "validate_post_layout",
-        "build_inner: running post-layout validators (Stage 6b)"
-    );
+    tracing::info!("build_inner: running post-layout validators (Stage 6b)");
     for validator in registry.iter_validators() {
         let validator_id = validator.id().to_owned();
         let post_diags = dispatch::dispatch_plugin(&validator_id, || {
@@ -549,19 +573,14 @@ fn build_inner(
         all_validator_diagnostics.extend(post_diags);
     }
 
-    // Strict-mode gate (ADR-018 Decision 5): evaluate the COMBINED diagnostic list
-    // (Stage 5 + Stage 6b) exactly once. This gate fires here (after Stage 6b),
-    // superseding the pre-layout-only gate that ran above.
-    //
-    // The pre-layout gate already fired on the Stage 5 diagnostics only. Stage 6b
-    // may add new Error-severity diagnostics (e.g., E-A11-001 from missing chart alt).
-    // Re-evaluating the combined list here ensures Stage 6b errors block the build
-    // in strict mode.
+    // ADR-018 Decision 5 strict-mode gate: evaluate the COMBINED diagnostic list
+    // (Stage 5 + Stage 6b) exactly ONCE, after both passes have collected all
+    // diagnostics. No early return at Stage 5; the gate fires here, after Stage 6b.
     if options.strict {
-        let has_post_layout_error = all_validator_diagnostics
+        let has_error = all_validator_diagnostics
             .iter()
             .any(|d| d.severity == DiagnosticSeverity::Error);
-        if has_post_layout_error {
+        if has_error {
             let error_count = all_validator_diagnostics
                 .iter()
                 .filter(|d| d.severity == DiagnosticSeverity::Error)
@@ -582,24 +601,25 @@ fn build_inner(
     // (lookup key, e.g. "pptx") from extension() (file extension, e.g. "pptx"
     // for most, but may differ for custom exporters). This ensures BuildOutput
     // carries the authoritative file extension declared by the exporter.
-    // `format` is already bound above (used for pipeline_start span).
-    tracing::info!(
-        stage = "export",
-        format,
-        "build_inner: exporting to output format"
-    );
-    let exporter = registry
-        .lookup_exporter(format)
-        .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
-    let exporter_id = exporter.id().to_owned();
-    // Capture the extension before dispatch_plugin borrows exporter in the closure.
-    let file_extension = exporter.extension().to_owned();
-    let export_opts = ExportOptions::default();
-    let bytes = dispatch::dispatch_plugin(&exporter_id, || {
-        exporter.export(&deck, &laid_out, &brand, &export_opts)
-    })
-    .map_err(error::BuildError::Plugin)?
-    .map_err(error::BuildError::Export)?;
+    //
+    // AC-007: "export" is one of the 6 canonical pipeline stage spans.
+    let (bytes, file_extension) = {
+        let _span = tracing::info_span!("export", format).entered();
+        tracing::info!("pipeline stage: export");
+        let exporter = registry
+            .lookup_exporter(format)
+            .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
+        let exporter_id = exporter.id().to_owned();
+        // Capture the extension before dispatch_plugin borrows exporter in the closure.
+        let file_extension = exporter.extension().to_owned();
+        let export_opts = ExportOptions::default();
+        let bytes = dispatch::dispatch_plugin(&exporter_id, || {
+            exporter.export(&deck, &laid_out, &brand, &export_opts)
+        })
+        .map_err(error::BuildError::Plugin)?
+        .map_err(error::BuildError::Export)?;
+        (bytes, file_extension)
+    };
 
     Ok(BuildOutput {
         bytes,
