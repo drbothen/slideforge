@@ -328,9 +328,10 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             // Body carries ContentBlock items for rich body content.
                             // Wrap the text block's content as a single ContentBlock::Text.
                             // The PPTX serializer's extract_body_text traverses these ContentBlocks.
-                            let content = crate::types::FrameContent::Body(vec![
-                                ContentBlock::Text(text_block.clone()),
-                            ]);
+                            let content =
+                                crate::types::FrameContent::Body(vec![ContentBlock::Text(
+                                    text_block.clone(),
+                                )]);
                             fill_region_slot_or_append(
                                 &mut all_frames,
                                 content,
