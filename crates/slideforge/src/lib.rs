@@ -539,7 +539,7 @@ fn build_inner(
                 }
             }
             return Err(error::BuildError::Layout(layout_err));
-        }
+        },
     };
 
     // Stage 6b (ADR-018 Decision 1): post-layout validation pass on LaidOutDeck.
