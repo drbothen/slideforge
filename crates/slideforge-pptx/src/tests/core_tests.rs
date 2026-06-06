@@ -141,6 +141,7 @@ fn make_title_slide(index: usize, title: &str) -> LaidOutSlide {
             bbox: title_bbox(),
             content: FrameContent::Title(Arc::from(title)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: vec![],
@@ -158,11 +159,13 @@ fn make_content_slide(index: usize, title: &str) -> LaidOutSlide {
                 bbox: title_bbox(),
                 content: FrameContent::Title(Arc::from(title)),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: body_bbox(),
                 content: FrameContent::Body(vec![]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -1193,6 +1196,7 @@ fn test_BC_4_01_001_ec003_chart_svg_has_content_type_override() {
             alt: slideforge_types::AltText::Decorative,
         },
         text_flow: None,
+        region_role: None,
     }];
 
     let pptx_bytes = build_pptx(&laid_out);
@@ -1693,6 +1697,7 @@ fn test_f037_005_diagram_frame_emits_pic_shape_referencing_media_rid() {
             alt: slideforge_types::AltText::Decorative,
         },
         text_flow: None,
+        region_role: None,
     }];
 
     let pptx_bytes = build_pptx(&laid_out);

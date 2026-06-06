@@ -748,6 +748,7 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
     let text_block = Block {
         content: ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("intro paragraph"))],
+            tag: slideforge_types::TextTag::Untagged,
             span: SourceSpan::default(),
         }),
         label: None,

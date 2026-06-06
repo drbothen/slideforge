@@ -1,0 +1,11 @@
+# STORY-086 fixture: single title slide with a declared title field.
+#
+# Used by: AC-001 (PPTX title text run), AC-003 (DOCX Heading1 run).
+# Key constraint: title field is "My Title" — tests assert this exact string
+# appears in rendered output as a non-empty text run.
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "My Title"

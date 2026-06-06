@@ -208,7 +208,13 @@ pub fn layout_shapes(
         // (e.g., when --no-validate mode is formally specified).
         let alt = match &shape.alt {
             Some(slideforge_types::AltText::Provided(s)) => Some(Arc::clone(s)),
-            Some(slideforge_types::AltText::Decorative) | None => None,
+            // Decorative, Unspecified, and None all map to no alt string in the shape frame.
+            // Unspecified on a shape means no author alt was threaded (ADR-019 Decision 4.1);
+            // the shape layout path fires LayoutError::MissingAlt separately if needed.
+            Some(
+                slideforge_types::AltText::Decorative | slideforge_types::AltText::Unspecified,
+            )
+            | None => None,
         };
         let decorative =
             shape.decorative || matches!(&shape.alt, Some(slideforge_types::AltText::Decorative));
@@ -316,6 +322,7 @@ pub fn layout_shapes(
             bbox,
             content: crate::types::FrameContent::Shape(shape_frame),
             text_flow: None,
+            region_role: None,
         });
     }
 
@@ -1827,7 +1834,7 @@ mod tests {
         // Extract values from spec (mirroring layout_shapes extraction at shapes.rs:215-220).
         let alt = match &spec.alt {
             Some(AltText::Provided(s)) => Some(Arc::clone(s)),
-            Some(AltText::Decorative) | None => None,
+            Some(AltText::Decorative | AltText::Unspecified) | None => None,
         };
         let decorative = spec.decorative || matches!(&spec.alt, Some(AltText::Decorative));
 
@@ -1855,6 +1862,9 @@ mod tests {
                 panic!(
                     "decorative MUST NOT win when alt is present (BC-3.04.001 v1.5.2 Invariant 11)"
                 );
+            },
+            slideforge_types::AltText::Unspecified => {
+                panic!("Unspecified MUST NOT be produced when alt is Provided (Invariant 11)");
             },
         }
     }

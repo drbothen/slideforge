@@ -53,6 +53,22 @@ ordered-float = { workspace = true }
 # makes `zip` available to the compiled library (for BleedChecker), while
 # this dev-dep makes it available to the integration test binaries.
 zip = "=2.3.0"
+# tracing-test: enables `#[tracing_test::traced_test]` + `logs_contain()` in
+# integration tests that verify tracing warning/error emission (e.g. W-A11-002
+# spurious-emission guard for F-086-P13-OBS-001). Pinned to the same version
+# already present in Cargo.lock via slideforge-layout.
+#
+# `no-env-filter` is REQUIRED for integration tests (`tests/` directory): without
+# it, the env filter is set to `<test_crate_name>=trace`, which captures only
+# events from the test crate itself and misses events from slideforge-eval
+# production code. `no-env-filter` sets the filter to "trace" (all crates).
+# See tracing-test docs: "integration tests must use no-env-filter".
+tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
+
+[[test]]
+# field_to_block_unit.rs — STORY-086 Red Gate unit tests for thread_fields_to_blocks.
+# No feature gates; runs in the default `cargo nextest run -p slideforge-eval` invocation.
+name = "field_to_block_unit"
 
 [[test]]
 # bleed_tests.rs uses `slideforge_eval::BleedChecker`, which is gated behind the

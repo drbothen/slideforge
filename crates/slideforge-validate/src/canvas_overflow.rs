@@ -265,6 +265,7 @@ mod tests {
         let text_block = Block {
             content: ContentBlock::Text(TextBlock {
                 inlines: vec![InlineNode::Plain(Arc::from("Some paragraph text"))],
+                tag: slideforge_types::TextTag::Untagged,
                 span: SourceSpan::default(),
             }),
             label: None,

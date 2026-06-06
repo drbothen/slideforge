@@ -147,6 +147,7 @@ fn title_slide(text: &str) -> LaidOutSlide {
             },
             content: FrameContent::Title(Arc::from(text)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -173,7 +174,7 @@ fn n_slide_deck(n: usize) -> LaidOutDeck {
 
 /// Build a single slide with a title frame + body frame (with bullets).
 fn title_and_body_slide() -> LaidOutDeck {
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock, TextTag};
 
     LaidOutDeck {
         page_size: default_page_size(),
@@ -190,6 +191,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                     },
                     content: FrameContent::Title(Arc::from("Title H1 Text")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -201,6 +203,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                     content: FrameContent::Body(vec![
                         ContentBlock::Text(TextBlock {
                             inlines: vec![InlineNode::Plain(Arc::from("Body paragraph text"))],
+                            tag: TextTag::Untagged,
                             span: SourceSpan::default(),
                         }),
                         ContentBlock::Bullets(vec![BulletItem {
@@ -210,6 +213,7 @@ fn title_and_body_slide() -> LaidOutDeck {
                         }]),
                     ]),
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -238,6 +242,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
                     },
                     content: FrameContent::Title(Arc::from("Figure Slide")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -250,6 +255,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
                         alt: slideforge_types::AltText::Provided(Arc::from(alt_text)),
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -280,6 +286,7 @@ fn decorative_only_slide() -> LaidOutDeck {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -531,6 +538,7 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -616,6 +624,7 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
                     alt: slideforge_types::AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -705,6 +714,7 @@ fn test_bc_4_03_001_body_level_chart_diagram_no_placeholder_alt() {
                 ContentBlock::Diagram(diagram_spec),
             ]),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -839,6 +849,7 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
                     },
                     content: FrameContent::Title(Arc::from("Slide with decorative frame")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -852,6 +863,7 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
                         alt: slideforge_types::AltText::Decorative,
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -1115,6 +1127,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
             },
             content: FrameContent::Title(Arc::from("Quarterly Revenue Report")),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -1135,6 +1148,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                 },
                 content: FrameContent::Title(Arc::from("Revenue Breakdown")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1156,6 +1170,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                     },
                 ])]),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1170,6 +1185,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
                     )),
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -1190,6 +1206,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
             },
             content: FrameContent::Title(Arc::from("Thank You")),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -1435,7 +1452,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
     use krilla::tagging::{Node, TagKind};
     use slideforge_layout::LaidOutSlide;
     use slideforge_pdf::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, TextBlock, TextTag};
 
     // Build a 2-frame slide: Title (index 0) → Body with bullets (index 1).
     // The structure tree must list the H1 group BEFORE the L/P group.
@@ -1452,6 +1469,7 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                 },
                 content: FrameContent::Title(Arc::from("Title H1")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -1462,9 +1480,11 @@ fn test_bc_4_03_001_invariant_structure_tree_reading_order() {
                 },
                 content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from("Paragraph"))],
+                    tag: TextTag::Untagged,
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -1591,6 +1611,7 @@ fn test_bc_4_03_001_invariant_every_figure_has_non_empty_alt() {
                 alt: slideforge_types::AltText::Decorative,
             },
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: RegisterSet::new(),
@@ -2054,6 +2075,7 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
                 },
                 content: FrameContent::Title(Arc::from("Quarterly Review")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2064,6 +2086,7 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
                 },
                 content: FrameContent::Subtitle(Arc::from("Q4 2025 Highlights")),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -2551,7 +2574,7 @@ fn test_bc_4_03_001_ac013_ci_workflow_includes_ignored_flag() {
 #[test]
 fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
     use slideforge_pdf::tag_engine::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+    use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
     // Body frame with 2 content blocks: Text + Bullets.
     // This is the "title_and_body_slide" configuration (exercised by AC-013 bullets fixture).
@@ -2568,6 +2591,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                 },
                 content: FrameContent::Title(Arc::from("Integration Title")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2579,6 +2603,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                 content: FrameContent::Body(vec![
                     ContentBlock::Text(TextBlock {
                         inlines: vec![InlineNode::Plain(Arc::from("Body paragraph text"))],
+                        tag: TextTag::Untagged,
                         span: SourceSpan::default(),
                     }),
                     ContentBlock::Bullets(vec![BulletItem {
@@ -2588,6 +2613,7 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
                     }]),
                 ]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,
@@ -2680,7 +2706,9 @@ fn test_f_p3_001_multi_block_body_each_block_has_own_child_index_integration() {
 #[test]
 fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
     use slideforge_pdf::tag_engine::SlideTagEngine;
-    use slideforge_types::{BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock};
+    use slideforge_types::{
+        BulletItem, ContentBlock, InlineNode, MathNode, SourceSpan, TextBlock, TextTag,
+    };
 
     // ── Part 1: tag engine produces 3 distinct child indices ──────────────────
 
@@ -2697,6 +2725,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                 },
                 content: FrameContent::Title(Arc::from("Mixed-Block Regression")),
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: BoundingBox {
@@ -2708,6 +2737,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                 content: FrameContent::Body(vec![
                     ContentBlock::Text(TextBlock {
                         inlines: vec![InlineNode::Plain(Arc::from("Text paragraph"))],
+                        tag: TextTag::Untagged,
                         span: SourceSpan::default(),
                     }),
                     ContentBlock::Math(MathNode::display(
@@ -2721,6 +2751,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
                     }]),
                 ]),
                 text_flow: None,
+                region_role: None,
             },
         ],
         speaker_notes: None,

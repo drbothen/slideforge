@@ -6,7 +6,7 @@
 //!
 //! STORY-039 scope expansion (human-authorized 2026-06-03):
 //! AC-005 uses REAL FrameContent::Chart/Diagram frames (not Image proxies — F-039-C2 fix).
-//! EC-006/EC-007 test the Decorative-sentinel path (ChartSpec.alt = None / DiagramSpec.alt = None).
+//! EC-006/EC-007 test the AltText::Decorative variant path (empty descr="" rendering in PPTX).
 //!
 //! ## Traceability
 //!
@@ -24,8 +24,8 @@
 //! | `test_BC_4_01_004_ec001_all_decorative_slide` | EC-001 | postcondition 2 | All decorative frames produce descr="" |
 //! | `test_BC_4_01_004_ec002_zh_tw_lang_bcp47_embedded` | EC-002 | EC-003 | zh-Hant-TW lang embedded unchanged |
 //! | `test_BC_4_01_004_ec005_300_char_alt_exact_length` | EC-005 | invariant 1 | 300-char descr exact length verified |
-//! | `test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty` | EC-006 | EC-006 | Chart AltText::Decorative produces descr="" |
-//! | `test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty` | EC-007 | EC-007 | Diagram AltText::Decorative produces descr="" |
+//! | `test_BC_4_01_004_ec006_chart_decorative_variant_descr_empty` | EC-006 | EC-006 | Chart AltText::Decorative produces descr="" |
+//! | `test_BC_4_01_004_ec007_diagram_decorative_variant_descr_empty` | EC-007 | EC-007 | Diagram AltText::Decorative produces descr="" |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -152,6 +152,7 @@ fn make_slide_with_image_alt(index: usize, alt: &str) -> LaidOutSlide {
                 alt: AltText::Provided(Arc::from(alt)),
             },
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: vec![],
@@ -175,6 +176,7 @@ fn make_slide_with_decorative_image(index: usize) -> LaidOutSlide {
                 alt: AltText::Decorative,
             },
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: None,
         register_tags: vec![],
@@ -213,6 +215,7 @@ fn make_laid_out_deck_with_lang_only() -> LaidOutDeck {
                 bbox: title_bbox(),
                 content: FrameContent::Title(Arc::from("Lang Test Slide")),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -246,6 +249,7 @@ fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
                     alt: AltText::Provided(Arc::from(alt)),
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -281,6 +285,7 @@ fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
                     alt: AltText::Provided(Arc::from(alt)),
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -292,12 +297,17 @@ fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
 }
 
 /// Build a `LaidOutDeck` with one slide containing a `FrameContent::Chart`
-/// where `ChartSpec.alt = None` was mapped to `AltText::Decorative` (EC-006).
+/// carrying `AltText::Decorative` directly (author explicitly opted out via `decorative: true`).
 ///
-/// The test asserts that when `alt = AltText::Decorative`, the PPTX emits `descr=""`
-/// (not absent). This tests the Decorative-distinction code path in `AltTextEmbedder`
-/// and guards against regressions that would omit the `descr` attribute entirely.
-fn make_laid_out_deck_with_chart_none_alt() -> LaidOutDeck {
+/// EC-006 verifies the PPTX output side: a `FrameContent::Chart { alt: AltText::Decorative }`
+/// frame must produce `descr=""` (attribute PRESENT with empty value, NOT absent).
+/// This tests the `AltTextEmbedder` Decorative variant path and guards against regressions
+/// that would omit the `descr` attribute entirely for Decorative frames.
+///
+/// NOTE: The `None`-alt path (missing author alt text, pipeline gap) maps to
+/// `AltText::Unspecified` since STORY-086 / ADR-019 Decision 5.2. This helper
+/// constructs the Decorative VARIANT directly, not the None-alt path.
+fn make_laid_out_deck_with_chart_decorative() -> LaidOutDeck {
     use slideforge_types::AltText;
     LaidOutDeck {
         page_size: PageSize::default(),
@@ -306,12 +316,13 @@ fn make_laid_out_deck_with_chart_none_alt() -> LaidOutDeck {
             slide_type_keyword: Arc::from("chart"),
             frames: vec![Frame {
                 bbox: title_bbox(),
-                // AltText::Decorative = what layout::run produces when ChartSpec.alt = None
-                // (safe sentinel + tracing::warn! per EC-006).
+                // AltText::Decorative: author explicitly opted out (decorative: true).
+                // EC-006: PPTX must emit descr="" (present, empty) for this variant.
                 content: FrameContent::Chart {
                     alt: AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -323,8 +334,15 @@ fn make_laid_out_deck_with_chart_none_alt() -> LaidOutDeck {
 }
 
 /// Build a `LaidOutDeck` with one slide containing a `FrameContent::Diagram`
-/// where `DiagramSpec.alt = None` was mapped to `AltText::Decorative` (EC-007).
-fn make_laid_out_deck_with_diagram_none_alt() -> LaidOutDeck {
+/// carrying `AltText::Decorative` directly (author explicitly opted out via `decorative: true`).
+///
+/// EC-007 verifies the PPTX output side: a `FrameContent::Diagram { svg, alt: AltText::Decorative }`
+/// frame must produce `descr=""` (attribute PRESENT with empty value, NOT absent).
+///
+/// NOTE: The `None`-alt path (missing author alt text, pipeline gap) maps to
+/// `AltText::Unspecified` since STORY-086 / ADR-019 Decision 5.2. This helper
+/// constructs the Decorative VARIANT directly, not the None-alt path.
+fn make_laid_out_deck_with_diagram_decorative() -> LaidOutDeck {
     use slideforge_types::AltText;
     let svg = Arc::from(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><title>empty</title></svg>"#,
@@ -337,13 +355,14 @@ fn make_laid_out_deck_with_diagram_none_alt() -> LaidOutDeck {
             slide_type_keyword: Arc::from("diagram"),
             frames: vec![Frame {
                 bbox: title_bbox(),
-                // AltText::Decorative = what layout::run produces when DiagramSpec.alt = None
-                // (safe sentinel + tracing::warn! per EC-007).
+                // AltText::Decorative: author explicitly opted out (decorative: true).
+                // EC-007: PPTX must emit descr="" (present, empty) for this variant.
                 content: FrameContent::Diagram {
                     svg: normalized,
                     alt: AltText::Decorative,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -972,15 +991,20 @@ fn test_BC_4_01_004_ec005_300_char_alt_exact_length() {
     );
 }
 
-// ─── EC-006: ChartSpec.alt = None → AltText::Decorative + descr="" ───────────
+// ─── EC-006: AltText::Decorative on Chart frame → descr="" in PPTX ─────────
 
-/// BC-4.01.004 EC-006 (amended story spec):
-/// When `ChartSpec.alt = None` reaches the layout engine (upstream validator miss),
-/// `layout::run` must map it to `AltText::Decorative` and emit `tracing::warn!`.
-///
-/// This test verifies the PPTX output side of that contract: a
-/// `FrameContent::Chart { alt: AltText::Decorative }` frame must produce
+/// BC-4.01.004 EC-006:
+/// A `FrameContent::Chart { alt: AltText::Decorative }` frame must produce
 /// `descr=""` on its enclosing shape (attribute PRESENT with empty value, NOT absent).
+///
+/// This tests the Decorative variant code path in `AltTextEmbedder` — author
+/// explicitly opted out of alt text via `decorative: true`. The PPTX OOXML
+/// accessibility contract requires the `descr` attribute to be present (even if
+/// empty) so that assistive technology can detect the decorative marker.
+///
+/// NOTE: the `None`-alt path (pipeline gap, no author alt threaded) maps to
+/// `AltText::Unspecified` since STORY-086 / ADR-019 Decision 5.2 — that path
+/// is tested in `slideforge-layout` and `slideforge-validate`.
 ///
 /// `slide_serializer.rs` routes `Chart { alt: AltText::Decorative }` through
 /// `AltTextEmbedder` and emits `descr=""` (present, empty) on the enclosing
@@ -988,10 +1012,10 @@ fn test_BC_4_01_004_ec005_300_char_alt_exact_length() {
 /// skip Chart frames entirely or emit the `descr` attribute as absent rather than
 /// empty.
 #[test]
-fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
+fn test_BC_4_01_004_ec006_chart_decorative_variant_descr_empty() {
     let deck = make_deck_with_lang("en-US");
-    // Chart frame with AltText::Decorative (simulates ChartSpec.alt = None path).
-    let laid_out = make_laid_out_deck_with_chart_none_alt();
+    // Chart frame with AltText::Decorative (author opted out — decorative: true).
+    let laid_out = make_laid_out_deck_with_chart_decorative();
 
     let pptx_bytes = build_pptx(&deck, &laid_out);
     let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
@@ -1007,31 +1031,34 @@ fn test_BC_4_01_004_ec006_chart_none_alt_maps_to_decorative_descr_empty() {
     assert!(
         descr_values.iter().any(String::is_empty),
         "slide1.xml must contain <p:cNvPr descr=\"\"> for a Chart frame with \
-         AltText::Decorative (EC-006 — ChartSpec.alt = None safe-sentinel path). \
+         AltText::Decorative (EC-006 — author opted out via decorative: true). \
          The descr attribute MUST be present with empty value. \
          Found descr values: {descr_values:?}"
     );
 }
 
-// ─── EC-007: DiagramSpec.alt = None → AltText::Decorative + descr="" ─────────
+// ─── EC-007: AltText::Decorative on Diagram frame → descr="" in PPTX ────────
 
-/// BC-4.01.004 EC-007 (amended story spec):
-/// When `DiagramSpec.alt = None` reaches the layout engine (upstream validator miss),
-/// `layout::run` must map it to `AltText::Decorative` and emit `tracing::warn!`.
+/// BC-4.01.004 EC-007:
+/// A `FrameContent::Diagram { svg, alt: AltText::Decorative }` frame must produce
+/// `descr=""` on its enclosing `<p:pic>` shape (attribute PRESENT with empty value, NOT absent).
 ///
-/// This test verifies the PPTX output side: a
-/// `FrameContent::Diagram { svg, alt: AltText::Decorative }` frame must produce
-/// `descr=""` on its enclosing `<p:pic>` shape.
+/// This tests the Decorative variant code path in `build_picture` — author
+/// explicitly opted out of alt text via `decorative: true`.
+///
+/// NOTE: the `None`-alt path (pipeline gap, no author alt threaded) maps to
+/// `AltText::Unspecified` since STORY-086 / ADR-019 Decision 5.2 — that path
+/// is tested in `slideforge-layout` and `slideforge-validate`.
 ///
 /// `build_picture` in `slide_serializer.rs` passes `AltText::Decorative` through
 /// to the `description` field as `Some("".to_owned())` so that the `descr` attribute
 /// is present (even if empty) for decorative frames. This test guards against
 /// regressions that would revert `description` to `None` and omit the `descr` attribute.
 #[test]
-fn test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty() {
+fn test_BC_4_01_004_ec007_diagram_decorative_variant_descr_empty() {
     let deck = make_deck_with_lang("en-US");
-    // Diagram frame with AltText::Decorative (simulates DiagramSpec.alt = None path).
-    let laid_out = make_laid_out_deck_with_diagram_none_alt();
+    // Diagram frame with AltText::Decorative (author opted out — decorative: true).
+    let laid_out = make_laid_out_deck_with_diagram_decorative();
 
     let pptx_bytes = build_pptx(&deck, &laid_out);
     let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
@@ -1046,7 +1073,7 @@ fn test_BC_4_01_004_ec007_diagram_none_alt_maps_to_decorative_descr_empty() {
     assert!(
         descr_values.iter().any(String::is_empty),
         "slide1.xml must contain <p:cNvPr descr=\"\"> for a Diagram frame with \
-         AltText::Decorative (EC-007 — DiagramSpec.alt = None safe-sentinel path). \
+         AltText::Decorative (EC-007 — author opted out via decorative: true). \
          The descr attribute MUST be present with empty value (not absent). \
          Found descr values: {descr_values:?}"
     );

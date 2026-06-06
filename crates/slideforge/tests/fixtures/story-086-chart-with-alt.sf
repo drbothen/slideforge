@@ -1,0 +1,13 @@
+# STORY-086 fixture: chart slide with alt text provided.
+#
+# Used by: AC-004 (strict + chart WITH alt → Ok, PPTX carries descr).
+# The alt text "Bar chart showing Q3 revenue by region" must appear in the
+# PPTX slide XML as an accessibility description attribute.
+
+slideforge_version "1"
+lang "en-US"
+
+slide chart:
+  title "Q3 Revenue"
+  chart_type "bar"
+  alt "Bar chart showing Q3 revenue by region"

@@ -40,7 +40,7 @@
 use std::sync::Arc;
 
 use slideforge_types::{
-    AltText, Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, Value,
+    AltText, Brand, BulletItem, ContentBlock, Deck, FieldValue, Register, TextTag, Value,
 };
 
 use crate::error::LayoutError;
@@ -107,6 +107,15 @@ use crate::types::{
 /// # Errors
 ///
 /// Returns [`LayoutError`] on any invariant violation. See variants above.
+// `layout::run` exceeds the `clippy::too_many_lines` threshold by design. The function
+// is the single semantic→geometric IR boundary in the pipeline (AC-008); every slide-
+// level concern (page size derivation, region frame allocation, bbox validation, shape
+// layout, alt-text threading, TextTag-driven region-slot filling, register copying,
+// speaker-note derivation, section collection) must be sequenced here in a documented
+// order. Extracting sub-passes into helpers would scatter the invariant ordering across
+// multiple call sites and reduce readability for the audit trail. The `allow` is
+// justified by the function's deliberately monolithic contract, not as a deferral.
+#[allow(clippy::too_many_lines)]
 pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // EC-001: reject empty decks.
     if deck.slides.is_empty() {
@@ -160,10 +169,11 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         }
 
         // NOTE: FrameContent variants in the frames produced by region_frames_for
-        // start as Empty/Image/Chart/Diagram placeholders. Richer content population
-        // (e.g., wiring slide body blocks into FrameContent::Body) is STORY-027
-        // scope. The region map establishes the geometric foundation; content
-        // resolution is a separate pass in Phase 3.
+        // start as Empty/Image/Chart/Diagram placeholders. Wiring of
+        // body/title/chart/image blocks into FrameContent is Stage 2b (ADR-019).
+        // See `slideforge-eval::field_to_block::thread_fields_to_blocks`.
+        // The region map establishes the geometric foundation; content
+        // is threaded from Slide.blocks by thread_media_alt_into_frames below.
         //
         // MED-002: Compute text_flow for text-bearing frames.
         // For title/subtitle frames, extract text from the slide's resolved fields
@@ -259,44 +269,115 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         deck_warnings.extend(shape_output.warnings);
 
         // Inline text pass: convert ContentBlock::Text and ContentBlock::Bullets blocks
-        // into FrameContent::TextRun frames so the inline validation pass
-        // (run_inline_validation) can scan them for xref targets and depth violations
-        // (BC-3.05.001 EC-002 / AC-003 / STORY-073).
+        // into layout frames, respecting RegionRole-driven region-slot filling.
         //
-        // For ContentBlock::Text: one TextRun frame per block.
+        // T6b.1 / AC-023 / F-086-P3-HIGH-001 / BC-4.01.001 v1.2 / ADR-019 Decision 3:
+        // For tagged text blocks (Title / Subtitle / Body), the implementation FILLS the
+        // matching FrameContent::Empty region slot pre-allocated by region_frames_for,
+        // preserving that slot's authored bbox and computing its text_flow in-place.
+        // Slot selection is ROLE-DRIVEN: each TextTag maps to a RegionRole; the search
+        // finds the Empty slot with matching RegionRole, not "first Empty" by position.
+        // This guarantees that TextTag::Title always fills the Title-region slot regardless
+        // of block processing order (AC-023 / EC-007 / BC-4.01.001 v1.2 invariant 5).
+        // A new full-page-bbox frame is NEVER appended when a pre-allocated region slot
+        // can absorb the tagged content.
+        //
+        // Fallback (documented — fires only when no role-matched or generic slot remains):
+        // If a slide type genuinely has no remaining Empty region slot matching the tag's
+        // role (e.g., a future custom slide type with all slots already filled), the
+        // implementation falls back to appending a clamped full-page-bbox frame. This
+        // keeps the pipeline non-fatal for unknown extension cases.
+        //
         // For ContentBlock::Bullets: one TextRun frame per BulletItem (parent before
         // children, depth-first order). Nesting is structural via BulletItem.children;
         // layout preserves the flat frame sequence for exporters.
         for block in &slide.blocks {
             match &block.content {
                 ContentBlock::Text(text_block) => {
-                    // Clamp the placeholder height to page_height so the bbox always
-                    // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
-                    // canvas_height < 914_400 EMU the unclamped height would violate
-                    // y + height <= page_height, triggering the InvalidBoundingBox
-                    // defensive check below.
-                    let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
-                    let bbox = crate::types::BoundingBox {
-                        x: crate::types::Emu(0),
-                        y: crate::types::Emu(0),
-                        width: page_size.width,
-                        height: placeholder_height,
-                    };
-                    // BC-3.06.003 defensive check: the clamped bbox must still satisfy
-                    // all invariants (non-zero dimensions, within page bounds).
-                    let frame_index = all_frames.len();
-                    if !bbox.is_valid(page_size.width, page_size.height) {
-                        return Err(LayoutError::InvalidBoundingBox {
-                            source_slide_index: source_index,
-                            frame_index,
-                            bbox,
-                        });
+                    match text_block.tag {
+                        // ── Tagged blocks: fill pre-allocated region slot in-place ──────
+                        // Role-driven, NOT position-driven (AC-023 / F-086-P3-HIGH-001 / BC-4.01.001 v1.2 PC-12).
+                        // Each tag variant passes its TextTag to fill_region_slot_or_append, which
+                        // maps the tag to a RegionRole and searches for the Empty slot carrying that role.
+                        // This guarantees that TextTag::Title always fills the Title-role slot regardless
+                        // of block processing order — a Body block arriving before Title cannot claim
+                        // the Title-role slot. Fallback to Generic/append only when no role-matched slot remains.
+                        TextTag::Title => {
+                            let text = extract_inline_text_str(&text_block.inlines);
+                            let content = crate::types::FrameContent::Title(text);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                TextTag::Title,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
+                        },
+                        TextTag::Subtitle => {
+                            let text = extract_inline_text_str(&text_block.inlines);
+                            let content = crate::types::FrameContent::Subtitle(text);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                TextTag::Subtitle,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
+                        },
+                        TextTag::Body => {
+                            // Body carries ContentBlock items for rich body content.
+                            // Wrap the text block's content as a single ContentBlock::Text.
+                            // The PPTX serializer's extract_body_text traverses these ContentBlocks.
+                            let content =
+                                crate::types::FrameContent::Body(vec![ContentBlock::Text(
+                                    text_block.clone(),
+                                )]);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                TextTag::Body,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
+                        },
+                        // ── Untagged blocks: always append a TextRun frame (unchanged) ──
+                        // TextTag::Untagged has no semantic placeholder — never consumes
+                        // a pre-allocated region slot. Uses a clamped full-page-bbox.
+                        TextTag::Untagged => {
+                            // Clamp the placeholder height to page_height so the bbox always
+                            // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
+                            // canvas_height < 914_400 EMU the unclamped height would violate
+                            // y + height <= page_height.
+                            let placeholder_height =
+                                crate::types::Emu(914_400).min(page_size.height);
+                            let bbox = crate::types::BoundingBox {
+                                x: crate::types::Emu(0),
+                                y: crate::types::Emu(0),
+                                width: page_size.width,
+                                height: placeholder_height,
+                            };
+                            // BC-3.06.003 defensive check.
+                            let frame_index = all_frames.len();
+                            if !bbox.is_valid(page_size.width, page_size.height) {
+                                return Err(LayoutError::InvalidBoundingBox {
+                                    source_slide_index: source_index,
+                                    frame_index,
+                                    bbox,
+                                });
+                            }
+                            all_frames.push(crate::types::Frame {
+                                bbox,
+                                content: crate::types::FrameContent::TextRun(
+                                    text_block.inlines.clone(),
+                                ),
+                                text_flow: None,
+                                region_role: None,
+                            });
+                        },
                     }
-                    all_frames.push(crate::types::Frame {
-                        bbox,
-                        content: crate::types::FrameContent::TextRun(text_block.inlines.clone()),
-                        text_flow: None,
-                    });
                 },
                 ContentBlock::Bullets(items) => {
                     // STORY-073 / AC-001 — produce one FrameContent::TextRun per
@@ -390,9 +471,9 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 /// # STORY-039 AC-005 / EC-006 / EC-007
 ///
 /// Region-map frames for `chart`, `diagram`, and `image`/`screenshot`/`bio` slide
-/// types carry `AltText::Decorative` as a structural placeholder. This function
-/// reads each `ContentBlock::Chart` / `Diagram` / `Image` block's `.alt` field
-/// and overwrites the corresponding placeholder frame.
+/// types carry `AltText::Unspecified` as a structural placeholder (ADR-019 Decision 5.1).
+/// This function reads each `ContentBlock::Chart` / `Diagram` / `Image` block's `.alt`
+/// field and overwrites the corresponding placeholder frame.
 ///
 /// ## Mapping rule (lossless — no normalisation, no truncation)
 ///
@@ -400,7 +481,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 /// |------------------------|----------------------|--------------------------|
 /// | `Some(Provided(s))`    | `Provided(s)`        | none                     |
 /// | `Some(Decorative)`     | `Decorative`         | none                     |
-/// | `None`                 | `Decorative`         | `tracing::warn!` (EC-006/EC-007): upstream validator miss |
+/// | `None`                 | `Unspecified`        | `tracing::warn!` (EC-006/EC-007): no author alt threaded |
 ///
 /// ## Scope discipline
 ///
@@ -432,11 +513,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "EC-006: ChartSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "EC-006: ChartSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()
@@ -462,11 +543,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "EC-007: DiagramSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "EC-007: DiagramSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()
@@ -495,11 +576,11 @@ fn thread_media_alt_into_frames(
                     tracing::warn!(
                         source_slide_index,
                         slide_type,
-                        "ImageSpec.alt is None — upstream validator \
-                         should have rejected this document; mapping to \
-                         AltText::Decorative at layout time"
+                        "ImageSpec.alt is None — no author alt text was threaded \
+                         into this ContentBlock; emitting AltText::Unspecified; \
+                         validate_post_layout will emit E-A11-001 in strict mode (ADR-019 Decision 5.2)"
                     );
-                    AltText::Decorative
+                    AltText::Unspecified
                 };
                 match frames
                     .iter_mut()
@@ -566,6 +647,200 @@ fn speaker_notes_from_register_content(
                 Some(Arc::from(text.as_str()))
             }
         })
+}
+
+/// Extract plain text from a slice of [`slideforge_types::InlineNode`] values into an [`Arc<str>`].
+///
+/// Used by the `TextTag` routing pass to produce the `Arc<str>` carried by
+/// `FrameContent::Title` and `FrameContent::Subtitle`. Nested inline formatting
+/// (Bold, Italic, etc.) is flattened to plain text for these variants, which is
+/// semantically correct — the placeholder text is the canonical string label;
+/// inline formatting is not preserved in OOXML title placeholders.
+///
+/// Plain text is concatenated in source order. Math nodes are omitted.
+fn extract_inline_text_str(nodes: &[slideforge_types::InlineNode]) -> Arc<str> {
+    let mut out = String::new();
+    for node in nodes {
+        extract_inline_text_recursive(node, &mut out);
+    }
+    Arc::from(out.as_str())
+}
+
+/// Recursive helper for [`extract_inline_text_str`].
+fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut String) {
+    use slideforge_types::InlineNode;
+    match node {
+        InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
+            out.push_str(s);
+        },
+        InlineNode::Bold(children)
+        | InlineNode::Italic(children)
+        | InlineNode::Footnote(children)
+        | InlineNode::Superscript(children)
+        | InlineNode::Subscript(children)
+        | InlineNode::Strikethrough(children)
+        | InlineNode::Highlight(children) => {
+            for child in children {
+                extract_inline_text_recursive(child, out);
+            }
+        },
+        InlineNode::Link { text, .. } => {
+            for child in text {
+                extract_inline_text_recursive(child, out);
+            }
+        },
+        InlineNode::Math(_) => {
+            // Math nodes are not extracted as plain text for title/subtitle frames.
+        },
+    }
+}
+
+/// Fill the `FrameContent::Empty` region slot whose [`crate::types::RegionRole`]
+/// matches the given [`TextTag`], preserving the slot's authored bbox and computing
+/// `text_flow` in-place.
+///
+/// # T6b.1 / AC-023 / BC-4.01.001 v1.2 / ADR-019 Decision 3
+///
+/// `region_frames_for` pre-allocates geometry slots as `FrameContent::Empty`, each
+/// with a `region_role` identifying which semantic content it expects. This function
+/// is the injection point where tagged text content (Title / Subtitle / Body) claims
+/// the CORRECT slot IN-PLACE, replacing `FrameContent::Empty` with the supplied
+/// `content` variant while preserving the slot's authored bbox.
+///
+/// ## Why this matters for visual parity
+///
+/// The authored bbox encodes the PPTX placeholder geometry (type, idx, position) as
+/// specified in ADR-015 §7. Appending a new full-page-bbox frame instead of filling
+/// the slot would discard this authored geometry and produce incorrect OOXML placeholder
+/// coordinates (visual-parity-contract §Positional layout ±4pt).
+///
+/// ## Slot selection (role-driven, NOT position-driven) — AC-023 / F-086-P3-HIGH-001
+///
+/// Selection priority (checked in order):
+/// 1. **Exact role match:** finds the first `FrameContent::Empty` slot whose
+///    `region_role` matches the requested role (`Title` → `RegionRole::Title`,
+///    `Subtitle` → `RegionRole::Subtitle`, `Body` → `RegionRole::Body`).
+/// 2. **Generic fallback:** if no exact-role Empty slot exists, fills the first
+///    `FrameContent::Empty` slot with `region_role == Some(RegionRole::Generic)`
+///    or `region_role == None`. This handles multi-body layouts (e.g., `two_col`
+///    second column) and forward-compatibility with unknown custom types.
+/// 3. **Append fallback:** if no Empty slot exists at all, appends a clamped
+///    full-page-bbox frame. Fires only for slide types that pre-fill all slots
+///    with non-Empty content.
+///
+/// This role-driven selection guarantees that a `TextTag::Title` block arriving
+/// after a `TextTag::Body` block in the input still claims the title-region slot
+/// (AC-023 invariant 5 / EC-007).
+///
+/// ## Fallback (documented — fires only when no Empty slot remains)
+///
+/// When no `FrameContent::Empty` slot exists in `frames` (e.g., a slide type with all
+/// region slots already filled by prior blocks, or a custom slide type with no Empty
+/// placeholders at all), a clamped full-page-bbox frame is appended. This fallback is
+/// intentional for forward-compatibility with future slide types that may pre-fill all
+/// their region slots with non-Empty content.
+///
+/// # Errors
+///
+/// Returns `Err(LayoutError::InvalidBoundingBox)` if the fallback full-page-bbox fails
+/// the BC-3.06.003 defensive check (should never occur in practice).
+fn fill_region_slot_or_append(
+    frames: &mut Vec<crate::types::Frame>,
+    tag: TextTag,
+    content: crate::types::FrameContent,
+    inlines: &[slideforge_types::InlineNode],
+    page_size: PageSize,
+    source_slide_index: usize,
+) -> Result<(), LayoutError> {
+    // Map the TextTag to the expected RegionRole.
+    let expected_role = match tag {
+        TextTag::Title => crate::types::RegionRole::Title,
+        TextTag::Subtitle => crate::types::RegionRole::Subtitle,
+        TextTag::Body => crate::types::RegionRole::Body,
+        // Untagged blocks are never routed through this function — they are
+        // handled separately by the TextTag::Untagged arm in layout::run.
+        TextTag::Untagged => crate::types::RegionRole::Generic,
+    };
+
+    // Phase 1: exact role match — find the first Empty slot with the matching role.
+    // This is the primary path for all tagged blocks (Title / Subtitle / Body).
+    // Order-independent: a Body block processed before a Title block will NOT claim
+    // the Title-role slot; it searches for a Body-role slot instead.
+    let exact_match_idx = frames.iter().position(|f| {
+        matches!(f.content, crate::types::FrameContent::Empty)
+            && f.region_role == Some(expected_role)
+    });
+
+    if let Some(idx) = exact_match_idx {
+        let flat_text = collect_plain_text(inlines);
+        let bbox = frames[idx].bbox;
+        frames[idx].text_flow = Some(compute_text_flow(&flat_text, bbox));
+        frames[idx].content = content;
+        return Ok(());
+    }
+
+    // Phase 2: generic fallback — fill the first Empty slot with Generic or None role.
+    // Handles multi-body layouts where a second Body block fills a Generic column slot
+    // (e.g., `two_col` right column) or an untyped slot in an unknown custom type.
+    let generic_match_idx = frames.iter().position(|f| {
+        matches!(f.content, crate::types::FrameContent::Empty)
+            && matches!(
+                f.region_role,
+                Some(crate::types::RegionRole::Generic) | None
+            )
+    });
+
+    if let Some(idx) = generic_match_idx {
+        let flat_text = collect_plain_text(inlines);
+        let bbox = frames[idx].bbox;
+        frames[idx].text_flow = Some(compute_text_flow(&flat_text, bbox));
+        frames[idx].content = content;
+        return Ok(());
+    }
+
+    // Phase 3: no Empty slot of any kind remains — append a clamped full-page-bbox frame.
+    // This fires only when a slide type has no pre-allocated Empty placeholders
+    // (e.g., all slots are Image/Chart/Diagram, or a future custom type). It
+    // preserves pipeline non-fatality for extension cases.
+    let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+    let bbox = crate::types::BoundingBox {
+        x: crate::types::Emu(0),
+        y: crate::types::Emu(0),
+        width: page_size.width,
+        height: placeholder_height,
+    };
+    // BC-3.06.003 defensive check.
+    let frame_index = frames.len();
+    if !bbox.is_valid(page_size.width, page_size.height) {
+        return Err(LayoutError::InvalidBoundingBox {
+            source_slide_index,
+            frame_index,
+            bbox,
+        });
+    }
+    let flat_text = collect_plain_text(inlines);
+    let text_flow = Some(compute_text_flow(&flat_text, bbox));
+    frames.push(crate::types::Frame {
+        bbox,
+        content,
+        text_flow,
+        region_role: None,
+    });
+    Ok(())
+}
+
+/// Collect all plain-text from a slice of inline nodes into a single `String`.
+///
+/// Used by [`fill_region_slot_or_append`] to produce the plain-text string
+/// passed to [`compute_text_flow`] when filling or appending a region slot.
+/// Nested formatting (Bold, Italic, etc.) is flattened to plain text; Math
+/// nodes are omitted (same semantics as [`extract_inline_text_str`]).
+fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        extract_inline_text_recursive(node, &mut out);
+    }
+    out
 }
 
 /// Recursively emit one [`crate::types::FrameContent::TextRun`] frame per
@@ -648,6 +923,7 @@ fn push_bullet_frames_inner(
             bbox,
             content: crate::types::FrameContent::TextRun(item.inlines.clone()),
             text_flow: None,
+            region_role: None,
         });
         // Recurse into children (depth-first, source order), incrementing depth.
         push_bullet_frames_inner(

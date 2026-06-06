@@ -90,6 +90,7 @@ fn make_slide(index: usize, title: &str, report_text: &str) -> LaidOutSlide {
             },
             content: FrameContent::Title(Arc::from(title)),
             text_flow: None,
+            region_role: None,
         }],
         speaker_notes: Some(Arc::from(format!(
             "NOTES_SENTINEL — slide {index} notes. Should NOT appear in DOCX body."

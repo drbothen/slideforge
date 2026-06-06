@@ -57,23 +57,24 @@ impl Validator for AltTextValidator {
 
     /// Stage 5 (pre-layout) alt-text check on the semantic [`Deck`] IR.
     ///
-    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Chart`,
-    /// `ContentBlock::Image`, and `ContentBlock::Diagram` entries with missing
-    /// or blank alt text.
+    /// Iterates `deck.slides[*].blocks` looking for `ContentBlock::Shape` entries
+    /// with missing or blank alt text. **Restricted to Shape blocks only** per
+    /// ADR-018 v1.2 Decision-3 (STORY-086 scope-expansion adjudication).
     ///
-    /// ## Current pipeline state
+    /// ## Scope: Shape only (ADR-018 v1.2 Decision-3)
     ///
-    /// `slideforge-eval` always sets `Slide.blocks = vec![]` (see
-    /// `slideforge_eval::for_eval:342`). `ContentBlock` construction is deferred to
-    /// layout + Wave 3+ stories. As a result, this method currently produces zero
-    /// diagnostics — not because the logic is wrong, but because there are no blocks
-    /// to iterate. The authoritative alt-text enforcement for the current pipeline
-    /// is in [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3).
+    /// `ContentBlock::Chart`, `ContentBlock::Image`, and `ContentBlock::Diagram`
+    /// are NOT validated here. Stage 2b (STORY-086) populates these blocks with
+    /// `alt = None` when no author alt text is supplied. If the pre-layout pass
+    /// fired on them, it would produce a double-diagnostic alongside the
+    /// post-layout `validate_post_layout()` pass (which fires on
+    /// `AltText::Unspecified` frames). Single-fire is enforced by restricting
+    /// pre-layout scope to Shape, which is NOT a structural-placeholder type in
+    /// regions.rs (shapes are always user-authored via the shape DSL).
     ///
-    /// When a future story populates `Slide.blocks` from eval-time DSL fields,
-    /// this method will provide earlier detection (before layout). Both passes are
-    /// additive: combined diagnostics from Stage 5 and Stage 6b are accumulated
-    /// into one list before the strict-mode gate fires.
+    /// The authoritative alt-text enforcement for Chart/Image/Diagram is in
+    /// [`AltTextValidator::validate_post_layout`] (ADR-018 Decision 3 /
+    /// ADR-019 Decision 5.3).
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
         use slideforge_types::ContentBlock;
 
@@ -82,47 +83,10 @@ impl Validator for AltTextValidator {
         for slide in &deck.slides {
             for block in &slide.blocks {
                 match &block.content {
-                    ContentBlock::Image(spec) => {
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "image",
-                            spec.path.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
-                    ContentBlock::Chart(spec) => {
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "chart",
-                            spec.chart_type.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
-                    ContentBlock::Diagram(spec) => {
-                        // Truncate diagram source to first 30 *chars* (not bytes) for the
-                        // identifier. Using byte indexing (&source[..30]) would panic if byte 30
-                        // falls in the middle of a multi-byte UTF-8 character (e.g. CJK labels
-                        // in Mermaid diagrams). chars().take(30) is always char-boundary-safe.
-                        let identifier: std::borrow::Cow<str> = if spec.source.chars().count() > 30
-                        {
-                            let truncated: String = spec.source.chars().take(30).collect();
-                            std::borrow::Cow::Owned(format!("{truncated}…"))
-                        } else {
-                            std::borrow::Cow::Borrowed(spec.source.as_ref())
-                        };
-                        check_visual_element(
-                            spec.alt.as_ref(),
-                            spec.decorative,
-                            "diagram",
-                            identifier.as_ref(),
-                            &spec.span,
-                            &mut diagnostics,
-                        );
-                    },
+                    // Pre-layout scope: Shape only (ADR-018 v1.2 Decision-3).
+                    // Shape blocks are always user-authored (shape DSL) and have no
+                    // structural-placeholder counterpart in regions.rs, so there is no
+                    // risk of double-fire with the post-layout validator.
                     ContentBlock::Shape(spec) => {
                         check_visual_element(
                             spec.alt.as_ref(),
@@ -133,10 +97,17 @@ impl Validator for AltTextValidator {
                             &mut diagnostics,
                         );
                     },
+                    // Chart, Image, Diagram: validated post-layout only (ADR-018 v1.2 Decision-3).
+                    // Restricting here prevents double-fire when Stage 2b emits blocks with alt=None
+                    // (thread_media_alt_into_frames maps None → AltText::Unspecified; post-layout
+                    // validate_post_layout fires exactly once — BC-5.01.001 postcondition 1).
                     // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
                     // Tables are text content that is already readable by screen readers
                     // (story spec, STORY-015 line 309). Alt text on tables is not validated.
-                    ContentBlock::Text(_)
+                    ContentBlock::Chart(_)
+                    | ContentBlock::Image(_)
+                    | ContentBlock::Diagram(_)
+                    | ContentBlock::Text(_)
                     | ContentBlock::Bullets(_)
                     | ContentBlock::Math(_)
                     | ContentBlock::Table(_) => {},
@@ -151,49 +122,28 @@ impl Validator for AltTextValidator {
     ///
     /// Iterates `laid_out.slides[*].frames` looking for `FrameContent::Chart`,
     /// `FrameContent::Image`, and `FrameContent::Diagram` entries with
-    /// `AltText::Decorative`. In the current pipeline, `AltText::Decorative` on
-    /// these frame variants is the structural placeholder set by the region map when
-    /// no alt text has been threaded from a `ContentBlock` (ADR-018 §Context;
-    /// `slideforge_eval::for_eval:342`). Since `Slide.blocks` is always `vec![]`
-    /// after eval, no alt text can be threaded before this pass.
+    /// `AltText::Unspecified` (the pipeline gap indicator — ADR-019 Decision 4).
     ///
-    /// A `FrameContent::Chart/Image/Diagram` with `AltText::Decorative` therefore
-    /// indicates a visual element whose author-supplied alt text was absent — the
-    /// authoritative evidence of a missing `alt "..."` in the DSL source.
+    /// ## `AltText` discrimination (ADR-019 Decision 5.3 / STORY-086)
     ///
-    /// Emits `E-A11-001` (Error severity) for each such frame. In strict mode,
-    /// these errors cause `BuildError::ValidationFailed`.
+    /// | Frame `alt` value            | Outcome                          |
+    /// |------------------------------|----------------------------------|
+    /// | `AltText::Unspecified`       | E-A11-001 (pipeline gap)         |
+    /// | `AltText::Decorative`        | VALID — author explicit opt-out  |
+    /// | `AltText::Provided(_)`       | VALID — author supplied alt text |
     ///
-    /// ## Current correctness (Wave 1–2 scope)
+    /// `AltText::Unspecified` is the structural placeholder set by `regions.rs`
+    /// (ADR-019 Decision 5.1). Stage 2b (`thread_fields_to_blocks`) populates
+    /// `Slide.blocks`, and `thread_media_alt_into_frames` overwrites the placeholder
+    /// with the author-supplied value. If the placeholder is never overwritten
+    /// (because the author omitted `alt "..."` and `decorative: true`), the frame
+    /// reaches this validator with `AltText::Unspecified` — a true positive for
+    /// E-A11-001.
     ///
-    /// Today `Slide.blocks` is always `vec![]` after eval, so the layout engine
-    /// never calls `thread_media_alt_into_frames` with author-supplied content.
-    /// As a result, every `FrameContent::Chart/Image/Diagram` that reaches this
-    /// pass carries the `AltText::Decorative` placeholder that the region map
-    /// set unconditionally — this placeholder means "no alt text was threaded",
-    /// which is correct evidence of a missing `alt "..."` in the DSL source.
+    /// Threading lands in Story A (`STORY-086`). See ADR-019.
     ///
-    /// ## IMPORTANT — this match MUST be revisited for Wave 3+
-    ///
-    /// When Wave 3+ stories populate `Slide.blocks` from eval-time DSL fields,
-    /// `layout::thread_media_alt_into_frames` will overwrite the placeholder with:
-    /// - `AltText::Provided(s)` for frames with author-supplied alt text.
-    /// - `AltText::Decorative` for frames explicitly marked `decorative: true`.
-    ///
-    /// At that point, an `AltText::Decorative` frame will mean EITHER:
-    /// 1. Author-supplied `decorative: true` → VALID, no error should be emitted.
-    /// 2. Missing alt text (placeholder never replaced) → INVALID, E-A11-001.
-    ///
-    /// This match arm currently cannot distinguish these two cases. Once
-    /// `thread_media_alt_into_frames` lands, flagging ANY `AltText::Decorative`
-    /// as an error will be a false positive for case 1.
-    ///
-    /// **The match logic here MUST be updated when Wave 3+ alt-text threading
-    /// lands.** Track this as follow-up in the story that implements
-    /// `thread_media_alt_into_frames` (OBS-1 from SEC-050 adversary pass).
-    ///
-    /// Traceability: ADR-018 Decision 3, BC-5.02.001 §Accessibility,
-    /// STORY-050 AC-009, CLAUDE.md §Accessibility ("alt required — compile error").
+    /// Traceability: ADR-018 Decision 3, ADR-019 Decision 5.3,
+    /// BC-5.02.001 §Accessibility, BC-5.01.001 postcondition 1.
     fn validate_post_layout(
         &self,
         laid_out: &LaidOutDeck,
@@ -208,11 +158,12 @@ impl Validator for AltTextValidator {
             for frame in &laid_out_slide.frames {
                 let slide_type = laid_out_slide.slide_type_keyword.as_ref();
                 match &frame.content {
+                    // AltText::Unspecified — pipeline gap: no author alt text was threaded.
+                    // This means the author omitted both `alt "..."` and `decorative: true`.
+                    // E-A11-001 fires in strict mode (ADR-019 Decision 5.3 / BC-5.01.001 PC-1).
                     FrameContent::Chart {
-                        alt: AltText::Decorative,
+                        alt: AltText::Unspecified,
                     } => {
-                        // AltText::Decorative on a Chart frame = missing alt text
-                        // (structural placeholder; no ContentBlock threaded it yet).
                         diagnostics.push(make_post_layout_error(
                             "chart",
                             slide_type,
@@ -220,7 +171,7 @@ impl Validator for AltTextValidator {
                         ));
                     },
                     FrameContent::Image {
-                        alt: AltText::Decorative,
+                        alt: AltText::Unspecified,
                     } => {
                         diagnostics.push(make_post_layout_error(
                             "image",
@@ -229,7 +180,7 @@ impl Validator for AltTextValidator {
                         ));
                     },
                     FrameContent::Diagram {
-                        alt: AltText::Decorative,
+                        alt: AltText::Unspecified,
                         ..
                     } => {
                         diagnostics.push(make_post_layout_error(
@@ -238,8 +189,10 @@ impl Validator for AltTextValidator {
                             display_slide,
                         ));
                     },
-                    // AltText::Provided(_) — valid alt text, no diagnostic.
-                    // All other FrameContent variants are non-visual or text-bearing.
+                    // All other cases (AltText::Decorative author opt-out, AltText::Provided valid alt,
+                    // and all non-visual FrameContent variants): no diagnostic emitted.
+                    // - Decorative: author explicit opt-out (decorative: true) — valid (ADR-019 5.3 / BC-5.01.001 EC-007)
+                    // - Provided: author supplied non-empty alt text — valid
                     _ => {},
                 }
             }
@@ -314,7 +267,9 @@ fn check_visual_element(
     // `decorative: bool` is false. See design note on dual decorative representation above.
     let _ = effective_decorative;
     let is_missing = match alt {
-        None => true,
+        // None or Unspecified: no meaningful alt text — fire E-A11-001.
+        // Unspecified on ContentBlock.alt means the author did not supply alt text.
+        None | Some(AltText::Unspecified) => true,
         Some(AltText::Provided(s)) => is_blank(s),
         Some(AltText::Decorative) => false,
     };
@@ -536,8 +491,10 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_missing_alt_single_image() {
-        // 1 image with alt: None, decorative: false → exactly 1 E-A11-001
-        let slide = make_slide(vec![make_image_block(None, false)]);
+        // Pre-layout validate() is now Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks are validated post-layout; validate() on an image block → 0 diagnostics.
+        // The behavior-under-test (missing alt fires E-A11-001) is verified via Shape block.
+        let slide = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
@@ -551,11 +508,12 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_missing_alt_multiple_images() {
-        // 3 images all missing alt → 3 E-A11-001 diagnostics
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Error accumulation is verified via 3 shape blocks (same check_visual_element logic).
         let slide = make_slide(vec![
-            make_image_block(None, false),
-            make_image_block(None, false),
-            make_image_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
@@ -568,8 +526,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_empty_string_alt_is_missing() {
-        // alt: Some(AltText::Provided("")) is treated as missing (blank check)
-        let slide = make_slide(vec![make_image_block(
+        // alt: Some(AltText::Provided("")) is treated as missing (blank check).
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from(""))),
             false,
         )]);
@@ -585,8 +544,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_whitespace_only_alt_is_missing() {
-        // alt: Some(AltText::Provided("  ")) is treated as missing
-        let slide = make_slide(vec![make_image_block(
+        // alt: Some(AltText::Provided("  ")) is treated as missing.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("  "))),
             false,
         )]);
@@ -598,6 +558,20 @@ mod tests {
             "whitespace-only alt should produce E-A11-001; got {diags:?}"
         );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
+    }
+
+    #[test]
+    fn test_bc_5_03_015_image_block_validate_scope_restricted() {
+        // Confirm that pre-layout validate() produces 0 diagnostics for Image blocks.
+        // Image alt-text enforcement is post-layout only (ADR-018 v1.2 Decision-3).
+        let slide = make_slide(vec![make_image_block(None, false)]);
+        let deck = make_deck(vec![slide]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Image blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
+        );
     }
 
     // ── Present alt — no error ─────────────────────────────────────────────────
@@ -651,7 +625,8 @@ mod tests {
     fn test_bc_5_03_015_alt_and_decorative_together() {
         // alt: Some(Provided("text")), decorative: true → 1 W-A11-002 warning
         // Per BC-3.04.001 v1.5.2 Invariant 11: alt wins over decorative (AC-009 / F-P18-HIGH-001).
-        let slide = make_slide(vec![make_image_block(
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
+        let slide = make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("this alt takes precedence"))),
             true,
         )]);
@@ -679,8 +654,9 @@ mod tests {
         // Per BC-3.04.001 v1.5.2 Invariant 11 (F-P18-HIGH-001). Cross-crate
         // semantic consistency: slideforge-layout::build_shape_frame applies the
         // same "alt wins" rule, producing AltText::Provided(s) when both are set.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
         let alt_text = Arc::from("A meaningful description of the shape");
-        let deck = make_deck(vec![make_slide(vec![make_image_block(
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::clone(&alt_text))),
             true,
         )])]);
@@ -727,30 +703,31 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_chart_missing_alt() {
-        // chart with alt: None → 1 E-A11-001
+        // Chart blocks are validated post-layout only (ADR-018 v1.2 Decision-3).
+        // Pre-layout validate() produces 0 diagnostics for Chart blocks.
+        // The shape block version confirms the underlying check_visual_element logic still works.
         let slide = make_slide(vec![make_chart_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "chart missing alt should produce 1 diagnostic; got {diags:?}"
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Chart blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     #[test]
     fn test_bc_5_03_015_diagram_missing_alt() {
-        // diagram with alt: None → 1 E-A11-001
+        // Diagram blocks are validated post-layout only (ADR-018 v1.2 Decision-3).
+        // Pre-layout validate() produces 0 diagnostics for Diagram blocks.
         let slide = make_slide(vec![make_diagram_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(
-            diags.len(),
-            1,
-            "diagram missing alt should produce 1 diagnostic; got {diags:?}"
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks \
+             (post-layout only per ADR-018 v1.2 Decision-3); got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     #[test]
@@ -771,30 +748,33 @@ mod tests {
     #[test]
     fn test_diagram_unicode_source_no_panic() {
         // Diagram source with multi-byte UTF-8 characters (CJK) exceeding 30 bytes.
-        // Byte-indexing at position 30 would panic mid-character; chars().take(30) is safe.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — Diagram blocks
+        // are now skipped. The test verifies no panic occurs even when diagram source is not
+        // inspected at pre-layout stage (chars().take(30) truncation is post-layout path).
         let source = "graph TD; A[\"日本語のラベル\"]-->B[\"中文標籤のテスト\"]";
         let deck = make_deck(vec![make_slide(vec![make_diagram_block_with_source(
             source, None, false,
         )])]);
         let diags = AltTextValidator.validate(&deck, &ValidatorOptions::default());
-        // Should produce E-A11-001 (missing alt) without panicking
-        assert_eq!(
-            diags.len(),
-            1,
-            "expected 1 E-A11-001 diagnostic; got {diags:?}"
+        // Pre-layout validate() skips Diagram — no E-A11-001 here (post-layout fires instead).
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks; got {diags:?}"
         );
-        assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
 
     // ── Error accumulation ─────────────────────────────────────────────────────
 
     #[test]
     fn test_bc_5_03_015_error_accumulation() {
-        // 2 images + 1 diagram all missing alt → 3 E-A11-001 (all accumulated)
+        // Error accumulation: 3 shapes all missing alt → 3 E-A11-001 (all accumulated).
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image/Diagram blocks now produce 0 diagnostics at pre-layout; shape blocks confirm
+        // the accumulation behavior of check_visual_element is intact.
         let slide = make_slide(vec![
-            make_image_block(None, false),
-            make_image_block(None, false),
-            make_diagram_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
@@ -810,9 +790,10 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_error_accumulation_across_slides() {
-        // 2 slides, each with 1 image missing alt → 2 E-A11-001
-        let slide1 = make_slide(vec![make_image_block(None, false)]);
-        let slide2 = make_slide(vec![make_image_block(None, false)]);
+        // 2 slides, each with 1 shape missing alt → 2 E-A11-001.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let slide1 = make_slide(vec![make_shape_block(None, false)]);
+        let slide2 = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide1, slide2]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
@@ -830,9 +811,10 @@ mod tests {
     #[test]
     fn test_bc_5_03_015_text_blocks_no_alt_needed() {
         // deck with only Text blocks → 0 diagnostics
-        use slideforge_types::{InlineNode, block::TextBlock};
+        use slideforge_types::{InlineNode, TextTag, block::TextBlock};
         let text_block = make_block(ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("just text"))],
+            tag: TextTag::Untagged,
             span: SourceSpan::default(),
         }));
         let bullets_block = make_block(ContentBlock::Bullets(vec![]));
@@ -887,17 +869,19 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_mixed_valid_and_invalid() {
-        // 1 image with valid alt + 1 image missing alt → exactly 1 error
+        // 1 shape with valid alt + 1 shape missing alt → exactly 1 error.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks now produce 0 diagnostics; shape blocks confirm mixed-validity logic.
         let slide = make_slide(vec![
-            make_image_block(Some(AltText::Provided(Arc::from("a logo"))), false),
-            make_image_block(None, false),
+            make_shape_block(Some(AltText::Provided(Arc::from("a logo"))), false),
+            make_shape_block(None, false),
         ]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(
             diags.len(),
             1,
-            "only the missing-alt image should produce an error; got {diags:?}"
+            "only the missing-alt shape should produce an error; got {diags:?}"
         );
         assert_eq!(diags[0].code.as_ref(), E_A11_001);
     }
@@ -906,8 +890,9 @@ mod tests {
 
     #[test]
     fn test_bc_5_03_015_error_has_hint() {
-        // E-A11-001 diagnostics must include a correction hint
-        let slide = make_slide(vec![make_image_block(None, false)]);
+        // E-A11-001 diagnostics must include a correction hint.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3) — use shape block.
+        let slide = make_slide(vec![make_shape_block(None, false)]);
         let deck = make_deck(vec![slide]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
@@ -921,47 +906,59 @@ mod tests {
 
     #[test]
     fn test_error_message_contains_identifier_image() {
-        // E-A11-001 for an image must include the file path as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Image blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'photo.png'"),
-            "error message must contain the image path; got: {}",
-            diags[0].message
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Image blocks; got {diags:?}"
         );
     }
 
     #[test]
     fn test_error_message_contains_identifier_chart() {
-        // E-A11-001 for a chart must include the chart type as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Chart blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_chart_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'bar'"),
-            "error message must contain the chart type; got: {}",
-            diags[0].message
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Chart blocks; got {diags:?}"
         );
     }
 
     #[test]
     fn test_error_message_contains_identifier_diagram() {
-        // E-A11-001 for a diagram must include truncated source as identifier
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        // Diagram blocks produce 0 diagnostics at pre-layout; confirm no panic + 0 diags.
         let deck = make_deck(vec![make_slide(vec![make_diagram_block(None, false)])]);
+        let diags = AltTextValidator.validate(&deck, &default_opts());
+        assert!(
+            diags.is_empty(),
+            "pre-layout validate() must produce 0 diagnostics for Diagram blocks; got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_error_message_contains_identifier_shape() {
+        // E-A11-001 for a shape must include the shape type as identifier.
+        // Shape is the only pre-layout-validated type (ADR-018 v1.2 Decision-3).
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         assert!(
-            diags[0].message.contains("'graph TD; A-->B'"),
-            "error message must contain the diagram source; got: {}",
+            diags[0].message.contains("'rect'"),
+            "error message must contain the shape type 'rect'; got: {}",
             diags[0].message
         );
     }
 
     #[test]
     fn test_warning_message_contains_identifier() {
-        // W-A11-002 for an image must include the file path as identifier
-        let deck = make_deck(vec![make_slide(vec![make_image_block(
+        // W-A11-002 for a shape must include the shape type as identifier.
+        // Pre-layout validate() is Shape-only (ADR-018 v1.2 Decision-3).
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(
             Some(AltText::Provided(Arc::from("alt that wins"))),
             true,
         )])]);
@@ -969,8 +966,8 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code.as_ref(), W_A11_002);
         assert!(
-            diags[0].message.contains("'photo.png'"),
-            "warning message must contain the image path; got: {}",
+            diags[0].message.contains("'rect'"),
+            "warning message must contain the shape type 'rect'; got: {}",
             diags[0].message
         );
     }
@@ -1097,7 +1094,9 @@ mod tests {
 
     #[test]
     fn test_snapshot_alt_error_message() {
-        let deck = make_deck(vec![make_slide(vec![make_image_block(None, false)])]);
+        // Snapshot of E-A11-001 message. Pre-layout validate() is Shape-only
+        // (ADR-018 v1.2 Decision-3) — use shape block to produce the diagnostic.
+        let deck = make_deck(vec![make_slide(vec![make_shape_block(None, false)])]);
         let diags = AltTextValidator.validate(&deck, &default_opts());
         assert_eq!(diags.len(), 1);
         insta::assert_snapshot!(diags[0].message.as_ref());
@@ -1109,12 +1108,18 @@ mod tests {
     ///
     /// Constructs a `LaidOutDeck` with two slides:
     /// - slide 0 (`source_index` 0): a Chart frame with `AltText::Provided` (valid)
-    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Decorative` (missing alt)
+    /// - slide 1 (`source_index` 1): a Chart frame with `AltText::Unspecified` (pipeline gap)
     ///
     /// Asserts that:
     /// 1. Exactly one diagnostic is emitted (the second slide, not the first).
     /// 2. The diagnostic carries code `E-A11-001`.
     /// 3. The diagnostic message contains `"slide 2"` (`source_index` 1 → 1-based = 2).
+    ///
+    /// ## ADR-019 update (STORY-086)
+    ///
+    /// Per ADR-019 Decision 5.3: `AltText::Unspecified` → E-A11-001 (pipeline gap);
+    /// `AltText::Decorative` → valid (author opt-out). This test was updated from
+    /// `Decorative` to `Unspecified` to reflect the correct post-Stage-2b semantics.
     ///
     /// Load-bearing: if `display_slide` were computed from an enumerate index
     /// instead of `source_index + 1`, this test would fail when `source_index`
@@ -1137,6 +1142,7 @@ mod tests {
             },
             content,
             text_flow: None,
+            region_role: None,
         };
 
         // Slide 0 (source_index=0, "title"): Chart with valid alt — no diagnostic expected.
@@ -1151,13 +1157,14 @@ mod tests {
             register_content: vec![],
         };
 
-        // Slide 1 (source_index=1, "content"): Chart with AltText::Decorative — E-A11-001
-        // expected with locator "slide 2".
+        // Slide 1 (source_index=1, "content"): Chart with AltText::Unspecified — E-A11-001
+        // expected with locator "slide 2". Per ADR-019 Decision 5.3: Unspecified = pipeline
+        // gap (no author alt data threaded), triggers E-A11-001. Decorative would be valid.
         let slide1 = LaidOutSlide {
             source_index: 1,
             slide_type_keyword: Arc::from("content"),
             frames: vec![make_frame(FrameContent::Chart {
-                alt: AltText::Decorative,
+                alt: AltText::Unspecified,
             })],
             speaker_notes: None,
             register_tags: vec![],
@@ -1177,7 +1184,7 @@ mod tests {
         assert_eq!(
             diags.len(),
             1,
-            "expected exactly 1 diagnostic (slide 1 has Decorative chart); got {diags:?}"
+            "expected exactly 1 diagnostic (slide 1 has Unspecified chart); got {diags:?}"
         );
 
         // Must be E-A11-001 error severity.
@@ -1199,6 +1206,507 @@ mod tests {
             diags[0].message.contains("slide 2"),
             "diagnostic message must contain 'slide 2' (source_index 1 → 1-based); got: {}",
             diags[0].message
+        );
+    }
+
+    // ── STORY-086: AC-013, AC-014, AC-015 — AltText::Unspecified discrimination ─
+
+    /// AC-015 / BC-5.01.001 postcondition 1 — `AltText::Unspecified` on a chart frame
+    /// fires E-A11-001 in the post-layout validator.
+    ///
+    /// Red Gate: the stub `validate_post_layout` fires E-A11-001 on BOTH `Decorative`
+    /// AND `Unspecified` (both arms push the error). The assertion `count == 1` passes
+    /// against the stub for this specific vector because Unspecified already fires.
+    /// HOWEVER, the semantic intent is that after Stage 2b, `Decorative` MUST NOT fire
+    /// E-A11-001 (it becomes the "valid" state). The AC-015 Red Gate is validated by
+    /// `test_bc_5_01_001_ac015_decorative_frame_no_error` below which FAILS against the stub.
+    ///
+    /// Load-bearing: if the implementer removes the `Unspecified → E-A11-001` arm,
+    /// this test FAILS. Swap `AltText::Unspecified` to `AltText::Provided` → passes → confirms
+    /// the test is genuinely load-bearing on the Unspecified arm.
+    ///
+    /// Traces: BC-5.01.001 postcondition 1; BC-5.02.001 postcondition 7; ADR-019 Decision 5.3.
+    #[test]
+    fn test_bc_5_01_001_ac015_unspecified_chart_frame_fires_e_a11_001() {
+        // AC-015 — chart frame with AltText::Unspecified → E-A11-001 in strict mode.
+        // Red Gate: stub fires on both Decorative AND Unspecified — this test passes NOW.
+        // The paired test `ac015_decorative_frame_no_error` FAILS now and validates the gate.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+            region_role: None,
+        };
+
+        // Chart frame with AltText::Unspecified — pipeline gap, must fire E-A11-001.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Unspecified,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Must fire exactly one E-A11-001.
+        assert_eq!(
+            diags.len(),
+            1,
+            "AC-015: chart frame with AltText::Unspecified must produce exactly 1 E-A11-001; \
+             got {} diagnostics: {diags:?}. BC-5.01.001 postcondition 1.",
+            diags.len()
+        );
+        assert_eq!(
+            diags[0].code.as_ref(),
+            E_A11_001,
+            "AC-015: diagnostic code must be E-A11-001 for Unspecified chart frame; \
+             got '{}'",
+            diags[0].code
+        );
+        assert_eq!(
+            diags[0].severity,
+            DiagnosticSeverity::Error,
+            "AC-015: diagnostic severity must be Error; got {:?}",
+            diags[0].severity
+        );
+    }
+
+    /// AC-015 / BC-5.01.001 EC-007 — `AltText::Decorative` on a chart frame must NOT
+    /// fire E-A11-001 in the post-layout validator.
+    ///
+    /// Red Gate: the STUB `validate_post_layout` fires E-A11-001 on BOTH `Decorative`
+    /// AND `Unspecified`. After implementation, `Decorative` must be VALID (no error).
+    ///
+    /// This test FAILS against the stub (stub fires on Decorative → `diags.len() == 1 != 0`).
+    /// It PASSES after the implementer changes the `Decorative` arm to NOT emit E-A11-001.
+    ///
+    /// Traces: BC-5.01.001 EC-007; BC-5.02.001 EC-009; ADR-019 Decision 5.3.
+    #[test]
+    fn test_bc_5_01_001_ac015_decorative_chart_frame_no_error() {
+        // AC-015 — chart frame with AltText::Decorative → no E-A11-001 in strict mode.
+        // RED GATE: stub fires E-A11-001 on Decorative → diags.len() == 1 → FAILS.
+        // After fix: Decorative arm is removed / returns valid → diags.is_empty() → PASSES.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+            region_role: None,
+        };
+
+        // Chart frame with AltText::Decorative — author opt-out, must be VALID.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Decorative,
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Decorative is valid — must produce ZERO diagnostics.
+        // FAILS against stub (stub fires E-A11-001 on Decorative → diags.len() == 1).
+        assert!(
+            diags.is_empty(),
+            "AC-015 Red Gate: chart frame with AltText::Decorative must produce NO diagnostics \
+             (author chose decorative: true). Got {} diagnostics: {diags:?}. \
+             Stub fires E-A11-001 on Decorative — THIS TEST MUST FAIL until T5 (alt_text.rs fix). \
+             BC-5.01.001 EC-007; BC-5.02.001 EC-009; ADR-019 Decision 5.3.",
+            diags.len()
+        );
+    }
+
+    /// AC-015 / BC-5.02.001 postcondition 7 — `AltText::Provided` chart frame is valid.
+    ///
+    /// Red Gate: NOT failing against the stub (Provided is already in the wildcard `_ => {}`
+    /// arm and produces no diagnostic). This is a correctness pin that ensures the `Provided`
+    /// arm is not accidentally broken by the fix.
+    ///
+    /// Traces: BC-5.02.001 postcondition 7; BC-5.01.001 postcondition 1 (negative: no error).
+    #[test]
+    fn test_bc_5_01_001_ac015_provided_chart_frame_no_error() {
+        // AC-015 — chart frame with AltText::Provided → no E-A11-001.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+            region_role: None,
+        };
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![make_frame(FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Revenue chart alt text")),
+            })],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        assert!(
+            diags.is_empty(),
+            "AC-015: chart frame with AltText::Provided must produce no diagnostics; \
+             got {diags:?}. BC-5.02.001 postcondition 7.",
+        );
+    }
+
+    /// AC-013 / BC-5.01.001 invariant 2 — `thread_media_alt_into_frames` fallback:
+    /// when `ContentBlock::Chart.alt == None`, the frame must carry `AltText::Unspecified`
+    /// (not `AltText::Decorative`).
+    ///
+    /// STORY-086 / ADR-019 Decision 5.2 updated the fallback from `None → Decorative`
+    /// to `None → Unspecified`, distinguishing a pipeline gap (no author alt threaded)
+    /// from an explicit decorative opt-out. This test is now GREEN.
+    ///
+    /// This test constructs a `LaidOutDeck` by calling the real layout pipeline on a
+    /// deck with a chart `ContentBlock` where `alt = None`, then asserts the resulting
+    /// chart frame carries `AltText::Unspecified`.
+    ///
+    /// Load-bearing: the frame content type is directly on the production path through
+    /// `thread_media_alt_into_frames` in `slideforge_layout::layout::run`.
+    ///
+    /// Traces: BC-5.01.001 EC-004; ADR-019 Decision 5.2.
+    #[test]
+    fn test_bc_5_01_001_ac013_thread_media_alt_fallback_produces_unspecified() {
+        // AC-013 / AC-014 — when ContentBlock::Chart.alt = None,
+        // thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative).
+        // STORY-086: None → Unspecified (GREEN — fix shipped).
+        use slideforge_layout::FrameContent;
+        use slideforge_types::{
+            AltText, Block, Brand, BrandFonts, BrandPalette, ContentBlock, Deck, DeckMetadata,
+            OrderedMap, Slide, SourceSpan, specs::ChartSpec,
+        };
+
+        // Build a minimal Brand so layout::run can proceed.
+        let brand = Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Arial"),
+                body: Arc::from("Arial"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // Construct a chart slide with a ContentBlock::Chart where alt = None.
+        // This simulates what Stage 2b produces when no alt field is present.
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("chart_type"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from("bar"))),
+        );
+
+        let slide = Slide {
+            slide_type: Arc::from("chart"),
+            fields,
+            blocks: vec![Block {
+                content: ContentBlock::Chart(ChartSpec {
+                    chart_type: Arc::from("bar"),
+                    alt: None, // ← None: Stage 2b alt-resolution rule → ContentBlock.alt = None
+                    decorative: false,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: SourceSpan::default(),
+            }],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = Deck {
+            slides: vec![slide],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: None,
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+
+        // Run the layout — this calls thread_media_alt_into_frames internally.
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("layout::run must succeed for a valid chart slide");
+
+        // Find the Chart frame in the laid-out slide.
+        let chart_frame = laid_out.slides[0]
+            .frames
+            .iter()
+            .find(|f| matches!(f.content, FrameContent::Chart { .. }));
+
+        let chart_frame = chart_frame
+            .expect("AC-013: chart slide must produce a FrameContent::Chart frame after layout");
+
+        // Assert the alt is Unspecified (not Decorative).
+        // STORY-086: None → Unspecified (GREEN — fix shipped per ADR-019 Decision 5.2).
+        assert!(
+            matches!(
+                &chart_frame.content,
+                FrameContent::Chart {
+                    alt: AltText::Unspecified
+                }
+            ),
+            "AC-013 / AC-014: when ContentBlock::Chart.alt = None, \
+             thread_media_alt_into_frames must produce AltText::Unspecified (not Decorative). \
+             Got: {:?}. BC-5.01.001 EC-004; ADR-019 Decision 5.2.",
+            &chart_frame.content
+        );
+    }
+
+    /// AC-013 / BC-5.01.001 invariant 2 — `regions.rs` structural placeholder sites use
+    /// `AltText::Unspecified`.
+    ///
+    /// A `LaidOutDeck` constructed WITHOUT calling Stage 2b (simulating pre-threading state
+    /// where `Slide.blocks = vec![]`) must have chart frames with `AltText::Unspecified`,
+    /// NOT `AltText::Decorative`. This confirms the region map structural placeholder fix.
+    ///
+    /// Red Gate: the STUB `regions.rs` uses `AltText::Decorative` for structural placeholders.
+    /// After fix: all 5 sites use `AltText::Unspecified`.
+    ///
+    /// Load-bearing: this test directly invokes `layout::run` on a deck with NO blocks (no
+    /// Stage 2b threading), which exercises the `regions.rs` structural placeholder path.
+    ///
+    /// Traces: BC-5.01.001 invariant 2; ADR-019 Decision 5.1.
+    #[test]
+    fn test_bc_5_01_001_ac013_regions_structural_placeholder_is_unspecified() {
+        // AC-013: when no ContentBlock threads alt into the frame,
+        // the structural placeholder from regions.rs must be AltText::Unspecified.
+        //
+        // RED GATE: stub uses Decorative as structural placeholder → FAILS.
+        // After fix: regions.rs uses Unspecified → PASSES.
+        use slideforge_layout::FrameContent;
+        use slideforge_types::{
+            AltText, Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, Slide,
+            SourceSpan,
+        };
+
+        let brand = Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Arial"),
+                body: Arc::from("Arial"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+
+        // Chart slide with NO blocks (no Stage 2b threading — simulates pre-fix state).
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("chart_type"),
+            slideforge_types::FieldValue::Literal(slideforge_types::Value::Str(Arc::from("bar"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("chart"),
+            fields,
+            blocks: vec![], // ← NO ContentBlocks: regions.rs structural placeholder used
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = Deck {
+            slides: vec![slide],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: None,
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        };
+
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("layout::run must succeed for chart slide");
+
+        // Find the Chart frame (structural placeholder from regions.rs).
+        let chart_frame = laid_out.slides[0]
+            .frames
+            .iter()
+            .find(|f| matches!(f.content, FrameContent::Chart { .. }));
+
+        let chart_frame =
+            chart_frame.expect("AC-013: chart slide must produce a FrameContent::Chart frame");
+
+        // The structural placeholder must be Unspecified (not Decorative).
+        // RED GATE: stub uses Decorative → assertion matches Unspecified → FAILS.
+        assert!(
+            matches!(
+                &chart_frame.content,
+                FrameContent::Chart {
+                    alt: AltText::Unspecified
+                }
+            ),
+            "AC-013 Red Gate: regions.rs structural placeholder must be AltText::Unspecified, \
+             not AltText::Decorative. Got: {:?}. \
+             Stub uses Decorative → FAILS until T3 ships (regions.rs fix). \
+             BC-5.01.001 invariant 2; ADR-019 Decision 5.1.",
+            &chart_frame.content
+        );
+    }
+
+    // ── Issue 1 (architect-pass-1): post-layout validate_post_layout is the sole
+    //    validator for Chart/Image/Diagram; fires exactly ONE E-A11-001 for Unspecified ─
+
+    /// Issue 1 / AC-005 — `validate_post_layout` fires exactly ONE E-A11-001 for a
+    /// chart frame with `AltText::Unspecified`.
+    ///
+    /// This test verifies the SINGLE-FIRE guarantee required by AC-005 and the
+    /// Issue 1 adjudication (architect-pass-1). After the fix:
+    /// - `AltTextValidator::validate()` (pre-layout) is restricted to Shape blocks only.
+    /// - `validate_post_layout()` (post-layout) fires E-A11-001 for Unspecified frames.
+    /// - Together they guarantee exactly ONE E-A11-001 per missing-alt Chart/Image/Diagram.
+    ///
+    /// Red Gate status: `test_bc_5_01_001_ac015_unspecified_chart_frame_fires_e_a11_001`
+    /// already passes (`validate_post_layout` already handles Unspecified). This new test
+    /// adds an explicit count check and also tests Image and Diagram to ensure all three
+    /// visual frame types fire the error.
+    ///
+    /// Traces: AC-005; BC-5.01.001 postcondition 1; BC-5.02.001 postcondition 7;
+    ///         architect-pass-1-adjudication Issue 1 verdict.
+    #[test]
+    fn test_bc_5_01_001_issue1_post_layout_fires_exactly_one_e_a11_001_per_unspecified_frame() {
+        // Issue 1: validate_post_layout must fire exactly 1 E-A11-001 per
+        // Chart/Image/Diagram frame with AltText::Unspecified.
+        // This is already implemented — this test guards against regression.
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+        use slideforge_types::{AltText, Emu};
+
+        let make_frame = |content: FrameContent| Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1_000_000),
+                height: Emu(500_000),
+            },
+            content,
+            text_flow: None,
+            region_role: None,
+        };
+
+        // One chart, one image, one diagram — all Unspecified.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("chart"),
+            frames: vec![
+                make_frame(FrameContent::Chart {
+                    alt: AltText::Unspecified,
+                }),
+                make_frame(FrameContent::Image {
+                    alt: AltText::Unspecified,
+                }),
+                make_frame(FrameContent::Diagram {
+                    svg: slideforge_types::NormalizedDiagramSvg::empty_placeholder(),
+                    alt: AltText::Unspecified,
+                }),
+            ],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
+
+        // Must fire exactly 3 E-A11-001 (one per Unspecified frame).
+        let e_a11_count = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_A11_001)
+            .count();
+        assert_eq!(
+            e_a11_count, 3,
+            "Issue 1: validate_post_layout must fire E-A11-001 for each Unspecified \
+             Chart, Image, and Diagram frame. Expected 3, got {e_a11_count}. \
+             Diagnostics: {diags:?}. \
+             BC-5.01.001 postcondition 1; architect-pass-1 Issue 1."
         );
     }
 }

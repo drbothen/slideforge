@@ -20,6 +20,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Title,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -38,6 +41,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Generic,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -56,6 +62,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Generic,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -74,6 +83,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Generic,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -92,5 +104,8 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Generic,
+        ),
     },
 ]

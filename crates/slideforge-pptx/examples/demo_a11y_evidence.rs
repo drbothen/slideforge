@@ -102,6 +102,7 @@ fn make_laid_out_deck_image(alt: AltText) -> LaidOutDeck {
                 bbox: title_bbox(),
                 content: FrameContent::Image { alt },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -124,6 +125,7 @@ fn make_laid_out_deck_chart(alt: AltText) -> LaidOutDeck {
                 bbox: title_bbox(),
                 content: FrameContent::Chart { alt },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -153,6 +155,7 @@ fn make_laid_out_deck_diagram(alt: AltText) -> LaidOutDeck {
                     alt,
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -175,6 +178,7 @@ fn make_laid_out_deck_lang_only() -> LaidOutDeck {
                 bbox: title_bbox(),
                 content: FrameContent::Title(Arc::from("Lang Test Slide")),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: vec![],
@@ -399,27 +403,35 @@ fn dump_chart_diagram_evidence() {
     println!("PASS: descr matches alt text on enclosing p:pic");
     println!();
 
-    // EC-006: ChartSpec.alt = None → AltText::Decorative → descr=""
+    // EC-006: AltText::Decorative on Chart frame → descr=""
+    // (author explicitly opted out via decorative: true; STORY-086 updated the None-alt
+    // path to produce AltText::Unspecified, not Decorative)
     let deck = make_deck(Some("en-US"));
     let laid_out = make_laid_out_deck_chart(AltText::Decorative);
     let pptx = build_pptx(&deck, &laid_out);
     let slide_xml = zip_read_entry(&pptx, "ppt/slides/slide1.xml");
     let cnvpr =
         extract_first_cnvpr_with_descr(&slide_xml).expect("EC-006: must find cNvPr with descr");
-    println!("--- EC-006: Chart with AltText::Decorative (ChartSpec.alt = None path) ---");
+    println!(
+        "--- EC-006: Chart with AltText::Decorative (author opted out via decorative: true) ---"
+    );
     println!("Frame type: FrameContent::Chart, alt: AltText::Decorative");
     println!("Extracted: {cnvpr}");
     println!("PASS: descr=\"\" present (attribute present, empty value)");
     println!();
 
-    // EC-007: DiagramSpec.alt = None → AltText::Decorative → descr=""
+    // EC-007: AltText::Decorative on Diagram frame → descr=""
+    // (author explicitly opted out via decorative: true; STORY-086 updated the None-alt
+    // path to produce AltText::Unspecified, not Decorative)
     let deck = make_deck(Some("en-US"));
     let laid_out = make_laid_out_deck_diagram(AltText::Decorative);
     let pptx = build_pptx(&deck, &laid_out);
     let slide_xml = zip_read_entry(&pptx, "ppt/slides/slide1.xml");
     let cnvpr =
         extract_first_cnvpr_with_descr(&slide_xml).expect("EC-007: must find cNvPr with descr");
-    println!("--- EC-007: Diagram with AltText::Decorative (DiagramSpec.alt = None path) ---");
+    println!(
+        "--- EC-007: Diagram with AltText::Decorative (author opted out via decorative: true) ---"
+    );
     println!("Frame type: FrameContent::Diagram, alt: AltText::Decorative");
     println!("Extracted: {cnvpr}");
     println!("PASS: descr=\"\" present (attribute present, empty value)");

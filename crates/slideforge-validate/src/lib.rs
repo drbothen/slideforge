@@ -64,7 +64,7 @@ mod integration_tests {
     use slideforge_plugin_api::{Validator, ValidatorOptions};
     use slideforge_types::{
         Block, ContentBlock, Deck, DeckMetadata, FieldValue, OrderedMap, Slide, SourceSpan, Value,
-        specs::ImageSpec,
+        specs::ShapeSpec,
     };
 
     use crate::alt_text::{AltTextValidator, E_A11_001};
@@ -72,21 +72,34 @@ mod integration_tests {
     use crate::lang_validator::{E_A11_003, LangValidator};
 
     /// Full pipeline: deck missing lang (E-A11-003) + `severity_cards` slide missing
-    /// label (E-A11-002) + image block missing alt text (E-A11-001).
+    /// label (E-A11-002) + shape block missing alt text (E-A11-001).
     ///
     /// Runs all three validators and asserts that combined diagnostics contain
     /// exactly one instance of each error code.
     ///
     /// Story STORY-017 Test Strategy integration test.
+    ///
+    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Pre-layout `AltTextValidator::validate()`
+    /// is now restricted to `ContentBlock::Shape`. Image/Chart/Diagram are validated post-layout
+    /// only. Updated to use `ContentBlock::Shape` to confirm E-A11-001 fires in the pipeline.
     #[test]
     fn test_full_validation_pipeline() {
         // Build a deck that simultaneously triggers all three validators:
         //   - No deck-level lang → LangValidator emits E-A11-003
         //   - severity_cards slide missing label → LabelCheckValidator emits E-A11-002
-        //   - image block without alt text → AltTextValidator emits E-A11-001
-        let image_block = Block {
-            content: ContentBlock::Image(ImageSpec {
-                path: Arc::from("chart.png"),
+        //   - shape block without alt text → AltTextValidator emits E-A11-001
+        //     (pre-layout validate() is Shape-only per ADR-018 v1.2 Decision-3)
+        let shape_block = Block {
+            content: ContentBlock::Shape(ShapeSpec {
+                shape_type: slideforge_types::ShapeType::Rect,
+                position: slideforge_types::specs::ShapePosition {
+                    x: slideforge_types::specs::ShapeUnit::Inches(500),
+                    y: slideforge_types::specs::ShapeUnit::Inches(1000),
+                    width: slideforge_types::specs::ShapeUnit::Inches(2000),
+                    height: slideforge_types::specs::ShapeUnit::Inches(1000),
+                },
+                fill: slideforge_types::FillSpec::None,
+                text: None,
                 alt: None,
                 decorative: false,
                 span: SourceSpan::default(),
@@ -99,7 +112,7 @@ mod integration_tests {
         let color_slide = Slide {
             slide_type: Arc::from("severity_cards"),
             fields: OrderedMap::new(), // no label field
-            blocks: vec![image_block], // has an image missing alt — triggers E-A11-001
+            blocks: vec![shape_block], // has a shape missing alt — triggers E-A11-001
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),
@@ -171,12 +184,23 @@ mod integration_tests {
     }
 
     /// Verify the integration test also works when label IS valid and lang IS set —
-    /// only the missing-alt image should produce a diagnostic (regression guard).
+    /// only the missing-alt shape should produce a diagnostic (regression guard).
+    ///
+    /// NOTE (STORY-086 / ADR-018 v1.2 Decision-3): Updated to use `ContentBlock::Shape`
+    /// because pre-layout `validate()` is now Shape-only.
     #[test]
     fn test_full_validation_pipeline_only_alt_missing() {
-        let image_block = Block {
-            content: ContentBlock::Image(ImageSpec {
-                path: Arc::from("logo.png"),
+        let shape_block = Block {
+            content: ContentBlock::Shape(ShapeSpec {
+                shape_type: slideforge_types::ShapeType::Rect,
+                position: slideforge_types::specs::ShapePosition {
+                    x: slideforge_types::specs::ShapeUnit::Inches(500),
+                    y: slideforge_types::specs::ShapeUnit::Inches(1000),
+                    width: slideforge_types::specs::ShapeUnit::Inches(2000),
+                    height: slideforge_types::specs::ShapeUnit::Inches(1000),
+                },
+                fill: slideforge_types::FillSpec::None,
+                text: None,
                 alt: None,
                 decorative: false,
                 span: SourceSpan::default(),
@@ -194,7 +218,7 @@ mod integration_tests {
         let color_slide = Slide {
             slide_type: Arc::from("severity_cards"),
             fields,
-            blocks: vec![image_block],
+            blocks: vec![shape_block],
             register: None,
             tags: vec![],
             source_span: SourceSpan::default(),

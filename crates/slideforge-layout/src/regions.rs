@@ -21,7 +21,9 @@
 //! `x >= 0`, `y >= 0`, `width > 0`, `height > 0`,
 //! `x + width <= page_width`, `y + height <= page_height`.
 
-use crate::types::{AltText, BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg};
+use crate::types::{
+    AltText, BoundingBox, Emu, Frame, FrameContent, NormalizedDiagramSvg, RegionRole,
+};
 
 /// Produce the canonical [`Frame`] list for a given slide type keyword on the
 /// given page dimensions.
@@ -81,11 +83,13 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 1_600_200, 8_229_600, 1_143_000),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 2_743_200, 8_229_600, 914_400),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Subtitle),
             },
         ],
 
@@ -111,11 +115,13 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Body),
             },
         ],
 
@@ -128,11 +134,13 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 1_737_360, 8_229_600, 1_371_600),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 3_200_400, 8_229_600, 914_400),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Subtitle),
             },
         ],
 
@@ -146,16 +154,19 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 3_886_200, 3_657_600),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Body),
             },
             Frame {
                 bbox: bbox(4_800_600, 1_188_720, 3_886_200, 3_657_600),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
         ],
 
@@ -167,16 +178,18 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
-                // STORY-039: stub placeholder — `layout::run` overwrites with real content.
-                // `AltText::Decorative` is the safe default for structural stubs
-                // (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
 
@@ -193,11 +206,13 @@ pub fn region_frames_for(
                 bbox: bbox(914_400, 1_188_720, 7_315_200, 2_286_000),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Body),
             },
             Frame {
                 bbox: bbox(914_400, 3_657_600, 7_315_200, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
         ],
 
@@ -207,19 +222,20 @@ pub fn region_frames_for(
         "bio" => vec![
             Frame {
                 bbox: bbox(457_200, 457_200, 2_743_200, 4_114_800),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
-                // later story. `AltText::Decorative` is the safe default when no alt has
-                // been threaded yet (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
+                region_role: None,
             },
             Frame {
                 bbox: bbox(3_657_600, 457_200, 5_029_200, 4_114_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Body),
             },
         ],
 
@@ -234,26 +250,31 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 274_320, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_371_600, 3_657_600, 2_286_000),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
             Frame {
                 bbox: bbox(4_297_680, 1_371_600, 3_657_600, 2_286_000),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
             Frame {
                 bbox: bbox(457_200, 3_657_600, 3_657_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
             Frame {
                 bbox: bbox(4_297_680, 3_657_600, 3_657_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
         ],
 
@@ -265,17 +286,18 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ChartSpec.alt` (STORY-039 AC-005). Content/SVG resolution is deferred
-                // to a later story. `AltText::Decorative` is the safe default when no
-                // alt has been threaded yet.
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Chart {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
 
@@ -287,18 +309,19 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `DiagramSpec.alt` (STORY-039 AC-005). SVG content resolution is deferred
-                // to a later story. `AltText::Decorative` and `empty_placeholder()` are
-                // the safe defaults when no content has been threaded yet.
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Diagram {
                     svg: NormalizedDiagramSvg::empty_placeholder(),
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
 
@@ -310,17 +333,18 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(457_200, 1_188_720, 8_229_600, 3_657_600),
-                // Structural placeholder: `layout::run` threads the `alt` field from
-                // `ImageSpec.alt` (STORY-039 AC-005). Content resolution is deferred to a
-                // later story. `AltText::Decorative` is the safe default when no alt has
-                // been threaded yet (explicit opt-out, not silent empty string).
+                // Structural placeholder — overwritten by thread_media_alt_into_frames when
+                // Stage 2b (ADR-019) populates Slide.blocks; if never overwritten,
+                // validate_post_layout emits E-A11-001.
                 content: FrameContent::Image {
-                    alt: AltText::Decorative,
+                    alt: AltText::Unspecified,
                 },
                 text_flow: None,
+                region_role: None,
             },
         ],
 
@@ -332,11 +356,13 @@ pub fn region_frames_for(
                 bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Title),
             },
             Frame {
                 bbox: bbox(1_371_600, 1_188_720, 6_400_800, 3_657_600),
                 content: FrameContent::Empty,
                 text_flow: None,
+                region_role: Some(RegionRole::Generic),
             },
         ],
 

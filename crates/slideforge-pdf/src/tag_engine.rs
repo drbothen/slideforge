@@ -274,11 +274,16 @@ impl SlideTagEngine {
                     }
                 },
 
-                // ── Image → Figure+Alt (or Artifact if decorative) ───────────
+                // ── Image → Figure+Alt (or Artifact if decorative/unspecified) ──
                 FrameContent::Image { alt } => {
                     match alt {
                         slideforge_types::AltText::Decorative => {
                             // Decorative image: mark as Artifact.
+                            decorative_frame_indices.push(frame_idx);
+                        },
+                        // STORY-086 stub: Unspecified = pipeline placeholder; treat as
+                        // Artifact (same as Decorative) until Stage 2b threads real alt.
+                        slideforge_types::AltText::Unspecified => {
                             decorative_frame_indices.push(frame_idx);
                         },
                         slideforge_types::AltText::Provided(alt_str) => {
@@ -289,28 +294,35 @@ impl SlideTagEngine {
                     }
                 },
 
-                // ── Diagram / Chart → Figure+Alt (or Artifact if decorative) ──
+                // ── Diagram / Chart → Figure+Alt (or Artifact if decorative/unspecified) ──
                 //
                 // STORY-039: both `FrameContent::Diagram` and `FrameContent::Chart`
                 // carry `alt: AltText`. Same branching logic:
                 // - `AltText::Provided(s)` → tagged Figure with /Alt (BC-4.03.001 AC-004).
-                // - `AltText::Decorative` → Artifact (stub placeholder or explicit opt-out).
+                // - `AltText::Decorative` → Artifact (explicit opt-out).
+                // - `AltText::Unspecified` → Artifact (pipeline placeholder — STORY-086).
                 FrameContent::Diagram { alt, .. } | FrameContent::Chart { alt } => match alt {
                     slideforge_types::AltText::Provided(alt_str) => {
                         let child_idx = part_group.children.len();
                         part_group.push(self.tag_figure(Some(alt_str.as_ref()))?);
                         frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                     },
-                    slideforge_types::AltText::Decorative => {
+                    // Decorative = author opt-out; Unspecified = pipeline placeholder (no alt).
+                    // Both are marked as PDF Artifacts — not in the structure tree.
+                    // The post-layout validator fires E-A11-001 for Unspecified in strict mode.
+                    slideforge_types::AltText::Decorative
+                    | slideforge_types::AltText::Unspecified => {
                         decorative_frame_indices.push(frame_idx);
                     },
                 },
 
-                // ── Shape → Figure+Alt or Artifact if decorative ──────────────
+                // ── Shape → Figure+Alt or Artifact if decorative/unspecified ──
                 FrameContent::Shape(shape_frame) => {
                     match &shape_frame.alt {
-                        slideforge_types::AltText::Decorative => {
-                            // Decorative shape: not in the tag tree — mark as Artifact.
+                        // Decorative or Unspecified shape: not in the tag tree — mark as Artifact.
+                        // Unspecified = no author alt data; Decorative = author opt-out.
+                        slideforge_types::AltText::Decorative
+                        | slideforge_types::AltText::Unspecified => {
                             decorative_frame_indices.push(frame_idx);
                         },
                         slideforge_types::AltText::Provided(alt) => {
@@ -322,9 +334,25 @@ impl SlideTagEngine {
                 },
 
                 // ── TextRun → P ───────────────────────────────────────────────
-                FrameContent::TextRun(_inlines) => {
+                // STORY-086 / ADR-019: Stage 2b populates ContentBlock::Text blocks
+                // whose inlines are threaded into TextRun frames. Set /ActualText on
+                // the P structure element so the content is accessible in the structure
+                // tree (PDF/UA-1 compliance; also makes text findable in raw PDF bytes
+                // for integration test verification, as structure dictionaries are
+                // stored uncompressed even when content streams use FlateDecode).
+                FrameContent::TextRun(inlines) => {
                     let child_idx = part_group.children.len();
-                    let p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
+                    let actual_text: String =
+                        inlines.iter().fold(String::new(), |mut acc, node| {
+                            if let slideforge_types::InlineNode::Plain(s) = node {
+                                acc.push_str(s.as_ref());
+                            }
+                            acc
+                        });
+                    let mut p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
+                    if !actual_text.is_empty() {
+                        p_group.tag.set_actual_text(Some(actual_text));
+                    }
                     part_group.push(p_group);
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
@@ -381,9 +409,31 @@ impl SlideTagEngine {
         }
 
         match block {
-            // Text paragraph → P
-            ContentBlock::Text(_text_block) => {
-                Ok(Some(TagGroup::new(Tag::<krilla::tagging::kind::P>::P)))
+            // Text paragraph → P, with /ActualText attribute.
+            //
+            // /ActualText is set so that the paragraph text is stored in the uncompressed
+            // structure dictionary — making it findable in raw PDF bytes even when the
+            // content stream uses FlateDecode compression. This is consistent with the
+            // TextRun → P path in `tag_slide_with_title` (which sets /ActualText for
+            // the same reason). PDF/UA-1 compliance benefits from /ActualText on P elements
+            // when the content stream glyphs may differ from logical reading order
+            // (BC-4.03.001 / STORY-086).
+            ContentBlock::Text(text_block) => {
+                let mut p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
+                let actual_text: String =
+                    text_block
+                        .inlines
+                        .iter()
+                        .fold(String::new(), |mut acc, node| {
+                            if let slideforge_types::InlineNode::Plain(s) = node {
+                                acc.push_str(s.as_ref());
+                            }
+                            acc
+                        });
+                if !actual_text.is_empty() {
+                    p_group.tag.set_actual_text(Some(actual_text));
+                }
+                Ok(Some(p_group))
             },
 
             // Bullet list → L (Disc) with LI+LBody for each item.
@@ -405,7 +455,7 @@ impl SlideTagEngine {
             ContentBlock::Shape(shape_spec) => match &shape_spec.alt {
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
                 // Unreachable: produces_structure_group() returns false for non-Provided alt.
-                Some(AltText::Decorative) | None => Ok(None),
+                Some(AltText::Decorative | AltText::Unspecified) | None => Ok(None),
             },
 
             // Chart in body → Figure+Alt.
@@ -418,7 +468,7 @@ impl SlideTagEngine {
             ContentBlock::Chart(chart_spec) => match chart_spec.alt.as_ref() {
                 Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
                 // Unreachable: produces_structure_group() returns false for non-Provided alt.
-                Some(AltText::Decorative) | None => Ok(None),
+                Some(AltText::Decorative | AltText::Unspecified) | None => Ok(None),
             },
 
             // Diagram in body → Figure+Alt.
@@ -429,7 +479,7 @@ impl SlideTagEngine {
             ContentBlock::Diagram(diagram_spec) => match diagram_spec.alt.as_ref() {
                 Some(AltText::Provided(s)) => Ok(Some(self.tag_figure(Some(s))?)),
                 // Unreachable: produces_structure_group() returns false for non-Provided alt.
-                Some(AltText::Decorative) | None => Ok(None),
+                Some(AltText::Decorative | AltText::Unspecified) | None => Ok(None),
             },
 
             // Image in body → Figure+Alt.
@@ -437,7 +487,7 @@ impl SlideTagEngine {
             ContentBlock::Image(image_spec) => match &image_spec.alt {
                 Some(AltText::Provided(alt)) => Ok(Some(self.tag_figure(Some(alt))?)),
                 // Unreachable: produces_structure_group() returns false for non-Provided alt.
-                Some(AltText::Decorative) | None => Ok(None),
+                Some(AltText::Decorative | AltText::Unspecified) | None => Ok(None),
             },
 
             // Math block → P (math content is inline text; STORY-045 will
@@ -571,6 +621,7 @@ mod tests {
                 },
                 content: FrameContent::Title(Arc::from("Red Gate Test Slide")),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -636,6 +687,7 @@ mod tests {
                     // Non-decorative title frame.
                     content: FrameContent::Title(Arc::from("Photo Slide")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -649,6 +701,7 @@ mod tests {
                         alt: slideforge_types::AltText::Decorative,
                     },
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -697,6 +750,7 @@ mod tests {
                     )),
                 },
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
@@ -874,7 +928,9 @@ mod tests {
     #[test]
     fn test_f_p3_001_multi_block_body_records_per_block_child_indices() {
         use krilla::tagging::{Node, TagKind};
-        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{
+            BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag,
+        };
 
         let engine = SlideTagEngine::new();
 
@@ -893,6 +949,7 @@ mod tests {
                     },
                     content: FrameContent::Title(Arc::from("Multi-Block Body Test")),
                     text_flow: None,
+                    region_role: None,
                 },
                 Frame {
                     bbox: BoundingBox {
@@ -904,6 +961,7 @@ mod tests {
                     content: FrameContent::Body(vec![
                         ContentBlock::Text(TextBlock {
                             inlines: vec![InlineNode::Plain(Arc::from("Paragraph text"))],
+                            tag: TextTag::Untagged,
                             span: SourceSpan::default(),
                         }),
                         ContentBlock::Bullets(vec![BulletItem {
@@ -913,6 +971,7 @@ mod tests {
                         }]),
                     ]),
                     text_flow: None,
+                    region_role: None,
                 },
             ],
             speaker_notes: None,
@@ -1013,7 +1072,7 @@ mod tests {
     #[test]
     fn test_f_p3_001_single_block_body_backward_compat() {
         use krilla::tagging::{Node, TagKind};
-        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
         let engine = SlideTagEngine::new();
 
@@ -1029,9 +1088,11 @@ mod tests {
                 },
                 content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from("Single paragraph"))],
+                    tag: TextTag::Untagged,
                     span: SourceSpan::default(),
                 })]),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),

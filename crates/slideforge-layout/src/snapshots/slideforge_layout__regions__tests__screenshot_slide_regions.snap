@@ -20,6 +20,9 @@ expression: frames
         },
         content: Empty,
         text_flow: None,
+        region_role: Some(
+            Title,
+        ),
     },
     Frame {
         bbox: BoundingBox {
@@ -37,8 +40,9 @@ expression: frames
             ),
         },
         content: Image {
-            alt: Decorative,
+            alt: Unspecified,
         },
         text_flow: None,
+        region_role: None,
     },
 ]

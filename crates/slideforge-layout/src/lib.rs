@@ -74,7 +74,16 @@ pub use types::{
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    // doc_markdown: EMU coordinate examples in test doc-comments use x=NNN, y=NNN
+    // patterns that clippy flags as missing backticks. These are test-only doc
+    // comments serving as Red Gate documentation — formatting them as code snippets
+    // would harm readability without adding correctness value.
+    clippy::doc_markdown,
+    // unused_variables: some test doc-level bindings (e.g., page_height) are
+    // retained for reference clarity even when the variable is not read in an
+    // assertion. Test-local documentation bindings are intentional.
+    unused_variables
 )]
 mod tests {
     use std::sync::Arc;
@@ -897,6 +906,7 @@ mod tests {
             },
             content: FrameContent::TextRun(vec![InlineNode::Xref(Arc::clone(&xref_target))]),
             text_flow: None,
+            region_role: None,
         };
         let laid_out_slide = LaidOutSlide {
             source_index: 0,
@@ -1186,6 +1196,7 @@ mod tests {
         let xref_target = Arc::from("__nonexistent_slide__");
         let text_block = TextBlock {
             inlines: vec![InlineNode::Xref(Arc::clone(&xref_target))],
+            tag: slideforge_types::TextTag::Untagged,
             span: SourceSpan::default(),
         };
         let block = Block {
@@ -1489,6 +1500,7 @@ mod tests {
 
         let text_block = TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from("hello"))],
+            tag: slideforge_types::TextTag::Untagged,
             span: SourceSpan::default(),
         };
         let block = Block {
@@ -1556,6 +1568,7 @@ mod tests {
             bbox: make_bbox(685_800),
             content: crate::types::FrameContent::Title(Arc::from("Quarterly Revenue")),
             text_flow: None,
+            region_role: None,
         };
         let title_text = collect_frame_text(&title_frame);
         assert!(
@@ -1568,6 +1581,7 @@ mod tests {
             bbox: make_bbox(914_400),
             content: crate::types::FrameContent::Subtitle(Arc::from("FY-2026 Highlights")),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&subtitle_frame).contains("FY-2026 Highlights"),
@@ -1579,9 +1593,11 @@ mod tests {
             bbox: make_bbox(3_657_600),
             content: crate::types::FrameContent::Body(vec![ContentBlock::Text(TextBlock {
                 inlines: vec![InlineNode::Plain(Arc::from("Body visual content"))],
+                tag: slideforge_types::TextTag::Untagged,
                 span: SourceSpan::default(),
             })]),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&body_frame).contains("Body visual content"),
@@ -1595,6 +1611,7 @@ mod tests {
                 "TextRun inline text",
             ))]),
             text_flow: None,
+            region_role: None,
         };
         assert!(
             collect_frame_text(&text_run_frame).contains("TextRun inline text"),
@@ -1667,6 +1684,7 @@ mod tests {
             blocks: vec![Block {
                 content: ContentBlock::Text(TextBlock {
                     inlines: vec![InlineNode::Plain(Arc::from(visual_body_text))],
+                    tag: slideforge_types::TextTag::Untagged,
                     span: SourceSpan::default(),
                 }),
                 label: None,
@@ -3043,5 +3061,520 @@ mod tests {
             },
             other => panic!("expected LayoutError::BulletDepthExceeded, got: {other:?}"),
         }
+    }
+
+    // ── STORY-086 AC-023: tag-over-position invariant ──────────────────────────
+
+    /// AC-023 / BC-4.01.001 v1.2 postcondition 12 — `TextTag` routing is tag-driven,
+    /// NOT position-driven. A `TextTag::Title` block at index 1 (Body at index 0)
+    /// must produce `FrameContent::Title` in the title frame regardless of its
+    /// position in `Slide.blocks`.
+    ///
+    /// Red Gate: current layout.rs maps ALL `ContentBlock::Text` → `FrameContent::TextRun`
+    /// regardless of any tag (`TextTag` is unused). No `FrameContent::Title` is produced.
+    /// This test asserts that `FrameContent::Title` appears in the frame list for the
+    /// reversed-order slide. FAILS because:
+    /// (a) `TextTag::Title` has no routing in layout.rs
+    /// (b) All `ContentBlock::Text` → `TextRun`, never Title
+    ///
+    /// After `TextTag` routing implementation: `TextTag::Title` → `FrameContent::Title` in
+    /// the title region frame, regardless of block list position.
+    ///
+    /// Traces: BC-4.01.001 v1.2 postcondition 12 + invariant 5; AC-023.
+    #[test]
+    fn test_bc_4_01_001_ac023_texttag_title_is_tag_driven_not_position_driven() {
+        // AC-023: Body at blocks[0], Title at blocks[1] (reversed).
+        // Layout must produce FrameContent::Title regardless of position.
+        // RED GATE: no TextTag routing → no FrameContent::Title produced → FAILS.
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock, TextTag};
+
+        // Build a content slide with blocks in REVERSED order:
+        // blocks[0] = ContentBlock::Text(tag: Body)
+        // blocks[1] = ContentBlock::Text(tag: Title)
+        let body_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("body text"))],
+                tag: TextTag::Body,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let title_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("the title"))],
+                tag: TextTag::Title,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            // REVERSED: body first, title second
+            blocks: vec![body_block, title_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for content slide");
+        let laid_out = &result.slides[0];
+
+        // Assert that at least one frame has FrameContent::Title.
+        // RED GATE: current code maps ALL Text → TextRun → no FrameContent::Title → FAILS.
+        // After routing: TextTag::Title → FrameContent::Title in the title region slot.
+        let has_title_frame = laid_out
+            .frames
+            .iter()
+            .any(|f| matches!(&f.content, crate::types::FrameContent::Title(_)));
+        assert!(
+            has_title_frame,
+            "AC-023 RED GATE: layout::run must produce at least one FrameContent::Title \
+             when a ContentBlock::Text with TextTag::Title is present, regardless of its \
+             position in Slide.blocks. \
+             Current code: TextTag is ignored → all ContentBlock::Text → TextRun → \
+             no FrameContent::Title → FAILS until TextTag routing is implemented. \
+             BC-4.01.001 v1.2 postcondition 12 + invariant 5. \
+             Frame count: {}",
+            laid_out.frames.len()
+        );
+
+        // Assert the Title frame carries "the title" text.
+        let title_text: Option<String> = laid_out.frames.iter().find_map(|f| {
+            if let crate::types::FrameContent::Title(s) = &f.content {
+                Some(s.as_ref().to_owned())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            title_text.as_deref(),
+            Some("the title"),
+            "AC-023: FrameContent::Title must carry text 'the title'; got {title_text:?}"
+        );
+    }
+
+    // ── STORY-086 AC-023 (load-bearing): tag-driven slot geometry under reversed input ──
+
+    /// F-086-P3-HIGH-001 / AC-023 / EC-007 — tag-driven slot selection under reversed input.
+    ///
+    /// # What this test verifies
+    ///
+    /// `fill_region_slot_or_append` currently fills "the first `FrameContent::Empty` slot
+    /// regardless of which ContentBlock triggered the call" (position-driven, not tag-driven).
+    /// For a "content" slide, `region_frames_for` allocates TWO Empty slots:
+    ///   - slot[0]: title region  (x=457_200, y=365_760,   w=8_229_600, h=685_800)
+    ///   - slot[1]: body region   (x=457_200, y=1_188_720, w=8_229_600, h=3_657_600)
+    ///
+    /// With reversed block order `[Body, Title]`:
+    ///   - Body block is processed first → claims slot[0] (title-region geometry) → WRONG
+    ///   - Title block is processed second → claims slot[1] (body-region geometry) → WRONG
+    ///
+    /// The invariant (BC-4.01.001 v1.2 invariant 5, AC-023, EC-007) requires that
+    /// `FrameContent::Title` MUST carry the title-region bbox (y≈365_760) and
+    /// `FrameContent::Body` MUST carry the body-region bbox (y≈1_188_720),
+    /// REGARDLESS of which order the blocks appear in `Slide.blocks`.
+    ///
+    /// # Red Gate
+    ///
+    /// FAILS on HEAD 25caca2b because:
+    ///   - Body (processed first) fills slot[0] → `FrameContent::Body` at y=365_760 (title geometry)
+    ///   - Title (processed second) fills slot[1] → `FrameContent::Title` at y=1_188_720 (body geometry)
+    ///
+    /// The previous AC-023 test only checked that `FrameContent::Title` exists with the right
+    /// text — it passed even though Title was placed in the BODY-REGION slot (wrong geometry).
+    /// This test is the load-bearing replacement that checks the ACTUAL GEOMETRY.
+    ///
+    /// # Pass condition (implementer target)
+    ///
+    /// `fill_region_slot_or_append` (or its caller) must use tag-aware slot selection:
+    /// `TextTag::Title` fills the slot pre-allocated as title geometry and
+    /// `TextTag::Body` fills the slot pre-allocated as body geometry —
+    /// i.e. slots are tag-typed, not position-claimed in processing order.
+    ///
+    /// Tolerance: ±50_800 EMU (±4pt) per visual-parity-contract §Positional layout tolerance.
+    ///
+    /// Traces: F-086-P3-HIGH-001; AC-023; EC-007; BC-4.01.001 v1.2 invariant 5.
+    // F-086-P3-HIGH-001 / AC-023 / EC-007 — tag-driven slot selection under reversed input
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn test_bc_4_01_001_ac023_reversed_blocks_title_gets_title_region_body_gets_body_region() {
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock, TextTag};
+
+        // Build a "content" slide with blocks in REVERSED order:
+        //   blocks[0] = Body ("the body")
+        //   blocks[1] = Title ("the title")
+        // The invariant demands that geometry assignment is tag-driven, not position-driven.
+        let body_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("the body"))],
+                tag: TextTag::Body,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let title_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("the title"))],
+                tag: TextTag::Title,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            // REVERSED: body first, title second
+            blocks: vec![body_block, title_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for reversed-order content slide");
+        let laid_out = &result.slides[0];
+
+        // Authored region geometry from regions.rs for "content" at default page size
+        // (9_144_000 × 5_143_500 EMU). These are the canonical values — obtained from
+        // region_frames_for("content", DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT).
+        //
+        //   slot[0] = title region: x=457_200, y=365_760,   w=8_229_600, h=685_800
+        //   slot[1] = body region:  x=457_200, y=1_188_720, w=8_229_600, h=3_657_600
+        //
+        // Tolerance: ±50_800 EMU (±4pt) per visual-parity-contract §Positional layout.
+        let tolerance = 50_800_i64;
+
+        let authored_title_bbox = crate::types::BoundingBox {
+            x: crate::types::Emu(457_200),
+            y: crate::types::Emu(365_760),
+            width: crate::types::Emu(8_229_600),
+            height: crate::types::Emu(685_800),
+        };
+        let authored_body_bbox = crate::types::BoundingBox {
+            x: crate::types::Emu(457_200),
+            y: crate::types::Emu(1_188_720),
+            width: crate::types::Emu(8_229_600),
+            height: crate::types::Emu(3_657_600),
+        };
+
+        // ── (a) FrameContent::Title must carry the title-region bbox ─────────────────
+        let title_frame = laid_out
+            .frames
+            .iter()
+            .find(|f| matches!(&f.content, crate::types::FrameContent::Title(_)));
+
+        assert!(
+            title_frame.is_some(),
+            "AC-023 reversed-input: layout::run must produce a FrameContent::Title frame. \
+             Frame count: {}; Frame contents: {:?}",
+            laid_out.frames.len(),
+            laid_out
+                .frames
+                .iter()
+                .map(|f| format!("{:?}", f.content))
+                .collect::<Vec<_>>()
+        );
+
+        let title_frame = title_frame.unwrap();
+
+        // Assert Title frame text is correct.
+        if let crate::types::FrameContent::Title(ref title_text) = title_frame.content {
+            assert_eq!(
+                title_text.as_ref(),
+                "the title",
+                "AC-023 reversed-input: FrameContent::Title must carry text 'the title'; \
+                 got {title_text:?}"
+            );
+        }
+
+        // Assert Title frame carries the TITLE-REGION bbox (y≈365_760), NOT the body-region
+        // bbox (y≈1_188_720). This is the load-bearing assertion that the previous AC-023
+        // test lacked — it distinguishes correct tag-driven routing from the position-driven
+        // bug where Title ends up in slot[1] (body geometry).
+        let tf_bbox_ok = (title_frame.bbox.x.0 - authored_title_bbox.x.0).abs() <= tolerance
+            && (title_frame.bbox.y.0 - authored_title_bbox.y.0).abs() <= tolerance
+            && (title_frame.bbox.width.0 - authored_title_bbox.width.0).abs() <= tolerance
+            && (title_frame.bbox.height.0 - authored_title_bbox.height.0).abs() <= tolerance;
+
+        assert!(
+            tf_bbox_ok,
+            "F-086-P3-HIGH-001 / AC-023 / EC-007 RED GATE — reversed-input: \
+             FrameContent::Title must carry the TITLE-REGION bbox \
+             (x={}, y={}, w={}, h={}) within ±{} EMU. \
+             Got: (x={}, y={}, w={}, h={}). \
+             CURRENT BUG: fill_region_slot_or_append is position-driven — Body block \
+             arrives first, claims slot[0] (title geometry y={}), then Title block \
+             claims slot[1] (body geometry y={}) — so Title ends up at y={} (body region) \
+             instead of y={} (title region). \
+             Fix: make slot assignment tag-aware so TextTag::Title always fills the \
+             title-region slot regardless of block processing order. \
+             Traces: F-086-P3-HIGH-001; AC-023; EC-007; BC-4.01.001 v1.2 invariant 5.",
+            authored_title_bbox.x.0,
+            authored_title_bbox.y.0,
+            authored_title_bbox.width.0,
+            authored_title_bbox.height.0,
+            tolerance,
+            title_frame.bbox.x.0,
+            title_frame.bbox.y.0,
+            title_frame.bbox.width.0,
+            title_frame.bbox.height.0,
+            authored_title_bbox.y.0, // what slot[0] actually is
+            authored_body_bbox.y.0,  // what slot[1] actually is
+            title_frame.bbox.y.0,    // where Title actually landed
+            authored_title_bbox.y.0, // where Title should be
+        );
+
+        // ── (b) FrameContent::Body must carry the body-region bbox ──────────────────
+        let body_frame = laid_out
+            .frames
+            .iter()
+            .find(|f| matches!(&f.content, crate::types::FrameContent::Body(_)));
+
+        assert!(
+            body_frame.is_some(),
+            "AC-023 reversed-input: layout::run must produce a FrameContent::Body frame. \
+             Frame count: {}; Frame contents: {:?}",
+            laid_out.frames.len(),
+            laid_out
+                .frames
+                .iter()
+                .map(|f| format!("{:?}", f.content))
+                .collect::<Vec<_>>()
+        );
+
+        let body_frame = body_frame.unwrap();
+
+        let bf_bbox_ok = (body_frame.bbox.x.0 - authored_body_bbox.x.0).abs() <= tolerance
+            && (body_frame.bbox.y.0 - authored_body_bbox.y.0).abs() <= tolerance
+            && (body_frame.bbox.width.0 - authored_body_bbox.width.0).abs() <= tolerance
+            && (body_frame.bbox.height.0 - authored_body_bbox.height.0).abs() <= tolerance;
+
+        assert!(
+            bf_bbox_ok,
+            "F-086-P3-HIGH-001 / AC-023 / EC-007 RED GATE — reversed-input: \
+             FrameContent::Body must carry the BODY-REGION bbox \
+             (x={}, y={}, w={}, h={}) within ±{} EMU. \
+             Got: (x={}, y={}, w={}, h={}). \
+             CURRENT BUG: Body block (first in list) claims slot[0] (title geometry y={}), \
+             so Body ends up at y={} (title region) instead of y={} (body region). \
+             Traces: F-086-P3-HIGH-001; AC-023; EC-007; BC-4.01.001 v1.2 invariant 5.",
+            authored_body_bbox.x.0,
+            authored_body_bbox.y.0,
+            authored_body_bbox.width.0,
+            authored_body_bbox.height.0,
+            tolerance,
+            body_frame.bbox.x.0,
+            body_frame.bbox.y.0,
+            body_frame.bbox.width.0,
+            body_frame.bbox.height.0,
+            authored_title_bbox.y.0, // slot[0] has title geometry
+            body_frame.bbox.y.0,     // where Body actually landed
+            authored_body_bbox.y.0,  // where Body should be
+        );
+
+        // ── (c) Mutual exclusion: Title must NOT be at body-region y, Body must NOT be at title-region y ─
+        // These assertions make the geometry swap failure explicit even if (a)/(b) somehow pass.
+        assert!(
+            (title_frame.bbox.y.0 - authored_body_bbox.y.0).abs() > tolerance,
+            "F-086-P3-HIGH-001 / AC-023 / EC-007: FrameContent::Title must NOT reside at \
+             the body-region y ({}) — that indicates a position-driven slot swap. \
+             Title frame y={}, body region y={}. \
+             Traces: F-086-P3-HIGH-001; AC-023; EC-007.",
+            authored_body_bbox.y.0,
+            title_frame.bbox.y.0,
+            authored_body_bbox.y.0,
+        );
+        assert!(
+            (body_frame.bbox.y.0 - authored_title_bbox.y.0).abs() > tolerance,
+            "F-086-P3-HIGH-001 / AC-023 / EC-007: FrameContent::Body must NOT reside at \
+             the title-region y ({}) — that indicates a position-driven slot swap. \
+             Body frame y={}, title region y={}. \
+             Traces: F-086-P3-HIGH-001; AC-023; EC-007.",
+            authored_title_bbox.y.0,
+            body_frame.bbox.y.0,
+            authored_title_bbox.y.0,
+        );
+    }
+
+    // ── STORY-086 T6b.1: Title frame geometry must use authored region bbox ────
+
+    /// T6b.1 / BC-4.01.001 v1.2 / visual-parity-contract — the `FrameContent::Title`
+    /// frame produced by `layout::run` for a content slide MUST carry the authored
+    /// region geometry from `region_frames_for("content", …)` (title header:
+    /// x=457_200, y=365_760, width=8_229_600, height=685_800 at default page size),
+    /// NOT the full-page placeholder bbox (x=0, y=0, width=page_width, height=clamped).
+    ///
+    /// ## Why this matters (T6b.1)
+    ///
+    /// `layout.rs` currently APPENDS a NEW frame (with full-page bbox) for each
+    /// `ContentBlock::Text` block, ignoring the pre-allocated Empty frames from
+    /// `region_frames_for`. This causes authored geometry to be lost: the PPTX
+    /// serializer receives the wrong coordinates for the title placeholder, breaking
+    /// visual parity (visual-parity-contract §Positional layout tolerance: ±4pt).
+    ///
+    /// ## Red Gate
+    ///
+    /// FAILS on current HEAD 065303b2 because:
+    /// - `layout::run` appends a `FrameContent::Title` frame with bbox
+    ///   `{x:0, y:0, width:page_width, height:914_400}` (full-page placeholder).
+    /// - The authored region frame (x=457_200, y=365_760, …) is left as Empty.
+    ///
+    /// ## Pass condition (implementer target)
+    ///
+    /// The fix must fill the pre-allocated `region_frames_for` slot (frame index 0
+    /// for "content" slides) with `FrameContent::Title` and the authored geometry,
+    /// rather than appending a new full-page-bbox frame.
+    ///
+    /// Traces: T6b.1; BC-4.01.001 v1.2; visual-parity-contract §Positional layout.
+    // F-086-P2-OBS / T6b.1 geometry Red Gate
+    #[test]
+    fn test_bc_4_01_001_t6b1_title_frame_uses_authored_region_geometry_not_full_page_bbox() {
+        // T6b.1 RED GATE: layout::run appends a full-page-bbox Title frame instead of
+        // filling the pre-allocated region frame. This test asserts the AUTHORED region
+        // geometry is used. FAILS on current code; passes after the implementer's fix.
+        use slideforge_types::{Block, ContentBlock, InlineNode, TextBlock, TextTag};
+
+        let title_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("Slide Heading"))],
+                tag: TextTag::Title,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let body_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("Body content"))],
+                tag: TextTag::Body,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![title_block, body_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand).expect("layout::run must succeed for content slide");
+        let laid_out = &result.slides[0];
+
+        // The authored region geometry for "content" slide type at default page size
+        // (9_144_000 × 5_143_500 EMU) from regions.rs:
+        //   Title:  x=457_200, y=365_760, width=8_229_600, height=685_800
+        //   Body:   x=457_200, y=1_188_720, width=8_229_600, height=3_657_600
+        let page_width = crate::types::DEFAULT_PAGE_WIDTH;
+        let page_height = crate::types::DEFAULT_PAGE_HEIGHT;
+
+        let authored_title_bbox = crate::types::BoundingBox {
+            x: crate::types::Emu(457_200),
+            y: crate::types::Emu(365_760),
+            width: crate::types::Emu(8_229_600),
+            height: crate::types::Emu(685_800),
+        };
+
+        // Full-page placeholder bbox (what current code INCORRECTLY produces):
+        let full_page_bbox = crate::types::BoundingBox {
+            x: crate::types::Emu(0),
+            y: crate::types::Emu(0),
+            width: page_width,
+            height: crate::types::Emu(914_400), // clamped placeholder_height
+        };
+
+        // Find the FrameContent::Title frame.
+        let title_frame = laid_out
+            .frames
+            .iter()
+            .find(|f| matches!(&f.content, crate::types::FrameContent::Title(_)));
+
+        assert!(
+            title_frame.is_some(),
+            "T6b.1 RED GATE: layout::run must produce a FrameContent::Title frame for \
+             a content slide with a TextTag::Title block. \
+             Frame count: {}",
+            laid_out.frames.len()
+        );
+
+        let title_frame = title_frame.unwrap();
+
+        // Assert the Title frame bbox EQUALS the authored region geometry (within
+        // visual-parity-contract tolerance: ±4pt = ±4 * 12_700 = ±50_800 EMU).
+        // Exact match is required for PPTX placeholder inheritance (ADR-015 §7).
+        let tolerance = 50_800_i64; // ±4pt in EMU (1pt = 12_700 EMU)
+
+        let x_ok = (title_frame.bbox.x.0 - authored_title_bbox.x.0).abs() <= tolerance;
+        let y_ok = (title_frame.bbox.y.0 - authored_title_bbox.y.0).abs() <= tolerance;
+        let w_ok = (title_frame.bbox.width.0 - authored_title_bbox.width.0).abs() <= tolerance;
+        let h_ok = (title_frame.bbox.height.0 - authored_title_bbox.height.0).abs() <= tolerance;
+
+        assert!(
+            x_ok && y_ok && w_ok && h_ok,
+            "T6b.1 RED GATE: FrameContent::Title frame must use the authored region bbox \
+             (x={}, y={}, width={}, height={}) within ±{} EMU tolerance. \
+             Got bbox: (x={}, y={}, width={}, height={}). \
+             CURRENT CODE BUG: layout::run appends a full-page-bbox Title frame \
+             (x={}, y={}, width={}, height={}) instead of filling the pre-allocated \
+             region slot with the authored geometry. \
+             Fix: fill region_frames_for slot[0] with FrameContent::Title and its bbox. \
+             BC-4.01.001 v1.2; visual-parity-contract §Positional layout ±4pt; T6b.1.",
+            authored_title_bbox.x.0,
+            authored_title_bbox.y.0,
+            authored_title_bbox.width.0,
+            authored_title_bbox.height.0,
+            tolerance,
+            title_frame.bbox.x.0,
+            title_frame.bbox.y.0,
+            title_frame.bbox.width.0,
+            title_frame.bbox.height.0,
+            full_page_bbox.x.0,
+            full_page_bbox.y.0,
+            full_page_bbox.width.0,
+            full_page_bbox.height.0,
+        );
+
+        // Additionally assert the Title frame bbox is NOT the full-page placeholder bbox.
+        // This makes the Red Gate explicit: a full-page bbox is ALWAYS wrong for a
+        // "content" slide title placeholder.
+        let is_full_page = title_frame.bbox.x.0 == 0
+            && title_frame.bbox.y.0 == 0
+            && title_frame.bbox.width == page_width;
+
+        assert!(
+            !is_full_page,
+            "T6b.1 RED GATE: FrameContent::Title frame must NOT be the full-page placeholder \
+             bbox (x=0, y=0, width=page_width). The current code appends a full-page-bbox \
+             frame instead of filling the authored region geometry. \
+             Got: (x={}, y={}, width={}, height={}). \
+             BC-4.01.001 v1.2; T6b.1.",
+            title_frame.bbox.x.0,
+            title_frame.bbox.y.0,
+            title_frame.bbox.width.0,
+            title_frame.bbox.height.0,
+        );
     }
 }

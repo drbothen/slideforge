@@ -333,12 +333,9 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     let mut slide = Slide {
         slide_type,
         fields,
-        // Block-level content (images, charts, diagrams, shapes) is populated
-        // by later pipeline stages (layout, PPTX generation, Waves 3+). In
-        // Wave 2, the evaluator only resolves field values. Validators that
-        // inspect `slide.blocks` (AltTextValidator, CanvasOverflowValidator)
-        // operate on `Deck` values produced by the layout stage, not directly
-        // from `eval_deck` output.
+        // Block-level content is populated by the post-eval field-to-block
+        // threading pass (Stage 2b, ADR-019). AltTextValidator now runs
+        // post-layout via ADR-018 Decision 3 — not on this Deck output.
         blocks: vec![],
         // `register` (presenter-notes register) is wired in by the parser /
         // later pipeline stages that read the `notes:` / `report:` / `detail:`

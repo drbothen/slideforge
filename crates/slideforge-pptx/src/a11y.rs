@@ -125,7 +125,12 @@ impl AltTextEmbedder {
                     slideforge_types::AltText::Provided(s) => {
                         Some(AltDecision::Provided(s.clone()))
                     },
-                    slideforge_types::AltText::Decorative => Some(AltDecision::Decorative),
+                    // Decorative = author opt-out; Unspecified = pipeline placeholder (no author alt).
+                    // Both are treated as the Artifact/Decorative path for PPTX a11y output
+                    // (no descr attribute). The post-layout validator fires E-A11-001 for
+                    // Unspecified in strict mode (ADR-019 Decision 5.3).
+                    slideforge_types::AltText::Decorative
+                    | slideforge_types::AltText::Unspecified => Some(AltDecision::Decorative),
                 },
                 // Text frames and non-visual frames do not get descr attributes.
                 FrameContent::Title(_)

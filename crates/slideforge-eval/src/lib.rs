@@ -43,6 +43,7 @@ pub mod env;
 pub mod error;
 pub mod eval;
 pub mod expr;
+pub mod field_to_block;
 pub mod filters;
 pub mod for_eval;
 pub mod if_eval;
@@ -90,6 +91,7 @@ pub use eval::{
     eval_deck, eval_deck_with_cycle_check, eval_deck_with_variant, eval_expr_to_string,
 };
 pub use expr::eval_expr;
+pub use field_to_block::thread_fields_to_blocks;
 pub use filters::{AVAILABLE_FILTERS, apply_filter};
 pub use for_eval::{eval_block_items, eval_for_block, eval_slide_node};
 pub use if_eval::eval_if_chain;

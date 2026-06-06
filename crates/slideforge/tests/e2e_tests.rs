@@ -54,3 +54,8 @@ mod e2e_observability;
 
 #[path = "e2e/multi_format.rs"]
 mod e2e_multi_format;
+
+// STORY-086 — Stage 2b content-threading Red Gate tests
+// AC-001 through AC-007, AC-018 (positive content vectors + alt-text discrimination).
+#[path = "e2e/story_086_content_threading.rs"]
+mod e2e_story_086_content_threading;

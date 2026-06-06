@@ -1381,6 +1381,7 @@ mod tests {
                     },
                     content: FrameContent::Title(Arc::from("Red Gate Test")),
                     text_flow: None,
+                    region_role: None,
                 }],
                 speaker_notes: None,
                 register_tags: RegisterSet::new(),
@@ -1413,6 +1414,7 @@ mod tests {
                         },
                         content: FrameContent::Title(Arc::from("Sunrise Over Mountains")),
                         text_flow: None,
+                        region_role: None,
                     },
                     Frame {
                         bbox: BoundingBox {
@@ -1428,6 +1430,7 @@ mod tests {
                             )),
                         },
                         text_flow: None,
+                        region_role: None,
                     },
                 ],
                 speaker_notes: None,
@@ -1723,6 +1726,7 @@ mod tests {
                     },
                     content: FrameContent::Title(Arc::from(japanese_text)),
                     text_flow: None,
+                    region_role: None,
                 }],
                 speaker_notes: None,
                 register_tags: RegisterSet::new(),
@@ -1820,6 +1824,7 @@ mod tests {
                         },
                         content: FrameContent::Title(Arc::from("Title at top")),
                         text_flow: None,
+                        region_role: None,
                     },
                     Frame {
                         bbox: BoundingBox {
@@ -1830,6 +1835,7 @@ mod tests {
                         },
                         content: FrameContent::Subtitle(Arc::from("Subtitle at 1-inch")),
                         text_flow: None,
+                        region_role: None,
                     },
                     Frame {
                         bbox: BoundingBox {
@@ -1840,6 +1846,7 @@ mod tests {
                         },
                         content: FrameContent::Body(vec![]),
                         text_flow: None,
+                        region_role: None,
                     },
                 ],
                 speaker_notes: None,
@@ -2068,6 +2075,7 @@ mod tests {
                     },
                     content: FrameContent::Title(Arc::from("Drawing Path Test")),
                     text_flow: None,
+                    region_role: None,
                 }],
                 speaker_notes: None,
                 register_tags: RegisterSet::new(),
@@ -2170,6 +2178,7 @@ mod tests {
                         alt: slideforge_types::AltText::Decorative,
                     },
                     text_flow: None,
+                    region_role: None,
                 }],
                 speaker_notes: None,
                 register_tags: RegisterSet::new(),
@@ -2276,7 +2285,7 @@ mod tests {
     /// assertion (TD-VSDD-059).
     #[test]
     fn test_f_p2_001_body_blocks_baselines_are_distinct_and_stack_downward() {
-        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock};
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
 
         use crate::coords::emu_to_pt;
 
@@ -2292,6 +2301,7 @@ mod tests {
         let make_text_block = |s: &'static str| {
             ContentBlock::Text(TextBlock {
                 inlines: vec![InlineNode::Plain(Arc::from(s))],
+                tag: TextTag::Untagged,
                 span: SourceSpan::default(),
             })
         };
@@ -2553,6 +2563,7 @@ mod tests {
                             alt: slideforge_types::AltText::Decorative,
                         },
                         text_flow: None,
+                        region_role: None,
                     },
                     Frame {
                         bbox: BoundingBox {
@@ -2563,6 +2574,7 @@ mod tests {
                         },
                         content: FrameContent::Title(Arc::from("Hello Paint State")),
                         text_flow: None,
+                        region_role: None,
                     },
                 ],
                 speaker_notes: None,

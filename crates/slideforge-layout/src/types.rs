@@ -226,6 +226,55 @@ pub struct LaidOutSlide {
     pub register_content: Vec<RegisteredContent>,
 }
 
+/// The semantic role of a pre-allocated region slot in a slide's region map.
+///
+/// `RegionRole` is set by [`crate::regions::region_frames_for`] on each
+/// `FrameContent::Empty` slot to identify which tag of content should claim
+/// that slot. The layout engine's `fill_region_slot_or_append` function in
+/// `layout.rs` uses this role — not slot position — to route `TextTag`-bearing
+/// blocks into the correct geometry region, ensuring tag-driven slot selection
+/// regardless of block processing order (AC-023 / BC-4.01.001 v1.2 invariant 5).
+///
+/// ## Why this matters
+///
+/// Without an explicit role, "first Empty slot" selection causes position-driven
+/// bugs: a `TextTag::Body` block arriving before `TextTag::Title` in the block
+/// list would claim the title-region geometry (slot 0), and the title would land
+/// in the body-region geometry (slot 1). `RegionRole` makes slot selection
+/// order-independent.
+///
+/// ## Lifecycle
+///
+/// - **Set by:** `region_frames_for` on every `FrameContent::Empty` placeholder.
+/// - **Consumed by:** `fill_region_slot_or_append` to find the matching slot.
+/// - **Cleared to `None` after filling:** once a slot is filled, `region_role`
+///   becomes semantically irrelevant (the slot is no longer `Empty`). The field
+///   is left as-is after filling; callers must not rely on it post-fill.
+/// - **`None` for non-region-map frames:** appended frames (shapes, inline text
+///   runs, dynamically-generated frames) carry `region_role: None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RegionRole {
+    /// The frame is the slide's primary title region.
+    ///
+    /// Claimed by `TextTag::Title` blocks via `fill_region_slot_or_append`.
+    Title,
+    /// The frame is a subtitle or secondary heading region.
+    ///
+    /// Claimed by `TextTag::Subtitle` blocks via `fill_region_slot_or_append`.
+    Subtitle,
+    /// The frame is the slide's primary body (content) region.
+    ///
+    /// Claimed by `TextTag::Body` blocks via `fill_region_slot_or_append`.
+    Body,
+    /// The frame is a generic slot without a fixed tag role.
+    ///
+    /// Used for multi-slot layouts (e.g., `stat_callout` stat/label regions,
+    /// `two_col` second column) where the slot is not semantically typed.
+    /// `fill_region_slot_or_append` falls back to this slot for any tag that
+    /// has no `RegionRole::Title`/`Subtitle`/`Body` match remaining.
+    Generic,
+}
+
 /// A positioned content region within a laid-out slide.
 ///
 /// A `Frame` pairs a bounding box (position + size in EMU) with the semantic
@@ -250,6 +299,17 @@ pub struct Frame {
     /// `None` for non-text frames (images, charts, diagrams, shapes) and for
     /// frames where no text content was populated at layout time.
     pub text_flow: Option<TextFlow>,
+
+    /// The semantic role of this pre-allocated region slot.
+    ///
+    /// Set by [`crate::regions::region_frames_for`] to enable tag-driven slot
+    /// selection in `layout::fill_region_slot_or_append` (AC-023 /
+    /// BC-4.01.001 v1.2 invariant 5). `None` for appended frames (shapes,
+    /// inline text runs, dynamically-generated frames) that are not pre-allocated
+    /// region slots.
+    ///
+    /// See [`RegionRole`] for the full lifecycle description.
+    pub region_role: Option<RegionRole>,
 }
 
 /// Position and dimensions of a content region, in English Metric Units.
@@ -360,7 +420,7 @@ pub enum FrameContent {
         ///
         /// Threaded from `ImageSpec.alt` in the semantic IR via `layout::run`.
         /// When `ImageSpec.alt` is `None` (upstream validator miss), layout maps it
-        /// to `AltText::Decorative` and emits `tracing::warn!` (EC-006/EC-007).
+        /// to `AltText::Unspecified` and emits `tracing::warn!` (EC-006/EC-007).
         alt: AltText,
     },
     /// A chart rendered from a chart spec.
@@ -369,7 +429,7 @@ pub enum FrameContent {
     /// `AltText::Decorative` — chart explicitly marked decorative.
     ///
     /// Alt text is threaded from `ChartSpec.alt` via `layout::run` (STORY-039).
-    /// When `ChartSpec.alt` is `None`, maps to `AltText::Decorative` + `tracing::warn!`.
+    /// When `ChartSpec.alt` is `None`, maps to `AltText::Unspecified` + `tracing::warn!`.
     Chart {
         /// Accessibility alt text for the chart, threaded from `ChartSpec.alt`.
         alt: AltText,
@@ -386,7 +446,7 @@ pub enum FrameContent {
     /// `AltText::Decorative` — diagram explicitly marked decorative.
     ///
     /// Alt text is threaded from `DiagramSpec.alt` via `layout::run` (STORY-039).
-    /// When `DiagramSpec.alt` is `None`, maps to `AltText::Decorative` + `tracing::warn!`.
+    /// When `DiagramSpec.alt` is `None`, maps to `AltText::Unspecified` + `tracing::warn!`.
     Diagram {
         /// The PPTX-safe, usvg-normalized SVG payload.
         svg: NormalizedDiagramSvg,
@@ -662,6 +722,7 @@ mod tests {
             },
             content: FrameContent::Empty,
             text_flow: None,
+            region_role: None,
         };
         let frame2 = frame.clone();
         assert_eq!(frame, frame2);

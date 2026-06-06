@@ -138,8 +138,12 @@ impl DocumentBodySerializer {
         let mut detail_paragraphs: Vec<BodyChoice> = Vec::new();
 
         for slide in &deck.slides {
-            // Extract title from frames — first Title frame wins.
-            let title = slide
+            // ── Title (FrameContent::Title → Heading1) ───────────────────────
+            // Extract title from FrameContent::Title frames (tag-driven, STORY-086 / ADR-019
+            // Decision 3 / BC-4.02.001 v1.2 postcondition 8). No positional TextRun fallback —
+            // after Stage 2b, the title field always produces TextTag::Title → FrameContent::Title.
+            // AC-023: routing is tag-driven, NOT position-driven.
+            let title: &str = slide
                 .frames
                 .iter()
                 .find_map(|f| {
@@ -155,6 +159,47 @@ impl DocumentBodySerializer {
             body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
                 "Heading1", title,
             ))));
+
+            // ── Subtitle (FrameContent::Subtitle → Heading2) ─────────────────
+            // BC-4.02.001 v1.2 postcondition 9: subtitle field → FrameContent::Subtitle →
+            // <w:pStyle w:val="Heading2"/> paragraph.
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::Subtitle(t) = &frame.content {
+                    body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                        "Heading2",
+                        t.as_ref(),
+                    ))));
+                }
+            }
+
+            // ── Body (FrameContent::Body → Normal paragraphs) ─────────────────
+            // BC-4.02.001 v1.2 postcondition 10: body field → FrameContent::Body →
+            // Normal-styled paragraphs (no Heading style). Body text MUST NOT appear
+            // in a Heading1 paragraph (AC-020: tag-driven routing invariant).
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::Body(blocks) = &frame.content {
+                    for content_block in blocks {
+                        if let slideforge_types::ContentBlock::Text(text_block) = content_block {
+                            let text: String = text_block
+                                .inlines
+                                .iter()
+                                .filter_map(|node| {
+                                    if let slideforge_types::InlineNode::Plain(s) = node {
+                                        Some(s.as_ref())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if !text.is_empty() {
+                                body_paragraphs.push(BodyChoice::WP(Box::new(
+                                    make_styled_paragraph("Normal", &text),
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
 
             // Collect report entries for this slide.
             let report_entries: Vec<&slideforge_types::RegisteredContent> = slide

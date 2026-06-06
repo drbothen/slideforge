@@ -207,6 +207,7 @@ mod tests {
                 },
                 content: FrameContent::Title(Arc::from(format!("Slide {page_idx}"))),
                 text_flow: None,
+                region_role: None,
             }],
             speaker_notes: None,
             register_tags: RegisterSet::new(),
