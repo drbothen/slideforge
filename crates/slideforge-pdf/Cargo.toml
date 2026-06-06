@@ -40,7 +40,7 @@ slideforge-layout = { workspace = true }
 
 [dev-dependencies]
 # For font.rs tests: create temp font files without filesystem coupling.
-tempfile = "=3.10.0"
+tempfile = "=3.27.0"
 # For coords_proptest.rs: property-based testing of coordinate invariants (AC-003, VP-006).
 # Pinned per NFR-025 supply-chain policy (dev-only exemption applies; exact pin used anyway).
 proptest = "=1.5.0"
