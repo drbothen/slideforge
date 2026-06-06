@@ -137,22 +137,19 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 });
             },
             Some(FieldValue::Inlines(nodes)) => {
-                // Rich-text bullet list from the parser: thread as-is.
-                let _ = nodes; // nodes is &Vec<InlineNode>
                 // ADR-019 Decision 3.2: FieldValue::Inlines bullets threaded as-is.
                 // We don't have structured BulletItem from Inlines — emit as a single
-                // BulletItem carrying the inline nodes.
-                if let Some(FieldValue::Inlines(inlines)) = slide.fields.get("bullets") {
-                    slide.blocks.push(Block {
-                        content: ContentBlock::Bullets(vec![BulletItem {
-                            inlines: inlines.clone(),
-                            children: vec![],
-                            span: SourceSpan::default(),
-                        }]),
-                        label: None,
+                // BulletItem carrying the already-bound inline nodes directly, without
+                // redundantly re-fetching slide.fields.get("bullets").
+                slide.blocks.push(Block {
+                    content: ContentBlock::Bullets(vec![BulletItem {
+                        inlines: nodes.clone(),
+                        children: vec![],
                         span: SourceSpan::default(),
-                    });
-                }
+                    }]),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
             },
             _ => {},
         }
@@ -294,16 +291,16 @@ fn is_decorative(slide: &slideforge_types::Slide) -> bool {
     )
 }
 
-/// Construct a `Block` wrapping a `ContentBlock::Text` from a plain string.
+/// Construct a [`slideforge_types::Block`] wrapping a `ContentBlock::Text` with the
+/// specified [`TextTag`].
 ///
-/// Uses `TextTag::Untagged` as the default tag. Stage 2b callers must update
-/// Construct a `Block` wrapping a `ContentBlock::Text` with the specified [`TextTag`].
-///
-/// Stage 2b callers use this to set the correct semantic tag when constructing
-/// text blocks from DSL fields (`title`, `subtitle`, `body`). The tag drives the
-/// routing decision in `layout.rs` (`TextTag::Title` → `FrameContent::Title`,
-/// `TextTag::Subtitle` → `FrameContent::Subtitle`, `TextTag::Body` → `FrameContent::Body`,
-/// `TextTag::Untagged` → `FrameContent::TextRun`).
+/// Stage 2b callers use this to set the correct semantic tag when constructing text
+/// blocks from DSL fields (`title`, `subtitle`, `body`). The tag drives the routing
+/// decision in `layout.rs`:
+/// - `TextTag::Title` → `FrameContent::Title` (PPTX `type="title"`, DOCX Heading 1)
+/// - `TextTag::Subtitle` → `FrameContent::Subtitle` (PPTX `type="subTitle"`, DOCX Heading 2)
+/// - `TextTag::Body` → `FrameContent::Body` (PPTX `type="body"`, DOCX Normal)
+/// - `TextTag::Untagged` → `FrameContent::TextRun` (generic inline run)
 fn make_text_block_tagged(text: &str, tag: TextTag) -> Block {
     Block {
         content: ContentBlock::Text(TextBlock {

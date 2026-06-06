@@ -107,7 +107,15 @@ use crate::types::{
 /// # Errors
 ///
 /// Returns [`LayoutError`] on any invariant violation. See variants above.
-#[allow(clippy::too_many_lines)] // STORY-086 TextTag routing expands the inline text pass; refactor deferred to STORY-088
+// `layout::run` exceeds the `clippy::too_many_lines` threshold by design. The function
+// is the single semantic→geometric IR boundary in the pipeline (AC-008); every slide-
+// level concern (page size derivation, region frame allocation, bbox validation, shape
+// layout, alt-text threading, TextTag-driven region-slot filling, register copying,
+// speaker-note derivation, section collection) must be sequenced here in a documented
+// order. Extracting sub-passes into helpers would scatter the invariant ordering across
+// multiple call sites and reduce readability for the audit trail. The `allow` is
+// justified by the function's deliberately monolithic contract, not as a deferral.
+#[allow(clippy::too_many_lines)]
 pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // EC-001: reject empty decks.
     if deck.slides.is_empty() {
@@ -261,72 +269,110 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         deck_warnings.extend(shape_output.warnings);
 
         // Inline text pass: convert ContentBlock::Text and ContentBlock::Bullets blocks
-        // into FrameContent::TextRun frames so the inline validation pass
-        // (run_inline_validation) can scan them for xref targets and depth violations
-        // (BC-3.05.001 EC-002 / AC-003 / STORY-073).
+        // into layout frames, respecting TextTag-driven region-slot filling.
         //
-        // For ContentBlock::Text: one TextRun frame per block.
+        // T6b.1 / BC-4.01.001 v1.2 / ADR-019 Decision 3:
+        // For tagged text blocks (Title / Subtitle / Body), the implementation FILLS the
+        // first matching FrameContent::Empty region slot pre-allocated by region_frames_for,
+        // preserving that slot's authored bbox and computing its text_flow in-place.
+        // A new full-page-bbox frame is NEVER appended when a pre-allocated region slot
+        // can absorb the tagged content.
+        //
+        // Fallback (documented — fires only when no Empty slot remains):
+        // If a slide type genuinely has no remaining Empty region slot for the current
+        // tag (e.g., a future custom slide type with all slots already filled), the
+        // implementation falls back to appending a clamped full-page-bbox frame. This
+        // keeps the pipeline non-fatal for unknown extension cases.
+        //
         // For ContentBlock::Bullets: one TextRun frame per BulletItem (parent before
         // children, depth-first order). Nesting is structural via BulletItem.children;
         // layout preserves the flat frame sequence for exporters.
+        //
+        // Tag-driven, NOT position-driven (BC-4.01.001 v1.2 postcondition 12):
+        // Slot selection is determined by the TextTag on each block, regardless of
+        // the block's position in Slide.blocks. AC-023 verifies this invariant.
         for block in &slide.blocks {
             match &block.content {
                 ContentBlock::Text(text_block) => {
-                    // Clamp the placeholder height to page_height so the bbox always
-                    // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
-                    // canvas_height < 914_400 EMU the unclamped height would violate
-                    // y + height <= page_height, triggering the InvalidBoundingBox
-                    // defensive check below.
-                    let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
-                    let bbox = crate::types::BoundingBox {
-                        x: crate::types::Emu(0),
-                        y: crate::types::Emu(0),
-                        width: page_size.width,
-                        height: placeholder_height,
-                    };
-                    // BC-3.06.003 defensive check: the clamped bbox must still satisfy
-                    // all invariants (non-zero dimensions, within page bounds).
-                    let frame_index = all_frames.len();
-                    if !bbox.is_valid(page_size.width, page_size.height) {
-                        return Err(LayoutError::InvalidBoundingBox {
-                            source_slide_index: source_index,
-                            frame_index,
-                            bbox,
-                        });
-                    }
-                    // TextTag-driven routing (STORY-086 / BC-4.01.001 v1.2 / ADR-019 Decision 3):
-                    // Title → FrameContent::Title (PPTX type="title", DOCX Heading1)
-                    // Subtitle → FrameContent::Subtitle (PPTX type="subTitle", DOCX Heading2)
-                    // Body → FrameContent::Body (PPTX type="body", DOCX Normal)
-                    // Untagged → FrameContent::TextRun (unchanged, generic text run)
-                    // Routing is tag-driven, NOT position-driven (BC-4.01.001 v1.2 postcondition 12).
-                    let frame_content = match text_block.tag {
+                    match text_block.tag {
+                        // ── Tagged blocks: fill pre-allocated region slot in-place ──────
+                        // Tag-driven, NOT position-driven (AC-023 / BC-4.01.001 v1.2 PC-12).
+                        // Each tag variant searches for the first Empty region slot and fills
+                        // it with the authored bbox, computing text_flow from the inline content.
+                        // Fallback to full-page-bbox append only when no Empty slot exists
+                        // (documents when the fallback fires, so future slide-type authors
+                        // understand the contract).
                         TextTag::Title => {
-                            // Concatenate all inline text for the Title variant (Arc<str> form).
                             let text = extract_inline_text_str(&text_block.inlines);
-                            crate::types::FrameContent::Title(text)
+                            let content = crate::types::FrameContent::Title(text);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
                         },
                         TextTag::Subtitle => {
                             let text = extract_inline_text_str(&text_block.inlines);
-                            crate::types::FrameContent::Subtitle(text)
+                            let content = crate::types::FrameContent::Subtitle(text);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
                         },
                         TextTag::Body => {
                             // Body carries ContentBlock items for rich body content.
                             // Wrap the text block's content as a single ContentBlock::Text.
                             // The PPTX serializer's extract_body_text traverses these ContentBlocks.
-                            crate::types::FrameContent::Body(vec![ContentBlock::Text(
-                                text_block.clone(),
-                            )])
+                            let content = crate::types::FrameContent::Body(vec![
+                                ContentBlock::Text(text_block.clone()),
+                            ]);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
                         },
+                        // ── Untagged blocks: always append a TextRun frame (unchanged) ──
+                        // TextTag::Untagged has no semantic placeholder — never consumes
+                        // a pre-allocated region slot. Uses a clamped full-page-bbox.
                         TextTag::Untagged => {
-                            crate::types::FrameContent::TextRun(text_block.inlines.clone())
+                            // Clamp the placeholder height to page_height so the bbox always
+                            // passes is_valid (F-P4-LOW-001 / BC-3.06.003). For brands with a
+                            // canvas_height < 914_400 EMU the unclamped height would violate
+                            // y + height <= page_height.
+                            let placeholder_height =
+                                crate::types::Emu(914_400).min(page_size.height);
+                            let bbox = crate::types::BoundingBox {
+                                x: crate::types::Emu(0),
+                                y: crate::types::Emu(0),
+                                width: page_size.width,
+                                height: placeholder_height,
+                            };
+                            // BC-3.06.003 defensive check.
+                            let frame_index = all_frames.len();
+                            if !bbox.is_valid(page_size.width, page_size.height) {
+                                return Err(LayoutError::InvalidBoundingBox {
+                                    source_slide_index: source_index,
+                                    frame_index,
+                                    bbox,
+                                });
+                            }
+                            all_frames.push(crate::types::Frame {
+                                bbox,
+                                content: crate::types::FrameContent::TextRun(
+                                    text_block.inlines.clone(),
+                                ),
+                                text_flow: None,
+                            });
                         },
-                    };
-                    all_frames.push(crate::types::Frame {
-                        bbox,
-                        content: frame_content,
-                        text_flow: None,
-                    });
+                    }
                 },
                 ContentBlock::Bullets(items) => {
                     // STORY-073 / AC-001 — produce one FrameContent::TextRun per
@@ -642,6 +688,106 @@ fn extract_inline_text_recursive(node: &slideforge_types::InlineNode, out: &mut 
             // Math nodes are not extracted as plain text for title/subtitle frames.
         },
     }
+}
+
+/// Fill the first available `FrameContent::Empty` region slot with a tagged content
+/// variant, preserving the slot's authored bbox and computing `text_flow` in-place.
+///
+/// # T6b.1 / BC-4.01.001 v1.2 / ADR-019 Decision 3
+///
+/// `region_frames_for` pre-allocates geometry slots as `FrameContent::Empty`. This
+/// function is the injection point where tagged text content (Title / Subtitle / Body)
+/// claims an Empty slot IN-PLACE, replacing `FrameContent::Empty` with the supplied
+/// `content` variant while preserving the slot's bbox as authored.
+///
+/// ## Why this matters for visual parity
+///
+/// The authored bbox encodes the PPTX placeholder geometry (type, idx, position) as
+/// specified in ADR-015 §7. Appending a new full-page-bbox frame instead of filling
+/// the slot would discard this authored geometry and produce incorrect OOXML placeholder
+/// coordinates (visual-parity-contract §Positional layout ±4pt).
+///
+/// ## Slot selection (tag-driven, NOT position-driven)
+///
+/// Searches `frames` from index 0 for the first `FrameContent::Empty` entry. The
+/// search is tag-driven: it selects the first unclaimed Empty slot regardless of which
+/// `ContentBlock` triggered the call. This satisfies BC-4.01.001 v1.2 postcondition 12
+/// (tag-driven) and AC-023 (reversed-block order produces the same result).
+///
+/// ## Fallback (documented — fires only when no Empty slot remains)
+///
+/// When no `FrameContent::Empty` slot exists in `frames` (e.g., a slide type with all
+/// region slots already filled by prior blocks, or a custom slide type with no Empty
+/// placeholders at all), a clamped full-page-bbox frame is appended. This fallback is
+/// intentional for forward-compatibility with future slide types that may pre-fill all
+/// their region slots with non-Empty content.
+///
+/// # Errors
+///
+/// Returns `Err(LayoutError::InvalidBoundingBox)` if the fallback full-page-bbox fails
+/// the BC-3.06.003 defensive check (should never occur in practice).
+fn fill_region_slot_or_append(
+    frames: &mut Vec<crate::types::Frame>,
+    content: crate::types::FrameContent,
+    inlines: &[slideforge_types::InlineNode],
+    page_size: PageSize,
+    source_slide_index: usize,
+) -> Result<(), LayoutError> {
+    // Search for the first Empty region slot (tag-driven, not position-driven).
+    if let Some(slot) = frames
+        .iter_mut()
+        .find(|f| matches!(f.content, crate::types::FrameContent::Empty))
+    {
+        // Fill the slot in-place: replace Empty with the tagged content and
+        // compute text_flow from the inline nodes using the AUTHORED bbox.
+        let flat_text = collect_plain_text(inlines);
+        slot.text_flow = Some(compute_text_flow(&flat_text, slot.bbox));
+        slot.content = content;
+        return Ok(());
+    }
+
+    // Fallback: no Empty slot available. Append a clamped full-page-bbox frame.
+    // This fires only when a slide type has no pre-allocated Empty placeholders
+    // (e.g., all slots are Image/Chart/Diagram, or a future custom type). It
+    // preserves pipeline non-fatality for extension cases.
+    let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+    let bbox = crate::types::BoundingBox {
+        x: crate::types::Emu(0),
+        y: crate::types::Emu(0),
+        width: page_size.width,
+        height: placeholder_height,
+    };
+    // BC-3.06.003 defensive check.
+    let frame_index = frames.len();
+    if !bbox.is_valid(page_size.width, page_size.height) {
+        return Err(LayoutError::InvalidBoundingBox {
+            source_slide_index,
+            frame_index,
+            bbox,
+        });
+    }
+    let flat_text = collect_plain_text(inlines);
+    let text_flow = Some(compute_text_flow(&flat_text, bbox));
+    frames.push(crate::types::Frame {
+        bbox,
+        content,
+        text_flow,
+    });
+    Ok(())
+}
+
+/// Collect all plain-text from a slice of inline nodes into a single `String`.
+///
+/// Used by [`fill_region_slot_or_append`] to produce the plain-text string
+/// passed to [`compute_text_flow`] when filling or appending a region slot.
+/// Nested formatting (Bold, Italic, etc.) is flattened to plain text; Math
+/// nodes are omitted (same semantics as [`extract_inline_text_str`]).
+fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        extract_inline_text_recursive(node, &mut out);
+    }
+    out
 }
 
 /// Recursively emit one [`crate::types::FrameContent::TextRun`] frame per
