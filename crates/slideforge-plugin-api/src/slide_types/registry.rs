@@ -32,12 +32,14 @@ use super::{
     executive_summary::ExecutiveSummarySlideType, financials::FinancialsSlideType,
     image::ImageSlideType, kpi_dashboard::KpiDashboardSlideType, matrix::MatrixSlideType,
     org_chart::OrgChartSlideType, problem_statement::ProblemStatementSlideType,
-    process_flow::ProcessFlowSlideType, quote::QuoteSlideType,
+    process_flow::ProcessFlowSlideType, progress_bar::ProgressBarSlideType, quote::QuoteSlideType,
     recommendation::RecommendationSlideType, risk_register::RiskRegisterSlideType,
     roadmap::RoadmapSlideType, screenshot::ScreenshotSlideType,
     section_break::SectionBreakSlideType, stat_callout::StatCalloutSlideType,
-    survey_results::SurveyResultsSlideType, team::TeamSlideType, timeline::TimelineSlideType,
-    title::TitleSlideType, toc::TocSlideType, two_col::TwoColSlideType, video::VideoSlideType,
+    status::StatusSlideType, survey_results::SurveyResultsSlideType, team::TeamSlideType,
+    timeline::TimelineSlideType, title::TitleSlideType, toc::TocSlideType,
+    two_col::TwoColSlideType, video::VideoSlideType,
+    weighted_composite::WeightedCompositeSlideType,
 };
 
 /// The runtime registry of all registered slide types.
@@ -177,6 +179,10 @@ impl Default for SlideTypeRegistry {
         r.register(Box::new(SurveyResultsSlideType::new()));
         r.register(Box::new(OrgChartSlideType::new()));
         r.register(Box::new(RoadmapSlideType::new()));
+        // Color-coded status (STORY-087 — BC-1.17.001/002/003)
+        r.register(Box::new(StatusSlideType::new()));
+        r.register(Box::new(ProgressBarSlideType::new()));
+        r.register(Box::new(WeightedCompositeSlideType::new()));
         // Closing
         r.register(Box::new(ClosingSlideType::new()));
         r
@@ -675,13 +681,16 @@ mod tests {
     // ── AC-017: all_keywords().len() == N ────────────────────────────────────
 
     /// Exercises BC-1.03.017: `all_keywords()` length matches registration count.
+    ///
+    /// STORY-087 added `status`, `progress_bar`, `weighted_composite` — count is now 34.
     #[test]
     fn test_bc_1_03_017_all_keywords_len_equals_31() {
         let reg = SlideTypeRegistry::default();
         assert_eq!(
             reg.all_keywords().len(),
-            31,
-            "SlideTypeRegistry::default must register all 31 built-in slide types; \
+            34,
+            "SlideTypeRegistry::default must register all 34 built-in slide types \
+             (31 original + status + progress_bar + weighted_composite); \
              currently registers {}",
             reg.all_keywords().len()
         );

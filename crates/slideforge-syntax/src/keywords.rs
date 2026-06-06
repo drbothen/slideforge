@@ -103,7 +103,7 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
 
 // ─── Slide-type keyword table ─────────────────────────────────────────────────
 
-/// The 31 built-in slide type keywords.
+/// The built-in slide type keywords.
 ///
 /// Each of these is a valid `slide <type>:` introducer. Using any of them as a
 /// `vars:` entry name produces E-PAR-008 ([`SyntaxError::VarNameCollision`]).
@@ -112,6 +112,9 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
 /// source of truth. This compile-time set must stay in sync with that runtime
 /// registry. Keywords use underscore separators (e.g., `section_break`, not
 /// `section-break`).
+///
+/// STORY-087 added `status`, `progress_bar`, `weighted_composite` (new color-coded
+/// types) and `severity_cards` (gap fix — was in `COLOR_CODED_TYPES` but missing here).
 static SLIDE_TYPE_KEYWORDS: phf::Set<&'static str> = phf::phf_set! {
     // Core presentation structure
     "title",
@@ -153,6 +156,12 @@ static SLIDE_TYPE_KEYWORDS: phf::Set<&'static str> = phf::phf_set! {
     "roadmap",
     // Closing
     "closing",
+    // Color-coded status types (STORY-087 — BC-1.17.001/002/003)
+    "status",
+    "progress_bar",
+    "weighted_composite",
+    // severity_cards: was in COLOR_CODED_TYPES but absent from this set (D4 gap fix)
+    "severity_cards",
 };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -322,10 +331,16 @@ mod tests {
         assert_eq!(code, "E-PAR-009", "raw must map to E-PAR-009 (RawKeyword)");
     }
 
-    // is_slide_type_keyword: all 31 registry types recognized
+    // is_slide_type_keyword: all slide type keywords recognized
+    //
+    // STORY-087 added status, progress_bar, weighted_composite (new color-coded types)
+    // and severity_cards (D4 gap fix — was in COLOR_CODED_TYPES but absent from this set).
+    // Total is now 35 keywords (31 original + 3 new + severity_cards).
     #[test]
     fn test_bc_1_09_008_is_slide_type_keyword_all_31_types() {
-        // These are the exact 31 keywords registered in SlideTypeRegistry::default().
+        // These are the exact keywords registered in SlideTypeRegistry::default()
+        // plus severity_cards (which is in regions.rs / COLOR_CODED_TYPES but registered
+        // as a keyword here after STORY-087 D4 gap fix).
         let all_types = [
             // Core presentation structure
             "title",
@@ -367,11 +382,17 @@ mod tests {
             "roadmap",
             // Closing
             "closing",
+            // Color-coded status types (STORY-087 — BC-1.17.001/002/003)
+            "status",
+            "progress_bar",
+            "weighted_composite",
+            // severity_cards: D4 gap fix — keyword now matches COLOR_CODED_TYPES
+            "severity_cards",
         ];
         assert_eq!(
             all_types.len(),
-            31,
-            "test vector must have exactly 31 types"
+            35,
+            "test vector must have exactly 35 keywords (31 original + 3 new + severity_cards)"
         );
         for t in all_types {
             assert!(

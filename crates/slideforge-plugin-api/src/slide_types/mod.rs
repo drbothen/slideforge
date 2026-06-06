@@ -7,11 +7,11 @@
 //! 2. **[`validate_fields`]** — accumulates all field-validation diagnostics
 //!    for a slide against its declared type schema.
 //! 3. **Individual slide type structs** — one per built-in type keyword.
-//!    All 31 built-in types are implemented as part of STORY-003.
+//!    31 built-in types implemented in STORY-003; 3 color-coded types added in STORY-087.
 //! 4. **[`SLIDE_TYPE_REGISTRY`]** — a process-wide lazy singleton holding the
 //!    default registry for use by the evaluator and layout engine.
 //! 5. **[`common_optional_fields`]** — returns the universal optional fields
-//!    shared by all 31 slide types.
+//!    shared by all built-in slide types.
 //!
 //! ## Adding a new slide type
 //!
@@ -44,6 +44,7 @@ pub mod matrix;
 pub mod org_chart;
 pub mod problem_statement;
 pub mod process_flow;
+pub mod progress_bar;
 pub mod quote;
 pub mod recommendation;
 pub mod registry;
@@ -52,6 +53,7 @@ pub mod roadmap;
 pub mod screenshot;
 pub mod section_break;
 pub mod stat_callout;
+pub mod status;
 pub mod survey_results;
 pub mod team;
 pub mod timeline;
@@ -59,6 +61,7 @@ pub mod title;
 pub mod toc;
 pub mod two_col;
 pub mod video;
+pub mod weighted_composite;
 
 pub use registry::{SlideTypeRegistry, validate_fields};
 
