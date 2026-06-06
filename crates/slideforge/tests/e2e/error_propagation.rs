@@ -240,8 +240,11 @@ fn test_bc_5_02_001_ec004_register_fields_do_not_break_build() {
 /// EC-002: a source with an `@include` directive (unimplemented or pointing to
 /// a missing file) must not panic — it must fail with a structured error.
 ///
-/// FLAGGED FOR ORCHESTRATOR: when @include is implemented, tighten to assert
-/// `Err(BuildError::ParseFailed { .. })` with code `E-INC-001` for circular includes.
+/// Current behavior: `@include` is not yet implemented in `slideforge-syntax`.
+/// The directive is currently treated as unknown syntax; the pipeline returns some
+/// form of parse or eval failure without panicking. When `@include` is fully
+/// implemented (tracked separately from STORY-050), the assertion should be tightened
+/// to `Err(BuildError::ParseFailed { .. })` with code `E-INC-001` for missing files.
 ///
 /// Traceability: STORY-050 EC-002.
 #[test]
@@ -263,8 +266,11 @@ fn test_bc_5_02_001_ec002_include_directive_fails_gracefully_no_panic() {
 
 /// EC-003: a `@data` directive pointing to a nonexistent file must not panic.
 ///
-/// FLAGGED FOR ORCHESTRATOR: update the expected error variant once @data
-/// is fully implemented.
+/// Current behavior: `@data` is not yet implemented in `slideforge-eval`.
+/// The directive currently passes through without binding data; the pipeline
+/// completes without panicking. When `@data` is fully implemented, the assertion
+/// should be tightened to `Err(BuildError::EvalFailed { .. })` with a
+/// `E-DATA-001` code for missing data files.
 ///
 /// Traceability: STORY-050 EC-003.
 #[test]

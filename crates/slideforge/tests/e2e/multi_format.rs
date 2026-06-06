@@ -5,14 +5,13 @@
 //! - **AC-008**: the same fixture produces valid output in PPTX, DOCX, and PDF.
 //! - **EC-005**: all 3 formats can be built in sequence from the same fixture.
 //!
-//! ## RECONCILIATION FLAG
+//! ## Implementation note: multi-format API
 //!
-//! The spec mentions `BuildOptions::all_formats()` for a single-call multi-format
-//! API. This method does NOT exist. Three separate `build()` calls are used.
-//!
-//! ## Orchestrator decision required
-//!
-//! Should `BuildOptions::all_formats()` (returning `Vec<BuildOutput>`) be added?
+//! BC-5.02.001 AC-008 is implemented using three separate `build()` calls, one
+//! per format. A single-call `BuildOptions::all_formats()` convenience method is
+//! deferred to a future DX story (STORY-050 Deferred Features) and is NOT part
+//! of this story's scope. Three separate calls is the canonical pattern per BC
+//! AC-008.
 
 #![allow(clippy::unwrap_used)]
 
