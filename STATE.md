@@ -55,7 +55,7 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 6 RAN — F-086-P6-MED-001 found + REMEDIATED: ADR-019 v1.3 + 4 trim tests + 2-line trim fix; pass-6 fix-burst COMPLETE; adversary LOCAL pass 7 DISPATCHED; streak 0/3). BLK-002 OPEN.**
+Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PROGRESS (adversary pass 7 RAN — CLEAN (PR-merge) YES, CLEAN (strict) NO; F-086-P7-MED-001: BC-1.16.001 PC-7 described BulletItem{text,level,span} but real type is {inlines,children,span} (code correct; stale BC); PO fix attempt 608ec7b0 CORRUPTED (read develop types, stripped TextTag/AltText::Unspecified); RECOVERED via f2261592 (BC-1.16.001 v1.3 + story-writer 9bbde7c9 STORY-086 v1.5); worktree HEAD unchanged at a055345e; adversary LOCAL pass 8 DISPATCHED; streak 0/3). BLK-002 OPEN.**
 
 - `develop` = `030dec6c` (61 merged PRs; origin/develop confirmed). **Open PRs: 0.**
 - Active worktrees: `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e).
@@ -69,7 +69,7 @@ Phase 3, **Wave 4 — 21/21 MERGED. Wave 4 gate FAILED. STORY-086 delivery IN PR
 
 ## NEXT ACTIONS (zero-context orchestrator: execute in order)
 
-**STATUS: Wave 4 gate FAILED (2026-06-06). STORY-086 adversary LOCAL pass 6 RAN + ALL remediated. Pass 7 DISPATCHED. Streak 0/3.**
+**STATUS: Wave 4 gate FAILED (2026-06-06). STORY-086 adversary LOCAL pass 7 RAN + REMEDIATED (BC-1.16.001 v1.3; recovery from corrupted v1.2; STORY-086 v1.5). Pass 8 DISPATCHED. Streak 0/3.**
 
 ### Step 1 — DONE: Remediation scoped + de-risked
 
@@ -97,7 +97,15 @@ Pass-6 fix-burst COMPLETE:
 - implementer (commit a055345e): 2-line trim fix (make_text_block_tagged Arc::from(text.trim()); resolve_alt Arc::from(s.trim())); whitespace-only-skip preserved; all 5 trim tests pass; full exit gate CLEAN.
 - Worktree HEAD now a055345e. Workspace: 3300 pass, 14 skipped, 1 tolerated flake (test_cold_budget_under_200ms). Spec: ADR-019 → v1.3.
 
-CURRENT SUB-STEP: adversary LOCAL pass 7 DISPATCHED, streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
+Pass-7 fix-burst COMPLETE:
+- Adversary pass 7 RAN (CLEAN (PR-merge) YES, CLEAN (strict) NO). F-086-P7-MED-001: BC-1.16.001 PC-7 described BulletItem{text,level,span} but real type is {inlines,children,span} (code correct; stale BC — spec-side fix required).
+- PO fix attempt (commit 608ec7b0, BC-1.16.001 "v1.2") CORRUPTED: PO read types from main checkout (develop, STORY-086 unmerged) and wrongly STRIPPED TextTag / TextBlock.tag / AltText::Unspecified from BC-1.16.001 (those exist only in the STORY-086 worktree). Violates LESSON-1/LESSON-16 worktree-absolute path discipline.
+- RECOVERY commit f2261592: BC-1.16.001 restored to v1.1 content (TextTag/tag/Unspecified intact) + legitimate fixes applied: PC-7 BulletItem {inlines,children,span} (F-086-P7-MED-001) + PC-10 ImageSpec field `path` (real Rust field; DSL keyword stays `src`). Bumped to v1.3. v1.2 marked CORRUPTED in changelog.
+- story-writer commit 9bbde7c9: STORY-086 → v1.5, fixed stale e2e test path (tests/integration/e2e_build_tests.rs → crates/slideforge/tests/e2e/story_086_content_threading.rs); all other paths verified present.
+- Worktree HEAD UNCHANGED at a055345e. Workspace 3300/3300 pass, 14 skipped. Exit gate CLEAN.
+- BC-1.16.001 now v1.3. STORY-086 now v1.5.
+
+CURRENT SUB-STEP: adversary LOCAL pass 8 DISPATCHED, streak 0/3, target 3 strict-CLEAN (sequential per LESSON-7). Then demo → PR → security-reviewer + pr-reviewer → merge. Then RE-RUN Wave 4 gates (Gate 3 + Gate 5). BLK-002 stays OPEN.
 
 ### Step 3 — Re-run failed Wave 4 gates
 
@@ -155,20 +163,20 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 ## Session Resume Checkpoint
 
-**STORY-086 adversary pass 6 RAN + ALL remediated. Pass 7 DISPATCHED. Streak 0/3. NEXT: await adversary LOCAL pass 7 result (sequential per LESSON-7).**
+**STORY-086 adversary pass 7 RAN + REMEDIATED (BC-1.16.001 v1.3; STORY-086 v1.5; HEAD a055345e unchanged). Pass 8 DISPATCHED. Streak 0/3. NEXT: await adversary LOCAL pass 8 result (sequential per LESSON-7).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: adversary pass 6 COMPLETE (F-086-P6-MED-001 untrimmed content found + REMEDIATED; ADR-019 v1.3; HEAD a055345e; exit gate CLEAN; 3300 pass, 14 skipped). Adversary LOCAL pass 7 DISPATCHED. Streak 0/3. Stories 88 / 545 pts. BLK-002 OPEN. |
+| **Position** | Wave 4: 21/21 merged. Wave 4 gate FAILED. STORY-086 delivery in progress: adversary pass 7 COMPLETE (F-086-P7-MED-001 stale BC-1.16.001 PC-7 BulletItem type description found + REMEDIATED; recovery from corrupted v1.2 PO commit 608ec7b0; BC-1.16.001 → v1.3; STORY-086 → v1.5; worktree HEAD a055345e unchanged). Adversary LOCAL pass 8 DISPATCHED. Streak 0/3. Stories 88 / 545 pts. BLK-002 OPEN. |
 | **develop SHA** | `030dec6c` (61 merged PRs; origin/develop confirmed) |
 | **Active worktrees** | `.worktrees/STORY-086` (feature/STORY-086, HEAD a055345e) |
 | **Open PRs** | 0 |
 | **Workspace crates** | 17 |
 | **Workspace tests** | 3300/3300 pass, 14 skipped (e2e AC-007 bullets intentionally ignored pending STORY-088; 1 pre-existing cold_budget flake tracked under STORY-080) |
 | **factory-artifacts** | PUSHED to remote (origin/factory-artifacts) — human-authorized 2026-06-04. Upstream tracking set. Fresh sessions: clone repo + `git worktree add .factory factory-artifacts`. |
-| **DURABLE ARTIFACTS** | (1) `.factory/cycles/STORY-086/adversarial-reviews/adversary-STORY-086-pass-1.md`; (2) `adversary-STORY-086-pass-2.md`; (3) `adversary-STORY-086-pass-3.md` (HIGH-001 geometry tag-drive; MED-001 stale docs); (4) `adversary-STORY-086-pass-4.md`; (5) `adversary-STORY-086-pass-5.md` (CRIT-001 decorative-first + D5 @var gap + MED-001/002 + OBS-1); (6) `adversary-STORY-086-pass-6.md` (MED-001 untrimmed content; ADR-019 §3.1/§3.3 spec-vs-spec contradiction); (7) `.factory/cycles/STORY-086/architect-pass-1-adjudication.md` D1-D5; (8) `.factory/cycles/STORY-086/architect-pass-6-adjudication.md` (trim canonical); (9) `.factory/specs/wave4-expanded-scope-uncertainty-resolution.md`; (10) `ADR-019` v1.3; (11) `BC-1.16.001` v1.1; (12) `BC-3.04.001` v1.6; (13) error-taxonomy v2.17; (14) STORY-086 v1.4 + STORY-088 v1.2 (8 pts). |
-| **RESUME INSTRUCTION** | Adversary LOCAL pass 7 is IN PROGRESS (streak 0/3). Await result; if CLEAN streak advances to 1/3. Target: 3 consecutive strict-CLEAN passes (BC-5.39.001). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (independent) → merge (STANDING MERGE AUTH). After STORY-086 merges: re-run Gate 3 (adversary) + Gate 5 (holdout) on patched develop. Only after re-gate passes: advance to Wave 5. BLK-002 OPEN until STORY-086 merges + gates re-pass. |
+| **DURABLE ARTIFACTS** | (1-6) adversary passes 1-6 at `.factory/cycles/STORY-086/adversarial-reviews/`; (7) `adversary-STORY-086-pass-7.md` (MED-001 stale BC-1.16.001 PC-7 BulletItem type; recovery from corrupted PO commit 608ec7b0 via f2261592); (8) architect adjudications: `architect-pass-1-adjudication.md` (D1-D5), `architect-pass-5-adjudication.md`, `architect-pass-6-adjudication.md` (trim canonical); (9) `ADR-019` v1.3; (10) `BC-1.16.001` v1.3; (11) `BC-3.04.001` v1.6; (12) error-taxonomy v2.17; (13) STORY-086 v1.5 + STORY-088 v1.2 (8 pts). Old checkpoint archived to `.factory/cycles/STORY-086/session-checkpoints.md`. |
+| **RESUME INSTRUCTION** | Adversary LOCAL pass 8 is IN PROGRESS (streak 0/3). Await result; if CLEAN (strict) streak advances to 1/3. Target: 3 consecutive strict-CLEAN passes (BC-5.39.001). After convergence: demo-recorder → pr-manager 9-step → security-reviewer + pr-reviewer (independent) → merge (STANDING MERGE AUTH). After STORY-086 merges: re-run Gate 3 (adversary) + Gate 5 (holdout) on patched develop. Only after re-gate passes: advance to Wave 5. BLK-002 OPEN until STORY-086 merges + gates re-pass. |
 
 ---
 
@@ -242,6 +250,7 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 | PR #56 description has mislabeled file paths (notes.rs/masters.rs/inline.rs vs actual notes_slide.rs/notes_master.rs) — cosmetic, merged PR; no action required. | trivial | — |
 | Empty-string lang `lang ""` (Some("")) normalization to "en" — owned by slideforge-validate (SS-03), not exporter. | LOW | wave-gate / validator story |
 | Diagram frame with no media rId emits no `<p:pic>` → its alt descr is not emitted (pre-existing STORY-037 media structure; latent a11y gap). | LOW | pptx diagram-media story / Phase 6 a11y audit |
+| [process-gap] PG-WORKTREE-TYPES: Spec-correction agents for IN-FLIGHT worktree stories MUST read types from the worktree (.worktrees/STORY-NNN/), NOT the main checkout (develop). PO commit 608ec7b0 read develop types, stripped TextTag/AltText::Unspecified from BC-1.16.001 (existed only in STORY-086 worktree); reverted by f2261592. Second process-gap this cycle (first: PG-TD060-SCOPE pass-4). Codify: orchestrator MUST pin worktree type paths on spec-correction dispatches for in-flight stories. Anchor follow-up improvement story or justified deferral at STORY-086 sub-cycle close. Lessons file: `.factory/cycles/STORY-086/lessons.md`. | process | self-improvement epic |
 | [process-gap] TDD Red-Gate citation discipline: per-test Red-Gate rationale must name a symbol PROVABLY on the production code path the test asserts (STORY-039 pass-1 F-039-PG1 — cited `AltTextEmbedder::embed` was not on the asserted path). | process | self-improvement epic (test-writer/implementer Red-Gate gate) |
 | [process-gap OBS-4] vsdd-factory:adversary tool profile (Read/Grep/Glob) cannot execute cargo gates. LOCAL-pass dispatch instructions MUST NOT ask adversary to "run gates" — gate-execution-of-record is implementer exit-gate + orchestrator spot-verification. Follow-up: either grant adversary `exec` for LOCAL passes OR codify orchestrator-runs-gates as standing protocol. (surfaced STORY-085 pass 3) | process | self-improvement epic / tool-profile policy |
 
@@ -251,6 +260,8 @@ Only after all Wave 4 gates pass: begin Wave 5 with STORY-087, STORY-082, STORY-
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-06 | PROCESS-GAP-WORKTREE-TYPES | [process-gap record for cycle-close] PG-WORKTREE-TYPES: When an agent corrects a spec against code for an IN-FLIGHT worktree story, it MUST read type/code definitions from the worktree (.worktrees/STORY-NNN/), NOT the main checkout (develop, without the unmerged story's additions). PO read develop's types and stripped STORY-086's TextTag/AltText::Unspecified from BC-1.16.001 (commit 608ec7b0). Reverted by recovery commit f2261592 (BC-1.16.001 v1.3 with legitimate PC-7/PC-10 fixes intact). This is the SECOND process-gap this cycle (first: PG-TD060-SCOPE from pass-4). Reinforces LESSON-1/LESSON-16 (worktree-absolute paths). Codify: orchestrator dispatches to spec-correction agents MUST pin the worktree type path for in-flight stories. Anchored for lessons codification + follow-up improvement story when STORY-086 sub-cycle closes. |
+| 2026-06-06 | STORY-086-PASS7 | Adversary LOCAL pass 7 RAN: CLEAN (PR-merge) YES, CLEAN (strict) NO. Code correct and converged; all prior findings verified closed. F-086-P7-MED-001: BC-1.16.001 PC-7 described BulletItem{text,level,span} but real type is {inlines: Vec<InlineNode>, children: Vec<BulletItem>, span: Span} (code correct; stale BC spec-side fix). Streak stayed 0/3. Remediation: (1) PO fix attempt commit 608ec7b0 (BC-1.16.001 "v1.2") CORRUPTED — PO read types from main checkout (develop, STORY-086 unmerged), wrongly stripped TextTag/TextBlock.tag/AltText::Unspecified (exist only in STORY-086 worktree). (2) RECOVERY commit f2261592: BC-1.16.001 restored to v1.1 content + legitimate fixes applied: PC-7 BulletItem {inlines,children,span}; PC-10 ImageSpec field `path` (real Rust field; DSL keyword stays `src`). Bumped to v1.3; v1.2 marked CORRUPTED in changelog. (3) story-writer commit 9bbde7c9: STORY-086 → v1.5, fixed stale e2e test path (tests/integration/e2e_build_tests.rs → crates/slideforge/tests/e2e/story_086_content_threading.rs). Worktree HEAD UNCHANGED at a055345e. Workspace 3300/3300 pass, 14 skipped. Adversary LOCAL pass 8 dispatched. |
 | 2026-06-06 | STORY-086-PASS6 | Adversary LOCAL pass 6 found F-086-P6-MED-001: implementation stored UNTRIMMED title/subtitle/body/alt content, violating BC-1.16.001 PC-1/PC-4/PC-12 (trimmed canonical). Also exposed spec-vs-spec contradiction: ADR-019 §3.1/§3.3 specified untrimmed Arc::from(s), conflicting with BC trim invariants. Streak stayed 0/3. Remediated: (1) Architect adjudication (commit 8d83884b): BC supersedes ADR for contract semantics per Source-of-Truth Precedence rule; TRIMMED canonical; ADR-019 → v1.3 (§3.1/§3.3 corrected to Arc::from(s.trim())); adjudication doc at `.factory/cycles/STORY-086/architect-pass-6-adjudication.md`. (2) test-writer (commit f8999bde): 4 trim Red Gate tests (title/subtitle/body/chart-alt) + 1 whitespace-only-skip regression guard. (3) implementer (commit a055345e): 2-line trim fix in make_text_block_tagged and resolve_alt; whitespace-only-skip preserved; all 5 trim tests pass; full canonical exit gate CLEAN (3300 pass, 14 skipped). Worktree HEAD a055345e. Adversary LOCAL pass 7 dispatched. |
 | 2026-06-06 | STORY-086-PASS5 | Adversary LOCAL pass 5 found F-086-P5-CRIT-001 + F-086-P5-MED-001/002 + OBS-1 + D5 error. All remediated. Streak reset 0/3. CRIT-001: resolve_alt was alt-first, violating BC-1.16.001 PC-12 decorative-first; inter-BC conflict with BC-3.04.001 Inv-11 adjudicated by architect (decorative-first canonical, ADR-019 v1.2; W-A11-002 tracing::warn! registered in error-taxonomy v2.17 under Accessibility Warnings; BC-3.04.001 v1.6 Inv-11 scoped to shape-DSL path only; BC-1.16.001 v1.1 EC-004 + PC-12 decorative-first + W-A11-002 mechanism). Implementer: resolve_alt decorative-first + W-A11-002 emission (commit 77092e2a); 3 both-set Red Gate tests → green; regression guard. MED-001: AC-020 e2e strengthened (commit 10cd8813). MED-002: EC-004 W-A11-002 mechanism corrected to post-layout (commit 77092e2a). OBS-1: AC-007 e2e rescoped to forward-looking; #[ignore]'d citing STORY-088 per SID-1 (commit 10cd8813). D5 error: @var/vars-block list-literal does NOT parse (architect correction fc549c6e); STORY-088 scope expanded to cover BOTH bullets forms, 5→8 pts, estimated_days 2→3 (story-writer 7e1b9c72). Full exit gate CLEAN (3295 pass, 14 skipped). Pass 6 next. |
 | 2026-06-06 | STORY-088-SCOPE-EXPAND | STORY-088 (Bullets list-literal DSL syntax) scope expanded: adversary pass-5 D5 correction confirms @var/vars-block list-literal does NOT parse in STORY-086 scope. Both bullets DSL forms (direct `bullets: ["A","B","C"]` AND `bullets: var_name` @var/vars-block binding) deferred to STORY-088. Points 5→8, estimated_days 2→3. STORY-INDEX.md Wave 5 total 132→135 pts, overall total 542→545 pts. sprint-state.yaml STORY-088 points/estimated_days updated. BC-INDEX has no version column — no BC-INDEX update needed. |
