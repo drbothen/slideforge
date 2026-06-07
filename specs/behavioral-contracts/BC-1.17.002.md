@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2.1"
+version: "1.3"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,11 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — label and value field threading mechanism via Stage 2b; new ContentBlock::ColorBar(ColorBarSpec) and FrameContent::ColorBar materialization.", "2026-06-06 v1.2.1 (F-087-P3-001 follow-through): PC-4 HTML clause and PC-9 PDF/HTML clause scoped with contingency notes — HtmlExporter deferred project-wide to STORY-050/Phase-4; FrameContent::ColorBar materialized by STORY-087."]
+modified:
+  - "2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated."
+  - "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — label and value field threading mechanism via Stage 2b; new ContentBlock::ColorBar(ColorBarSpec) and FrameContent::ColorBar materialization."
+  - "2026-06-06 v1.2.1 (F-087-P3-001 follow-through): PC-4 HTML clause and PC-9 PDF/HTML clause scoped with contingency notes — HtmlExporter deferred project-wide to STORY-050/Phase-4; FrameContent::ColorBar materialized by STORY-087."
+  - "2026-06-07 v1.3 (STORY-089 / BC-1.18.001 v1.1 validator-boundary clarification): ValueRangeValidator (E-VAL-011) narrowed to ONLY validate the numeric range of an Int-typed value. TYPE constraint (non-Int value) now owned by FieldSchemaValidator via E-VAL-104 (BC-1.18.001 EC-001). PRESENCE constraint (absent required field) owned by E-VAL-101. EC-012 and EC-013 added to document wrong-type delegation; PC-3/Inv-3 updated to state boundary precisely."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -52,11 +56,26 @@ strict mode.
    `Missing label on color-coded element 'progress_bar' '<title-value>' at <file>:<line>:<col>. Color alone must not convey meaning. Add label "...".`
    In strict mode: `Err(BuildError::ValidationFailed)`; no output.
 3. `fields["value"]` is required and must be an integer in the range [0, 100] (inclusive).
-   - If absent: compile error (required-field error).
-   - If present but outside [0, 100]: compile error with message:
-     `progress_bar value must be between 0 and 100; got <value>.`
-   - This check is performed by `ValueRangeValidator` at Stage 5 (pre-layout), not by
-     `SlideType::lay_out()`. Error code: E-VAL-011.
+   The validation of this field is split across two validators with distinct, non-overlapping
+   responsibilities:
+
+   - **Presence (E-VAL-101):** If the field is absent, `validate_fields` (FieldSchemaValidator,
+     BC-1.18.001) emits E-VAL-101. `ValueRangeValidator` does NOT fire for an absent value.
+
+   - **Type (E-VAL-104):** If the field is present but is not `Value::Int` (e.g., `Value::Str`,
+     `Value::Float`, `Value::Bool`), `validate_fields` (FieldSchemaValidator, BC-1.18.001)
+     emits E-VAL-104 with message:
+     `Field 'value' on progress_bar slide has wrong type: expected integer, got <actual_type>.`
+     `ValueRangeValidator` does NOT fire when the value is the wrong type — it operates only on
+     a confirmed `Value::Int`. There is no double-diagnostic.
+
+   - **Range (E-VAL-011):** If the field is present AND is a `Value::Int` AND the integer is
+     outside [0, 100], `ValueRangeValidator` (Stage 5, pre-layout) emits E-VAL-011 with
+     message: `progress_bar value must be between 0 and 100; got <value>.`
+     `ValueRangeValidator` is the SOLE owner of out-of-range detection; it does NOT check
+     type or presence.
+
+   `SlideType::lay_out()` is geometry-only and performs no value-range or type validation.
 4. When `title`, `label`, and `value` are all valid:
    - The slide renders a visual progress bar filled to `value`% of its total width.
    - The `label` text is rendered visibly, providing the accessible text co-encoding
@@ -71,11 +90,22 @@ strict mode.
      exists. PPTX/PDF/DOCX rendering is delivered in STORY-087.
 5. `LabelCheck.validate()` (Stage 5) reads `Slide.fields["label"]` directly.
    LabelCheck does NOT require Stage 2b to have run.
-6. The `value` field validation is performed by `ValueRangeValidator` — a `Validator` plugin
-   registered at Stage 5 (pre-layout) in `slideforge::registry::register_bundled_plugins`. It
-   reads `Slide.fields["value"]` directly, before layout. Error code: E-VAL-011. Severity:
-   `DiagnosticSeverity::Error` (strict-mode fatal). `SlideType::lay_out()` is geometry-only
-   and does NOT perform value-range validation.
+6. The `value` field is validated by two validators with non-overlapping responsibilities:
+
+   - **`FieldSchemaValidator` (`validate_fields`, BC-1.18.001):** Runs Stage 5 (pre-layout).
+     Checks PRESENCE (E-VAL-101 if absent required) and TYPE (E-VAL-104 if value is not
+     `Value::Int` — e.g., `Value::Str("75%")` or `Value::Float(50.5)` or `Value::Bool`).
+     `FieldSchemaValidator` does NOT check numeric range.
+
+   - **`ValueRangeValidator`:** A `Validator` plugin registered at Stage 5 (pre-layout) in
+     `slideforge::registry::register_bundled_plugins`. Reads `Slide.fields["value"]` ONLY
+     when the value is confirmed `Value::Int`. If the integer is outside [0, 100], emits
+     E-VAL-011 (`progress_bar value must be between 0 and 100; got <value>.`), severity
+     `DiagnosticSeverity::Error` (strict-mode fatal). `ValueRangeValidator` does NOT fire
+     for absent values (E-VAL-101 fires instead) or for wrong-type values (E-VAL-104 fires
+     instead). There is no double-diagnostic.
+
+   `SlideType::lay_out()` is geometry-only and does NOT perform value-range or type validation.
 9. The `label` field is threaded into `Slide.blocks` as
    `ContentBlock::Text(TextTag::ColorLabel)` by `thread_fields_to_blocks` (Stage 2b,
    ADR-019 Decision 3). At layout time, `fill_region_slot_or_append` routes
@@ -98,9 +128,15 @@ strict mode.
 1. **`label` is mandatory — no opt-out.** Unlike visual media (where `decorative: true`
    is an opt-out), color-coded progress bars require a label. (DI-002)
 2. **`title` is mandatory.** Identifies what progress is being tracked.
-3. **`value` is mandatory and bounded.** Must be in `[0, 100]` inclusive. The integer
-   constraint means `value: 50.5` (float) is a type error; only integer-valued expressions
-   are accepted.
+3. **`value` is mandatory and bounded.** Must be in `[0, 100]` inclusive. Validation is split
+   by responsibility:
+   - **Presence:** `FieldSchemaValidator` emits E-VAL-101 if absent.
+   - **Type:** `FieldSchemaValidator` emits E-VAL-104 if the value is not `Value::Int`.
+     This covers: `value: 50.5` (Float) → E-VAL-104; `value: "75%"` (Str) → E-VAL-104;
+     `value: true` (Bool) → E-VAL-104. In all non-Int cases, E-VAL-011 does NOT fire.
+   - **Range:** `ValueRangeValidator` emits E-VAL-011 ONLY when the value IS `Value::Int`
+     AND the integer is outside [0, 100]. Only integer-valued expressions pass type checking;
+     float literals, strings, and booleans are type errors (E-VAL-104), never range errors.
 4. **Label should co-encode the numeric progress.** This is a content recommendation,
    not a compile-time enforced format constraint. Authors may write `label "In progress"` —
    the validator does not require the label to contain a percentage. However, WCAG
@@ -109,9 +145,15 @@ strict mode.
 5. **E-A11-002 for missing label.** Same error code and severity as BC-1.17.001.
 6. **The keyword `"progress_bar"` must be registered before the pipeline runs.**
    An unregistered keyword causes `LayoutError::UnknownSlideType` before label validation.
-7. **`ValueRangeValidator` is registered at Stage 5. No validation of `value` occurs in
-   `SlideType::lay_out()`.** Tests calling `lay_out()` directly do NOT exercise the
-   value-range enforcement; only `slideforge::build()` or `build_inner()`-level tests do.
+7. **`ValueRangeValidator` owns ONLY numeric-range checking (E-VAL-011). It does NOT own
+   type or presence.** `ValueRangeValidator` is registered at Stage 5 (pre-layout).
+   It reads `Slide.fields["value"]` only for `Value::Int` values already confirmed
+   present and correctly typed by the preceding `FieldSchemaValidator` pass. Tests calling
+   `lay_out()` directly do NOT exercise value-range or type enforcement; only
+   `slideforge::build()` or `build_inner()`-level tests do. The three validation owners
+   are: absent → E-VAL-101 (`FieldSchemaValidator`); wrong type → E-VAL-104
+   (`FieldSchemaValidator`, BC-1.18.001); out-of-range Int → E-VAL-011
+   (`ValueRangeValidator`).
 
 ## Edge Cases
 
@@ -128,6 +170,8 @@ strict mode.
 | EC-009 | `fields["value"]` is a `{{ expr }}` that evaluates to 75 | Valid. `eval_deck` resolves to `FieldValue::Literal(Value::Int(75))`; passes value check. |
 | EC-010 | `fields["value"]` is a `{{ expr }}` that evaluates to 150 | Compile error: value 150 is out of range [0, 100]. Error cites source span of the expression. |
 | EC-011 | Label present but title absent | Required-field error for title emitted first; E-A11-002 NOT emitted (label is present). Both errors accumulated if validation continues past title check. |
+| EC-012 | `fields["value"] = Value::Str("75%")` (string instead of integer) | `FieldSchemaValidator` emits E-VAL-104: `Field 'value' on progress_bar slide has wrong type: expected integer, got string.` E-VAL-011 from `ValueRangeValidator` does NOT fire. No double-diagnostic. Cross-ref: BC-1.18.001 EC-001. |
+| EC-013 | `fields["value"] = Value::Float(50.5)` (float instead of integer) | `FieldSchemaValidator` emits E-VAL-104: `Field 'value' on progress_bar slide has wrong type: expected integer, got float.` E-VAL-011 from `ValueRangeValidator` does NOT fire. Float 50.5 is in-range numerically but is the wrong type — type error takes priority; there is no range check on a non-Int value. Cross-ref: BC-1.18.001 EC-001. |
 
 ## Canonical Test Vectors
 
@@ -139,6 +183,8 @@ strict mode.
 | `slide progress_bar: title "Completion" label "Done" value 100` | `Ok(BuildOutput)` — 100% filled bar | boundary (max value) |
 | `slide progress_bar: title "Completion" label "Done" value 101` | Compile error: value out of range | error (over-range) |
 | `slide progress_bar: title "Completion" label "Done" value -5` | Compile error: value out of range | error (under-range) |
+| `slide progress_bar: title "Completion" label "Done" value: "75%"` (`Value::Str`) | E-VAL-104 from `FieldSchemaValidator` (`Field 'value' on progress_bar slide has wrong type: expected integer, got string.`). E-VAL-011 does NOT fire. | error (wrong type — Str, EC-012) |
+| `slide progress_bar: title "Completion" label "Done" value: 50.5` (`Value::Float`) | E-VAL-104 from `FieldSchemaValidator` (`Field 'value' on progress_bar slide has wrong type: expected integer, got float.`). E-VAL-011 does NOT fire. | error (wrong type — Float, EC-013) |
 
 ## Verification Properties
 
@@ -162,14 +208,16 @@ strict mode.
 
 - BC-1.17.001 — sibling: `status` slide type (same label-mandatory pattern; simpler fields)
 - BC-1.17.003 — sibling: `weighted_composite` slide type (same label pattern plus per-component labels)
+- BC-1.18.001 — depends on (FieldSchemaValidator owns E-VAL-104 type-mismatch for `value` field; EC-001 of BC-1.18.001 is the authoritative source-of-truth for the Str wrong-type case; EC-013 here mirrors that boundary for Float)
 - BC-5.01.003 — depends on (missing-label compile error that this BC instantiates for `progress_bar`)
 - BC-3.01.001 — depends on (SlideType trait enforces required fields)
 
 ## Architecture Anchors
 
 - `specs/architecture/ARCH-INDEX.md` SS-14 (Plugin API — SlideType implementations)
-- `specs/architecture/ARCH-INDEX.md` SS-03 (Validation — LabelCheckValidator)
+- `specs/architecture/ARCH-INDEX.md` SS-03 (Validation — LabelCheckValidator, ValueRangeValidator, FieldSchemaValidator)
 - `specs/architecture/adr/ADR-019-stage-2b-field-to-block-threading.md` — LabelCheck operating pre-layout
+- BC-1.18.001 — FieldSchemaValidator contract (owns E-VAL-104 type-mismatch and E-VAL-101 presence; delegates range to ValueRangeValidator)
 
 ## Story Anchor
 
@@ -187,3 +235,4 @@ strict mode.
 | 1.1 | 2026-06-06 | PC-6 / Inv-7 amended per architect adjudication F-087-P1-001: enforcement point moved from lay_out() to ValueRangeValidator Stage 5; E-VAL-011 allocated |
 | 1.2 | 2026-06-06 | PC-9 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): label threaded as TextTag::ColorLabel → Body-role frame; value threaded as ContentBlock::ColorBar(ColorBarSpec{percent}) → FrameContent::ColorBar materialized with proportional filled_width_emu. Rendering mechanism decided (Option T — Threading). |
 | 1.2.1 | 2026-06-06 | PC-4 HTML clause and PC-9 PDF/HTML clause scoped with contingency notes (F-087-P3-001 follow-through): HTML rendering of the color label and filled bar is CONTINGENT on HtmlExporter registration, deferred project-wide (anchor: STORY-050 / Phase-4). FrameContent::ColorBar and ColorLabel→Body IR materialized by STORY-087. PPTX/PDF/DOCX unaffected. |
+| 1.3 | 2026-06-07 | Validator-ownership boundary clarified (STORY-089 / BC-1.18.001 v1.1 EC-001): `ValueRangeValidator` (E-VAL-011) narrowed to ONLY validate the numeric range of a confirmed `Value::Int`. TYPE constraint delegated to `FieldSchemaValidator` via E-VAL-104 (BC-1.18.001); PRESENCE constraint delegated to E-VAL-101. `value: "75%"` (Str) → E-VAL-104 only; `value: 50.5` (Float) → E-VAL-104 only; absent value → E-VAL-101 only; in both wrong-type cases E-VAL-011 does NOT fire. PC-3 rewritten with three-validator breakdown; PC-6 rewritten with dual-validator split; Inv-3 updated; Inv-7 updated; EC-012 (Str wrong type) and EC-013 (Float wrong type) added; two canonical test vectors added. |
