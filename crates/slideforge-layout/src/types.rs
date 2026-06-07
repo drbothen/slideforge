@@ -516,6 +516,18 @@ pub enum FrameContent {
         /// Carried from the bar-background frame's `bbox.width` for exporter
         /// convenience (avoids re-reading geometry from the frame list).
         total_width_emu: Emu,
+        /// The canonical percentage value from the source `ColorBarSpec`.
+        ///
+        /// Carried verbatim from `spec.percent` so that exporters can emit the
+        /// correct text label without re-deriving it from `filled_width_emu /
+        /// total_width_emu`. Re-derivation introduces a second integer floor that
+        /// produces off-by-one errors when `total_width_emu` is not divisible by
+        /// 100 (OBS-P6-002).
+        ///
+        /// DOCX exporters MUST use this field for the `"{percent}%"` text run.
+        /// PDF/HTML exporters use `filled_width_emu` for visual geometry and MUST
+        /// NOT use this field for geometric computations.
+        percent: u8,
         /// The fill color derived from the brand's primary color, or a fixed
         /// default (`#0070C0`, blue) when brand colors are absent.
         color: Rgb,

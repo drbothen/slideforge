@@ -496,6 +496,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                     all_frames[idx].content = crate::types::FrameContent::ColorBar {
                         filled_width_emu: filled_width,
                         total_width_emu: total_width,
+                        percent: spec.percent,
                         color,
                     };
                 }

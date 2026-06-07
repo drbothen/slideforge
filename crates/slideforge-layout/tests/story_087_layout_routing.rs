@@ -530,6 +530,207 @@ fn test_BC_1_17_003_pc9_six_components_caps_at_5_no_stray_frame() {
     );
 }
 
+// ── OBS-P6-001 — status slide Title frame invariants ─────────────────────────
+//
+// The `status` region map (regions.rs "status" arm) allocates only:
+//   Frame 0: RegionRole::Generic  — the 0.75in (685,800 EMU) color indicator strip
+//   Frame 1: RegionRole::Body     — the label/title body
+//
+// There is NO RegionRole::Title frame. `fill_region_slot_or_append` for a
+// TextTag::Title block therefore falls through to Phase 2 (Generic fallback) and
+// routes the title text into Frame 0 — the narrow color indicator strip — instead
+// of a real title slot.
+//
+// These three tests assert the CORRECT post-fix behavior (invariants):
+//   1. A FrameContent::Title frame exists AND its width > 685_800 EMU.
+//   2. The narrow Generic (≤685_800 EMU wide) frame does NOT carry FrameContent::Title.
+//   3. The title text in the FrameContent::Title frame matches the input.
+//
+// ALL THREE MUST FAIL now (title currently goes into the 685_800 EMU strip).
+// Traceability: OBS-P6-001 / BC-1.17.001.
+
+/// OBS-P6-001 assertion 1: the frame carrying FrameContent::Title on a `status`
+/// slide must be wider than the color indicator strip (> 685_800 EMU).
+///
+/// RED GATE: currently the title is routed into the 0.75in (685_800 EMU) strip
+/// (Frame 0, RegionRole::Generic) via fill_region_slot_or_append Phase-2 fallback,
+/// because the status region map has no RegionRole::Title frame.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P6_001_status_title_frame_width_exceeds_color_strip() {
+    // Build a status slide with a title block and a ColorLabel block.
+    let blocks = vec![
+        text_block_tagged("Status Title Text", TextTag::Title),
+        text_block_tagged("On Track", TextTag::ColorLabel),
+    ];
+    let slide = make_slide_with_blocks("status", blocks, Some("Status Title Text"));
+    let deck = make_deck_one_slide(slide);
+    let brand = make_brand();
+
+    let laid_out = run(&deck, &brand).expect("layout::run must not fail for status slide");
+    let frames = &laid_out.slides[0].frames;
+
+    // The color indicator strip width in EMU at the default page size:
+    //   sx(685_800) = 685_800 * 9_144_000 / 9_144_000 = 685_800 EMU (0.75in)
+    // A real title slot must be substantially wider than this.
+    let color_strip_width_emu: i64 = 685_800;
+
+    // Find the FrameContent::Title frame.
+    let title_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::Title(_)))
+        .collect();
+
+    assert_eq!(
+        title_frames.len(),
+        1,
+        "OBS-P6-001 RED GATE: status slide with TextTag::Title block must produce \
+         exactly 1 FrameContent::Title frame. Got {} Title frames. \
+         All frames: {frames:?}",
+        title_frames.len()
+    );
+
+    let title_frame = title_frames[0];
+    assert!(
+        title_frame.bbox.width.0 > color_strip_width_emu,
+        "OBS-P6-001 RED GATE: the FrameContent::Title frame on a status slide must be \
+         WIDER than the color indicator strip ({color_strip_width_emu} EMU). \
+         Got width = {} EMU. \
+         Currently the title is routed into the 0.75in Generic strip (Frame 0) via \
+         fill_region_slot_or_append Phase-2 fallback because no RegionRole::Title \
+         frame exists in the status region map. \
+         All frames: {frames:?}",
+        title_frame.bbox.width.0
+    );
+}
+
+/// OBS-P6-001 assertion 2: the narrow color indicator frame (Generic role,
+/// ≤ 685_800 EMU wide) must NOT contain the slide title.
+///
+/// RED GATE: currently fill_region_slot_or_append Phase-2 fallback routes
+/// TextTag::Title into Frame 0 (the 0.75in Generic strip), so the color strip
+/// carries FrameContent::Title instead of remaining FrameContent::Empty.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P6_001_status_color_strip_does_not_contain_title() {
+    let color_strip_width_emu: i64 = 685_800;
+
+    let blocks = vec![
+        text_block_tagged("Status Title Text", TextTag::Title),
+        text_block_tagged("On Track", TextTag::ColorLabel),
+    ];
+    let slide = make_slide_with_blocks("status", blocks, Some("Status Title Text"));
+    let deck = make_deck_one_slide(slide);
+    let brand = make_brand();
+
+    let laid_out = run(&deck, &brand).expect("layout::run must not fail for status slide");
+    let frames = &laid_out.slides[0].frames;
+
+    // Find any frame narrower than or equal to the color strip width that carries Title.
+    let title_in_strip: Vec<_> = frames
+        .iter()
+        .filter(|f| {
+            f.bbox.width.0 <= color_strip_width_emu && matches!(f.content, FrameContent::Title(_))
+        })
+        .collect();
+
+    assert_eq!(
+        title_in_strip.len(),
+        0,
+        "OBS-P6-001 RED GATE: the narrow color indicator frame \
+         (width ≤ {color_strip_width_emu} EMU) must NOT carry FrameContent::Title. \
+         Found {} narrow frame(s) with Title content. \
+         This means the title was routed into the 0.75in strip (the Phase-2 Generic \
+         fallback in fill_region_slot_or_append fired because no RegionRole::Title \
+         slot exists in the status region map). \
+         All frames: {frames:?}",
+        title_in_strip.len()
+    );
+
+    // Additionally: the narrow Generic frame must remain FrameContent::Empty
+    // (available for exporters to render as the color indicator).
+    let narrow_generic_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| {
+            f.bbox.width.0 <= color_strip_width_emu
+                && f.region_role == Some(slideforge_layout::RegionRole::Generic)
+        })
+        .collect();
+
+    assert!(
+        !narrow_generic_frames.is_empty(),
+        "OBS-P6-001: status slide must still produce at least one narrow Generic frame \
+         (the color indicator slot). Got frames: {frames:?}"
+    );
+
+    for narrow_frame in &narrow_generic_frames {
+        assert!(
+            matches!(narrow_frame.content, FrameContent::Empty),
+            "OBS-P6-001 RED GATE: the narrow Generic frame (width ≤ {color_strip_width_emu} EMU) \
+             must remain FrameContent::Empty (the color indicator slot must be available for \
+             exporters). Got content: {:?}. All frames: {frames:?}",
+            narrow_frame.content
+        );
+    }
+}
+
+/// OBS-P6-001 assertion 3: the FrameContent::Title frame carries the exact
+/// title text from the input AND resides in a frame wider than the color strip.
+///
+/// RED GATE: currently the title is routed into the 0.75in (685_800 EMU) narrow
+/// strip, which fails assertion 1. This test adds the text-content assertion on
+/// TOP of the width check, so both the location and text are verified together.
+/// The COMBINED assertion (width > strip AND text matches) is the Red Gate: it
+/// fails now because the only Title frame is the narrow strip.
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P6_001_status_title_text_matches_input() {
+    let expected_title = "My Status Slide Title";
+    let color_strip_width_emu: i64 = 685_800;
+
+    let blocks = vec![
+        text_block_tagged(expected_title, TextTag::Title),
+        text_block_tagged("At Risk", TextTag::ColorLabel),
+    ];
+    let slide = make_slide_with_blocks("status", blocks, Some(expected_title));
+    let deck = make_deck_one_slide(slide);
+    let brand = make_brand();
+
+    let laid_out = run(&deck, &brand).expect("layout::run must not fail for status slide");
+    let frames = &laid_out.slides[0].frames;
+
+    // Find FrameContent::Title frames that are WIDE ENOUGH to be a real title slot
+    // (wider than the color strip). This is the combined assertion: correct text
+    // AND correct location. The narrow-strip Title frame does NOT satisfy this.
+    let wide_title_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| {
+            matches!(f.content, FrameContent::Title(_)) && f.bbox.width.0 > color_strip_width_emu
+        })
+        .collect();
+
+    assert_eq!(
+        wide_title_frames.len(),
+        1,
+        "OBS-P6-001 RED GATE: status slide must produce exactly 1 FrameContent::Title \
+         frame whose width > {color_strip_width_emu} EMU (not the narrow strip). \
+         Got {} wide Title frames. \
+         (Currently the only Title frame IS the narrow strip at width=685800 EMU, \
+         so this assertion fails until a real Title slot is added.) \
+         All frames: {frames:?}",
+        wide_title_frames.len()
+    );
+
+    if let FrameContent::Title(text) = &wide_title_frames[0].content {
+        assert_eq!(
+            text.as_ref(),
+            expected_title,
+            "OBS-P6-001: the wide FrameContent::Title frame must carry the exact \
+             input text '{expected_title}', got '{text}'"
+        );
+    }
+}
+
 /// BC-1.17.003 PC-9 / adjudication §10.2:
 /// 5 component blocks → all 5 Generic-role slots filled.
 ///

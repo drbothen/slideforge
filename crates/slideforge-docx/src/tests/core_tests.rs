@@ -52,7 +52,7 @@ use std::sync::Arc;
 
 use slideforge_eval::BleedChecker;
 use slideforge_layout::types::{
-    BoundingBox, Emu, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+    BoundingBox, Emu, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, Rgb,
 };
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{
@@ -1555,4 +1555,219 @@ fn test_BC_4_02_001_f041_008_paragraph_count_exact_not_ppr_pstyle() {
          '<w:p>'/'<w:p ' count ({paragraph_count}), confirming that '<w:pPr' elements \
          inflate the old assertion (F-041-008)"
     );
+}
+
+// ─── OBS-P6-002: DOCX percent double-floor off-by-one ────────────────────────
+//
+// Confirmed defect: layout::run floors `filled_width = (percent * total) / 100`
+// (integer EMU). The DOCX exporter (document_body.rs ~229) RE-DERIVES percent
+// as `(filled_width * 100) / total` — a second floor. At bar widths not
+// divisible by 100 the two floors compound and produce `percent - 1`.
+//
+// The canonical spec value `ColorBarSpec.percent: u8` is NOT carried in
+// `FrameContent::ColorBar`; it has only `filled_width_emu` and `total_width_emu`.
+//
+// ## Black-box approach (no type change needed)
+//
+// We construct a `LaidOutDeck` directly with a `FrameContent::ColorBar` frame
+// whose `filled_width_emu` and `total_width_emu` match what `layout::run` would
+// produce at a non-default bar width (not divisible by 100), then drive the full
+// DOCX exporter and assert the text in `word/document.xml`.
+//
+// ## Triggering width
+//
+// The `progress_bar` bar-background frame width at default page size is:
+//   sx(8_229_600) = 8_229_600 * 9_144_000 / 9_144_000 = 8_229_600 EMU
+// which IS divisible by 100 (8_229_600 / 100 = 82_296 exactly) — no bug there.
+//
+// We force a non-divisible-by-100 total by setting `total_width_emu` directly to
+// a value not divisible by 100 (e.g., 8_229_601 EMU). This is the "bar at a
+// non-default page width" scenario. The total can be any value where:
+//   (((percent * total) / 100) * 100) / total != percent
+//
+// For `total = 5_000_003` (not divisible by 100):
+//   filled = 75 * 5_000_003 / 100 = 3_750_002  (floor)
+//   recovered = 3_750_002 * 100 / 5_000_003 = 74  (second floor, off-by-one!)
+//
+// For `total = 4_500_001` (not divisible by 100):
+//   filled = 75 * 4_500_001 / 100 = 3_375_000  (floor)
+//   recovered = 3_375_000 * 100 / 4_500_001 = 74  (off-by-one)
+//
+// Traceability: OBS-P6-002 / BC-1.17.002 PC-9 (DOCX clause).
+
+/// Helper: build a `LaidOutDeck` with a single `progress_bar` slide that carries
+/// a `FrameContent::ColorBar` frame with the given `filled_width_emu` and
+/// `total_width_emu`.
+fn make_progress_bar_deck_with_colorbar(percent_input: u8, total_width_emu: i64) -> LaidOutDeck {
+    // Replicate what layout::run does: filled = (percent * total) / 100 (floor).
+    let filled_width_emu = Emu((i64::from(percent_input) * total_width_emu) / 100);
+    let total_emu = Emu(total_width_emu);
+
+    // Title frame (required so the DOCX exporter can emit a Heading1).
+    let title_frame = Frame {
+        bbox: BoundingBox {
+            x: Emu(457_200),
+            y: Emu(365_760),
+            width: Emu(8_229_600),
+            height: Emu(685_800),
+        },
+        content: FrameContent::Title(Arc::from("Progress Bar Slide")),
+        text_flow: None,
+        region_role: None,
+    };
+
+    // The ColorBar frame at the non-default total width.
+    let bar_frame = Frame {
+        bbox: BoundingBox {
+            x: Emu(457_200),
+            y: Emu(1_188_720),
+            width: total_emu,
+            height: Emu(685_800),
+        },
+        content: FrameContent::ColorBar {
+            filled_width_emu,
+            total_width_emu: total_emu,
+            percent: percent_input,
+            color: Rgb {
+                r: 0,
+                g: 112,
+                b: 192,
+            },
+        },
+        text_flow: None,
+        region_role: None,
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("progress_bar"),
+        frames: vec![title_frame, bar_frame],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    LaidOutDeck {
+        page_size: PageSize {
+            width: Emu(9_144_000),
+            height: Emu(5_143_500),
+        },
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    }
+}
+
+/// OBS-P6-002 — DOCX exporter percent double-floor: value=75 at a
+/// non-divisible-by-100 bar width must produce `<w:t>75%</w:t>` in document.xml.
+///
+/// ## RED GATE
+///
+/// With `total_width_emu = 5_000_003` (not divisible by 100):
+///   filled = 75 * 5_000_003 / 100 = 3_750_002  (layout floor, integer EMU)
+///   DOCX re-derives: (3_750_002 * 100) / 5_000_003 = 74  (second floor, off-by-one)
+///
+/// The DOCX exporter currently emits `74%` instead of `75%`. This test MUST FAIL
+/// until the exporter carries the canonical `percent` value without re-deriving it.
+///
+/// Traceability: OBS-P6-002 / BC-1.17.002 PC-9 (DOCX clause).
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P6_002_docx_percent_double_floor_value_75() {
+    // total = 5_000_003: NOT divisible by 100 (5_000_003 % 100 = 3)
+    // filled = 75 * 5_000_003 / 100 = 3_750_002
+    // DOCX re-derives: (3_750_002 * 100) / 5_000_003 = 374_999_799 / 5_000_003 ≈ 74
+    // Expected: "75%", actual (buggy): "74%"
+    let total_emu: i64 = 5_000_003;
+    let percent_input: u8 = 75;
+
+    // Confirm the math: filled and double-floor.
+    let filled = i64::from(percent_input) * total_emu / 100;
+    let double_floored = filled * 100 / total_emu;
+    assert_ne!(
+        double_floored,
+        i64::from(percent_input),
+        "precondition: chosen total_emu={total_emu} must trigger double-floor bug \
+         (filled={filled}, recovered={double_floored} should != {percent_input})"
+    );
+
+    let deck = minimal_deck();
+    let laid_out = make_progress_bar_deck_with_colorbar(percent_input, total_emu);
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+
+    let docx_bytes = DocxExporter
+        .export(&deck, &laid_out, &brand, &opts)
+        .expect("DOCX export must succeed for progress_bar with ColorBar");
+
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // The canonical value must appear as "75%" in the document XML.
+    // The buggy behavior emits "74%" due to the double-floor.
+    assert!(
+        doc_xml.contains("<w:t>75%</w:t>") || doc_xml.contains(">75%<"),
+        "OBS-P6-002 RED GATE: DOCX document.xml must contain '75%' for a progress_bar \
+         slide with percent=75 at total_emu={total_emu} (not divisible by 100). \
+         Bug: DOCX re-derives percent as (filled_width*100)/total — a second integer \
+         floor — producing '74%' instead of '75%'. \
+         filled_width_emu = {filled}, double_floored = {double_floored}. \
+         Actual document.xml snippet (first 3000 chars):\n{}",
+        &doc_xml[..doc_xml.len().min(3000)]
+    );
+}
+
+/// OBS-P6-002 — parameterized: several percent values at a triggering width
+/// must all round-trip correctly through the DOCX exporter.
+///
+/// ## RED GATE
+///
+/// With `total_width_emu = 5_000_003`, values 1..=99 (excluding 0, 25, 50, 75, 100
+/// which happen to be exact at this width) all produce off-by-one in the current
+/// implementation. This test asserts a representative set: {33, 67, 75, 90}.
+///
+/// Traceability: OBS-P6-002 / BC-1.17.002 PC-9 (DOCX clause).
+#[test]
+#[allow(non_snake_case)]
+fn test_OBS_P6_002_docx_percent_double_floor_multiple_values() {
+    // total = 5_000_003: NOT divisible by 100.
+    let total_emu: i64 = 5_000_003;
+
+    // Representative percent values that trigger the double-floor at this width.
+    // Verified: 33, 67, 75, 90 all produce off-by-one with total=5_000_003.
+    let test_values: &[u8] = &[33, 67, 75, 90];
+
+    for &percent_input in test_values {
+        let filled = i64::from(percent_input) * total_emu / 100;
+        let double_floored = filled * 100 / total_emu;
+
+        // Confirm this value triggers the bug (ensures the test is meaningful).
+        if double_floored == i64::from(percent_input) {
+            // This particular value is exact at this width — skip it.
+            continue;
+        }
+
+        let deck = minimal_deck();
+        let laid_out = make_progress_bar_deck_with_colorbar(percent_input, total_emu);
+        let brand = minimal_brand();
+        let opts = ExportOptions::default();
+
+        let docx_bytes = DocxExporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("DOCX export must succeed");
+
+        let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+        let expected_text = format!("{percent_input}%");
+        let expected_xml = format!("<w:t>{expected_text}</w:t>");
+
+        assert!(
+            doc_xml.contains(&expected_xml) || doc_xml.contains(&format!(">{expected_text}<")),
+            "OBS-P6-002 RED GATE: DOCX document.xml must contain '{expected_text}' for \
+             percent={percent_input} at total_emu={total_emu}. \
+             Bug: double-floor produces '{double_floored}%' instead. \
+             filled_width_emu={filled}. \
+             Actual document.xml (first 3000 chars):\n{}",
+            &doc_xml[..doc_xml.len().min(3000)]
+        );
+    }
 }

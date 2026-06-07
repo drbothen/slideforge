@@ -139,6 +139,7 @@ fn progress_bar_laid_out_deck() -> LaidOutDeck {
                 content: FrameContent::ColorBar {
                     filled_width_emu: filled_width,
                     total_width_emu: total_width,
+                    percent: 75,
                     color: Rgb {
                         r: 0,
                         g: 112,

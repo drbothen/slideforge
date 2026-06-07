@@ -370,11 +370,20 @@ pub fn region_frames_for(
         ],
 
         // ── status ────────────────────────────────────────────────────────
-        // Static skeleton: color indicator strip (left) + label/title body (right).
-        // Value-proportional geometry (color fill width) is computed in
-        // StatusSlideType::lay_out(), which has access to the slide fields.
-        // Frame 0 (color indicator): 0.5in, 0.4in, 0.75in, 4.5in
-        // Frame 1 (label + title):   1.5in, 0.4in, 8.0in,  4.5in
+        // Static skeleton: color indicator strip (left) + title header (right-top)
+        // + label/body area (right-below).
+        //
+        // OBS-P6-001: a dedicated RegionRole::Title frame is required so that
+        // fill_region_slot_or_append routes TextTag::Title into a wide slot rather
+        // than falling back to the narrow Generic strip.
+        //
+        // Frame 0 (color indicator): x=0.5in  y=0.4in  w=0.75in(685_800)  h=4.5in(4_114_800)
+        // Frame 1 (title):           x=1.5in  y=0.4in  w=8.0in(7_315_200)  h=0.65in(594_360)
+        // Frame 2 (body):            x=1.5in  y=1.15in w=8.0in(7_315_200)  h=3.75in(3_429_000)
+        //
+        // Geometry check: Frame 1 y(365_760) + h(594_360) = 960_120 ≤ Frame 2 y(1_051_560) ✓
+        // Canvas check: x(1_371_600) + w(7_315_200) = 8_686_800 ≤ 9_144_000 ✓
+        //               y(1_051_560) + h(3_429_000) = 4_480_560 ≤ 5_143_500 ✓
         "status" => vec![
             Frame {
                 bbox: bbox(457_200, 365_760, 685_800, 4_114_800),
@@ -383,7 +392,13 @@ pub fn region_frames_for(
                 region_role: Some(RegionRole::Generic),
             },
             Frame {
-                bbox: bbox(1_371_600, 365_760, 7_315_200, 4_114_800),
+                bbox: bbox(1_371_600, 365_760, 7_315_200, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Title),
+            },
+            Frame {
+                bbox: bbox(1_371_600, 1_051_560, 7_315_200, 3_429_000),
                 content: FrameContent::Empty,
                 text_flow: None,
                 region_role: Some(RegionRole::Body),
