@@ -24,10 +24,14 @@
 #   tracing::warn! only. Callers cannot inspect diagnostics from Ok(BuildOutput).
 #   (See build_inner: Stage 5 → if options.strict { return Err } else { continue }.)
 #
-# Red Gate (pre-wiring, current state):
-#   No FieldSchemaValidator is registered. validate_fields() is a dead letter — never
-#   called from build_inner(). build() returns Ok for this fixture in both strict and
-#   warn-only mode. AC-009 FAILS (expects Err, gets Ok).
+# Historical Red Gate state (pre-wiring):
+#   No FieldSchemaValidator was registered. validate_fields() was a dead letter — never
+#   called from build_inner(). build() returned Ok for this fixture in both strict and
+#   warn-only mode. AC-009 FAILED (expected Err, got Ok).
+#
+# Current post-wiring state (STORY-089 complete):
+#   FieldSchemaValidator is registered. validate_fields() is called at Stage 5.
+#   build() with strict=true returns Err(ValidationFailed) with E-VAL-104. AC-009 PASSES.
 
 slideforge_version "1"
 lang "en-US"

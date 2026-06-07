@@ -8,31 +8,28 @@
 //! - Priority-1 `expected_type` annotations on `progress_bar.value` (Int), `chart.chart_type`
 //!   (OneOf), `weighted_composite.components` (List), `decorative` (Bool), and others.
 //!
-//! ## What is still missing (the wiring gap — why these tests are RED)
+//! ## What the Red Gate exposed (historical wiring gap — now resolved)
 //!
-//! `validate_fields` is a **dead letter** at build time. `build_inner` calls
-//! `validator.validate(&deck, &validator_opts)` for every registered `Validator`
-//! plugin (Stage 5), but NO registered validator calls `validate_fields`. The
-//! `FieldSchemaValidator` that the implementer must create and register is absent.
+//! At the Red Gate, `validate_fields` was a **dead letter** at build time. `build_inner`
+//! called `validator.validate(&deck, &validator_opts)` for every registered `Validator`
+//! plugin (Stage 5), but no registered validator called `validate_fields`. The
+//! `FieldSchemaValidator` had not yet been created or registered.
 //!
-//! Consequence: `build()` on a `progress_bar` slide with `value "fifty"` (Str instead
-//! of Int) currently returns `Ok` in both strict and warn-only mode. It should return
+//! Pre-wiring consequence: `build()` on a `progress_bar` slide with `value "fifty"`
+//! (Str instead of Int) returned `Ok` in both strict and warn-only mode.
+//!
+//! ## Current wired state (post-STORY-089 implementation)
+//!
+//! `FieldSchemaValidator` is registered in `slideforge::registry::register_bundled_plugins`
+//! at Stage 5 (alongside `ValueRangeValidator`, `LabelCheckValidator`, etc.). It:
+//! - Iterates every `Slide` in the `Deck`.
+//! - Looks up the `SlideType` for each slide in the `SlideTypeRegistry`.
+//! - Calls `validate_fields(slide, slide_type)` for each slide.
+//! - Accumulates all returned `Diagnostic` values (DI-018: no bail-on-first).
+//! - Returns the accumulated `Vec<Diagnostic>`.
+//!
+//! Result: `build()` on a `progress_bar` slide with `value "fifty"` now returns
 //! `Err(ValidationFailed)` in strict mode with at least one E-VAL-104 diagnostic.
-//!
-//! ## Implementer instructions
-//!
-//! To make these tests pass, the implementer must:
-//! 1. Create a `FieldSchemaValidator` in `slideforge-validate` that:
-//!    - Iterates every `Slide` in the `Deck`.
-//!    - Looks up the `SlideType` for each slide in the `SlideTypeRegistry`.
-//!    - Calls `validate_fields(slide, slide_type)` for each slide.
-//!    - Accumulates all returned `Diagnostic` values (DI-018: no bail-on-first).
-//!    - Returns the accumulated `Vec<Diagnostic>`.
-//! 2. Register `FieldSchemaValidator` in `slideforge::registry::register_bundled_plugins`
-//!    at Stage 5 (alongside `ValueRangeValidator`, `LabelCheckValidator`, etc.).
-//!
-//! `validate_fields` already produces correct E-VAL-104 diagnostics for type mismatches.
-//! The ONLY missing piece is the `Validator` wrapper and its registration.
 //!
 //! ## Build() API shape (strict vs. warn-only)
 //!
@@ -82,38 +79,35 @@ use crate::e2e::{BrandTmpDir, fixture_source};
 /// of Int) MUST return `Err(BuildError::ValidationFailed)` AND the failure MUST
 /// carry at least one diagnostic with `code == "E-VAL-104"`.
 ///
-/// ## Why this is RED right now
+/// ## Historical Red Gate state (resolved by STORY-089 wiring)
 ///
-/// `validate_fields` in `slideforge-plugin-api/slide_types/registry.rs` correctly
-/// produces an E-VAL-104 diagnostic for `value "fifty"` on a `progress_bar` slide.
-/// However, `validate_fields` is NEVER called from `build_inner()`. No registered
-/// `Validator` plugin invokes it.
+/// At the Red Gate, `validate_fields` in `slideforge-plugin-api/slide_types/registry.rs`
+/// correctly produced an E-VAL-104 diagnostic for `value "fifty"` on a `progress_bar`
+/// slide, but `validate_fields` was NEVER called from `build_inner()`. No registered
+/// `Validator` plugin invoked it.
 ///
-/// ## Observed pre-wiring behavior
+/// ## Pre-wiring behavior (historical)
 ///
-/// The `ValueRangeValidator` (which IS registered) detects `Value::Str("fifty")` as
-/// a wrong-type on the `value` field and emits `E-VAL-011` (not E-VAL-104). This
-/// already causes `Err(ValidationFailed)` in strict mode — but with the wrong code.
-/// The test is RED because it requires E-VAL-104 (field-schema type mismatch from
-/// `FieldSchemaValidator`) and gets only E-VAL-011 (range validator's wrong-type arm).
+/// At the Red Gate, `ValueRangeValidator` (which was registered) detected
+/// `Value::Str("fifty")` as a wrong-type on the `value` field and emitted `E-VAL-011`
+/// (not E-VAL-104). This caused `Err(ValidationFailed)` in strict mode — but with the
+/// wrong code. The test was RED because it required E-VAL-104 (field-schema type mismatch
+/// from `FieldSchemaValidator`) and got only E-VAL-011 (range validator's wrong-type arm).
 ///
-/// ## Red Gate evidence
-///
+/// Pre-wiring evidence:
 /// Run: `cargo nextest run -p slideforge -E 'test(test_BC_1_18_001_ac009_strict)'`
 /// Pre-wiring result: `FAIL` at the E-VAL-104 assertion:
 ///   `Got diagnostic codes: ["E-VAL-011"]`
 ///
-/// The test fails AT the E-VAL-104 secondary assertion — proving FieldSchemaValidator
-/// is not wired (only ValueRangeValidator fires).
+/// ## Current post-wiring behavior
 ///
-/// ## Post-implementation behavior
-///
-/// After `FieldSchemaValidator` is registered at Stage 5:
+/// With `FieldSchemaValidator` registered at Stage 5:
 /// - `FieldSchemaValidator::validate(&deck)` calls `validate_fields` for each slide.
 /// - `validate_fields` detects `Value::Str("fifty")` on `FieldType::Int` field.
 /// - Returns one E-VAL-104 (T1: "expected integer, got string").
-/// - Combined with E-VAL-011 from ValueRangeValidator, `diagnostics` contains both.
-/// - The E-VAL-104 assertion PASSES.
+/// - `ValueRangeValidator` is range-only (BC-1.17.002 v1.3) and does NOT emit E-VAL-011
+///   for wrong-type — type checking is delegated to `FieldSchemaValidator`.
+/// - Only E-VAL-104 is present. The E-VAL-104 assertion PASSES.
 ///
 /// ## Fixture: story-089-progress-bar-str-value.sf
 ///
@@ -233,14 +227,14 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
 /// `build()` in warn-only mode (`strict=false`) on the same `progress_bar` fixture
 /// with `value "fifty"` MUST return `Ok(BuildOutput)` — the build does NOT hard-fail.
 ///
-/// ## AC-010 special analysis — why this may already pass (guard vs. Red Gate)
+/// ## AC-010 special analysis — guard test, not a Red Gate test
 ///
-/// In the CURRENT (pre-wiring) state: no FieldSchemaValidator is registered. `build()`
-/// returns `Ok` for this fixture regardless of strict mode (both strict and warn-only
-/// succeed — the wiring is absent so the type mismatch goes undetected). The `Ok`
-/// assertion PASSES trivially for the wrong reason.
+/// At the Red Gate (pre-wiring), no `FieldSchemaValidator` was registered. `build()`
+/// returned `Ok` for this fixture regardless of strict mode (both strict and warn-only
+/// succeeded — the wiring was absent so the type mismatch went undetected). The `Ok`
+/// assertion PASSED trivially for the wrong reason.
 ///
-/// Post-wiring: `FieldSchemaValidator` fires and produces E-VAL-104. Because
+/// Post-wiring (current): `FieldSchemaValidator` fires and produces E-VAL-104. Because
 /// `strict=false`, `build_inner` does NOT apply the strict gate. The build continues
 /// past validation to layout and export. Result: `Ok(BuildOutput)`. This assertion
 /// still PASSES, now for the correct reason.
@@ -374,22 +368,22 @@ fn test_BC_1_18_001_ac009_positive_control_valid_int_value_strict_ok() {
 /// `data` on a chart slide, this test FAILS — signaling that `chart.data` was left as
 /// required in the field schema when it should be optional.
 ///
-/// ## Current behavior (pre-wiring)
+/// ## Historical pre-wiring behavior (Red Gate state)
 ///
-/// No `FieldSchemaValidator` is registered. `build()` does not call `validate_fields`.
-/// The build returns `Ok` (layout and export succeed; no field-schema check runs).
-/// This assertion PASSES trivially for the wrong reason.
+/// At the Red Gate, no `FieldSchemaValidator` was registered. `build()` did not call
+/// `validate_fields`. The build returned `Ok` (layout and export succeeded; no
+/// field-schema check ran). This assertion PASSED trivially for the wrong reason.
 ///
-/// ## Post-wiring behavior (contract to preserve)
+/// ## Current post-wiring behavior (contract to preserve)
 ///
-/// After `FieldSchemaValidator` is wired:
-/// - If `chart.data` is REQUIRED (current schema): `validate_fields` emits E-VAL-101
-///   for the absent field → strict gate fires → `Err(ValidationFailed)` → this test FAILS.
-/// - If `chart.data` is OPTIONAL (architect decision): no E-VAL-101 for absent data →
-///   build returns `Ok` → this test PASSES.
+/// With `FieldSchemaValidator` now wired:
+/// - If `chart.data` is REQUIRED: `validate_fields` emits E-VAL-101 for the absent
+///   field → strict gate fires → `Err(ValidationFailed)` → this test FAILS.
+/// - If `chart.data` is OPTIONAL (architect decision, implemented in STORY-089):
+///   no E-VAL-101 for absent data → build returns `Ok` → this test PASSES.
 ///
-/// The implementer must ensure `chart.data` is reclassified optional BEFORE or DURING
-/// the `FieldSchemaValidator` wiring to avoid breaking this contract.
+/// `chart.data` was reclassified as optional during STORY-089 `FieldSchemaValidator`
+/// wiring. This test guards against regression to required.
 ///
 /// ## Fixture: inline DSL source (no file needed)
 ///
