@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.19"
+version: "2.20"
 status: active
 producer: product-owner
 timestamp: 2026-06-07T00:00:00
@@ -375,15 +375,115 @@ namespace was previously empty in this taxonomy.
 Fatal in strict mode (exit 2). In `--warn-only` mode: error is reported as a warning;
 output may still be produced.
 
-Pre-registration collision check (2026-06-06): E-VAL-011 is the first formally registered
-code in the E-VAL namespace. The codes E-VAL-101, E-VAL-102, and W-VAL-103 appear
-informally in `crates/slideforge/src/registry.rs` (`validate_fields`) but are not yet
-registered in this taxonomy; they will be formally registered in a future spec burst.
+Formal-registration note (2026-06-07, v2.20): E-VAL-101, E-VAL-102, and W-VAL-103 are
+now formally registered below. These codes have been informally in use in
+`crates/slideforge-plugin-api/src/slide_types/registry.rs` (`validate_fields`) since
+prior to v2.18; this version resolves the debt noted in v2.18 ("will be formally
+registered in a future spec burst"). No implementer action required — the code strings
+in `registry.rs` are already correct and match the message formats documented here
+exactly (confirmed by reading `registry.rs` at registry.rs:241–293 at time of
+registration). The 1xx grouping (101 absent, 102 empty, 103 unknown, 104 type-mismatch)
+is hereby formally established as the `validate_fields` schema family.
 
 | Code | Severity | Exit (strict) | Message Format | Traces To |
 |------|---------|--------------|---------------|-----------|
 | E-VAL-011 | broken | 2 | `<slide_type> <field_path> must be <constraint>; got <value>.` (See message variants in BC-1.17.002 PC3, BC-1.17.003 inv 6/7) | BC-1.17.002 PC3, BC-1.17.003 inv 6/7 |
 | E-VAL-012 | broken | 2 | Three message variants depending on traversal kind: (1) `Image path '<path>' escapes the source root — contains a path-traversal segment ('..'). Image paths must be relative and contained within the source file's directory tree.` (2) `Image path '<path>' escapes the source root — path is absolute (starts with '/' or '\'). Image paths must be relative and contained within the source file's directory tree.` (3) `Image path '<path>' escapes the source root — uses a Windows drive letter prefix. Image paths must be relative and contained within the source file's directory tree.` All three variants include `at <file>:<line>:<col>` span suffix (from `spec.span`). | BC-1.16.001 EC-012, CAP-022, CWE-22 |
+| E-VAL-101 | broken | 2 | `Required field '<name>' missing on <type> slide. Required fields for '<type>': [<list>].` | BC-1.18.001 PC (absent-field precondition), DI-018, CAP-022 |
+| E-VAL-102 | broken | 2 | `Required field '<name>' is empty on <type> slide. Required fields for '<type>': [<list>].` | BC-1.18.001 PC (empty-field precondition), DI-018, CAP-022 |
+| W-VAL-103 | cosmetic | 0 | `Unknown field '<key>' for slide type '<type>'. Known fields: [<list>].` | BC-1.18.001 (unknown-field branch), CAP-022 |
+| E-VAL-104 | broken | 2 | Two message branches under this single code (same pattern as E-BRD-001/E-BRD-002 multi-variant): (T1 type-mismatch) `Field '<name>' on <type> slide has wrong type: expected <expected>, got <actual>. See the DSL reference for valid field types. (at <file>:<line>:<col>)` — (T2 OneOf violation) `Field '<name>' on <type> slide has disallowed value "<val>": allowed values are [<list>]. (at <file>:<line>:<col>)` | BC-1.18.001, DI-018, DI-004, CAP-022 |
+
+Note (E-VAL-101): `validate_fields` formal registration. Emitted by `validate_fields` in
+`crates/slideforge-plugin-api/src/slide_types/registry.rs` when a required field (declared
+in `SlideType::required_fields()`) is absent from `Slide.fields` entirely (i.e., the key
+is not present in the fields map). Severity: broken. Exit 2 in strict mode. The `<name>`
+placeholder is the absent field name; `<type>` is the slide type ID; `<list>` is the
+comma-separated list of all required field names for that type (built once before the loop:
+`required_list_str = required_list.join(", ")`). The diagnostic also carries a `hint` field:
+`"add '<name>: <value>' to this slide block. Required fields for '<type>': [<list>]."`.
+Error accumulation per DI-018 — `validate_fields` continues past absent-field errors to
+find all issues.
+
+**Pre-registration collision check (2026-06-07):** E-VAL-101 confirmed not present in
+error-taxonomy.md prior to v2.20 (only E-VAL-011 and E-VAL-012 were formally registered;
+E-VAL-101 was debt-noted since v2.18). Confirmed present in production code at
+`registry.rs:241` with `code: Arc::from("E-VAL-101")`. No implementer action required.
+
+Note (E-VAL-102): `validate_fields` formal registration. Emitted by `validate_fields`
+when a required field is present as `FieldValue::Literal(Value::Str(s))` with `s.is_empty()`.
+The field exists in the map but its value is an empty string — which `validate_fields`
+rejects for required fields. Severity: broken. Exit 2 in strict mode. Placeholders:
+`<name>` = field name; `<type>` = slide type ID; `<list>` = all required field names.
+Hint: `"provide a non-empty value for '<name>'. Required fields for '<type>': [<list>]."`.
+Note: a required field that is `Value::Str("  ")` (whitespace-only) does NOT trigger
+E-VAL-102 — the empty-check is `s.is_empty()`, not `s.trim().is_empty()`. Authors must
+provide at minimum a non-empty string (whitespace is accepted by E-VAL-102, though layout
+may still reject whitespace-only title/body values at its own stage).
+
+**Pre-registration collision check (2026-06-07):** E-VAL-102 confirmed not present in
+error-taxonomy.md prior to v2.20. Confirmed present in production code at `registry.rs:257`
+with `code: Arc::from("E-VAL-102")`. No implementer action required.
+
+Note (W-VAL-103): `validate_fields` formal registration. Emitted by `validate_fields`
+when a field key in `Slide.fields` is not in the union of `required_fields()` and
+`optional_fields()` for the slide's registered type. Severity: cosmetic. Exit 0 (warning
+does not block the build). The `<key>` placeholder is the unrecognized field name;
+`<type>` is the slide type ID; `<list>` is the sorted comma-separated known-field list
+(built once before the unknown-field loop: `known_list.sort_unstable(); known_list.join(", ")`).
+The diagnostic also carries a `hint` field: `"Valid fields for '<type>' are: <known_list_str>"`.
+Routed to `stderr` with a `warning:` prefix. Does NOT increment the error counter for
+exit-code calculation. Distinct from E-VAL-104 (type mismatch on a KNOWN field) — W-VAL-103
+fires when the field is UNKNOWN to the slide type entirely.
+
+**Pre-registration collision check (2026-06-07):** W-VAL-103 confirmed not present in
+error-taxonomy.md prior to v2.20 (the W-VAL warning namespace was empty). Confirmed
+present in production code at `registry.rs:282` with `code: Arc::from("W-VAL-103")`.
+No implementer action required.
+
+Note (E-VAL-104): NEW — schema-driven field-value type validation. Emitted by the new
+type-check arm in `validate_fields` (to be added by STORY-089) when a field's runtime
+`Value` variant does not match its `FieldDef.expected_type` annotation. Two message
+branches share this single code (consistent with E-BRD-001/E-BRD-002 multi-variant pattern
+and E-VAL-012 three-variant pattern):
+
+**T1 — Type-mismatch (wrong Value variant):**
+`Field '<name>' on <type> slide has wrong type: expected <expected>, got <actual>. See the DSL reference for valid field types. (at <file>:<line>:<col>)`
+- `<name>`: field name from `FieldDef.name`
+- `<type>`: slide type ID from `slide_type.id()`
+- `<expected>`: human-readable display name from `FieldType::display_name()` — e.g., `"integer"` for `FieldType::Int`, `"boolean"` for `FieldType::Bool`, `"string"` for `FieldType::Str`, `"list"` for `FieldType::List`, `"map"` for `FieldType::Map`, `"float"` for `FieldType::Float`, `"string"` for `FieldType::OneOf` (the expected base type is Str)
+- `<actual>`: `Value::type_name()` — e.g., `"string"`, `"integer"`, `"boolean"`, `"list"`, `"map"`, `"float"`
+
+**T2 — OneOf violation (`FieldType::OneOf` — value is Str but not in allowlist):**
+`Field '<name>' on <type> slide has disallowed value "<val>": allowed values are [<list>]. (at <file>:<line>:<col>)`
+- `<val>`: the disallowed string value
+- `<list>`: comma-separated allowlist from `FieldType::OneOf(variants)` — e.g., `bar, line, pie, scatter, area, stacked-bar, stacked-area` for `chart_type`
+
+Note: T2 is only reached when the value is `Value::Str`. If the value on an `OneOf`-typed
+field is a non-Str variant (e.g., `Value::Int`), T1 fires (type mismatch — expected string,
+got integer). The `OneOf` allowlist check is subordinate to the variant check.
+
+Severity: broken. Exit 2 in strict mode. In `--warn-only` mode: E-VAL-104 is reported as
+a warning; error-slide placeholder rendered for the affected slide; build continues.
+
+Error accumulation per DI-018: `validate_fields` accumulates ALL E-VAL-104 diagnostics for
+a slide before returning. A slide with three mistyped annotated fields produces three
+E-VAL-104 diagnostics; all three are reported in a single build pass.
+
+The `type_matches(value: &Value, expected: &FieldType) -> bool` pure helper function
+implements the matching logic. Fields annotated `None` or `Some(FieldType::Any)` are
+unconditionally skipped (no E-VAL-104 emitted). `FieldValue::Inlines(_)` fields are also
+skipped for this arm.
+
+**Pre-registration collision check (2026-06-07):** E-VAL-104 confirmed free in
+error-taxonomy.md (the E-VAL namespace had E-VAL-011, E-VAL-012, E-VAL-101, E-VAL-102,
+W-VAL-103 — no E-VAL-104). Confirmed absent from `grep -rE "E-VAL-104" crates/**/*.rs`:
+zero matches in codebase at time of registration. The 1xx grouping convention (101=absent,
+102=empty, 103=unknown, 104=type-mismatch) is formally established by this version.
+
+**New BC:** BC-1.18.001 (registered 2026-06-07) defines the full behavioral contract for
+E-VAL-104, including preconditions, postconditions, invariants, edge cases, and canonical
+test vectors. STORY-089 owns implementation.
 
 Note (E-VAL-011): Numeric field out-of-range violation for color-coded slide types. Emitted
 by `ValueRangeValidator` at Stage 5 (pre-layout) in `slideforge::registry::register_bundled_plugins`.
@@ -498,4 +598,5 @@ Per DI-018 and BC-1.15.002:
 | 2.17 | 2026-06-06 | product-owner | STORY-086 pass-5 adjudication (F-086-P5-MED-002): **W-A11-002 registered** — new "Accessibility Warnings (W-A11)" section added. W-A11-002 was referenced in BC-3.04.001 v1.5.1+, BC-1.16.001 EC-004, and STORY-086 adjudication but had no taxonomy entry (the W-A11 warning namespace was empty prior to this version). Pre-registration collision check confirmed W-A11-002 free. Semantics: fires when both `decorative: true` and a non-empty `alt "..."` are set on the same element, flagging a likely authoring mistake. Two-context warning: (1) Stage-2b `resolve_alt` for charts/images/diagrams — decorative wins, W-A11-002 emitted via `tracing::warn!(code = "W-A11-002")` at resolution time; (2) shape DSL `slideforge-validate` — alt wins (BC-3.04.001 Inv-11), W-A11-002 emitted post-layout. W-A11-001 (deprecated predecessor) is NOT registered — it is retired. Taxonomy version 2.16 → 2.17. Note: changelog row 2.15 appears after 2.16 in the table due to authoring order — this is a documentation sequencing artifact, not a retcon; both v2.15 and v2.16 were produced on the same date (2026-06-05) in separate bursts. |
 | 2.18 | 2026-06-06 | product-owner | STORY-087 pass-1 adjudication (F-087-P1-001): **E-VAL-011 registered** — new "Validation Errors (E-VAL)" section added. E-VAL-011 is allocated for numeric field out-of-range violations emitted by `ValueRangeValidator` at Stage 5 (pre-layout). Covers `progress_bar` value out of [0, 100] (BC-1.17.002 PC3) and `weighted_composite` component `weight` non-positive / `score` out of [0, 100] (BC-1.17.003 inv 6/7). Severity: broken. Exit 2 (strict-mode fatal). Error accumulation per DI-018: all component errors collected before returning. Pre-registration collision check: E-VAL-011 confirmed free — no existing E-VAL-NNN entries in taxonomy prior to this version. The informally-used codes E-VAL-101, E-VAL-102, W-VAL-103 in `registry.rs::validate_fields` remain unregistered (future burst). |
 | 2.18-addendum | 2026-06-06 | product-owner | STORY-087 pass-2 adjudication (F-087-P2-001): **E-VAL-011 addendum** — empty-components message variant added to existing E-VAL-011 Note. No new code allocated (same error code, same severity/exit). `weighted_composite.components: []` (empty list) is now an explicitly documented E-VAL-011 trigger with exact message `"weighted_composite requires at least one component; got empty list."`. Implementation directive: `ValueRangeValidator::validate_weighted_composite_components` must add an early-return arm for `Value::List(list) if list.is_empty()` that emits the diagnostic before the per-component loop. No taxonomy version bump per adjudication directive. |
+| 2.20 | 2026-06-07 | product-owner | STORY-089 Wave-5 slot-1 spec burst (human-authorized 2026-06-07): **Four codes registered — E-VAL-101, E-VAL-102, W-VAL-103 (formal registrations, no implementer action), E-VAL-104 (new).** (1) **E-VAL-101 formal registration:** `validate_fields` required-field-absent code; confirmed present at `registry.rs:241`; message `Required field '<name>' missing on <type> slide. Required fields for '<type>': [<list>].`; broken/exit 2; DI-018 accumulation. (2) **E-VAL-102 formal registration:** `validate_fields` required-field-empty-string code; confirmed at `registry.rs:257`; message `Required field '<name>' is empty on <type> slide. Required fields for '<type>': [<list>].`; broken/exit 2. (3) **W-VAL-103 formal registration:** `validate_fields` unknown-field warning code; confirmed at `registry.rs:282`; message `Unknown field '<key>' for slide type '<type>'. Known fields: [<list>].`; cosmetic/exit 0; first W-VAL entry in namespace. (4) **E-VAL-104 NEW:** schema-driven field-value type validation. Two message branches: T1 type-mismatch — `Field '<name>' on <type> slide has wrong type: expected <expected>, got <actual>. See the DSL reference for valid field types. (at <file>:<line>:<col>)`; T2 OneOf violation — `Field '<name>' on <type> slide has disallowed value "<val>": allowed values are [<list>]. (at <file>:<line>:<col>)`. Broken/exit 2. Multi-variant single-code pattern per E-BRD-001 precedent. **Collision check:** E-VAL-104 confirmed free in taxonomy (only E-VAL-011, E-VAL-012, E-VAL-101/102, W-VAL-103 existed); confirmed absent from `grep -rE "E-VAL-104" crates/**/*.rs` (zero matches). 1xx grouping formally established: 101=absent, 102=empty, 103=unknown, 104=type-mismatch. New BC-1.18.001 defines the full behavioral contract. STORY-089 owns implementation. Produces no output (no code changes to crates/ — spec-only burst). |
 | 2.19 | 2026-06-07 | product-owner | SEC-001 image-path-traversal containment (Wave-4 follow-up, human-authorized 2026-06-07): **E-VAL-012 registered** — new "Validation Errors (E-VAL)" row for `ImagePathValidator` (Validator surface #5, validator ID `"image-path"`). E-VAL-012 guards `ImageSpec.path` values that traverse outside the source-file root: (1) contains `".."` path-traversal segment, (2) is absolute (`/` or `\`), or (3) uses a Windows drive letter prefix (`C:\`, etc.). CWE-22. **Stage justification:** E-VAL (Validator/pre-layout, exit 2) is correct over E-PAR (parse/exit 1) because `ImageSpec.path` is post-eval — `src:` may be an interpolated `{{ expr }}`; a parse-stage guard would not catch expression-computed paths. Precedent: E-PAR-021 vs. E-LAY-005 (dual-stage guards for the same conceptual limit at correct stages). **Family justification:** E-VAL (not a new E-IMG family) because the existing E-VAL namespace covers all `Validator`-surface compile-time content diagnostics; no precedent for per-feature subsystem codes (E-BRD, E-DAT, E-PKG are subsystem families, not feature families). Three message variants distinguished in message text only (not separate codes): traversal-segment, absolute-path, drive-letter. Severity: broken. Exit: 2 (strict mode). `--warn-only`: error-slide placeholder, build continues. Traces to BC-1.16.001 EC-012, CAP-022. **Collision check (2026-06-07):** E-VAL-012 confirmed free in taxonomy (only E-VAL-011, E-VAL-101, E-VAL-102, W-VAL-103 existed) and confirmed absent from `grep -rE "E-VAL-012" crates/**/*.rs` (zero matches). BC-1.16.001 updated with EC-012 in same burst. |

@@ -164,6 +164,12 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-1.17.002 | progress_bar Slide Type Requires title + label + value(0–100); label Co-Encodes Numeric Progress Accessibly | P0 | active | [BC-1.17.002.md](BC-1.17.002.md) |
 | BC-1.17.003 | weighted_composite Slide Type Requires title + label + components[]; Both Top-Level and Per-Component label Are Mandatory | P0 | active | [BC-1.17.003.md](BC-1.17.003.md) |
 
+### 1.18 — Schema-Driven Field-Value Type Validation (CAP-022)
+
+| BC ID | Title | Priority | Status | File |
+|-------|-------|----------|--------|------|
+| BC-1.18.001 | validate_fields Enforces Field-Value Type Against FieldDef.expected_type; Emits E-VAL-104 on Type Mismatch or OneOf Violation | P0 | active | [BC-1.18.001.md](BC-1.18.001.md) |
+
 ---
 
 ## Section 2: Branding Bounded Context
@@ -338,12 +344,12 @@ traces_to: domain-spec/L2-INDEX.md
 
 | Section | Subsection | BCs | P0 | P1 |
 |---------|-----------|-----|----|----|
-| 1 — Authoring | 1.01–1.17 | 57 | 41 | 16 |
+| 1 — Authoring | 1.01–1.18 | 58 | 42 | 16 |
 | 2 — Branding | 2.01–2.02 | 8 | 6 | 2 |
 | 3 — Layout | 3.01–3.06 | 15 | 12 | 3 |
 | 4 — Export | 4.01–4.03 | 13 | 12 | 1 |
 | 5 — Cross-cutting | 5.01–5.06 | 23 | 7 | 16 |
-| **Total** | | **116** | **78** | **38** |
+| **Total** | | **117** | **79** | **38** |
 
 ---
 
@@ -354,7 +360,7 @@ traces_to: domain-spec/L2-INDEX.md
 | DI-001 | BC-5.01.001, BC-5.01.002, BC-1.16.001 |
 | DI-002 | BC-5.01.003, BC-1.17.001, BC-1.17.002, BC-1.17.003 |
 | DI-003 | BC-5.01.004, BC-5.01.005 |
-| DI-004 | BC-1.02.003 |
+| DI-004 | BC-1.02.003, BC-1.18.001 |
 | DI-005 | BC-1.04.003 |
 | DI-006 | BC-1.02.002, BC-1.03.003 |
 | DI-007 | BC-1.01.004, BC-1.06.002 |
@@ -368,7 +374,7 @@ traces_to: domain-spec/L2-INDEX.md
 | DI-015 | BC-2.01.002, BC-2.01.004 |
 | DI-016 | BC-2.02.002 |
 | DI-017 | BC-3.03.002, BC-3.03.004, BC-1.07.005 |
-| DI-018 | BC-1.15.002 |
+| DI-018 | BC-1.15.002, BC-1.18.001 |
 | DI-019 | BC-5.03.003 |
 | DI-020 | BC-1.07.002 |
 | DI-021 | BC-1.01.005 |
