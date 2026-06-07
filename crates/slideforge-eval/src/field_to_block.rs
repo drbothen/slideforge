@@ -22,6 +22,19 @@ use slideforge_types::{
     specs::{AltText, ChartSpec, DiagramSpec, ImageSpec},
 };
 
+/// Maximum number of component rows rendered for a `weighted_composite` slide.
+///
+/// `slideforge-layout` pre-allocates exactly 5 Generic-role region slots for
+/// `weighted_composite` (see `slideforge_layout::regions` — "component row slot
+/// 0" through "component row slot 4"). Threading more than 5 components would
+/// generate Body blocks that find no pre-allocated Generic slot and fall through
+/// to the layout Phase-3 fallback (appending stray full-page frames).
+///
+/// BC-1.17.003 PC-9 mandates silent drop: components beyond index 4 produce no
+/// additional frame. This constant is the single source of truth for the cap.
+/// (F-087-P7-001)
+const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
+
 /// Post-eval field-to-block threading pass (Stage 2b, ADR-019).
 ///
 /// Reads resolved field values from every `Slide.fields` in `deck` and
@@ -330,10 +343,18 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 }
                 // Thread each component → TextTag::Body (one per component, Generic-role slots).
                 // compose_component_row_text formats: "<name>: <score>/100 (wt: <weight>) — <label>".
+                //
+                // BC-1.17.003 PC-9: cap at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5) — exactly the
+                // number of Generic-role slots pre-allocated in `slideforge-layout/src/regions.rs`
+                // for `weighted_composite`. Components beyond index 4 produce no Body block and
+                // therefore claim no additional frame. (F-087-P7-001)
                 if let Some(FieldValue::Literal(Value::List(components))) =
                     slide.fields.get("components")
                 {
-                    for comp_val in components {
+                    for comp_val in components
+                        .iter()
+                        .take(MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS)
+                    {
                         if let Value::Map(comp) = comp_val {
                             let row_text = compose_component_row_text(comp);
                             if !row_text.is_empty() {

@@ -58,6 +58,25 @@ use crate::error::LayoutError;
 /// the proof would bound the children chain length and verify that traversal
 /// always terminates within `MAX_BULLET_DEPTH` frames.
 pub const MAX_BULLET_DEPTH: usize = 64;
+
+/// Maximum number of `weighted_composite` component rows that layout will
+/// route into Generic-role region slots.
+///
+/// `slideforge-layout::regions` pre-allocates exactly 5 Generic-role frames
+/// for `weighted_composite` (component row slots 0–4). A 6th (or later)
+/// `TextTag::Body` block finds all Generic Empty slots consumed and would
+/// otherwise fall through to the Phase-3 append fallback, producing a stray
+/// full-page-bbox frame with `region_role: None`.
+///
+/// BC-1.17.003 PC-9 mandates silent drop: components beyond index 4 produce
+/// no additional frame. Layout enforces this by counting filled Generic-role
+/// Body frames and skipping the `fill_region_slot_or_append` call once the
+/// cap is reached. (F-087-P7-001)
+///
+/// This constant must stay in sync with the 5 Generic-role slot count in
+/// `slideforge-layout::regions` (`weighted_composite` arm).
+const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
+
 use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
@@ -327,6 +346,32 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             )?;
                         },
                         TextTag::Body => {
+                            // BC-1.17.003 PC-9 / F-087-P7-001: for `weighted_composite`,
+                            // cap component rows at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5).
+                            // The region map pre-allocates exactly 5 Generic-role Empty slots;
+                            // once all 5 are filled, additional Body blocks would exhaust all
+                            // Empty slots and trigger Phase-3 (appending a stray full-page-bbox
+                            // frame with region_role: None). BC-1.17.003 PC-9 mandates silent
+                            // drop: components beyond index 4 produce no additional frame.
+                            if keyword_str == "weighted_composite" {
+                                let filled_generic_body_count = all_frames
+                                    .iter()
+                                    .filter(|f| {
+                                        f.region_role == Some(crate::types::RegionRole::Generic)
+                                            && matches!(
+                                                f.content,
+                                                crate::types::FrameContent::Body(_)
+                                            )
+                                    })
+                                    .count();
+                                if filled_generic_body_count
+                                    >= MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS
+                                {
+                                    // Silent drop: all 5 Generic slots consumed.
+                                    // No Phase-3 append; no error. Per BC-1.17.003 PC-9.
+                                    continue;
+                                }
+                            }
                             // Body carries ContentBlock items for rich body content.
                             // Wrap the text block's content as a single ContentBlock::Text.
                             // The PPTX serializer's extract_body_text traverses these ContentBlocks.
