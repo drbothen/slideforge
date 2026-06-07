@@ -17,8 +17,10 @@ use super::common_optional_fields;
 /// The built-in `bio` slide type.
 ///
 /// Required fields: `name`, `title`, `bio`.
-/// Optional fields: `image`, plus common optional fields
+/// Optional fields: `src`, plus common optional fields
 /// (`notes`, `alt`, `decorative`, `tags`, `footer`, `logo`, etc.).
+///
+/// The canonical media-source field keyword is `src` per BC-1.16.001 PC-10/EC-006.
 ///
 /// Maps to the `"Two Content"` OOXML layout.
 #[derive(Debug)]
@@ -33,9 +35,14 @@ impl BioSlideType {
     /// Construct a new `BioSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // Canonical media-source keyword is `src` per BC-1.16.001 PC-10/EC-006;
+        // field_to_block.rs reads "src" to construct ContentBlock::Image.
         let mut optional = vec![FieldDef {
-            name: Arc::from("image"),
-            description: Arc::from("Path or URL to the person's photo."),
+            name: Arc::from("src"),
+            description: Arc::from(
+                "Path or URL to the person's photo. \
+                 Canonical keyword per BC-1.16.001 PC-10/EC-006.",
+            ),
             required: false,
             default_value: None,
         }];

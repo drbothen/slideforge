@@ -38,12 +38,14 @@
 //!   keyword end-to-end. The `known_fields` unit test (below) is the true Red Gate
 //!   for the vocabulary mismatch.
 //!
-//! **AC-GATE5-002** (primary negative / true Red Gate): `image "photo.png"` (the
-//! ADVERTISED schema from `image.rs` required_fields) + `alt` → strict build must
-//! return `Ok` after fix. Currently returns `Err(ValidationFailed { E-A11-001 })`.
-//! - **Pre-fix behavior**: FAILS (image key not threaded → Unspecified → E-A11-001).
-//! - **Post-fix behavior**: PASSES (src is the only key, image key is irrelevant;
-//!   but the fix ensures docs + known_fields say src so users write src).
+//! **AC-GATE5-002** (REVISED — canonical `src` decision, 2026-06-07): `image "photo.png"`
+//! (the deprecated keyword) + `alt` → strict build MUST return `Err(E-A11-001)` both
+//! before AND after the fix. The canonical source keyword is `src` per BC-1.16.001
+//! PC-10/EC-006. Using `image "..."` does not provide `src` → threading skips →
+//! `AltText::Unspecified` → E-A11-001. The fix ensures FieldDef + known_fields
+//! advertise `src`, steering users to the correct keyword.
+//! - **Pre-fix behavior**: FAILS (E-A11-001 fired; test was asserting Ok, which was wrong).
+//! - **Post-fix behavior**: PASSES (test revised to assert Err(E-A11-001) — correct).
 //!
 //! **AC-GATE5-003** (WCAG regression): `src` + no alt + no decorative → strict build
 //! returns `Err(ValidationFailed { E-A11-001 })`. Must pass BOTH before and after fix.
@@ -131,81 +133,108 @@ fn test_bc_1_16_001_wave4_gate5_image_src_alt_build_ok_pptx_carries_descr() {
          Threading path: src field → ContentBlock::Image → thread_media_alt_into_frames \
          → AltText::Provided → AltTextEmbedder → descr. \
          BC-1.16.001 PC-10; BC-5.02.001 PC-7. \
-         slide1.xml (first 800 chars): {:.800}",
-        slide_xml
+         slide1.xml (first 800 chars): {slide_xml:.800}"
     );
 }
 
-// ─── AC-GATE5-002: image + `image` keyword (advertised schema) → E-A11-001 ────
+// ─── AC-GATE5-002: deprecated `image` keyword (not `src`) → E-A11-001 (correct) ─
 
-/// AC-GATE5-002 / BC-1.16.001 PC-10 — TRUE RED GATE for the Gate-5 defect.
+/// AC-GATE5-002 / BC-1.16.001 PC-10 — REVISED canonical behavior test.
 ///
-/// An `image` slide authored with the keyword `image "screenshot.png"` (as
-/// advertised by `image.rs::required_fields()[1].name = "image"` and
-/// `known_fields("image")` which lists `"image"`) plus a valid `alt "..."` MUST
-/// return `Ok(BuildOutput)` with `descr` set AFTER the fix. Before the fix, it
-/// fires `E-A11-001` because `field_to_block.rs` reads `"src"` and `"image"` is
-/// a different key that is silently ignored by the threading pass.
+/// ## Revision rationale (TD-VSDD-059 compliance)
 ///
-/// ## Red Gate: why this test fails pre-fix
+/// The original AC-GATE5-002 was authored expecting the OLD `image:` keyword to
+/// build Ok post-fix. That expectation was incorrect under the canonical-`src`
+/// decision (human decision 2026-06-07, BC-1.16.001 PC-10/EC-006).
+///
+/// The canonical media-source keyword is `src`. After the fix (FieldDef + known_fields
+/// aligned to `src`), an image slide authored with `image "screenshot.png"` still
+/// does NOT provide a `src` field. `field_to_block.rs` reads `"src"` — the `image`
+/// key is simply an unrecognized extra field that is silently ignored by the
+/// threading pass. Result: no `ContentBlock::Image` → Image frame retains
+/// `AltText::Unspecified` → `validate_post_layout` fires `E-A11-001` (strict).
+///
+/// This is CORRECT behavior: the `image` keyword is not the source-field keyword;
+/// `src` is. A user who writes `image "..."` instead of `src "..."` receives the
+/// same E-A11-001 they would get if they omitted the source entirely, because the
+/// field is not recognized by the threading layer.
+///
+/// The positive contract (canonical `src` + alt → Ok + descr) is covered by
+/// AC-GATE5-001 (unchanged).
+///
+/// ## Threading path (post-fix — same as pre-fix)
 ///
 /// 1. User writes `image "screenshot.png"` → stored under key `"image"`.
 /// 2. `field_to_block.rs:239`: `extract_str_field(slide, "src")` → `None`
-///    (key is `"image"`, not `"src"`). Warning emitted; no ContentBlock::Image.
+///    (`"image"` is not `"src"`). Warning emitted; no `ContentBlock::Image`.
 /// 3. `regions.rs`: provides `FrameContent::Image { alt: Unspecified }`.
-/// 4. `thread_media_alt_into_frames`: no ContentBlock::Image to thread → Image
-///    frame remains `AltText::Unspecified`.
+/// 4. `thread_media_alt_into_frames`: no `ContentBlock::Image` → Image frame
+///    remains `AltText::Unspecified`.
 /// 5. `validate_post_layout`: `Unspecified` → E-A11-001 fired.
-/// 6. Strict gate: `Err(ValidationFailed { E-A11-001 })` returned.
+/// 6. Strict gate: `Err(ValidationFailed { E-A11-001 })`.
 ///
-/// This test currently FAILS at the `unwrap_or_else` panic (build returns Err).
-/// After the fix (image.rs FieldDef + known_fields aligned to "src"), users are
-/// guided to write `src` and the documented schema matches threading.
-///
-/// Note: the test itself uses the BROKEN `image` keyword to DEMONSTRATE the defect.
-/// The positive test (AC-GATE5-001) uses the CANONICAL `src` keyword.
-///
-/// Traces: BC-1.16.001 PC-10; BC-5.01.001 postcondition 1 (E-A11-001 NOT fired
-/// for a provided alt); BC-5.02.001 PC-7.
+/// Traces: BC-1.16.001 PC-10/EC-006; BC-5.01.001 postcondition 1;
+/// human decision 2026-06-07 (canonical `src` keyword).
 #[test]
 fn test_bc_1_16_001_wave4_gate5_image_advertised_keyword_fails_e_a11_001() {
-    // AC-GATE5-002: image slide with `image "screenshot.png"` (advertised schema) + alt.
-    // RED GATE (pre-fix): field_to_block.rs reads "src" NOT "image" → no ContentBlock::Image
-    //   → Image frame stays Unspecified → E-A11-001 fires → Err(ValidationFailed).
-    // POST-FIX: after known_fields + FieldDef aligned to "src", users write "src".
-    //   The `image` keyword still silently passes through (parser accepts any field name)
-    //   but won't be threaded. This test documents the pre-fix defect.
+    // AC-GATE5-002 (REVISED per human decision 2026-06-07):
+    //
+    // Canonical media keyword is `src` (BC-1.16.001 PC-10/EC-006).
+    // Using the deprecated `image` keyword (instead of `src`) does NOT provide a
+    // media source — field_to_block.rs reads "src", not "image". The `image` field
+    // is silently ignored by the threading pass, leaving AltText::Unspecified on the
+    // Image frame, which fires E-A11-001 in strict mode.
+    //
+    // This is correct behavior post-fix: aligning FieldDef + known_fields to `src`
+    // does NOT make `image` a recognized source keyword. Users must use `src`.
+    //
+    // This test was originally authored expecting Ok post-fix (pre-decision draft).
+    // It is revised here to assert the correct canonical behavior: `image` keyword
+    // still fires E-A11-001 because it is not the `src` threading key.
+    // The positive contract (src + alt → Ok) is AC-GATE5-001.
     let brand = BrandTmpDir::new("w4g5_ac002_image_wrong_key");
     let source = fixture_source("wave4-image-advertised-schema.sf");
     let opts = brand.build_options("pptx", true); // strict: true
 
-    // Pre-fix: build returns Err(ValidationFailed { E-A11-001 }) — image key not threaded.
-    // This assertion FAILS (panics) when the test is run pre-fix:
-    let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
-        panic!(
-            "AC-GATE5-002 RED GATE: build() with image slide using 'image' field keyword \
-             and a valid alt must return Ok after the fix. \
-             Got Err: {e:?}. \
-             Pre-fix defect: field_to_block.rs reads 'src' not 'image' → \
-             ContentBlock::Image never produced → AltText::Unspecified retained → \
-             validate_post_layout fires E-A11-001 even though alt is provided. \
-             Fix: align image.rs + screenshot.rs + bio.rs FieldDef + known_fields.rs to 'src'. \
-             BC-1.16.001 PC-10; Gate-5 blocker."
-        )
-    });
+    let result = slideforge::build(&source, &opts);
 
-    // If build returns Ok (post-fix or if the keyword was already "src"), verify descr.
-    let mut archive = open_zip(&output.bytes, "AC-GATE5-002");
-    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide1.xml", "AC-GATE5-002");
-
-    // The alt text must appear in the PPTX as a descr attribute.
+    // Must be an error — `image "..."` is not the source field; `src "..."` is.
+    // field_to_block.rs reads "src" → no ContentBlock::Image → Unspecified → E-A11-001.
     assert!(
-        slide_xml.contains("The main dashboard showing Q3 metrics"),
-        "AC-GATE5-002: PPTX slide1.xml must carry the alt text \
-         'The main dashboard showing Q3 metrics' as a descr attribute. \
-         slide1.xml (first 800 chars): {:.800}",
-        slide_xml
+        result.is_err(),
+        "AC-GATE5-002 (REVISED): build() with image slide using deprecated 'image' field \
+         keyword (instead of canonical 'src') must return Err(E-A11-001) in strict mode. \
+         Got Ok — the fix must NOT make 'image' a recognized source keyword. \
+         Canonical source keyword is 'src' per BC-1.16.001 PC-10/EC-006. \
+         Human decision 2026-06-07."
     );
+
+    let err = result.unwrap_err();
+
+    // Must be ValidationFailed with E-A11-001.
+    match err {
+        slideforge::error::BuildError::ValidationFailed {
+            ref diagnostics, ..
+        } => {
+            let e_a11_count = diagnostics
+                .iter()
+                .filter(|d| d.code.as_ref() == "E-A11-001")
+                .count();
+            assert_eq!(
+                e_a11_count, 1,
+                "AC-GATE5-002 (REVISED): ValidationFailed must contain exactly 1 E-A11-001 \
+                 (image slide with deprecated 'image' keyword: no src → Unspecified → E-A11-001). \
+                 Got {e_a11_count} E-A11-001 in {diagnostics:?}. \
+                 BC-1.16.001 PC-10/EC-006; human decision 2026-06-07."
+            );
+        },
+        other => {
+            panic!(
+                "AC-GATE5-002 (REVISED): build() must return BuildError::ValidationFailed; \
+                 got other variant: {other:?}"
+            );
+        },
+    }
 }
 
 // ─── AC-GATE5-003: WCAG regression — src + no alt → E-A11-001 ────────────────
@@ -321,8 +350,7 @@ fn test_bc_1_16_001_wave4_gate5_screenshot_src_alt_build_ok_pptx_carries_descr()
         slide_xml.contains("Main analytics dashboard with revenue chart and KPI tiles"),
         "AC-GATE5-004: PPTX slide1.xml must carry the alt text \
          'Main analytics dashboard with revenue chart and KPI tiles' as a descr attribute. \
-         slide1.xml (first 800 chars): {:.800}",
-        slide_xml
+         slide1.xml (first 800 chars): {slide_xml:.800}"
     );
 }
 

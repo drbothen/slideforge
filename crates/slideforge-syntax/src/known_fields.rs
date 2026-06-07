@@ -121,7 +121,10 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "left",
             "right",
         ]),
-        // Both `image` and `screenshot` use: title, image (path), caption, plus common fields.
+        // Both `image` and `screenshot` use: title, src (media-source path), caption, plus common fields.
+        // Canonical media-source keyword is `src` per BC-1.16.001 PC-10/EC-006;
+        // field_to_block.rs reads "src" to construct ContentBlock::Image.
+        // Human decision 2026-06-07: `image` is NOT the source-field keyword; `src` is.
         "image" | "screenshot" => Some(&[
             "tags",
             "notes",
@@ -133,7 +136,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
-            "image",
+            "src",
             "caption",
         ]),
         "blank" => Some(&[
@@ -198,6 +201,10 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "title",
             "members",
         ]),
+        // `bio` uses: name, title, bio, src (optional photo), plus common fields.
+        // Canonical media-source keyword is `src` per BC-1.16.001 PC-10/EC-006;
+        // field_to_block.rs reads "src" to construct ContentBlock::Image for the photo.
+        // Human decision 2026-06-07: `image` is NOT the source-field keyword; `src` is.
         "bio" => Some(&[
             "tags",
             "notes",
@@ -211,7 +218,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "name",
             "title",
             "bio",
-            "image",
+            "src",
         ]),
         "executive_summary" => Some(&[
             "tags",
