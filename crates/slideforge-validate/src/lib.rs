@@ -14,6 +14,7 @@
 //! | [`CanvasOverflowValidator`] | `"canvas-overflow"` | Heuristic bullet-overflow detection (E-LAY-001) |
 //! | [`LabelCheckValidator`] | `"label-check"` | Enforces `label "..."` on color-coded slide types (WCAG 1.4.1) |
 //! | [`LangValidator`] | `"lang"` | Warns on missing deck `lang` declaration; injects default "en" |
+//! | [`ValueRangeValidator`] | `"value-range"` | Enforces numeric field ranges for color-coded slide types (E-VAL-011) |
 //!
 //! ## Validation pipeline configuration
 //!
@@ -37,6 +38,7 @@ mod label_check;
 mod lang_validator;
 mod mode;
 mod utils;
+pub mod value_range;
 mod wcag;
 mod zero_slide;
 
@@ -50,6 +52,7 @@ pub use utils::is_blank;
 pub use wcag::{
     contrast_ratio, parse_hex_color, relative_luminance, srgb_component_to_linear, wcag_aa_passes,
 };
+pub use value_range::ValueRangeValidator;
 pub use zero_slide::ZeroSlideValidator;
 
 // ─── Full validation pipeline integration test ────────────────────────────────

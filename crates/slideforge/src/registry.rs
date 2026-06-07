@@ -39,7 +39,7 @@ use slideforge_diagrams::DiagramRendererImpl;
 // ── Surface 5: Validator ──────────────────────────────────────────────────────
 use slideforge_validate::{
     AltTextValidator, CanvasOverflowValidator, LabelCheckValidator, LangValidator,
-    ValidationConfig, ZeroSlideValidator,
+    ValidationConfig, ValueRangeValidator, ZeroSlideValidator,
 };
 
 // ── Surface 6: MathRenderer ───────────────────────────────────────────────────
@@ -111,6 +111,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
         &ValidationConfig::default(),
     )));
     builder.register_validator(Box::new(LabelCheckValidator));
+    builder.register_validator(Box::new(ValueRangeValidator));
     builder.register_validator(Box::new(LangValidator));
 
     // ── Surface 6: MathRenderer (1 bundled implementation — pulldown-latex) ──
