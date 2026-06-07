@@ -1,0 +1,18 @@
+# STORY-087 pass-5 fixture: status slide with title "Project Beta" and NO label field.
+#
+# Used by:
+#   - test_BC_1_17_001_ac003_status_missing_label_message_contains_title
+#     (P05-HIGH-001 Red Gate: E-A11-002 message must contain "status" AND "Project Beta")
+#
+# BC-1.17.001 PC2 mandates the message format:
+#   Missing label on color-coded element 'status' '<title-value>' at <file>:<line>:<col>.
+#   Color alone must not convey meaning. Add label "...".
+#
+# The canonical test vector (BC-1.17.001 §Canonical Test Vectors row 2) uses title
+# "Project Beta" as the canonical missing-label input.
+
+slideforge_version "1"
+lang "en-US"
+
+slide status:
+  title "Project Beta"

@@ -168,31 +168,188 @@ fn test_AC_002_status_label_visible_in_output() {
     );
 }
 
-// ── AC-003: status missing label → E-A11-002 at build ────────────────────────
+// ── AC-003: status missing label → E-A11-002 message must contain title ──────
 
-/// AC-003: `build()` with `status` slide missing `label` field → `Err(ValidationFailed)`
-/// with E-A11-002 diagnostic.
+/// BC-1.17.001 PC2 / AC-003 (P05-HIGH-001):
+/// `build()` with `status` slide missing `label`, title "Project Beta" →
+/// `Err(ValidationFailed)` where the E-A11-002 diagnostic MESSAGE contains
+/// BOTH the slide type token `"status"` AND the title value `"Project Beta"`.
 ///
-/// This test exercises LabelCheckValidator which is ALREADY implemented (STORY-087 pass-1).
-/// It is included here as a regression guard confirming that the build pipeline's
-/// validation path still fires correctly in the content-rendering context.
+/// ## BC mandate (BC-1.17.001 PC2)
 ///
-/// GREEN GATE: This should pass with the existing LabelCheckValidator.
-/// If this test fails, LabelCheckValidator has regressed.
+/// Message format:
+///   `Missing label on color-coded element 'status' '<title-value>' at <file>:<line>:<col>.
+///    Color alone must not convey meaning. Add label "...".`
+///
+/// The `'<title-value>'` token is MANDATORY — the message must identify WHICH slide
+/// is missing its label via its title (canonical test vector, BC-1.17.001 §Canonical
+/// Test Vectors row 2).
+///
+/// ## RED GATE (P05-HIGH-001)
+///
+/// The current `make_missing_label_error` in `slideforge-validate/src/label_check.rs`
+/// generates:
+///   `"Missing label on color-coded element 'status' at {span}. ..."`
+///
+/// It OMITS the `'<title-value>'` token. The assertion on `"Project Beta"` FAILS.
+/// This is the load-bearing Red Gate for finding ADV-STORY087-P05-HIGH-001.
+///
+/// ## Post-implementation
+///
+/// After the implementer adds title-field lookup to `make_missing_label_error`,
+/// the message includes `'Project Beta'` and both assertions pass.
+///
+/// Traceability: BC-1.17.001 PC2; ADV-STORY087-P05-HIGH-001; AC-003.
 #[test]
-fn test_AC_003_status_missing_label_is_error() {
-    let brand_dir = BrandTmpDir::new("ac003_status");
-    let source = fixture_source("status_missing_label.sf");
+fn test_BC_1_17_001_ac003_status_missing_label_message_contains_title() {
+    let brand_dir = BrandTmpDir::new("ac003_status_p05");
+    // Fixture: status slide with title "Project Beta", NO label.
+    // Canonical test vector (BC-1.17.001 §Canonical Test Vectors row 2).
+    let source = fixture_source("story-087-status-missing-label-project-beta.sf");
     let opts = brand_dir.build_options("pptx", true);
 
-    // AC-003: strict mode must return Err for a status slide missing `label`.
-    // LabelCheckValidator fires E-A11-002. The build error is ValidationFailed.
-    // The error Display may not include the code directly — check for Err only.
     let result = slideforge::build(&source, &opts);
+
+    // Assertion 1: must be Err(ValidationFailed).
     assert!(
-        result.is_err(),
-        "AC-003: status without label in strict mode must return Err(ValidationFailed); got Ok"
+        matches!(
+            result,
+            Err(slideforge::error::BuildError::ValidationFailed { .. })
+        ),
+        "BC-1.17.001 AC-003: status without label in strict mode must return \
+         Err(ValidationFailed); got Ok"
     );
+
+    // Assertion 2 (LOAD-BEARING — RED GATE): E-A11-002 message must contain
+    // BOTH the slide type token 'status' AND the title value 'Project Beta'.
+    //
+    // The impl currently omits the title token from the message, so this FAILS.
+    if let Err(slideforge::error::BuildError::ValidationFailed { diagnostics, .. }) = result {
+        let e_a11_002_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code.as_ref() == "E-A11-002")
+            .collect();
+
+        assert!(
+            !e_a11_002_diags.is_empty(),
+            "BC-1.17.001 AC-003: Err(ValidationFailed) must contain at least one \
+             E-A11-002 diagnostic; got codes: {:?}",
+            diagnostics.iter().map(|d| d.code.as_ref()).collect::<Vec<_>>()
+        );
+
+        // The BC-1.17.001 PC2 message format includes the slide type and the title value.
+        let msg = e_a11_002_diags[0].message.as_ref();
+
+        assert!(
+            msg.contains("status"),
+            "P05-HIGH-001 RED GATE: E-A11-002 message must contain the slide type token \
+             'status'. \
+             BC-1.17.001 PC2 format: \"Missing label on color-coded element 'status' \
+             '<title-value>' at ...\". \
+             Got message: {msg:?}"
+        );
+
+        assert!(
+            msg.contains("Project Beta"),
+            "P05-HIGH-001 RED GATE: E-A11-002 message must contain the title value \
+             'Project Beta'. \
+             BC-1.17.001 PC2 format: \"Missing label on color-coded element 'status' \
+             'Project Beta' at ...\". \
+             Current impl omits '<title-value>' from make_missing_label_error(). \
+             Got message: {msg:?}"
+        );
+    }
+}
+
+// ── AC-009: progress_bar missing label → E-A11-002 message must contain title ─
+
+/// BC-1.17.002 PC2 / AC-009 (P05-HIGH-001):
+/// `build()` with `progress_bar` slide missing `label`, title "Sprint 4" →
+/// `Err(ValidationFailed)` where the E-A11-002 diagnostic MESSAGE contains
+/// BOTH the slide type token `"progress_bar"` AND the title value `"Sprint 4"`.
+///
+/// ## BC mandate (BC-1.17.002 PC2)
+///
+/// Message format:
+///   `Missing label on color-coded element 'progress_bar' '<title-value>' at <file>:<line>:<col>.
+///    Color alone must not convey meaning. Add label "...".`
+///
+/// The `'<title-value>'` token is MANDATORY — the message must identify WHICH progress
+/// bar slide is missing its label (canonical edge case BC-1.17.002 EC-001).
+///
+/// ## RED GATE (P05-HIGH-001)
+///
+/// The current `make_missing_label_error` in `slideforge-validate/src/label_check.rs`
+/// generates:
+///   `"Missing label on color-coded element 'progress_bar' at {span}. ..."`
+///
+/// It OMITS the `'<title-value>'` token. The assertion on `"Sprint 4"` FAILS.
+/// This is the load-bearing Red Gate for finding ADV-STORY087-P05-HIGH-001.
+///
+/// ## Post-implementation
+///
+/// After the implementer adds title-field lookup to `make_missing_label_error`,
+/// the message includes `'Sprint 4'` and both assertions pass.
+///
+/// Traceability: BC-1.17.002 PC2; BC-1.17.002 EC-001; ADV-STORY087-P05-HIGH-001; AC-009.
+#[test]
+fn test_BC_1_17_002_ac009_progress_bar_missing_label_message_contains_title() {
+    let brand_dir = BrandTmpDir::new("ac009_progress_bar_p05");
+    // Fixture: progress_bar with title "Sprint 4", value 65, NO label.
+    // Canonical edge case (BC-1.17.002 EC-001).
+    let source = fixture_source("story-087-progress-bar-missing-label-sprint4.sf");
+    let opts = brand_dir.build_options("pptx", true);
+
+    let result = slideforge::build(&source, &opts);
+
+    // Assertion 1: must be Err(ValidationFailed).
+    assert!(
+        matches!(
+            result,
+            Err(slideforge::error::BuildError::ValidationFailed { .. })
+        ),
+        "BC-1.17.002 AC-009: progress_bar without label in strict mode must return \
+         Err(ValidationFailed); got Ok"
+    );
+
+    // Assertion 2 (LOAD-BEARING — RED GATE): E-A11-002 message must contain
+    // BOTH the slide type token 'progress_bar' AND the title value 'Sprint 4'.
+    //
+    // The impl currently omits the title token from the message, so this FAILS.
+    if let Err(slideforge::error::BuildError::ValidationFailed { diagnostics, .. }) = result {
+        let e_a11_002_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code.as_ref() == "E-A11-002")
+            .collect();
+
+        assert!(
+            !e_a11_002_diags.is_empty(),
+            "BC-1.17.002 AC-009: Err(ValidationFailed) must contain at least one \
+             E-A11-002 diagnostic; got codes: {:?}",
+            diagnostics.iter().map(|d| d.code.as_ref()).collect::<Vec<_>>()
+        );
+
+        let msg = e_a11_002_diags[0].message.as_ref();
+
+        assert!(
+            msg.contains("progress_bar"),
+            "P05-HIGH-001 RED GATE: E-A11-002 message must contain the slide type token \
+             'progress_bar'. \
+             BC-1.17.002 PC2 format: \"Missing label on color-coded element 'progress_bar' \
+             '<title-value>' at ...\". \
+             Got message: {msg:?}"
+        );
+
+        assert!(
+            msg.contains("Sprint 4"),
+            "P05-HIGH-001 RED GATE: E-A11-002 message must contain the title value \
+             'Sprint 4'. \
+             BC-1.17.002 PC2 format: \"Missing label on color-coded element 'progress_bar' \
+             'Sprint 4' at ...\". \
+             Current impl omits '<title-value>' from make_missing_label_error(). \
+             Got message: {msg:?}"
+        );
+    }
 }
 
 // ── AC-005: missing label in warn-only mode → Ok ─────────────────────────────

@@ -872,6 +872,119 @@ mod tests {
         );
     }
 
+    // ── P05-LOW-001: per-component E-A11-002 message matches BC-1.17.003 PC4 ──
+    //
+    // BC-1.17.003 PC4 mandates the EXACT per-component E-A11-002 message format:
+    //   `Missing label on color-coded element 'weighted_composite.component'
+    //    '<component-name>' at <file>:<line>:<col>. Add label "..." to this component.`
+    //
+    // The current impl in `make_missing_component_label_error` emits:
+    //   `"Missing label on color-coded element 'weighted_composite.component'
+    //    '{comp_name}' at {span}.
+    //    Color alone must not convey meaning. Add label \"...\" to this component."`
+    //
+    // The EXTRA SENTENCE "Color alone must not convey meaning." is NOT in PC4.
+    // PC4 specifies only: "Add label \"...\" to this component." (no intermediate sentence).
+    // This test asserts the message does NOT contain that extra sentence,
+    // and DOES contain the component name, the type token, and "Add label".
+    //
+    // RED GATE (P05-LOW-001): the current impl inserts the extra sentence from
+    // the top-level error template. The `!msg.contains("Color alone...")` assertion
+    // FAILS. The implementer must remove that sentence from the component message.
+
+    /// BC-1.17.003 PC4 / P05-LOW-001:
+    /// `LabelCheckValidator` per-component E-A11-002 message for a missing component
+    /// label MUST match BC-1.17.003 PC4 exactly:
+    ///
+    /// `Missing label on color-coded element 'weighted_composite.component' '<component-name>'
+    ///  at <file>:<line>:<col>. Add label "..." to this component.`
+    ///
+    /// Required tokens (all must be present):
+    /// - `"weighted_composite.component"` — the element type path
+    /// - `"Quality"` — the component name (token `'<component-name>'` from PC4)
+    /// - `"Add label"` — the remediation instruction
+    ///
+    /// Forbidden token (PC4 does NOT include this sentence):
+    /// - `"Color alone must not convey meaning."` — this sentence appears in the
+    ///   TOP-LEVEL error template (PC2) but NOT in the per-component template (PC4).
+    ///   The current impl mistakenly inserts it, violating BC-1.17.003 PC4.
+    ///
+    /// ## RED GATE (P05-LOW-001)
+    ///
+    /// The current `make_missing_component_label_error` generates:
+    ///   `"...'{comp_name}' at {span}. Color alone must not convey meaning.
+    ///    Add label \"...\" to this component."`
+    ///
+    /// The forbidden sentence is present → `!msg.contains(...)` assertion FAILS.
+    ///
+    /// ## Post-implementation
+    ///
+    /// After removing the extra sentence from `make_missing_component_label_error`,
+    /// the message matches PC4 exactly and all assertions pass.
+    ///
+    /// Traceability: BC-1.17.003 PC4; ADV-STORY087-P05-LOW-001.
+    #[test]
+    fn test_BC_1_17_003_pc4_component_label_error_message_format() {
+        let comp_no_label = make_component_fv("Quality", None);
+        let slide =
+            make_weighted_composite_with_components(Some("Overall: Good"), vec![comp_no_label]);
+        let deck = make_deck(vec![slide]);
+        let diags = LabelCheckValidator.validate(&deck, &default_opts());
+
+        let component_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.code.as_ref() == E_A11_002 && d.message.contains("weighted_composite.component")
+            })
+            .collect();
+
+        assert_eq!(
+            component_errors.len(),
+            1,
+            "BC-1.17.003 PC4: must produce exactly 1 E-A11-002 for component 'Quality' \
+             missing its label (top-level label is present); got: {diags:?}"
+        );
+
+        let msg = component_errors[0].message.as_ref();
+
+        // Required: the type path token.
+        assert!(
+            msg.contains("weighted_composite.component"),
+            "BC-1.17.003 PC4: message must contain 'weighted_composite.component'; \
+             got: {msg:?}"
+        );
+
+        // Required: the component name (canonical 'Quality').
+        assert!(
+            msg.contains("Quality"),
+            "BC-1.17.003 PC4: message must contain the component name 'Quality'; \
+             got: {msg:?}"
+        );
+
+        // Required: the remediation instruction from PC4.
+        assert!(
+            msg.contains("Add label"),
+            "BC-1.17.003 PC4: message must contain 'Add label' (remediation instruction); \
+             got: {msg:?}"
+        );
+
+        // RED GATE (P05-LOW-001): PC4 does NOT include "Color alone must not convey meaning."
+        // The top-level message (PC2) uses that phrase; the component message (PC4) must NOT.
+        // Current impl inserts it from the top-level template → this assertion FAILS.
+        assert!(
+            !msg.contains("Color alone must not convey meaning."),
+            "P05-LOW-001 RED GATE: per-component E-A11-002 message must NOT contain \
+             'Color alone must not convey meaning.' — that sentence belongs to the \
+             top-level message format (BC-1.17.001/002 PC2) but NOT to the per-component \
+             format (BC-1.17.003 PC4). \
+             BC-1.17.003 PC4 format: \
+             \"Missing label on color-coded element 'weighted_composite.component' \
+             '<component-name>' at <file>:<line>:<col>. Add label \\\"...\\\" to this component.\" \
+             Current impl inserts the extra sentence. \
+             Got message: {msg:?}"
+        );
+    }
+
     // ── AC-024 / F-G3-HIGH-003 dead-guard consistency invariant ──────────────
 
     /// BC-1.17.001 postcondition 5 / AC-024: Every entry in `COLOR_CODED_TYPES`
