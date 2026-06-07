@@ -103,20 +103,12 @@ impl SlideType for StatusSlideType {
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
         use slideforge_layout::types::{BoundingBox, Frame, FrameContent, RegionRole};
-        use slideforge_types::{Emu, FieldValue, Value};
+        use slideforge_types::Emu;
 
-        // BC-1.17.001 postcondition 2 / AC-003: label is required.
-        // A missing or empty-after-trim label returns MissingRequiredField.
-        let label_ok = match slide.fields.get("label") {
-            Some(FieldValue::Literal(Value::Str(s))) => !s.trim().is_empty(),
-            _ => false,
-        };
-        if !label_ok {
-            return Err(LayoutError::MissingRequiredField {
-                slide_type: "status".to_owned(),
-                field: "label".to_owned(),
-            });
-        }
+        // Geometry-only: label validation is performed by LabelCheckValidator
+        // at Stage 5 (pre-layout). This method produces the static two-frame
+        // skeleton only.
+        // See architect adjudication F-087-P1-001 for the full rationale.
 
         // Produce the static two-frame skeleton matching the region map:
         // Frame 0 — color indicator strip (Generic role)

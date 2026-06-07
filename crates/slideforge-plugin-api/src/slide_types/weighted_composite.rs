@@ -18,10 +18,22 @@
 //!
 //! Each component in `components` requires: `name`, `weight`, `score`, `label`.
 //!
+//! # Validation
+//!
+//! - Label validation (top-level and per-component) is performed by
+//!   `LabelCheckValidator` at Stage 5 (pre-layout).
+//! - Value-range validation (`weight > 0`, `score ∈ [0, 100]`) is performed by
+//!   `ValueRangeValidator` at Stage 5 (pre-layout), registered in
+//!   `slideforge::registry::register_bundled_plugins`.
+//! - `lay_out()` is geometry-only and does NOT perform content validation.
+//!
+//! See architect adjudication F-087-P1-001 for the full rationale.
+//!
 //! # References
 //!
 //! - BC-1.17.003 — `weighted_composite` Slide Type Requires title + label + components\[\]
 //! - STORY-087 — Color-Coded Slide Types (Wave 4)
+//! - Architect adjudication F-087-P1-001: Option B — ValueRangeValidator Stage 5
 
 use std::sync::Arc;
 
@@ -43,12 +55,12 @@ use super::common_optional_fields;
 /// Each component requires: `name`, `weight` (positive), `score` (0–100), `label`.
 /// Optional fields: common optional fields (notes, report, detail, tags, etc.).
 ///
-/// # Validation in `lay_out()`
+/// # Geometry-only `lay_out()`
 ///
-/// - `components` must be a non-empty list → `Err(LayoutError::MissingRequiredField)`.
-/// - Each component `weight` must be positive → `Err(LayoutError::FieldTypeMismatch)`.
-/// - Each component `score` must be in \[0, 100\] → `Err(LayoutError::FieldTypeMismatch)`.
-/// - ALL component errors are accumulated before returning (not bail-on-first).
+/// `lay_out()` produces the static 7-frame skeleton. All content validation
+/// (label presence, weight/score ranges, non-empty components) is performed by
+/// `LabelCheckValidator` and `ValueRangeValidator` at Stage 5 (pre-layout).
+/// See architect adjudication F-087-P1-001.
 ///
 /// Maps to the `"Blank"` OOXML layout (custom geometry produced by `lay_out`).
 #[derive(Debug)]
@@ -132,126 +144,13 @@ impl SlideType for WeightedCompositeSlideType {
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
         use slideforge_layout::types::{BoundingBox, Frame, FrameContent, RegionRole};
-        use slideforge_types::{Emu, FieldValue, Value};
+        use slideforge_types::Emu;
 
-        // BC-1.17.003 postcondition 2 / AC-016: top-level label is required.
-        let label_ok = match slide.fields.get("label") {
-            Some(FieldValue::Literal(Value::Str(s))) => !s.trim().is_empty(),
-            _ => false,
-        };
-        if !label_ok {
-            return Err(LayoutError::MissingRequiredField {
-                slide_type: "weighted_composite".to_owned(),
-                field: "label".to_owned(),
-            });
-        }
-
-        // BC-1.17.003 postcondition 3 / AC-019: components must be non-empty.
-        let components = match slide.fields.get("components") {
-            Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
-            _ => {
-                return Err(LayoutError::MissingRequiredField {
-                    slide_type: "weighted_composite".to_owned(),
-                    field: "components".to_owned(),
-                });
-            },
-        };
-
-        if components.is_empty() {
-            return Err(LayoutError::MissingRequiredField {
-                slide_type: "weighted_composite".to_owned(),
-                field: "components".to_owned(),
-            });
-        }
-
-        // BC-1.17.003 postconditions 3+4 / invariants 6+7 / AC-020/021:
-        // Validate each component: weight > 0, score ∈ [0,100].
-        // Accumulate ALL errors (DI-018 — do not bail on first).
-        let mut errors: Vec<LayoutError> = Vec::new();
-
-        for (idx, comp_val) in components.iter().enumerate() {
-            let Value::Map(comp_map) = comp_val else {
-                // Non-map component — report and continue.
-                errors.push(LayoutError::FieldTypeMismatch {
-                    slide_type: "weighted_composite".to_owned(),
-                    field: format!("components[{idx}]"),
-                    expected_type: "Map".to_owned(),
-                    actual_type: "non-Map value".to_owned(),
-                });
-                continue;
-            };
-
-            // BC-1.17.003 postcondition 4 / AC-017: per-component label is required.
-            let comp_label_ok = match comp_map.get("label") {
-                Some(Value::Str(s)) => !s.trim().is_empty(),
-                _ => false,
-            };
-            if !comp_label_ok {
-                let comp_name = match comp_map.get("name") {
-                    Some(Value::Str(s)) => s.as_ref().to_owned(),
-                    _ => format!("[{idx}]"),
-                };
-                errors.push(LayoutError::MissingRequiredField {
-                    slide_type: "weighted_composite".to_owned(),
-                    field: format!("components[{comp_name}].label"),
-                });
-            }
-
-            // weight must be present and > 0 (float or int).
-            let weight_valid = match comp_map.get("weight") {
-                Some(Value::Float(f)) => f.0 > 0.0,
-                Some(Value::Int(n)) => *n > 0,
-                _ => false,
-            };
-            if !weight_valid {
-                let actual = match comp_map.get("weight") {
-                    Some(Value::Float(f)) => format!("{} — must be positive", f.0),
-                    Some(Value::Int(n)) => format!("{n} — must be positive"),
-                    _ => "absent or wrong type".to_owned(),
-                };
-                errors.push(LayoutError::FieldTypeMismatch {
-                    slide_type: "weighted_composite".to_owned(),
-                    field: format!("components[{idx}].weight"),
-                    expected_type: "positive number".to_owned(),
-                    actual_type: actual,
-                });
-            }
-
-            // score must be in [0, 100].
-            let score_int = match comp_map.get("score") {
-                Some(Value::Int(n)) => Some(*n),
-                _ => None,
-            };
-            match score_int {
-                Some(n) if (0..=100).contains(&n) => {
-                    // valid
-                },
-                Some(n) => {
-                    errors.push(LayoutError::FieldTypeMismatch {
-                        slide_type: "weighted_composite".to_owned(),
-                        field: format!("components[{idx}].score"),
-                        expected_type: "integer in [0, 100]".to_owned(),
-                        actual_type: format!("{n} — out of range"),
-                    });
-                },
-                None => {
-                    errors.push(LayoutError::FieldTypeMismatch {
-                        slide_type: "weighted_composite".to_owned(),
-                        field: format!("components[{idx}].score"),
-                        expected_type: "integer in [0, 100]".to_owned(),
-                        actual_type: "absent or wrong type".to_owned(),
-                    });
-                },
-            }
-        }
-
-        if !errors.is_empty() {
-            // Return the first error (Multiple variant requires non-empty, but we can
-            // return only the first to keep the error type simple for callers that match
-            // on FieldTypeMismatch directly, as the tests do).
-            // AC-020/021 tests match on a single FieldTypeMismatch variant.
-            return Err(errors.remove(0));
-        }
+        // Geometry-only: all content validation (label presence, weight/score range,
+        // non-empty components) is performed at Stage 5 (pre-layout) by
+        // LabelCheckValidator and ValueRangeValidator. This method produces the
+        // static 7-frame skeleton only.
+        // See architect adjudication F-087-P1-001 for the full rationale.
 
         // Produce the static 7-frame skeleton (title + agg-label + 5 component slots).
         let row_base_y = Emu(1_371_600);

@@ -2682,6 +2682,7 @@ name = "slideforge-validate"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "ordered-float",
  "slideforge-eval",
  "slideforge-layout",
  "slideforge-plugin-api",

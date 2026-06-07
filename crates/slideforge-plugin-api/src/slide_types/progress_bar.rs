@@ -10,10 +10,20 @@
 //!
 //! Required fields: `title`, `label`, `value`
 //!
+//! # Validation
+//!
+//! Value range validation (value ∈ \[0, 100\]) is performed by
+//! `ValueRangeValidator` at Stage 5 (pre-layout), registered in
+//! `slideforge::registry::register_bundled_plugins`. `lay_out()` is
+//! geometry-only and does NOT perform value-range validation.
+//!
+//! Label validation is performed by `LabelCheckValidator` at Stage 5.
+//!
 //! # References
 //!
 //! - BC-1.17.002 — `progress_bar` Slide Type Requires title + label + value(0–100)
 //! - STORY-087 — Color-Coded Slide Types (Wave 4)
+//! - Architect adjudication F-087-P1-001: Option B — ValueRangeValidator Stage 5
 
 use std::sync::Arc;
 
@@ -33,13 +43,12 @@ use super::common_optional_fields;
 /// Required fields: `title`, `label`, `value` (integer in \[0, 100\]).
 /// Optional fields: common optional fields (notes, report, detail, tags, etc.).
 ///
-/// # Value range validation
+/// # Geometry-only `lay_out()`
 ///
-/// `lay_out()` validates that `value` is an integer in the range \[0, 100\]
-/// inclusive. Values outside this range return
-/// `Err(LayoutError::FieldTypeMismatch)` with a message indicating the
-/// expected range and actual value. This is performed in `lay_out()` because
-/// the trait has no separate validation method.
+/// `lay_out()` produces the static three-frame skeleton. All content validation
+/// (label presence, value range) is performed by `LabelCheckValidator` and
+/// `ValueRangeValidator` at Stage 5 (pre-layout). See the architect adjudication
+/// for finding F-087-P1-001 for the full rationale.
 ///
 /// Maps to the `"Blank"` OOXML layout (custom geometry produced by `lay_out`).
 #[derive(Debug)]
@@ -122,43 +131,12 @@ impl SlideType for ProgressBarSlideType {
         _canvas: Canvas,
     ) -> Result<LaidOutSlide, LayoutError> {
         use slideforge_layout::types::{BoundingBox, Frame, FrameContent, RegionRole};
-        use slideforge_types::{Emu, FieldValue, Value};
+        use slideforge_types::Emu;
 
-        // BC-1.17.002 postcondition 2 / AC-009: label is required (non-empty).
-        let label_ok = match slide.fields.get("label") {
-            Some(FieldValue::Literal(Value::Str(s))) => !s.trim().is_empty(),
-            _ => false,
-        };
-        if !label_ok {
-            return Err(LayoutError::MissingRequiredField {
-                slide_type: "progress_bar".to_owned(),
-                field: "label".to_owned(),
-            });
-        }
-
-        // BC-1.17.002 postcondition 3 / AC-012/013: value must be [0, 100].
-        // Value is required; if absent it falls through to the FieldTypeMismatch below.
-        let value_int = match slide.fields.get("value") {
-            Some(FieldValue::Literal(Value::Int(n))) => *n,
-            // If value is missing entirely, report as FieldTypeMismatch for consistency.
-            _ => {
-                return Err(LayoutError::FieldTypeMismatch {
-                    slide_type: "progress_bar".to_owned(),
-                    field: "value".to_owned(),
-                    expected_type: "integer in [0, 100]".to_owned(),
-                    actual_type: "absent or wrong type".to_owned(),
-                });
-            },
-        };
-
-        if !(0..=100).contains(&value_int) {
-            return Err(LayoutError::FieldTypeMismatch {
-                slide_type: "progress_bar".to_owned(),
-                field: "value".to_owned(),
-                expected_type: "integer in [0, 100]".to_owned(),
-                actual_type: format!("{value_int} — out of range"),
-            });
-        }
+        // Geometry-only: value-range validation is performed by ValueRangeValidator
+        // at Stage 5 (pre-layout). Label validation is performed by LabelCheckValidator
+        // at Stage 5. This method produces the static three-frame skeleton only.
+        // See architect adjudication F-087-P1-001 for the full rationale.
 
         // Produce the static three-frame skeleton:
         // Frame 0 — title (Title role)
