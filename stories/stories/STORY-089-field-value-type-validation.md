@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.4"
+spec_version: "1.5"
 last_updated: "2026-06-07"
 changelog:
   - version: "1.0"
@@ -27,6 +27,9 @@ changelog:
   - version: "1.4"
     date: "2026-06-07"
     note: "Adversary corrections: (MED-1) AC-002 removed literal span-suffix '(at <file>:<line>:<col>)' from message requirement — per BC-1.18.001 PC-2, the source span is carried in Diagnostic.span and rendered by miette, not embedded in the message string; message ends at the documented content. (LOW) Count corrected 9→8: the per-component weight:Float is a nested Map key, not a top-level FieldDef (T3 deferred); authoritative Priority-1 count is 8 annotated FieldDef sites across 8 slide types. Changelog v1.1 and T5 updated accordingly."
+  - version: "1.5"
+    date: "2026-06-07"
+    note: "Adversary HIGH-2 residual count corrections: three remaining occurrences of the old '10 sites / 9 slide types' value corrected to '8 sites / 8 slide types' — line ~120 (ADR-020 implementation summary item 7), line ~521 (File Structure Requirements Priority-1 annotation sites header), line ~730 (T5 task heading). Authoritative count 8 annotated FieldDef sites across 8 slide types now consistent throughout the entire document."
 target_module: slideforge-plugin-api
 subsystems: [SS-14, SS-03]
 behavioral_contracts: [BC-1.18.001]
@@ -117,7 +120,7 @@ This story implements ADR-020 in full:
 4. Adds `type_matches(value: &Value, expected: &FieldType) -> bool` pure function to `slide_type.rs`
 5. Adds E-VAL-104 arm to `validate_fields` in `registry.rs` (T1 type-mismatch + T2 OneOf violation)
 6. Sweeps all `FieldDef { ... }` struct literal construction sites across ~80-120 sites in 34+ slide type files, adding `expected_type: None` or `Some(..)` as appropriate
-7. Annotates Priority-1 fields (10 sites across 9 slide types) that produce real E-VAL-104 signals in practice
+7. Annotates Priority-1 fields (8 sites across 8 slide types) that produce real E-VAL-104 signals in practice
 8. Formally registers E-VAL-101, E-VAL-102, W-VAL-103 in error-taxonomy.md (existing codes, formal registration only) alongside new E-VAL-104
 
 ## Narrative
@@ -518,7 +521,7 @@ crates/slideforge-plugin-api/src/slide_types/mod.rs
     [Update common_optional_fields(): add expected_type: Some(FieldType::Bool) to "decorative";
      add expected_type: None to the remaining 8 common optional fields]
 
---- Priority-1 annotation sites (10 FieldDef sites across 9 slide types) ---
+--- Priority-1 annotation sites (8 FieldDef sites across 8 slide types) ---
 crates/slideforge-plugin-api/src/slide_types/progress_bar.rs
     [Annotate "value" FieldDef: expected_type: Some(FieldType::Int)]
     [Add expected_type: None to all other FieldDef construction sites in this file]
@@ -727,7 +730,7 @@ Write unit tests that fail (Red Gate) because `type_matches` is still `todo!()`:
 
 **Green Gate deliverable:** All T3 tests pass. Workspace test suite passes (`cargo nextest run -p slideforge-plugin-api`).
 
-### T5 — Apply Priority-1 annotations to 9 slide types
+### T5 — Apply Priority-1 annotations to 8 slide types
 
 **Files:** progress_bar.rs, chart.rs, weighted_composite.rs, kpi_dashboard.rs, roadmap.rs, matrix.rs, agenda.rs, toc.rs, team.rs
 
