@@ -37,7 +37,7 @@
 
 use std::sync::Arc;
 
-use crate::e2e::{BrandTmpDir, fixture_source};
+use crate::e2e::{BrandTmpDir, fixture_source, open_zip};
 use slideforge_layout::FrameContent;
 use slideforge_types::{
     Block, Brand, BrandFonts, BrandPalette, ColorBarSpec, ContentBlock, Deck, DeckMetadata,
@@ -365,4 +365,178 @@ fn test_AC_015_weighted_composite_labels_visible() {
 fn test_BC_1_17_003_build_weighted_composite_visible_output() {
     // This test is intentionally empty — it will be filled in STORY-088.
     // The load-bearing proof is test_AC_015_weighted_composite_labels_visible above.
+}
+
+// ── AC-008 build()-level Red Gate: ColorBar solid-fill shape in PPTX bytes ───
+//
+// Finding F-087-P3-001 (adversary pass 3):
+//   FrameContent::ColorBar IS materialized into the LaidOutSlide IR (pass-2 fix)
+//   but the PPTX exporter's ColorBar arm (slide_serializer.rs:642-655) is a
+//   `tracing::warn!` no-op — no <p:sp> is emitted. The existing AC-008 IR test
+//   (above) only inspects the LaidOutDeck; it does NOT call build() or inspect
+//   PPTX bytes, so it cannot catch the missing render (TD-VSDD-059 paper-fix).
+//
+// BC-1.17.002 PC-9 (v1.2) requires the bar rendered visibly as a PPTX
+// solid-fill <p:sp> at proportional width.
+//
+// RED GATE: Until the ColorBar arm emits a solid-fill <p:sp>, the assertion
+// below on <a:solidFill> in slide1.xml FAILS.
+
+/// BC-1.17.002 PC-9 / F-087-P3-001 Red Gate:
+/// `build()` on a `progress_bar` deck (value=75, title "Sprint 4 Progress",
+/// label "75% complete") producing PPTX must yield slide1.xml that:
+///
+/// 1. Contains at least one `<a:solidFill>` element — the filled bar shape.
+///    This shape must NOT be a standard text placeholder (title/subtitle/body),
+///    meaning a second `<p:sp>` exists that carries `<a:solidFill>` but no
+///    `<p:ph>` (or a `<p:ph>` with a type that is not "title"/"body").
+/// 2. Contains the label text "75% complete" somewhere in the slide XML.
+///
+/// ## Why these assertions
+///
+/// - `<a:solidFill>` is the canonical OOXML representation of a solid-color
+///   shape fill (ECMA-376 §20.1.8.44). An empty warn-stub emits zero <p:sp>
+///   elements for ColorBar → no `<a:solidFill>` → assertion (1) FAILS.
+/// - Title/body placeholders may carry theme-inherited fill via `<p:ph>` and
+///   would not have `<a:solidFill>` in their `<p:spPr>`. The bar-render
+///   requirement is a non-placeholder shape with explicit solidFill.
+/// - Assertion (2) is a regression guard confirming the label-text path (which
+///   was fixed in pass-2) is not broken by the pass-3 ColorBar implementation.
+///
+/// ## Red Gate behavior (pre-implementation)
+///
+/// The PPTX exporter's ColorBar arm at slide_serializer.rs:642-655 is a no-op
+/// that only emits `tracing::warn!`. Slide1.xml contains no `<a:solidFill>`
+/// in a non-placeholder `<p:sp>`. Assertion (1) → FAILS at Red Gate.
+///
+/// ## Post-implementation behavior
+///
+/// After the implementer adds the solid-fill `<p:sp>` for the filled portion of
+/// the bar, slide1.xml contains `<a:solidFill>` in a non-placeholder `<p:sp>`
+/// with `<a:ext cx="…">` proportional to 75% of the bar background width.
+/// Both assertions pass.
+///
+/// Traceability: BC-1.17.002 PC-9; finding F-087-P3-001; adjudication §10.
+#[test]
+fn test_AC_008_progress_bar_bar_rendered_in_pptx_xml() {
+    let brand = BrandTmpDir::new("s087_p3_bar_pptx");
+    let source = fixture_source("story-087-progress-bar-75.sf");
+    let opts = brand.build_options("pptx", false); // warn-only: value=75 is valid, no E-VAL-011
+
+    let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
+        panic!(
+            "F-087-P3-001 Red Gate: build() with progress_bar value=75 must return Ok; \
+             got Err: {e:?}"
+        )
+    });
+
+    let mut archive = open_zip(&output.bytes, "F-087-P3-001");
+    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide1.xml", "F-087-P3-001");
+
+    // ── Assertion 1: label text "75% complete" is present ────────────────────
+    //
+    // Regression guard: this should already work after pass-2 (ColorLabel → Body).
+    // If this fails, the pass-2 label-thread fix has regressed.
+    assert!(
+        slide_xml.contains("75% complete"),
+        "F-087-P3-001: slide1.xml must contain the label text '75% complete'. \
+         Regression: the pass-2 label-threading fix may have been broken. \
+         slide1.xml (first 1000 chars):\n{:.1000}",
+        slide_xml
+    );
+
+    // ── Assertion 2: a solid-fill <p:sp> for the filled bar is present ───────
+    //
+    // The ColorBar filled portion must be rendered as a non-placeholder <p:sp>
+    // with an explicit <a:solidFill> in its <p:spPr>. Standard text placeholder
+    // shapes (title, body) carry <p:ph> and use theme-inherited fill — they do
+    // NOT carry <a:solidFill> in their own <p:spPr>.
+    //
+    // RED GATE: the ColorBar arm in slide_serializer.rs is a warn-stub that emits
+    // zero OOXML. No <a:solidFill> exists in the slide XML. This assertion FAILS.
+    assert!(
+        slide_xml.contains("<a:solidFill>") || slide_xml.contains("<a:solidFill "),
+        "F-087-P3-001 Red Gate: PPTX slide1.xml must contain at least one <a:solidFill> \
+         element — the solid-fill shape representing the filled portion of the progress bar. \
+         The ColorBar arm in slide_serializer.rs is currently a tracing::warn! no-op and \
+         emits no <p:sp>. \
+         slide1.xml (first 1500 chars):\n{:.1500}",
+        slide_xml
+    );
+
+    // ── Assertion 3: the solidFill is in a non-placeholder <p:sp> ────────────
+    //
+    // Parse the slide XML into individual <p:sp>…</p:sp> blocks and verify that
+    // at least one block carries <a:solidFill> but is NOT a standard text
+    // placeholder (i.e., it does NOT carry `type="title"` or `type="body"` or
+    // `idx="1"` on its <p:ph>).
+    //
+    // This guards against the degenerate case where a placeholder's theme-fill
+    // accidentally matches the solidFill selector.
+    let sp_blocks = extract_pptx_sp_blocks(&slide_xml);
+    let has_non_placeholder_solid_fill = sp_blocks.iter().any(|sp| {
+        let has_solid_fill = sp.contains("<a:solidFill>") || sp.contains("<a:solidFill ");
+        // Standard title/body/subtitle placeholders have type="title", type="body",
+        // type="subTitle", or idx="0" / idx="1" on their <p:ph> element.
+        let is_standard_text_placeholder = sp.contains(r#"type="title""#)
+            || sp.contains(r#"type="body""#)
+            || sp.contains(r#"type="subTitle""#)
+            || (sp.contains("<p:ph") && (sp.contains(r#"idx="0""#) || sp.contains(r#"idx="1""#)));
+        has_solid_fill && !is_standard_text_placeholder
+    });
+
+    assert!(
+        has_non_placeholder_solid_fill,
+        "F-087-P3-001 Red Gate: slide1.xml must contain a non-placeholder <p:sp> with \
+         <a:solidFill> representing the filled bar. \
+         Either no <p:sp> carries <a:solidFill>, or every solidFill is inside a standard \
+         text placeholder (which is incorrect — the bar is a new shape, not a placeholder). \
+         sp blocks found ({} total):\n{}",
+        sp_blocks.len(),
+        sp_blocks
+            .iter()
+            .map(|s| format!("  - {:.200}", s))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Read a named entry from a ZIP archive into a `String`.
+///
+/// Panics with a descriptive message if the entry is absent or unreadable.
+fn read_zip_entry(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    name: &str,
+    label: &str,
+) -> String {
+    let mut entry = archive
+        .by_name(name)
+        .unwrap_or_else(|e| panic!("{label}: ZIP entry '{name}' not found: {e}"));
+    let mut content = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut content)
+        .unwrap_or_else(|e| panic!("{label}: cannot read ZIP entry '{name}': {e}"));
+    content
+}
+
+/// Split PPTX slide XML into individual `<p:sp>…</p:sp>` shape blocks.
+///
+/// Returns one `String` per `<p:sp>` element found in `xml`.
+/// This is a simple text-scan — not a full XML parser — sufficient for
+/// asserting structural properties in integration tests.
+fn extract_pptx_sp_blocks(xml: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut remaining = xml;
+    while let Some(start) = remaining.find("<p:sp>").or_else(|| remaining.find("<p:sp ")) {
+        let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
+        let Some(tag_end) = tag_end else { break };
+        let Some(end_offset) = remaining[tag_end..].find("</p:sp>") else {
+            break;
+        };
+        let block_end = tag_end + end_offset + "</p:sp>".len();
+        blocks.push(remaining[start..block_end].to_owned());
+        remaining = &remaining[block_end..];
+    }
+    blocks
 }

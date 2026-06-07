@@ -1,0 +1,23 @@
+# STORY-087 fixture: progress_bar slide with value=75 (valid, 75%).
+#
+# Used by: test_AC_008_progress_bar_bar_rendered_in_pptx_xml
+#
+# Expected: build() returns Ok(BuildOutput). The PPTX slide1.xml must contain
+# a solid-fill <p:sp> shape representing the filled bar (FrameContent::ColorBar
+# rendered as a <p:sp> with <a:solidFill>). The label text "75% complete" must
+# also appear in the slide XML.
+#
+# Red Gate: the ColorBar arm in slide_serializer.rs is a tracing::warn! no-op
+# (STORY-087 pass-3 finding F-087-P3-001). No solid-fill bar <p:sp> is emitted.
+# The test asserting <a:solidFill> presence FAILS at Red Gate.
+#
+# Post-implementation: once the ColorBar arm emits a solid-fill <p:sp> at the
+# proportional width (75% of total bar width), the solidFill assertion passes.
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "75% complete"
+  value 75
