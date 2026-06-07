@@ -1,0 +1,17 @@
+# STORY-087 fixture: progress_bar slide with value=-1 (out-of-range, negative).
+#
+# Used by: test_BC_1_17_002_build_progress_bar_value_neg1_is_validation_failed
+#
+# Expected: build() returns Err(BuildError::ValidationFailed) containing at
+# least one diagnostic with code == "E-VAL-011".
+#
+# Red Gate: currently (pre-implementation) no ValueRangeValidator is registered,
+# so build() returns Ok for this fixture. The test asserts Err → FAILS at Red Gate.
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "Negative progress"
+  value -1

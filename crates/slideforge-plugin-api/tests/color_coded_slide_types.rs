@@ -1,43 +1,48 @@
-//! Red Gate integration tests for STORY-087: Color-Coded Slide Types.
+//! Geometry and registration tests for STORY-087: Color-Coded Slide Types.
 //!
 //! Covers BC-1.17.001 (status), BC-1.17.002 (`progress_bar`), and
-//! BC-1.17.003 (`weighted_composite`) `lay_out()` and registration behaviors.
+//! BC-1.17.003 (`weighted_composite`) `lay_out()` geometry and registration.
 //!
-//! ALL tests marked "FAILS at Red Gate" will panic with `todo!()` until the
-//! `lay_out()` implementations are filled in by the implementer.
+//! ## F-087-P1-001 adjudication change (2026-06-06)
 //!
-//! `LabelCheck` tests (AC-006, AC-018, AC-022, F-G3-HIGH-003, NFR-021/022/023)
-//! live in `crates/slideforge-validate/src/label_check.rs` (correct crate per
-//! project convention: validator tests live near the validator impl).
+//! Per the architect adjudication for finding F-087-P1-001, `lay_out()` is now
+//! GEOMETRY-ONLY. All value-range validation (value [0,100], weight>0, score [0,100])
+//! has moved to `ValueRangeValidator` (Stage 5, pre-layout). Label validation has
+//! moved to `LabelCheckValidator` (Stage 5). As a result:
 //!
-//! Keyword consistency tests (AC-024) live in
-//! `crates/slideforge-syntax/src/keywords.rs`.
+//! - lay_out() ALWAYS returns Ok for any field values (including out-of-range).
+//! - The lay_out()-direct error tests (AC-003, AC-004, AC-009, AC-012, AC-013,
+//!   AC-016, AC-017, AC-019, AC-020, AC-021) are removed from this file.
+//! - Value-range enforcement is tested at build() level in:
+//!   `crates/slideforge/tests/e2e/story_087_value_range.rs`
+//! - Label enforcement is tested in:
+//!   `crates/slideforge-validate/src/label_check.rs`
 //!
-//! # AC coverage (this file)
+//! ## Remaining test coverage (this file)
 //!
 //! | AC  | Test(s) |
 //! |-----|---------|
 //! | AC-001 | test_BC_1_17_001_ac001_status_keyword_registered |
 //! | AC-002 | test_BC_1_17_001_ac002_status_lay_out_ok_with_valid_fields |
 //! |        | test_BC_1_17_001_ac002_status_lay_out_geometry_two_frames |
-//! | AC-003 | test_BC_1_17_001_ac003_status_lay_out_missing_label_errors |
-//! | AC-004 | test_BC_1_17_001_ac004_status_lay_out_empty_label_errors |
+//! | AC-003g | test_BC_1_17_001_ac003g_status_lay_out_geometry_only_missing_label_ok |
+//! | AC-004g | test_BC_1_17_001_ac004g_status_lay_out_geometry_only_empty_label_ok |
 //! | AC-007 | test_BC_1_17_002_ac007_progress_bar_keyword_registered |
 //! | AC-008 | test_BC_1_17_002_ac008_progress_bar_lay_out_ok_with_valid_fields |
 //! |        | test_BC_1_17_002_ac008_progress_bar_lay_out_geometry_three_frames |
-//! | AC-009 | test_BC_1_17_002_ac009_progress_bar_missing_label_errors |
+//! | AC-009g | test_BC_1_17_002_ac009g_progress_bar_lay_out_geometry_only_missing_label_ok |
 //! | AC-010 | test_BC_1_17_002_ac010_progress_bar_value_0_valid |
 //! | AC-011 | test_BC_1_17_002_ac011_progress_bar_value_100_valid |
-//! | AC-012 | test_BC_1_17_002_ac012_progress_bar_value_101_errors |
-//! | AC-013 | test_BC_1_17_002_ac013_progress_bar_value_minus1_errors |
+//! | AC-012g | test_BC_1_17_002_ac012g_progress_bar_lay_out_geometry_only_value_101_ok |
+//! | AC-013g | test_BC_1_17_002_ac013g_progress_bar_lay_out_geometry_only_value_neg1_ok |
 //! | AC-014 | test_BC_1_17_003_ac014_weighted_composite_keyword_registered |
 //! | AC-015 | test_BC_1_17_003_ac015_weighted_composite_lay_out_ok_with_valid_fields |
 //! |        | test_BC_1_17_003_ac015_weighted_composite_lay_out_geometry_min_frames |
-//! | AC-016 | test_BC_1_17_003_ac016_weighted_composite_missing_top_label_errors |
-//! | AC-017 | test_BC_1_17_003_ac017_weighted_composite_missing_component_label_errors |
-//! | AC-019 | test_BC_1_17_003_ac019_weighted_composite_empty_components_errors |
-//! | AC-020 | test_BC_1_17_003_ac020_weighted_composite_score_101_errors |
-//! | AC-021 | test_BC_1_17_003_ac021_weighted_composite_weight_zero_errors |
+//! | AC-016g | test_BC_1_17_003_ac016g_weighted_composite_lay_out_geometry_only_missing_label_ok |
+//! | AC-017g | test_BC_1_17_003_ac017g_weighted_composite_lay_out_geometry_only_missing_component_label_ok |
+//! | AC-019g | test_BC_1_17_003_ac019g_weighted_composite_lay_out_geometry_only_empty_components_ok |
+//! | AC-020g | test_BC_1_17_003_ac020g_weighted_composite_lay_out_geometry_only_score_101_ok |
+//! | AC-021g | test_BC_1_17_003_ac021g_weighted_composite_lay_out_geometry_only_weight_zero_ok |
 //! | AC-023 | test_BC_1_17_001_ac023_all_three_types_registered_not_unknown |
 //! |        | test_BC_1_17_001_registration_count_34_after_story_087 |
 
@@ -51,7 +56,7 @@ use slideforge_plugin_api::slide_types::{
     SlideTypeRegistry, progress_bar::ProgressBarSlideType, status::StatusSlideType,
     weighted_composite::WeightedCompositeSlideType,
 };
-use slideforge_plugin_api::traits::{Canvas, LayoutError, SlideType};
+use slideforge_plugin_api::traits::{Canvas, SlideType};
 use slideforge_types::{
     Brand, BrandFonts, BrandPalette, FieldValue, OrderedMap, Slide, SourceSpan, Value,
 };
@@ -273,51 +278,51 @@ fn test_BC_1_17_001_ac002_status_lay_out_geometry_two_frames() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-003 / BC-1.17.001 postcondition 2 / EC-001
-// status lay_out() missing label → Err(MissingRequiredField)
+// AC-003g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// status lay_out() with missing label must still return Ok (geometry-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.001 AC-003: `StatusSlideType::lay_out()` with missing `label`
-/// returns `Err(LayoutError::MissingRequiredField { field: "label" })`.
+/// F-087-P1-001 adjudication: `StatusSlideType::lay_out()` is geometry-only after
+/// the refactor. It must return `Ok` even when the `label` field is absent.
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// Label enforcement has moved to `LabelCheckValidator` at Stage 5.
+/// `lay_out()` only produces the frame geometry skeleton.
+///
+/// This test replaces AC-003 (which tested `Err(MissingRequiredField)` from
+/// `lay_out()` — no longer correct after geometry-only refactor).
 #[test]
-fn test_BC_1_17_001_ac003_status_lay_out_missing_label_errors() {
+fn test_BC_1_17_001_ac003g_status_lay_out_geometry_only_missing_label_ok() {
     let st = StatusSlideType::new();
     let slide = make_slide_str("status", vec![("title", "Project Beta")]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
     assert!(
-        result.is_err(),
-        "StatusSlideType::lay_out() with missing label must return Err; got Ok"
+        result.is_ok(),
+        "StatusSlideType::lay_out() (geometry-only) must return Ok even with \
+         missing label; label enforcement is Stage 5 (LabelCheckValidator). \
+         Got: {result:?}"
     );
-    match result.unwrap_err() {
-        LayoutError::MissingRequiredField { slide_type, field } => {
-            assert_eq!(slide_type, "status", "slide_type in error must be 'status'");
-            assert_eq!(field, "label", "missing field must be 'label'");
-        },
-        other => panic!(
-            "Expected LayoutError::MissingRequiredField {{ field: 'label' }}, got: {other:?}"
-        ),
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-004 / BC-1.17.001 EC-004
-// status lay_out() empty label → Err
+// AC-004g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// status lay_out() with empty label must still return Ok (geometry-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.001 AC-004: Empty label `""` is equivalent to absent — must return Err.
+/// F-087-P1-001 adjudication: empty label `""` no longer causes `lay_out()` to
+/// return Err — `lay_out()` is geometry-only. Label enforcement (including blank
+/// label rejection) is Stage 5 (`LabelCheckValidator`).
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// This test replaces AC-004.
 #[test]
-fn test_BC_1_17_001_ac004_status_lay_out_empty_label_errors() {
+fn test_BC_1_17_001_ac004g_status_lay_out_geometry_only_empty_label_ok() {
     let st = StatusSlideType::new();
     let slide = make_slide_str("status", vec![("title", "Project Gamma"), ("label", "")]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
     assert!(
-        result.is_err(),
-        "StatusSlideType::lay_out() with empty label must return Err; got Ok"
+        result.is_ok(),
+        "StatusSlideType::lay_out() (geometry-only) must return Ok even with \
+         empty label; label enforcement is Stage 5 (LabelCheckValidator). \
+         Got: {result:?}"
     );
 }
 
@@ -411,15 +416,17 @@ fn test_BC_1_17_002_ac008_progress_bar_lay_out_geometry_three_frames() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-009 / BC-1.17.002 postcondition 2 / EC-001
-// progress_bar missing label → Err
+// AC-009g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// progress_bar lay_out() with missing label must return Ok (geometry-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.002 AC-009: Missing label field → `Err(MissingRequiredField { field: "label" })`.
+/// F-087-P1-001 adjudication: `ProgressBarSlideType::lay_out()` is geometry-only
+/// after the refactor. Missing `label` no longer causes Err from `lay_out()`.
+/// Label enforcement is Stage 5 (`LabelCheckValidator`).
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// This test replaces AC-009.
 #[test]
-fn test_BC_1_17_002_ac009_progress_bar_missing_label_errors() {
+fn test_BC_1_17_002_ac009g_progress_bar_lay_out_geometry_only_missing_label_ok() {
     let st = ProgressBarSlideType::new();
     let slide = make_slide_mixed(
         "progress_bar",
@@ -427,15 +434,12 @@ fn test_BC_1_17_002_ac009_progress_bar_missing_label_errors() {
         vec![("value", 75)],
     );
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "missing label must return Err");
-    match result.unwrap_err() {
-        LayoutError::MissingRequiredField { slide_type, field } => {
-            assert_eq!(slide_type, "progress_bar");
-            assert_eq!(field, "label");
-        },
-        other => panic!("Expected MissingRequiredField{{label}}, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "ProgressBarSlideType::lay_out() (geometry-only) must return Ok even with \
+         missing label; label enforcement is Stage 5 (LabelCheckValidator). \
+         Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -483,16 +487,22 @@ fn test_BC_1_17_002_ac011_progress_bar_value_100_valid() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-012 / BC-1.17.002 postcondition 3 / EC-003
-// progress_bar value=101 → Err(FieldTypeMismatch { field: "value" })
+// AC-012g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// progress_bar lay_out() with value=101 must return Ok (geometry-only)
+// Value-range enforcement is now at Stage 5 (ValueRangeValidator).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.002 AC-012: `value=101` → `Err(LayoutError::FieldTypeMismatch)`.
-/// `expected_type` must describe [0,100]; `actual_type` must mention 101.
+/// F-087-P1-001 adjudication: `ProgressBarSlideType::lay_out()` is geometry-only.
+/// `value=101` no longer causes `lay_out()` to return Err.
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// Value-range enforcement (value ∈ [0,100]) has moved to `ValueRangeValidator`
+/// at Stage 5 (pre-layout). The build()-level test is:
+///   `test_BC_1_17_002_build_progress_bar_value_101_is_validation_failed`
+///   in `crates/slideforge/tests/e2e/story_087_value_range.rs`.
+///
+/// This test replaces AC-012.
 #[test]
-fn test_BC_1_17_002_ac012_progress_bar_value_101_errors() {
+fn test_BC_1_17_002_ac012g_progress_bar_lay_out_geometry_only_value_101_ok() {
     let st = ProgressBarSlideType::new();
     let slide = make_slide_mixed(
         "progress_bar",
@@ -500,40 +510,23 @@ fn test_BC_1_17_002_ac012_progress_bar_value_101_errors() {
         vec![("value", 101)],
     );
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "value=101 must return Err; got Ok");
-    match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch {
-            slide_type,
-            field,
-            expected_type,
-            actual_type,
-        } => {
-            assert_eq!(slide_type, "progress_bar");
-            assert_eq!(field, "value");
-            assert!(
-                expected_type.contains('0') && expected_type.contains("100"),
-                "expected_type must describe [0,100]; got: {expected_type}"
-            );
-            assert!(
-                actual_type.contains("101"),
-                "actual_type must mention 101; got: {actual_type}"
-            );
-        },
-        other => panic!("Expected FieldTypeMismatch for value=101, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "ProgressBarSlideType::lay_out() (geometry-only) must return Ok even for \
+         value=101; value-range enforcement is Stage 5 (ValueRangeValidator). \
+         Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-013 / BC-1.17.002 EC-004
-// progress_bar value=-1 → Err(FieldTypeMismatch)
+// AC-013g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// progress_bar lay_out() with value=-1 must return Ok (geometry-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.002 AC-013: `value=-1` → `Err(LayoutError::FieldTypeMismatch)`.
-///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// F-087-P1-001 adjudication: `value=-1` no longer causes `lay_out()` to return Err.
+/// This test replaces AC-013.
 #[test]
-fn test_BC_1_17_002_ac013_progress_bar_value_minus1_errors() {
+fn test_BC_1_17_002_ac013g_progress_bar_lay_out_geometry_only_value_neg1_ok() {
     let st = ProgressBarSlideType::new();
     let slide = make_slide_mixed(
         "progress_bar",
@@ -541,20 +534,12 @@ fn test_BC_1_17_002_ac013_progress_bar_value_minus1_errors() {
         vec![("value", -1)],
     );
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "value=-1 must return Err; got Ok");
-    match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch {
-            field, actual_type, ..
-        } => {
-            assert_eq!(field, "value");
-            assert!(
-                actual_type.contains("-1"),
-                "actual_type must mention -1; got: {actual_type}"
-            );
-        },
-        other => panic!("Expected FieldTypeMismatch for value=-1, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "ProgressBarSlideType::lay_out() (geometry-only) must return Ok even for \
+         value=-1; value-range enforcement is Stage 5 (ValueRangeValidator). \
+         Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -643,149 +628,135 @@ fn test_BC_1_17_003_ac015_weighted_composite_lay_out_geometry_min_frames() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-016 / BC-1.17.003 postcondition 2 / EC-001
-// weighted_composite lay_out() missing top-level label → Err
+// AC-016g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// weighted_composite lay_out() with missing top-level label must return Ok
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.003 AC-016: Missing top-level label → `Err(MissingRequiredField { field: "label" })`.
+/// F-087-P1-001 adjudication: `WeightedCompositeSlideType::lay_out()` is
+/// geometry-only. Missing top-level label no longer causes Err from `lay_out()`.
+/// Label enforcement is Stage 5 (`LabelCheckValidator`).
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// This test replaces AC-016.
 #[test]
-fn test_BC_1_17_003_ac016_weighted_composite_missing_top_label_errors() {
+fn test_BC_1_17_003_ac016g_weighted_composite_lay_out_geometry_only_missing_label_ok() {
     let st = WeightedCompositeSlideType::new();
     let comp1 = make_component("Quality", 0.4, 85, Some("Excellent"));
     let slide = make_weighted_composite_slide(None, vec![comp1]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "missing top-level label must return Err");
-    match result.unwrap_err() {
-        LayoutError::MissingRequiredField { slide_type, field } => {
-            assert_eq!(slide_type, "weighted_composite");
-            assert_eq!(field, "label");
-        },
-        other => panic!("Expected MissingRequiredField{{label}}, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "WeightedCompositeSlideType::lay_out() (geometry-only) must return Ok even \
+         with missing top-level label; label enforcement is Stage 5 (LabelCheckValidator). \
+         Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-017 / BC-1.17.003 postcondition 4 / EC-002
-// weighted_composite lay_out() missing component label → Err
+// AC-017g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// weighted_composite lay_out() with missing component label must return Ok
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.003 AC-017: Component missing `label` sub-field returns Err.
-/// Error must identify `"weighted_composite"` and reference "label" or "component".
+/// F-087-P1-001 adjudication: missing component label no longer causes `lay_out()`
+/// to return Err. Component label enforcement is Stage 5 (`LabelCheckValidator`
+/// component iteration loop).
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// This test replaces AC-017.
 #[test]
-fn test_BC_1_17_003_ac017_weighted_composite_missing_component_label_errors() {
+fn test_BC_1_17_003_ac017g_weighted_composite_lay_out_geometry_only_missing_component_label_ok() {
     let st = WeightedCompositeSlideType::new();
     let comp_ok = make_component("Quality", 0.4, 85, Some("Excellent"));
     let comp_no_label = make_component("Price", 0.6, 72, None);
     let slide = make_weighted_composite_slide(Some("Overall: Good"), vec![comp_ok, comp_no_label]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "component missing label must return Err");
-    let err = result.unwrap_err();
-    let (err_slide_type, err_field) = match &err {
-        LayoutError::MissingRequiredField { slide_type, field }
-        | LayoutError::FieldTypeMismatch {
-            slide_type, field, ..
-        } => (slide_type.as_str(), field.as_str()),
-        other => panic!("Expected error for missing component label, got: {other:?}"),
-    };
-    assert_eq!(err_slide_type, "weighted_composite");
     assert!(
-        err_field.contains("label") || err_field.contains("component"),
-        "field must reference label/component; got: {err_field}"
+        result.is_ok(),
+        "WeightedCompositeSlideType::lay_out() (geometry-only) must return Ok even \
+         when a component is missing its label; label enforcement is Stage 5 \
+         (LabelCheckValidator). Got: {result:?}"
     );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-019 / BC-1.17.003 postcondition 3 / EC-004
-// weighted_composite lay_out() empty components list → Err
+// AC-019g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// weighted_composite lay_out() with empty components must return Ok
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.003 AC-019: `components: []` (empty list) must return Err.
+/// F-087-P1-001 adjudication: empty components list no longer causes `lay_out()`
+/// to return Err. `lay_out()` is geometry-only — it produces the 7-frame skeleton
+/// regardless of field values.
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// Components validation (non-empty, weight/score range) has moved to
+/// `ValueRangeValidator` at Stage 5.
+///
+/// This test replaces AC-019.
 #[test]
-fn test_BC_1_17_003_ac019_weighted_composite_empty_components_errors() {
+fn test_BC_1_17_003_ac019g_weighted_composite_lay_out_geometry_only_empty_components_ok() {
     let st = WeightedCompositeSlideType::new();
     let slide = make_weighted_composite_slide(Some("Overall: N/A"), vec![]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-    assert!(result.is_err(), "empty components list must return Err");
+    assert!(
+        result.is_ok(),
+        "WeightedCompositeSlideType::lay_out() (geometry-only) must return Ok even \
+         for empty components list; components validation is Stage 5 \
+         (ValueRangeValidator). Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-020 / BC-1.17.003 invariant 7 / EC-007
-// weighted_composite component score=101 → Err(FieldTypeMismatch)
+// AC-020g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// weighted_composite lay_out() with score=101 must return Ok (geometry-only)
+// Value-range enforcement is now at Stage 5 (ValueRangeValidator).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.003 AC-020: Component `score=101` → `Err(LayoutError::FieldTypeMismatch)`.
-/// `expected_type` must describe [0,100]; `actual_type` must mention 101.
+/// F-087-P1-001 adjudication: `WeightedCompositeSlideType::lay_out()` is
+/// geometry-only. Component `score=101` no longer causes `lay_out()` to return Err.
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// Value-range enforcement (score ∈ [0,100]) has moved to `ValueRangeValidator`
+/// at Stage 5. The build()-level test is:
+///   `test_BC_1_17_003_build_weighted_composite_score_101_is_validation_failed`
+///   in `crates/slideforge/tests/e2e/story_087_value_range.rs` (currently
+///   `#[ignore]`'d pending STORY-088 DSL list-literal support).
+///
+/// The unit-level test is:
+///   `test_BC_1_17_003_score_101_error` in
+///   `crates/slideforge-validate/src/value_range.rs`.
+///
+/// This test replaces AC-020.
 #[test]
-fn test_BC_1_17_003_ac020_weighted_composite_score_101_errors() {
+fn test_BC_1_17_003_ac020g_weighted_composite_lay_out_geometry_only_score_101_ok() {
     let st = WeightedCompositeSlideType::new();
     let comp_bad = make_component("Quality", 0.4, 101, Some("Impossible"));
     let slide = make_weighted_composite_slide(Some("Overall"), vec![comp_bad]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "score=101 must return Err");
-    match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch {
-            slide_type,
-            field,
-            expected_type,
-            actual_type,
-        } => {
-            assert_eq!(slide_type, "weighted_composite");
-            assert!(
-                field.contains("score") || field.contains("component"),
-                "field must identify score/component; got: {field}"
-            );
-            assert!(
-                expected_type.contains('0') && expected_type.contains("100"),
-                "expected_type must describe [0,100]; got: {expected_type}"
-            );
-            assert!(
-                actual_type.contains("101"),
-                "actual_type must mention 101; got: {actual_type}"
-            );
-        },
-        other => panic!("Expected FieldTypeMismatch for score=101, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "WeightedCompositeSlideType::lay_out() (geometry-only) must return Ok even \
+         for component score=101; value-range enforcement is Stage 5 \
+         (ValueRangeValidator). Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-021 / BC-1.17.003 invariant 6 / EC-006
-// weighted_composite component weight=0 → Err(FieldTypeMismatch)
+// AC-021g / F-087-P1-001 adjudication: lay_out() is geometry-only
+// weighted_composite lay_out() with weight=0 must return Ok (geometry-only)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.17.003 AC-021: Component `weight=0` (non-positive) → `Err(FieldTypeMismatch)`.
+/// F-087-P1-001 adjudication: Component `weight=0` no longer causes `lay_out()`
+/// to return Err. Weight enforcement is Stage 5 (`ValueRangeValidator`).
 ///
-/// FAILS at Red Gate: `lay_out()` is `todo!()` → panic.
+/// This test replaces AC-021.
 #[test]
-fn test_BC_1_17_003_ac021_weighted_composite_weight_zero_errors() {
+fn test_BC_1_17_003_ac021g_weighted_composite_lay_out_geometry_only_weight_zero_ok() {
     let st = WeightedCompositeSlideType::new();
     let comp_zero = make_component("Price", 0.0, 72, Some("Acceptable"));
     let slide = make_weighted_composite_slide(Some("Overall"), vec![comp_zero]);
     let result = st.lay_out(&slide, &stub_brand(), stub_canvas());
-
-    assert!(result.is_err(), "weight=0 must return Err");
-    match result.unwrap_err() {
-        LayoutError::FieldTypeMismatch {
-            slide_type, field, ..
-        } => {
-            assert_eq!(slide_type, "weighted_composite");
-            assert!(
-                field.contains("weight") || field.contains("component"),
-                "field must identify weight/component; got: {field}"
-            );
-        },
-        other => panic!("Expected FieldTypeMismatch for weight=0, got: {other:?}"),
-    }
+    assert!(
+        result.is_ok(),
+        "WeightedCompositeSlideType::lay_out() (geometry-only) must return Ok even \
+         for component weight=0; weight enforcement is Stage 5 (ValueRangeValidator). \
+         Got: {result:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

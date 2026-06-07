@@ -59,3 +59,10 @@ mod e2e_multi_format;
 // AC-001 through AC-007, AC-018 (positive content vectors + alt-text discrimination).
 #[path = "e2e/story_086_content_threading.rs"]
 mod e2e_story_086_content_threading;
+
+// STORY-087 — F-087-P1-001 value-range enforcement Red Gate tests
+// Proves ValueRangeValidator is wired at Stage 5, reachable from build().
+// progress_bar value=101 and value=-1 FAIL at Red Gate (no validator yet).
+// weighted_composite tests are #[ignore]'d pending STORY-088 DSL list-literal support.
+#[path = "e2e/story_087_value_range.rs"]
+mod e2e_story_087_value_range;

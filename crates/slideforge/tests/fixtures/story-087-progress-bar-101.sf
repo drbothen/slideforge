@@ -1,0 +1,18 @@
+# STORY-087 fixture: progress_bar slide with value=101 (out-of-range).
+#
+# Used by: test_BC_1_17_002_build_progress_bar_value_101_is_validation_failed
+#
+# Expected: build() returns Err(BuildError::ValidationFailed) containing at
+# least one diagnostic with code == "E-VAL-011".
+#
+# Red Gate: currently (pre-implementation) no ValueRangeValidator is registered,
+# so build() returns Ok for this fixture. The test asserts Err → FAILS at Red Gate.
+# Once ValueRangeValidator is wired at Stage 5, the test passes.
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "101% complete"
+  value 101
