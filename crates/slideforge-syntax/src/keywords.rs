@@ -350,7 +350,7 @@ mod tests {
     // and severity_cards (D4 gap fix — was in COLOR_CODED_TYPES but absent from this set).
     // Total is now 35 keywords (31 original + 3 new + severity_cards).
     #[test]
-    fn test_bc_1_09_008_is_slide_type_keyword_all_31_types() {
+    fn test_bc_1_09_008_is_slide_type_keyword_all_35_types() {
         // All 35 keywords in SLIDE_TYPE_KEYWORDS: the 34 registered in
         // SlideTypeRegistry::default() plus severity_cards (COLOR_CODED_TYPES
         // scan target without a SlideType registration — STORY-087 D4 gap fix).

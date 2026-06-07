@@ -694,7 +694,7 @@ mod tests {
     ///
     /// STORY-087 added `status`, `progress_bar`, `weighted_composite` — count is now 34.
     #[test]
-    fn test_bc_1_03_017_all_keywords_len_equals_31() {
+    fn test_bc_1_03_017_all_keywords_len_equals_34() {
         let reg = SlideTypeRegistry::default();
         assert_eq!(
             reg.all_keywords().len(),
@@ -728,7 +728,7 @@ mod tests {
     /// returns `Ok`. The other 31 types are called with empty fields (their
     /// `lay_out()` stubs return `Ok` regardless of fields).
     #[test]
-    fn test_all_31_types_lay_out_returns_ok() {
+    fn test_all_34_types_lay_out_returns_ok() {
         use crate::traits::Canvas;
         use slideforge_types::{Brand, BrandFonts, BrandPalette};
 

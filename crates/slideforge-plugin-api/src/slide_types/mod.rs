@@ -20,7 +20,7 @@
 //! 3. `pub mod <name>;` in this file
 //! 4. Add `r.register(Box::new(<Name>SlideType::new()))` in
 //!    [`SlideTypeRegistry::default`]
-//! 5. Update the count assertion in `test_bc_1_03_017_all_keywords_len_equals_31`
+//! 5. Update the count assertion in `test_bc_1_03_017_all_keywords_len_equals_34`
 //!    (registry count) and the `SLIDE_TYPE_KEYWORDS` set in `slideforge-syntax::keywords`
 //!    (keyword count — currently one more than the registry due to `severity_cards`)
 
