@@ -7,7 +7,7 @@
 //! 2. **[`validate_fields`]** — accumulates all field-validation diagnostics
 //!    for a slide against its declared type schema.
 //! 3. **Individual slide type structs** — one per built-in type keyword.
-//!    31 built-in types implemented in STORY-003; 3 color-coded types added in STORY-087.
+//!    34 built-in types: 31 implemented in STORY-003 + 3 color-coded types added in STORY-087.
 //! 4. **[`SLIDE_TYPE_REGISTRY`]** — a process-wide lazy singleton holding the
 //!    default registry for use by the evaluator and layout engine.
 //! 5. **[`common_optional_fields`]** — returns the universal optional fields
@@ -20,7 +20,9 @@
 //! 3. `pub mod <name>;` in this file
 //! 4. Add `r.register(Box::new(<Name>SlideType::new()))` in
 //!    [`SlideTypeRegistry::default`]
-//! 5. Update the assertion in `test_bc_1_03_017_all_keywords_len_equals_31`
+//! 5. Update the count assertion in `test_bc_1_03_017_all_keywords_len_equals_31`
+//!    (registry count) and the `SLIDE_TYPE_KEYWORDS` set in `slideforge-syntax::keywords`
+//!    (keyword count — currently one more than the registry due to `severity_cards`)
 
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -65,7 +67,7 @@ pub mod weighted_composite;
 
 pub use registry::{SlideTypeRegistry, validate_fields};
 
-/// Returns the universal optional fields shared by all 31 built-in slide types.
+/// Returns the universal optional fields shared by all 34 built-in slide types.
 ///
 /// These fields are accepted on every slide regardless of type. Individual
 /// slide types call this function and extend their type-specific optional

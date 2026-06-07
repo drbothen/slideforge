@@ -1,4 +1,4 @@
-//! [`SlideTypeRegistry`] — the runtime registry of all 31 built-in slide types.
+//! [`SlideTypeRegistry`] — the runtime registry of all 34 built-in slide types.
 //!
 //! The registry maps DSL keywords (e.g., `"title"`, `"content"`) to their
 //! [`SlideType`] implementations. It is the single source of truth for:
@@ -9,7 +9,12 @@
 //!
 //! ## Default registry
 //!
-//! [`SlideTypeRegistry::default`] pre-registers all 31 built-in slide types.
+//! [`SlideTypeRegistry::default`] pre-registers all 34 built-in slide types
+//! (31 original + `status`, `progress_bar`, `weighted_composite` added in STORY-087).
+//!
+//! Note: the parser keyword set (`SLIDE_TYPE_KEYWORDS` in `slideforge-syntax`) contains
+//! 35 entries — the 34 registered types plus `severity_cards`, which is a color-coded
+//! scan target without a standalone `SlideType` registration.
 //!
 //! ## Thread safety
 //!
@@ -134,11 +139,16 @@ impl SlideTypeRegistry {
 }
 
 impl Default for SlideTypeRegistry {
-    /// Create a registry pre-populated with all 31 built-in slide types.
+    /// Create a registry pre-populated with all 34 built-in slide types.
     ///
     /// Registration order matches the canonical slide type table. All types
     /// use underscore-separated keywords (e.g., `section_break`, `stat_callout`).
     /// Types are accessible by keyword via [`Self::lookup_by_keyword`].
+    ///
+    /// Count: 31 original types + `status`, `progress_bar`, `weighted_composite`
+    /// (color-coded types added in STORY-087). `severity_cards` is NOT registered
+    /// here — it is a color-coded scan target handled by region frames; its keyword
+    /// is reserved in `slideforge-syntax::keywords::SLIDE_TYPE_KEYWORDS`.
     fn default() -> Self {
         let mut r = Self::new();
         // Core presentation structure
@@ -707,9 +717,9 @@ mod tests {
         assert_eq!(reg.suggest("BLANK"), Some("blank"));
     }
 
-    // ── F-011: parameterized lay_out test for all 31 types ────────────────────
+    // ── F-011: parameterized lay_out test for all 34 types ────────────────────
 
-    /// Exercises BC-1.03.012 for all 34 types: `lay_out` returns Ok for every
+    /// Exercises BC-1.03.012 for all 34 registered types: `lay_out` returns Ok for every
     /// registered slide type (not just the 4 representative ones).
     ///
     /// STORY-087: The 3 color-coded types (`status`, `progress_bar`,

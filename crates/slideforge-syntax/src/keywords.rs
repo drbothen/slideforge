@@ -9,8 +9,11 @@
 //!    block-level introducer handled by `parser/section.rs`.
 //! 2. **Reserved directive keywords** — `@`-prefixed names (`@for`, `@if`,
 //!    `@elif`, `@else`, `@include`, `@data`, `@fn`, `@mixin`, `@while`).
-//! 3. **Slide-type keywords** — the 31 built-in slide types that must not be
-//!    used as variable names (e.g. `title`, `chart`, `content`).
+//! 3. **Slide-type keywords** — the 35 DSL keywords that must not be used as
+//!    variable names (e.g. `title`, `chart`, `content`). This is a deliberate
+//!    superset of the 34 registered `SlideType` implementations: `severity_cards`
+//!    is a color-coded scan target (region frames + `LabelCheck`/`COLOR_CODED`
+//!    coverage) but has no standalone `SlideType` registration.
 //!
 //! # Usage
 //!
@@ -19,8 +22,8 @@
 //!
 //! - [`classify_keyword`] — returns `(error_code, description)` if `kw` is
 //!   reserved in any category, or `None` if it is a safe user-defined name.
-//! - [`is_slide_type_keyword`] — `true` if `name` is one of the 31 built-in
-//!   slide types.
+//! - [`is_slide_type_keyword`] — `true` if `name` is one of the 35 slide-type
+//!   keywords (34 registered `SlideType` impls + `severity_cards`).
 //! - [`is_directive_keyword`] — `true` if `name` is a `@`-prefixed directive.
 //! - [`is_reserved_bare_keyword`] — `true` if `name` is any non-`@`-prefixed reserved identifier.
 //!
@@ -43,7 +46,7 @@ use phf::phf_map;
 /// - Structural deck-level keywords that cannot be used as variable names
 ///
 /// Slide-type keywords are handled separately by [`is_slide_type_keyword`]
-/// because there are 31 of them and they all share the same error code
+/// because there are 35 of them and they all share the same error code
 /// (E-PAR-008 via [`classify_keyword`]).
 static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> = phf_map! {
     // ── Future directive keywords (E-PAR-006) ─────────────────────────────
@@ -103,18 +106,26 @@ static RESERVED_KEYWORDS: phf::Map<&'static str, (&'static str, &'static str)> =
 
 // ─── Slide-type keyword table ─────────────────────────────────────────────────
 
-/// The built-in slide type keywords.
+/// The slide-type keywords reserved in the DSL parser (35 total).
 ///
 /// Each of these is a valid `slide <type>:` introducer. Using any of them as a
 /// `vars:` entry name produces E-PAR-008 ([`SyntaxError::VarNameCollision`]).
 ///
-/// Source: `SlideTypeRegistry::default()` in `slideforge-plugin-api` — the single
-/// source of truth. This compile-time set must stay in sync with that runtime
-/// registry. Keywords use underscore separators (e.g., `section_break`, not
-/// `section-break`).
+/// ## Relationship to `SlideTypeRegistry`
 ///
-/// STORY-087 added `status`, `progress_bar`, `weighted_composite` (new color-coded
-/// types) and `severity_cards` (gap fix — was in `COLOR_CODED_TYPES` but missing here).
+/// This compile-time set is a **deliberate superset** of `SlideTypeRegistry::default()`
+/// (34 registered `SlideType` implementations). The one extra entry is `severity_cards`:
+/// it is a color-coded type covered by region frames and `LabelCheck`/`COLOR_CODED`
+/// validation, but it has no standalone `SlideType` registration and is therefore absent
+/// from the runtime registry. Reserving its keyword here prevents user variables from
+/// colliding with it if a `SlideType` impl is added in a future story.
+///
+/// Summary of counts (post-STORY-087):
+/// - `SlideTypeRegistry::default()` — 34 registered types (31 original + `status`,
+///   `progress_bar`, `weighted_composite`)
+/// - `SLIDE_TYPE_KEYWORDS` — 35 keywords (the 34 above + `severity_cards`)
+///
+/// Keywords use underscore separators (e.g., `section_break`, not `section-break`).
 static SLIDE_TYPE_KEYWORDS: phf::Set<&'static str> = phf::phf_set! {
     // Core presentation structure
     "title",
@@ -194,9 +205,11 @@ pub fn classify_keyword(kw: &str) -> Option<(&'static str, &'static str)> {
     None
 }
 
-/// Return `true` if `name` exactly matches one of the 31 built-in slide types.
+/// Return `true` if `name` exactly matches one of the 35 reserved slide-type keywords.
 ///
-/// Variable names that collide with slide types must produce E-PAR-008.
+/// This covers the 34 registered `SlideType` implementations plus `severity_cards`
+/// (a color-coded scan target without a standalone `SlideType` registration).
+/// Variable names that collide with any of these must produce E-PAR-008.
 /// Note: suffix matches are allowed (`chart_data` is NOT a collision).
 ///
 /// # Examples
@@ -338,9 +351,9 @@ mod tests {
     // Total is now 35 keywords (31 original + 3 new + severity_cards).
     #[test]
     fn test_bc_1_09_008_is_slide_type_keyword_all_31_types() {
-        // These are the exact keywords registered in SlideTypeRegistry::default()
-        // plus severity_cards (which is in regions.rs / COLOR_CODED_TYPES but registered
-        // as a keyword here after STORY-087 D4 gap fix).
+        // All 35 keywords in SLIDE_TYPE_KEYWORDS: the 34 registered in
+        // SlideTypeRegistry::default() plus severity_cards (COLOR_CODED_TYPES
+        // scan target without a SlideType registration — STORY-087 D4 gap fix).
         let all_types = [
             // Core presentation structure
             "title",
