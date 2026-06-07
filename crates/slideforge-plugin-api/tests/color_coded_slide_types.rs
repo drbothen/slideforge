@@ -10,10 +10,10 @@
 //! has moved to `ValueRangeValidator` (Stage 5, pre-layout). Label validation has
 //! moved to `LabelCheckValidator` (Stage 5). As a result:
 //!
-//! - lay_out() ALWAYS returns Ok for any field values (including out-of-range).
-//! - The lay_out()-direct error tests (AC-003, AC-004, AC-009, AC-012, AC-013,
+//! - `lay_out()` ALWAYS returns `Ok` for any field values (including out-of-range).
+//! - The `lay_out()`-direct error tests (AC-003, AC-004, AC-009, AC-012, AC-013,
 //!   AC-016, AC-017, AC-019, AC-020, AC-021) are removed from this file.
-//! - Value-range enforcement is tested at build() level in:
+//! - Value-range enforcement is tested at `build()` level in:
 //!   `crates/slideforge/tests/e2e/story_087_value_range.rs`
 //! - Label enforcement is tested in:
 //!   `crates/slideforge-validate/src/label_check.rs`

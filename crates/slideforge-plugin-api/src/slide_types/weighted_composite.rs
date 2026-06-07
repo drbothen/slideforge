@@ -33,7 +33,7 @@
 //!
 //! - BC-1.17.003 — `weighted_composite` Slide Type Requires title + label + components\[\]
 //! - STORY-087 — Color-Coded Slide Types (Wave 4)
-//! - Architect adjudication F-087-P1-001: Option B — ValueRangeValidator Stage 5
+//! - Architect adjudication F-087-P1-001: Option B — `ValueRangeValidator` Stage 5
 
 use std::sync::Arc;
 

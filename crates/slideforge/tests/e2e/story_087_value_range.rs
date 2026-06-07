@@ -34,6 +34,7 @@
 
 #![allow(clippy::unwrap_used)] // integration tests — panics are intentional failures
 #![allow(clippy::doc_markdown)] // test comments reference identifiers like `E-VAL-011`
+#![allow(non_snake_case)] // BC-traceability IDs use uppercase: test_BC_S_SS_NNN_xxx
 
 use crate::e2e::{BrandTmpDir, fixture_source};
 

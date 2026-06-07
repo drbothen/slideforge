@@ -49,10 +49,10 @@ pub use label_check::{COLOR_CODED_TYPES, LabelCheckValidator};
 pub use lang_validator::{LangValidator, inject_lang_default};
 pub use mode::{ValidationConfig, ValidationMode};
 pub use utils::is_blank;
+pub use value_range::ValueRangeValidator;
 pub use wcag::{
     contrast_ratio, parse_hex_color, relative_luminance, srgb_component_to_linear, wcag_aa_passes,
 };
-pub use value_range::ValueRangeValidator;
 pub use zero_slide::ZeroSlideValidator;
 
 // ─── Full validation pipeline integration test ────────────────────────────────

@@ -101,9 +101,7 @@ fn validate_progress_bar_value(
         Some(FieldValue::Literal(Value::Int(n))) => {
             if !(0..=100).contains(n) {
                 diagnostics.push(make_range_error(
-                    &format!(
-                        "progress_bar value must be between 0 and 100; got {n}."
-                    ),
+                    &format!("progress_bar value must be between 0 and 100; got {n}."),
                     span,
                 ));
             }
@@ -113,9 +111,7 @@ fn validate_progress_bar_value(
             // Wrong type (not Int).
             let actual_type = value_type_name(other);
             diagnostics.push(make_range_error(
-                &format!(
-                    "progress_bar value must be an integer; got {actual_type} or absent."
-                ),
+                &format!("progress_bar value must be an integer; got {actual_type} or absent."),
                 span,
             ));
         },
@@ -330,9 +326,7 @@ mod tests {
     ///
     /// Each component is a `Value::Map` built from the provided tuples:
     /// `(name, weight_as_float, score_as_int)`.
-    fn make_weighted_composite_slide(
-        components: Vec<OrderedMap<Arc<str>, Value>>,
-    ) -> Slide {
+    fn make_weighted_composite_slide(components: Vec<OrderedMap<Arc<str>, Value>>) -> Slide {
         let mut fields: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
         fields.insert(
             Arc::from("title"),
@@ -368,10 +362,7 @@ mod tests {
     ) -> OrderedMap<Arc<str>, Value> {
         let mut m: OrderedMap<Arc<str>, Value> = OrderedMap::new();
         m.insert(Arc::from("name"), Value::Str(Arc::from(name)));
-        m.insert(
-            Arc::from("weight"),
-            Value::Float(OrderedFloat(weight)),
-        );
+        m.insert(Arc::from("weight"), Value::Float(OrderedFloat(weight)));
         m.insert(Arc::from("score"), Value::Int(score));
         if with_label {
             m.insert(Arc::from("label"), Value::Str(Arc::from("OK")));
@@ -387,7 +378,10 @@ mod tests {
         let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Int(50))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert!(
             errors.is_empty(),
             "progress_bar value=50 must produce no E-VAL-011; got {diags:?}"
@@ -400,7 +394,10 @@ mod tests {
         let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Int(0))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert!(
             errors.is_empty(),
             "progress_bar value=0 (lower boundary) must produce no E-VAL-011; got {diags:?}"
@@ -413,7 +410,10 @@ mod tests {
         let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Int(100))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert!(
             errors.is_empty(),
             "progress_bar value=100 (upper boundary) must produce no E-VAL-011; got {diags:?}"
@@ -426,7 +426,10 @@ mod tests {
         let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Int(101))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert_eq!(
             errors.len(),
             1,
@@ -450,7 +453,10 @@ mod tests {
         let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Int(-1))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert_eq!(
             errors.len(),
             1,
@@ -469,7 +475,10 @@ mod tests {
         let slide = make_progress_bar_slide(None);
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert_eq!(
             errors.len(),
             1,
@@ -480,12 +489,14 @@ mod tests {
     /// BC-1.17.002 PC3: `value` is `Str` (wrong type) → 1 E-VAL-011.
     #[test]
     fn test_BC_1_17_002_value_wrong_type() {
-        let slide = make_progress_bar_slide(Some(FieldValue::Literal(Value::Str(Arc::from(
-            "fifty",
-        )))));
+        let slide =
+            make_progress_bar_slide(Some(FieldValue::Literal(Value::Str(Arc::from("fifty")))));
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
-        let errors: Vec<_> = diags.iter().filter(|d| d.code.as_ref() == E_VAL_011).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
         assert_eq!(
             errors.len(),
             1,
@@ -495,7 +506,7 @@ mod tests {
 
     // ── Non-color-coded slide not checked ─────────────────────────────────────
 
-    /// Non-color-coded slide types must not be checked by ValueRangeValidator.
+    /// Non-color-coded slide types must not be checked by `ValueRangeValidator`.
     #[test]
     fn test_non_color_coded_slide_not_checked() {
         let slide = Slide {
@@ -677,11 +688,11 @@ mod tests {
     ///
     /// Proves error accumulation (no bail-on-first) per DI-018.
     ///
-    /// SID-1 compliance: this unit test drives weighted_composite score accumulation
+    /// SID-1 compliance: this unit test drives `weighted_composite` score accumulation
     /// without requiring DSL list-of-map support (STORY-088). It is the load-bearing
     /// proof for DI-018 accumulation, covering:
     ///   `test_BC_1_17_003_build_weighted_composite_score_101_is_validation_failed`
-    ///   (in crates/slideforge/tests/e2e/story_087_value_range.rs, #[ignore]'d
+    ///   (in `crates/slideforge/tests/e2e/story_087_value_range.rs`, `#[ignore]`'d
     ///   pending STORY-088 DSL list-literal parser).
     #[test]
     fn test_BC_1_17_003_accumulation_multiple_errors() {
@@ -707,7 +718,7 @@ mod tests {
     /// SID-1: weight=0 (Int zero) → E-VAL-011.
     ///
     /// Covers `test_BC_1_17_003_build_weighted_composite_weight_zero_is_validation_failed`
-    /// (in crates/slideforge/tests/e2e/story_087_value_range.rs, #[ignore]'d
+    /// (in `crates/slideforge/tests/e2e/story_087_value_range.rs`, `#[ignore]`'d
     /// pending STORY-088 DSL list-literal parser).
     #[test]
     fn test_BC_1_17_003_weight_int_zero_error() {
@@ -777,7 +788,7 @@ mod tests {
         );
     }
 
-    /// ValueRangeValidator ID must be "value-range".
+    /// `ValueRangeValidator` ID must be `"value-range"`.
     #[test]
     fn test_value_range_validator_id() {
         assert_eq!(ValueRangeValidator.id(), "value-range");

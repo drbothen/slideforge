@@ -23,7 +23,7 @@
 //!
 //! - BC-1.17.002 — `progress_bar` Slide Type Requires title + label + value(0–100)
 //! - STORY-087 — Color-Coded Slide Types (Wave 4)
-//! - Architect adjudication F-087-P1-001: Option B — ValueRangeValidator Stage 5
+//! - Architect adjudication F-087-P1-001: Option B — `ValueRangeValidator` Stage 5
 
 use std::sync::Arc;
 
