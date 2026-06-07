@@ -198,7 +198,9 @@ pub fn run_inline_validation(
                 | crate::types::FrameContent::Chart { .. }
                 | crate::types::FrameContent::Diagram { .. }
                 | crate::types::FrameContent::Empty
-                | crate::types::FrameContent::ErrorSlidePlaceholder { .. } => {},
+                | crate::types::FrameContent::ErrorSlidePlaceholder { .. }
+                // STORY-087 pass-2: ColorBar is geometry-only and carries no InlineNode subtree.
+                | crate::types::FrameContent::ColorBar { .. } => {},
             }
         }
     }

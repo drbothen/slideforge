@@ -364,6 +364,22 @@ impl SlideTagEngine {
                     part_group.push(p_group);
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
+
+                // STORY-087 pass-2: ColorBar — geometry-only fill directive.
+                // The bar frame carries no text and no alt text (accessibility
+                // co-encoding is provided by the adjacent ColorLabel text frame).
+                // Mark as PDF Artifact (same as a decorative shape). The visible
+                // label text frame produces its own P structure element separately.
+                // TODO(STORY-087): implementer should emit a Figure with dimensions
+                // as actual text (e.g., "/Alt (75% filled bar)") for full PDF/UA-1.
+                FrameContent::ColorBar { .. } => {
+                    tracing::warn!(
+                        frame_idx,
+                        "STORY-087: FrameContent::ColorBar rendered as PDF Artifact (stub) — \
+                         full Figure tagging pending implementer TDD green pass"
+                    );
+                    decorative_frame_indices.push(frame_idx);
+                },
             }
         }
 
@@ -501,6 +517,11 @@ impl SlideTagEngine {
                 let table_group = self.tag_table(table_spec)?;
                 Ok(Some(table_group))
             },
+
+            // STORY-087 pass-2: ColorBar is geometry-only and produces_structure_group()
+            // returns false, so tag_content_block is never called for ColorBar blocks.
+            // This arm is a defensive catch-all in case the call site changes.
+            ContentBlock::ColorBar(_) => Ok(None),
         }
     }
 

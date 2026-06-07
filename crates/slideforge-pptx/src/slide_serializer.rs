@@ -633,6 +633,22 @@ impl SlideSerializer {
                         "no PPTX element emitted for Shape/ErrorSlidePlaceholder/Empty frame"
                     );
                 },
+
+                // STORY-087 pass-2: ColorBar — full PPTX solid-fill rectangle rendering
+                // is deferred to the implementer (STORY-087 TDD green pass). This stub
+                // emits a visible warning so silent content loss is never tolerated
+                // (AC-002/008 visible-output requirement; adjudication §6).
+                // TODO(STORY-087): implement full ColorBar PPTX rendering.
+                FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } => {
+                    tracing::warn!(
+                        slide_index,
+                        frame_idx,
+                        filled_width_emu = filled_width_emu.0,
+                        total_width_emu = total_width_emu.0,
+                        "STORY-087: FrameContent::ColorBar not yet rendered to PPTX — \
+                         full solid-fill rectangle rendering pending implementer TDD green pass"
+                    );
+                },
             }
         }
 

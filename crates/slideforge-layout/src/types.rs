@@ -471,6 +471,55 @@ pub enum FrameContent {
     /// xref, etc.). Plain-text-only blocks continue to use
     /// `FrameContent::Title` / `FrameContent::Subtitle` / `FrameContent::Body`.
     TextRun(Vec<InlineNode>),
+    /// A progress-bar fill frame with proportional fill width.
+    ///
+    /// Produced by `layout::run`'s `ColorBar` materialization pass when a
+    /// `ContentBlock::ColorBar(ColorBarSpec { percent })` block is present in
+    /// the slide's block list. The pass finds the first Generic-role `FrameContent::Empty`
+    /// frame (the bar-background slot) and replaces it with this variant.
+    ///
+    /// ## Geometry computation
+    ///
+    /// `filled_width_emu = (percent as i64 * total_width_emu.0) / 100`
+    ///
+    /// Integer EMU arithmetic — no `f64`. Exact result rounded toward zero.
+    ///
+    /// `total_width_emu` is carried for exporter convenience (relative fill
+    /// computation without re-reading the frame's bounding box geometry).
+    ///
+    /// ## Exporter contract
+    ///
+    /// PPTX: render a `<p:sp>` solid-fill rectangle at the bar-background frame's
+    /// `bbox.x, bbox.y` with `width = filled_width_emu` and `height = frame.bbox.height`.
+    /// The unfilled portion requires no element (slide background shows through).
+    ///
+    /// PDF/HTML: render a filled rectangle at the proportional width.
+    ///
+    /// DOCX: render the percentage value as text (e.g., "75%") — DOCX has no
+    /// native progress-bar element; `filled_width_emu` is not meaningful in a
+    /// flow document.
+    ///
+    /// At minimum, exporters that cannot render a bar MUST emit a `tracing::warn!`
+    /// and must NOT silently skip the frame (AC-002/008 visible-output requirement).
+    ///
+    /// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
+    /// Uses integer `Emu` fields — no `f64` (comemo Hash + Kani arithmetic proofs).
+    ///
+    /// Traces: BC-1.17.002 PC-9, architect pass-2 adjudication §4.3 (STORY-087).
+    ColorBar {
+        /// The computed proportional fill width in EMU.
+        ///
+        /// Derived as `(ColorBarSpec.percent as i64 * bar_background_width_emu) / 100`.
+        filled_width_emu: Emu,
+        /// The total bar background frame width in EMU.
+        ///
+        /// Carried from the bar-background frame's `bbox.width` for exporter
+        /// convenience (avoids re-reading geometry from the frame list).
+        total_width_emu: Emu,
+        /// The fill color derived from the brand's primary color, or a fixed
+        /// default (`#0070C0`, blue) when brand colors are absent.
+        color: Rgb,
+    },
     /// An empty placeholder (present in the layout but no content assigned).
     Empty,
     /// An error-slide placeholder produced when a pipeline error occurs in

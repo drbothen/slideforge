@@ -29,9 +29,11 @@ use crate::specs::{ChartSpec, DiagramSpec, ImageSpec, ShapeSpec, TableSpec};
 /// | `Title` | `FrameContent::Title` | `<p:ph type="title"/>` | `Heading1` |
 /// | `Subtitle` | `FrameContent::Subtitle` | `<p:ph type="subTitle"/>` | `Heading2` |
 /// | `Body` | `FrameContent::Body` | `<p:ph type="body"/>` | Normal |
+/// | `ColorLabel` | `FrameContent::Body` | body or generic | Normal |
 /// | `Untagged` | `FrameContent::TextRun` | body or generic | Normal |
 ///
 /// See BC-4.01.001 v1.2 postconditions 9–12 and BC-4.02.001 v1.2 postconditions 8–11.
+/// See BC-1.17.001/002/003 v1.2 PC-8/9 and architect pass-2 adjudication (STORY-087).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextTag {
     /// Primary slide title — maps to `FrameContent::Title`.
@@ -50,6 +52,18 @@ pub enum TextTag {
     /// Set by Stage 2b when `Slide.fields["body"]` is a non-empty string.
     /// Routing produces the body placeholder in PPTX and a Normal paragraph in DOCX.
     Body,
+    /// A color-coded slide label — the accessible text co-encoding required by WCAG 1.4.1.
+    ///
+    /// Maps to `RegionRole::Body` in `fill_region_slot_or_append` (same routing as
+    /// `TextTag::Body` but semantically distinct). Used by `status`, `progress_bar`,
+    /// and `weighted_composite` slide types. Routed to `FrameContent::Body` at layout
+    /// time; exporters may apply label-specific font styling (e.g., bold, larger font).
+    ///
+    /// Set by Stage 2b when `Slide.fields["label"]` is a non-empty string on a
+    /// color-coded slide type. See architect pass-2 adjudication §4.1 (STORY-087).
+    ///
+    /// Traces: BC-1.17.001 PC-8, BC-1.17.002 PC-9, BC-1.17.003 PC-9.
+    ColorLabel,
     /// Generic/untagged paragraph — maps to `FrameContent::TextRun`.
     ///
     /// The default for all `TextBlock` construction sites that are NOT Stage 2b.
@@ -104,10 +118,34 @@ pub struct Block {
     pub span: SourceSpan,
 }
 
+/// Parameters for a color-bar fill frame (`progress_bar` slide type).
+///
+/// Carries only the fill percentage; all geometric computation (proportional
+/// fill width in EMU) is deferred to `layout::run`'s `ColorBar` materialization
+/// pass. The `percent` field drives `FrameContent::ColorBar.filled_width_emu`
+/// at layout time via:
+///   `filled_width_emu = (percent as i64 * bar_background_width_emu) / 100`
+///
+/// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010)
+/// and Kani bounded-model checking (Phase 6). Uses `u8` (integer, no `f64`)
+/// for exact EMU arithmetic. See architect pass-2 adjudication §4.3 (STORY-087).
+///
+/// Traces: BC-1.17.002 PC-9, architect pass-2 adjudication §4.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ColorBarSpec {
+    /// Fill percentage in `[0, 100]`.
+    ///
+    /// Drives the proportional fill width at layout time. Out-of-range values
+    /// are rejected by `ValueRangeValidator` (E-VAL-011) before Stage 2b
+    /// threading; the threading pass clamps defensively (`clamp(0, 100)`)
+    /// to prevent layout panics on invalid inputs.
+    pub percent: u8,
+}
+
 /// The discriminated union of all block content types.
 ///
-/// Exactly 8 variants are defined (AC-005). Additional block types (e.g.,
-/// `Code`, `Quote`) are deferred to v1.x stories.
+/// 9 variants are defined (8 original + `ColorBar` added by STORY-087 pass-2).
+/// Additional block types (e.g., `Code`, `Quote`) are deferred to v1.x stories.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentBlock {
     /// A text paragraph.
@@ -133,6 +171,19 @@ pub enum ContentBlock {
 
     /// A data table defined by a [`TableSpec`].
     Table(TableSpec),
+
+    /// A color-bar fill directive: used by `progress_bar` to encode the
+    /// proportional fill width at layout time.
+    ///
+    /// The `percent` field (0–100) drives the fill width computation in
+    /// `layout::run`'s `ColorBar` materialization pass. This block does NOT
+    /// carry text; accessibility co-encoding is separately provided by a
+    /// `ContentBlock::Text(TextTag::ColorLabel)` block. The materialization
+    /// pass produces `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }`
+    /// in the layout IR.
+    ///
+    /// Traces: BC-1.17.002 PC-9, architect pass-2 adjudication §4.3 (STORY-087).
+    ColorBar(ColorBarSpec),
 }
 
 impl ContentBlock {
@@ -157,6 +208,8 @@ impl ContentBlock {
             ContentBlock::Math(_) => "Math",
             ContentBlock::Image(_) => "Image",
             ContentBlock::Table(_) => "Table",
+            // STORY-087 pass-2: geometry-only directive; not a named content kind.
+            ContentBlock::ColorBar(_) => "ColorBar",
         }
     }
 
@@ -217,6 +270,11 @@ impl ContentBlock {
             ContentBlock::Chart(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
             ContentBlock::Diagram(spec) => matches!(spec.alt.as_ref(), Some(AltText::Provided(_))),
             ContentBlock::Shape(spec) => matches!(&spec.alt, Some(AltText::Provided(_))),
+
+            // STORY-087 pass-2: ColorBar is a geometry-only directive — it carries no
+            // text and no alt text. It does NOT produce a PDF structure group.
+            // Accessibility co-encoding is provided by the adjacent ColorLabel text block.
+            ContentBlock::ColorBar(_) => false,
         }
     }
 }

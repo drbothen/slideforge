@@ -343,6 +343,22 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                                 source_index,
                             )?;
                         },
+                        // STORY-087 pass-2: ColorLabel arm — stub (implementer will add routing).
+                        // This arm exists so the compiler sees ColorLabel in the exhaustive match.
+                        // NO behavior: ColorLabel blocks are currently DROPPED (no fill/append).
+                        // The implementer adds FrameContent::Body routing here (TDD green pass).
+                        // RED GATE: test_status_label_fills_body_slot MUST FAIL until implemented.
+                        TextTag::ColorLabel => {
+                            // Intentionally no-op: behavior deferred to implementer.
+                            // TODO(STORY-087): route ColorLabel to Body-role slot via
+                            // fill_region_slot_or_append (same as TextTag::Body but with
+                            // TextTag::ColorLabel passed as the tag argument).
+                            tracing::warn!(
+                                slide_type = keyword_str,
+                                "STORY-087 stub: TextTag::ColorLabel block dropped — \
+                                 ColorLabel routing not yet implemented (TDD Green Gate pending)"
+                            );
+                        },
                         // ── Untagged blocks: always append a TextRun frame (unchanged) ──
                         // TextTag::Untagged has no semantic placeholder — never consumes
                         // a pre-allocated region slot. Uses a clamped full-page-bbox.
@@ -756,7 +772,11 @@ fn fill_region_slot_or_append(
     let expected_role = match tag {
         TextTag::Title => crate::types::RegionRole::Title,
         TextTag::Subtitle => crate::types::RegionRole::Subtitle,
-        TextTag::Body => crate::types::RegionRole::Body,
+        // STORY-087 pass-2: ColorLabel maps to Body role — same slot routing as
+        // TextTag::Body but with a semantically distinct tag (adjudication §4.6).
+        // This ensures status/progress_bar/weighted_composite label text claims the
+        // pre-allocated Body-role region slot.
+        TextTag::Body | TextTag::ColorLabel => crate::types::RegionRole::Body,
         // Untagged blocks are never routed through this function — they are
         // handled separately by the TextTag::Untagged arm in layout::run.
         TextTag::Untagged => crate::types::RegionRole::Generic,

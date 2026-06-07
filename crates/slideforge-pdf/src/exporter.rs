@@ -764,6 +764,20 @@ fn draw_frame(
         | FrameContent::Image { .. }
         | FrameContent::Shape(_)
         | FrameContent::Empty => {},
+
+        // STORY-087 pass-2: ColorBar — full PDF filled-rectangle rendering is
+        // deferred to the implementer (STORY-087 TDD green pass). This stub
+        // emits a visible warning so silent content loss is never tolerated
+        // (AC-002/008 visible-output requirement; adjudication §6).
+        // TODO(STORY-087): implement full ColorBar PDF filled-rectangle draw.
+        FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } => {
+            tracing::warn!(
+                filled_width_emu = filled_width_emu.0,
+                total_width_emu = total_width_emu.0,
+                "STORY-087: FrameContent::ColorBar not yet drawn in PDF — \
+                 full filled-rectangle rendering pending implementer TDD green pass"
+            );
+        },
     }
     Ok(())
 }
@@ -863,7 +877,9 @@ pub(crate) fn body_item_baselines(
             | ContentBlock::Math(_)
             | ContentBlock::Image(_)
             | ContentBlock::Table(_)
-            | ContentBlock::Shape(_) => {},
+            | ContentBlock::Shape(_)
+            // STORY-087 pass-2: ColorBar is geometry-only — no cursor advance.
+            | ContentBlock::ColorBar(_) => {},
         }
     }
 
@@ -1056,7 +1072,9 @@ fn draw_body_blocks(
             | ContentBlock::Math(_)
             | ContentBlock::Image(_)
             | ContentBlock::Table(_)
-            | ContentBlock::Shape(_) => {},
+            | ContentBlock::Shape(_)
+            // STORY-087 pass-2: ColorBar is geometry-only — no body draw.
+            | ContentBlock::ColorBar(_) => {},
         }
     }
 }
@@ -1185,7 +1203,10 @@ fn draw_body_blocks_tagged(
                 | ContentBlock::Image(_)
                 | ContentBlock::Chart(_)
                 | ContentBlock::Diagram(_)
-                | ContentBlock::Shape(_) => {},
+                | ContentBlock::Shape(_)
+                // STORY-087 pass-2: ColorBar is geometry-only; produces_structure_group()
+                // returns false so this arm is only reachable if logic changes. No draw.
+                | ContentBlock::ColorBar(_) => {},
             }
 
             surface.end_tagged();

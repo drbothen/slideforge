@@ -793,4 +793,77 @@ mod tests {
     fn test_value_range_validator_id() {
         assert_eq!(ValueRangeValidator.id(), "value-range");
     }
+
+    // ── §10.3 — empty components check ───────────────────────────────────────
+    //
+    // Architect pass-2 adjudication §7 (F-087-P2-001) / BC-1.17.003 postcondition 3:
+    // `components: []` (empty list) → E-VAL-011 with message containing
+    // "at least one component".
+    //
+    // RED GATE: the current `validate_weighted_composite_components` silently
+    // returns when the list is empty (early-return arm without a diagnostic).
+    // This test will FAIL until the implementer adds the empty-list arm
+    // per architect adjudication §7.
+
+    /// BC-1.17.003 PC-3 / F-087-P2-001 / adjudication §7:
+    /// `weighted_composite` with `components: []` (empty list) → exactly 1 E-VAL-011
+    /// diagnostic with message containing "at least one component".
+    ///
+    /// RED GATE: the current `validate_weighted_composite_components` returns
+    /// early for an empty list WITHOUT emitting E-VAL-011 (the deferral comment
+    /// "Empty-components validation is a separate concern" is overridden by
+    /// architect adjudication §7 under the no-MVP canonical principle).
+    #[test]
+    fn test_BC_1_17_003_empty_components_is_error() {
+        let mut fields: OrderedMap<Arc<str>, FieldValue> = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Vendor A"))),
+        );
+        fields.insert(
+            Arc::from("label"),
+            FieldValue::Literal(Value::Str(Arc::from("Overall: Good"))),
+        );
+        // Empty list — this is the case that must produce E-VAL-011.
+        fields.insert(
+            Arc::from("components"),
+            FieldValue::Literal(Value::List(vec![])),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("weighted_composite"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+        };
+        let deck = make_deck(vec![slide]);
+        let diags = ValueRangeValidator.validate(&deck, &default_opts());
+
+        let val_011_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == E_VAL_011)
+            .collect();
+
+        assert_eq!(
+            val_011_errors.len(),
+            1,
+            "RED GATE: weighted_composite with components=[] must produce exactly 1 E-VAL-011. \
+             Current code silently returns for empty list (deferral comment overridden by \
+             architect adjudication F-087-P2-001 §7). Implement the empty-list arm per §7. \
+             Got diagnostics: {diags:?}"
+        );
+        assert!(
+            val_011_errors[0].message.contains("at least one component"),
+            "E-VAL-011 message must contain 'at least one component'; got: {}",
+            val_011_errors[0].message
+        );
+        assert_eq!(
+            val_011_errors[0].severity,
+            slideforge_plugin_api::DiagnosticSeverity::Error,
+            "E-VAL-011 must have Error severity (strict-mode fatal)"
+        );
+    }
 }

@@ -66,3 +66,10 @@ mod e2e_story_086_content_threading;
 // weighted_composite tests are #[ignore]'d pending STORY-088 DSL list-literal support.
 #[path = "e2e/story_087_value_range.rs"]
 mod e2e_story_087_value_range;
+
+// STORY-087 pass-2 — AC-002/008/015 content rendering Red Gate tests (§10.4).
+// Tests that label text and ColorBar frames are VISIBLE in the LaidOutDeck output.
+// Programmatic (SID-1) path: directly constructs Slide.blocks bypassing the parser.
+// RED GATE: layout::run has no ColorLabel arm or ColorBar materialization pass yet.
+#[path = "e2e/story_087_content_rendering.rs"]
+mod e2e_story_087_content_rendering;
