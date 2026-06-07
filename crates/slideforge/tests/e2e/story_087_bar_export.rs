@@ -70,7 +70,9 @@ use slideforge_layout::types::{
 };
 use slideforge_pdf::PdfExporter;
 use slideforge_plugin_api::ExportOptions;
-use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, SourceSpan};
+use slideforge_types::{
+    Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, SourceSpan,
+};
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -137,7 +139,11 @@ fn progress_bar_laid_out_deck() -> LaidOutDeck {
                 content: FrameContent::ColorBar {
                     filled_width_emu: filled_width,
                     total_width_emu: total_width,
-                    color: Rgb { r: 0, g: 112, b: 192 }, // #0070C0 brand primary
+                    color: Rgb {
+                        r: 0,
+                        g: 112,
+                        b: 192,
+                    }, // #0070C0 brand primary
                 },
                 text_flow: None,
                 region_role: None,
@@ -345,7 +351,8 @@ fn test_BC_1_17_002_html_bar_render_build_level() {
     // BC-1.17.002 PC-9 for HTML requires "filled rectangle". The HTML exporter is
     // expected to emit either an SVG <rect> element or a styled <div> with an inline
     // `style="width:75%"` (or equivalent). Either form satisfies PC-9 "filled rectangle".
-    let has_bar = html.contains("<rect") || html.contains("width:75%") || html.contains("width: 75%");
+    let has_bar =
+        html.contains("<rect") || html.contains("width:75%") || html.contains("width: 75%");
     assert!(
         has_bar,
         "BC-1.17.002 PC-9 HTML Red Gate: HTML output must contain a filled bar element \
@@ -378,9 +385,10 @@ fn test_BC_1_17_002_html_bar_render_build_level() {
 fn test_BC_1_17_002_html_bar_render_layout_ir_proxy() {
     use slideforge_layout::FrameContent;
     use slideforge_types::{
-        Block, Brand as TypesBrand, BrandFonts as TypesBrandFonts, BrandPalette as TypesBrandPalette,
-        ColorBarSpec, ContentBlock, Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap as TypesOrderedMap,
-        Slide, SourceSpan as TypesSourceSpan, TextBlock, TextTag, Value,
+        Block, Brand as TypesBrand, BrandFonts as TypesBrandFonts,
+        BrandPalette as TypesBrandPalette, ColorBarSpec, ContentBlock, Deck, DeckMetadata,
+        FieldValue, InlineNode, OrderedMap as TypesOrderedMap, Slide,
+        SourceSpan as TypesSourceSpan, TextBlock, TextTag, Value,
     };
 
     fn make_brand_for_layout() -> TypesBrand {
@@ -473,8 +481,11 @@ fn test_BC_1_17_002_html_bar_render_layout_ir_proxy() {
         color_bar_frames.len()
     );
 
-    if let FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } =
-        &color_bar_frames[0].content
+    if let FrameContent::ColorBar {
+        filled_width_emu,
+        total_width_emu,
+        ..
+    } = &color_bar_frames[0].content
     {
         assert!(
             filled_width_emu.0 > 0,
