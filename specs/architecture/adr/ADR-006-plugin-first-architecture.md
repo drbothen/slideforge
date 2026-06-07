@@ -47,3 +47,14 @@ BrandProvider, SlideType, SectionType, InlineFormat.
 **Testing:** Each bundled plugin has its own unit tests. The plugin API itself is tested
 by the fact that every bundled feature goes through it — the bundled plugins ARE the
 integration test suite for the API.
+
+## Related ADRs
+
+- **ADR-016** — extends plugin-first architecture by specifying PluginRegistryBuilder
+  ownership, surface ownership corrections (SectionType/InlineFormat in plugin-api),
+  and root-crate pipeline driver role.
+- **ADR-020** — extends the `SlideType` plugin surface schema by adding `FieldType` enum
+  and `expected_type: Option<FieldType>` to `FieldDef`, enabling schema-driven
+  field-value type validation (E-VAL-104). The constructor API (`FieldDef::new`,
+  `FieldDef::with_type`) established in ADR-020 is the go-forward policy for all
+  plugin-api schema structs.

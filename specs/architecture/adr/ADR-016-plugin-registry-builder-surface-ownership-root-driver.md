@@ -140,3 +140,15 @@ any plugin trait implementations.
 - STORY-085: Delivers `DefaultInlineFormat` (12 variants × 3 formats) + refactors
   `slideforge-pptx` inline serialization to route through the plugin trait.
 STORY-049 (Plugin Registry Assembly) depends on all three being merged.
+
+## Related ADRs
+
+- **ADR-006** — establishes the plugin-first architecture and 10-surface model that
+  this ADR extends with registry builder semantics and surface ownership corrections.
+- **ADR-019** — amends Decision 3 of this ADR by inserting Stage 2b (field-to-block
+  threading) into the pipeline stage enumeration. See Amendment Log above.
+- **ADR-020** — extends the `FieldDef` schema struct (co-located with `SlideType` in
+  SS-14) with `FieldType` enum and `expected_type: Option<FieldType>` for schema-driven
+  field-value validation. ADR-020 also establishes `#[non_exhaustive]` + constructor
+  API as the go-forward policy for plugin-api schema structs, complementing Decision 1's
+  `PluginRegistryBuilder` pattern for plugin-api extension types.
