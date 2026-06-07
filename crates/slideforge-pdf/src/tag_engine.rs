@@ -374,16 +374,17 @@ impl SlideTagEngine {
                 // a spurious unmarked-content finding without falsely claiming it as
                 // a tagged Figure.
                 //
-                // Full PDF/UA-1 Figure tagging with `/Alt` text (e.g., "75% filled bar")
-                // requires PDF draw ops and a Figure structure element in the content
-                // stream, deferred to STORY-091 (PDF ColorBar filled-rectangle via
-                // krilla content stream).
+                // The draw pass in exporter.rs renders the bar as a filled rectangle
+                // wrapped in `/Artifact BMC … EMC` (BC-1.17.002 PC-9 / STORY-087).
+                // Upgrading to a full PDF/UA-1 Figure structure element with `/Alt`
+                // text (e.g., "75% filled bar") is a future enhancement; the current
+                // Artifact tagging satisfies PDF/UA-1 for decorative visual elements.
                 FrameContent::ColorBar { .. } => {
                     tracing::debug!(
                         frame_idx,
                         "FrameContent::ColorBar marked as PDF Artifact; \
-                         label text is in adjacent ColorLabel frame; \
-                         full Figure tagging deferred to STORY-091"
+                         filled rectangle drawn by exporter draw_color_bar_rect; \
+                         label text is in adjacent ColorLabel frame (BC-1.17.002 PC-9)"
                     );
                     decorative_frame_indices.push(frame_idx);
                 },
