@@ -81,3 +81,13 @@ mod e2e_story_087_content_rendering;
 // RED GATE: PDF ColorBar arm is tracing::debug! no-op; DOCX has no ColorBar arm.
 #[path = "e2e/story_087_bar_export.rs"]
 mod e2e_story_087_bar_export;
+
+// Wave 4 Gate-5 — BC-1.16.001 PC-10 image-slide src+alt Red Gate tests.
+// AC-GATE5-001: image+src+alt → build Ok + PPTX descr (passes pre-fix: threading already reads "src").
+// AC-GATE5-002: image+image_keyword+alt → Err(E-A11-001) pre-fix, Ok post-fix (TRUE RED GATE).
+// AC-GATE5-003: image+src+no-alt → Err(E-A11-001) always (WCAG regression guard).
+// AC-GATE5-004: screenshot+src+alt → build Ok + PPTX descr.
+// AC-GATE5-005: known_fields("image"/"screenshot"/"bio") must contain "src" not "image"
+//               (TRUE RED GATE unit test — currently FAILS: known_fields has "image").
+#[path = "e2e/wave4_gate5_image_alt.rs"]
+mod e2e_wave4_gate5_image_alt;

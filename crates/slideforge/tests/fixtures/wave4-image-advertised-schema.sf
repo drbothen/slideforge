@@ -1,0 +1,22 @@
+# Wave 4 Gate-5 fixture: image slide with the ADVERTISED schema keyword `image` + alt.
+#
+# Used by: test_bc_1_16_001_wave4_gate5_image_advertised_keyword_fails_e_a11_001
+# (negative Red Gate — proves the defect: `image` keyword not threaded → E-A11-001)
+#
+# This fixture uses the `image` field name as advertised in image.rs required_fields()
+# and known_fields.rs. Stage 2b threading reads "src" NOT "image", so no
+# ContentBlock::Image is emitted → layout retains AltText::Unspecified → strict
+# validation fires E-A11-001 even though a valid alt is supplied.
+#
+# This test FAILS BEFORE THE FIX (E-A11-001 fires).
+# After the fix (image.rs + known_fields.rs aligned to "src"), a user authoring
+# with "image" keyword would get an unknown-field warning but no blocking error
+# at the threading level (the field simply won't thread).
+
+slideforge_version "1"
+lang "en-US"
+
+slide image:
+  title "Product Screenshot"
+  image "screenshot.png"
+  alt "The main dashboard showing Q3 metrics"
