@@ -784,7 +784,7 @@ fn draw_frame(
             color,
             ..
         } => {
-            draw_color_bar_rect(surface, bbox, *filled_width_emu, color);
+            draw_color_bar_rect(surface, bbox, *filled_width_emu, *color);
         },
     }
     Ok(())
@@ -812,7 +812,7 @@ fn draw_frame(
 /// The bar is tagged as a PDF Artifact by `tag_engine.rs` (pushed into
 /// `decorative_frame_indices`). The call-site in the draw loop wraps Artifact
 /// frames with `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`).
-/// WCAG accessibility co-encoding is provided by the adjacent ColorLabel
+/// WCAG accessibility co-encoding is provided by the adjacent `ColorLabel`
 /// (Body-role) text frame that renders the percentage label.
 ///
 /// ## Coordinate policy
@@ -829,7 +829,7 @@ fn draw_color_bar_rect(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,
     filled_width_emu: slideforge_layout::types::Emu,
-    color: &Rgb,
+    color: Rgb,
 ) {
     if filled_width_emu.0 <= 0 {
         // Zero or negative fill width — nothing to draw (0% progress).
