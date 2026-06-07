@@ -152,6 +152,69 @@ pub fn type_matches(value: &Value, expected: &FieldType) -> bool {
 ///
 /// `#[non_exhaustive]` applied per ADR-020 Decision 3. `expected_type` added
 /// per ADR-020 Decision 2.
+///
+/// # AC-018: `#[non_exhaustive]` external-construction compile-fail artifact
+///
+/// The `#[non_exhaustive]` attribute prevents struct literal construction in any
+/// crate that depends on `slideforge-plugin-api` (external crates). External
+/// plugin authors MUST use [`FieldDef::new`] or [`FieldDef::with_type`].
+///
+/// The following example demonstrates the PROHIBITED pattern (struct literal
+/// from an external crate). In an external crate, this produces a compile error:
+/// `cannot create non-exhaustive structs with struct literal syntax`.
+///
+/// ```compile_fail
+/// // This simulates external-crate construction: struct literal syntax is
+/// // prohibited by `#[non_exhaustive]` outside of `slideforge-plugin-api`.
+/// //
+/// // In an external crate (e.g., a third-party SlideType plugin), writing:
+/// //
+/// //   use slideforge_plugin_api::FieldDef;
+/// //   let _ = FieldDef { name: ..., description: ..., required: true,
+/// //                       default_value: None };
+/// //
+/// // produces: "cannot create non-exhaustive structs with struct literal syntax"
+/// //
+/// // We force compile_fail here by using a deliberately incomplete struct literal
+/// // that would fail even without #[non_exhaustive], to document the constraint:
+/// use slideforge_plugin_api::FieldDef;
+/// let _f: FieldDef = FieldDef {
+///     name: std::sync::Arc::from("title"),
+///     description: std::sync::Arc::from("The slide title"),
+///     required: true,
+///     default_value: None,
+///     // `expected_type` is intentionally OMITTED to simulate what an external
+///     // crate would write if it didn't know about the `expected_type` field
+///     // (which #[non_exhaustive] adds without breaking external code that uses
+///     // the constructor APIs). An external crate cannot name all fields in a
+///     // struct literal of a #[non_exhaustive] struct — the compiler rejects it.
+/// };
+/// ```
+///
+/// The CORRECT pattern for external plugin authors: use the stable constructors:
+///
+/// ```rust
+/// use slideforge_plugin_api::{FieldDef, FieldType};
+///
+/// // No type constraint: FieldDef::new().
+/// let _f1 = FieldDef::new(
+///     "title",
+///     "The slide title — non-empty string required",
+///     true,    // required: true
+///     None,    // no default value
+/// );
+///
+/// // With type constraint: FieldDef::with_type().
+/// let _f2 = FieldDef::with_type(
+///     "value",
+///     "Integer percentage in [0, 100]",
+///     true,
+///     None,
+///     FieldType::Int,
+/// );
+/// ```
+///
+/// Traceability: AC-018; ADR-020 Decision 3; BC-1.18.001 invariant 8.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FieldDef {

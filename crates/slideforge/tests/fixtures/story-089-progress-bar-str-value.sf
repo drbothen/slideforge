@@ -1,0 +1,38 @@
+# STORY-089 fixture: progress_bar slide with value "fifty" (Str instead of Int).
+#
+# Canonical test vector for AC-009 / AC-010 E-VAL-104 field-schema wiring tests.
+#
+# BC-1.18.001 postcondition 2 (T1 type-mismatch):
+#   The `value` field on `progress_bar` has expected_type: Some(FieldType::Int).
+#   Providing a string literal "fifty" produces a Value::Str, which does NOT match
+#   FieldType::Int. The FieldSchemaValidator (once wired into Stage 5) must emit
+#   E-VAL-104 with a T1 message: "expected integer, got string".
+#
+# Used by:
+#   test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104
+#   test_BC_1_18_001_ac010_warn_only_progress_bar_str_value_returns_ok
+#   test_BC_1_18_001_ac009_positive_int_value_strict_ok (negative control)
+#   test_BC_1_18_001_ac009_chart_no_data_strict_ok (regression intent)
+#
+# Expected AC-009 behavior (post-wiring):
+#   build() with strict=true → Err(BuildError::ValidationFailed)
+#   ValidationFailed.diagnostics contains at least one diagnostic with code "E-VAL-104".
+#
+# Expected AC-010 behavior (post-wiring):
+#   build() with strict=false → Ok(BuildOutput) (warn-only: diagnostics demoted to warnings).
+#   BuildOutput has no diagnostics field — the warn-only path emits E-VAL-104 via
+#   tracing::warn! only. Callers cannot inspect diagnostics from Ok(BuildOutput).
+#   (See build_inner: Stage 5 → if options.strict { return Err } else { continue }.)
+#
+# Red Gate (pre-wiring, current state):
+#   No FieldSchemaValidator is registered. validate_fields() is a dead letter — never
+#   called from build_inner(). build() returns Ok for this fixture in both strict and
+#   warn-only mode. AC-009 FAILS (expects Err, gets Ok).
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "fifty percent complete"
+  value "fifty"
