@@ -59,3 +59,25 @@ mod e2e_multi_format;
 // AC-001 through AC-007, AC-018 (positive content vectors + alt-text discrimination).
 #[path = "e2e/story_086_content_threading.rs"]
 mod e2e_story_086_content_threading;
+
+// STORY-087 — F-087-P1-001 value-range enforcement Red Gate tests
+// Proves ValueRangeValidator is wired at Stage 5, reachable from build().
+// progress_bar value=101 and value=-1 FAIL at Red Gate (no validator yet).
+// weighted_composite tests are #[ignore]'d pending STORY-088 DSL list-literal support.
+#[path = "e2e/story_087_value_range.rs"]
+mod e2e_story_087_value_range;
+
+// STORY-087 pass-2 — AC-002/008/015 content rendering Red Gate tests (§10.4).
+// Tests that label text and ColorBar frames are VISIBLE in the LaidOutDeck output.
+// Programmatic (SID-1) path: directly constructs Slide.blocks bypassing the parser.
+// RED GATE: layout::run has no ColorLabel arm or ColorBar materialization pass yet.
+#[path = "e2e/story_087_content_rendering.rs"]
+mod e2e_story_087_content_rendering;
+
+// STORY-087 pass-3 — BC-1.17.002 PC-9 bar-render Red Gate tests for PDF, HTML, DOCX.
+// These tests prove the progress_bar bar is rendered visibly in ALL output formats
+// (PC-9 requires ALL exporters, not just PPTX). HTML exporter not yet registered;
+// PDF uses export_uncompressed boundary test; DOCX uses build()-level test.
+// RED GATE: PDF ColorBar arm is tracing::debug! no-op; DOCX has no ColorBar arm.
+#[path = "e2e/story_087_bar_export.rs"]
+mod e2e_story_087_bar_export;

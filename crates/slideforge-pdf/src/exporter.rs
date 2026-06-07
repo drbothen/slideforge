@@ -61,7 +61,7 @@
 use krilla::Document;
 use krilla::color::rgb;
 use krilla::configure::{Configuration, Validator};
-use krilla::geom::Point;
+use krilla::geom::{PathBuilder, Point, Rect};
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
@@ -69,7 +69,7 @@ use krilla::paint::{Fill, FillRule};
 use krilla::tagging::{ArtifactType, ContentTag};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
-use slideforge_layout::types::{BoundingBox, FrameContent};
+use slideforge_layout::types::{BoundingBox, FrameContent, Rgb};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
@@ -764,8 +764,129 @@ fn draw_frame(
         | FrameContent::Image { .. }
         | FrameContent::Shape(_)
         | FrameContent::Empty => {},
+
+        // ColorBar — PDF filled rectangle (BC-1.17.002 PC-9).
+        //
+        // The bar frame is tagged as a PDF Artifact by `tag_engine.rs`
+        // (pushed into `decorative_frame_indices`). At the call-site in the
+        // draw loop, Artifact frames are wrapped with
+        // `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`),
+        // which suppresses the bar from the PDF logical structure tree.
+        // WCAG accessibility co-encoding is satisfied by the adjacent
+        // ColorLabel (Body-role) text frame that renders the percentage label.
+        //
+        // Drawing: uses krilla's PathBuilder to build a rectangle path at the
+        // filled sub-width, then sets the brand fill color and calls
+        // `surface.draw_path()`.  All coordinate conversions go through
+        // `coords::emu_to_pt()` (BC-4.03.005 / Architecture Compliance Rule 2).
+        FrameContent::ColorBar {
+            filled_width_emu,
+            color,
+            ..
+        } => {
+            draw_color_bar_rect(surface, bbox, *filled_width_emu, *color);
+        },
     }
     Ok(())
+}
+
+/// Draw a filled rectangle for a `FrameContent::ColorBar` onto a krilla `Surface`.
+///
+/// ## PDF content-stream operators emitted
+///
+/// With `compress_content_streams: false` (used by `export_uncompressed`), krilla
+/// emits the following PDF operators into the content stream:
+///
+/// ```text
+/// <r_norm> <g_norm> <b_norm> rg     % set non-stroke (fill) color
+/// <x> <y> <w> <h> re                % append rectangle path
+/// f                                  % fill (even-odd or non-zero)
+/// ```
+///
+/// The `re ` operator (ISO 32000-1 §8.5.2, Table 59) is what
+/// `test_BC_1_17_002_pdf_bar_rendered_in_content_stream` scans for in the
+/// uncompressed PDF bytes (BC-1.17.002 PC-9 / F-087-P3-001).
+///
+/// ## Tagging contract
+///
+/// The bar is tagged as a PDF Artifact by `tag_engine.rs` (pushed into
+/// `decorative_frame_indices`). The call-site in the draw loop wraps Artifact
+/// frames with `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`).
+/// WCAG accessibility co-encoding is provided by the adjacent `ColorLabel`
+/// (Body-role) text frame that renders the percentage label.
+///
+/// ## Coordinate policy
+///
+/// All EMU-to-point conversions use `coords::emu_to_pt()` (BC-4.03.005 /
+/// Architecture Compliance Rule 2). The krilla Surface is top-left, Y-down;
+/// no `ir_y_to_pdf_y` flip is applied (DIR-044-001).
+///
+/// ## No-op on empty bar
+///
+/// When `filled_width_emu.0 == 0` the bar is zero-width; no path is emitted.
+/// This is correct behavior (0% progress = nothing to draw).
+fn draw_color_bar_rect(
+    surface: &mut krilla::surface::Surface<'_>,
+    bbox: &BoundingBox,
+    filled_width_emu: slideforge_layout::types::Emu,
+    color: Rgb,
+) {
+    if filled_width_emu.0 <= 0 {
+        // Zero or negative fill width — nothing to draw (0% progress).
+        tracing::debug!(
+            filled_width_emu = filled_width_emu.0,
+            "ColorBar: zero filled_width_emu; skipping PDF rectangle draw"
+        );
+        return;
+    }
+
+    let x_pt = emu_to_pt(bbox.x);
+    let y_pt = emu_to_pt(bbox.y);
+    let w_pt = emu_to_pt(filled_width_emu);
+    let h_pt = emu_to_pt(bbox.height);
+
+    // Build a rectangle path at the filled sub-width.
+    //
+    // `Rect::from_xywh` returns `None` when w or h is non-positive or non-finite.
+    // We guard with `filled_width_emu.0 <= 0` above; `emu_to_pt` is monotone and
+    // returns a positive value for a positive EMU input, so `from_xywh` succeeds.
+    let Some(rect) = Rect::from_xywh(x_pt, y_pt, w_pt, h_pt) else {
+        tracing::debug!(
+            x_pt,
+            y_pt,
+            w_pt,
+            h_pt,
+            "ColorBar: Rect::from_xywh returned None (degenerate dimensions); skipping draw"
+        );
+        return;
+    };
+
+    let mut pb = PathBuilder::new();
+    pb.push_rect(rect);
+    let Some(path) = pb.finish() else {
+        tracing::debug!("ColorBar: PathBuilder::finish() returned None; skipping draw");
+        return;
+    };
+
+    // Set the brand fill color (from the ColorBar IR).
+    surface.set_fill(Some(Fill {
+        paint: rgb::Color::new(color.r, color.g, color.b).into(),
+        opacity: NormalizedF32::ONE,
+        rule: FillRule::NonZero,
+    }));
+    surface.set_stroke(None);
+    surface.draw_path(&path);
+
+    tracing::debug!(
+        x_pt,
+        y_pt,
+        w_pt,
+        h_pt,
+        r = color.r,
+        g = color.g,
+        b = color.b,
+        "ColorBar: filled rectangle drawn in PDF content stream"
+    );
 }
 
 /// Standard line-height leading multiplier used in body text stacking.
@@ -863,7 +984,9 @@ pub(crate) fn body_item_baselines(
             | ContentBlock::Math(_)
             | ContentBlock::Image(_)
             | ContentBlock::Table(_)
-            | ContentBlock::Shape(_) => {},
+            | ContentBlock::Shape(_)
+            // STORY-087 pass-2: ColorBar is geometry-only — no cursor advance.
+            | ContentBlock::ColorBar(_) => {},
         }
     }
 
@@ -1056,7 +1179,9 @@ fn draw_body_blocks(
             | ContentBlock::Math(_)
             | ContentBlock::Image(_)
             | ContentBlock::Table(_)
-            | ContentBlock::Shape(_) => {},
+            | ContentBlock::Shape(_)
+            // STORY-087 pass-2: ColorBar is geometry-only — no body draw.
+            | ContentBlock::ColorBar(_) => {},
         }
     }
 }
@@ -1185,7 +1310,10 @@ fn draw_body_blocks_tagged(
                 | ContentBlock::Image(_)
                 | ContentBlock::Chart(_)
                 | ContentBlock::Diagram(_)
-                | ContentBlock::Shape(_) => {},
+                | ContentBlock::Shape(_)
+                // STORY-087 pass-2: ColorBar is geometry-only; produces_structure_group()
+                // returns false so this arm is only reachable if logic changes. No draw.
+                | ContentBlock::ColorBar(_) => {},
             }
 
             surface.end_tagged();

@@ -55,6 +55,7 @@ pub mod presentation;
 pub mod rels;
 pub mod slide_ids;
 pub mod slide_serializer;
+pub mod xml_escape;
 pub mod zip_assembler;
 
 #[cfg(test)]

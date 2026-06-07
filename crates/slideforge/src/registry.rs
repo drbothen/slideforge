@@ -39,7 +39,7 @@ use slideforge_diagrams::DiagramRendererImpl;
 // ── Surface 5: Validator ──────────────────────────────────────────────────────
 use slideforge_validate::{
     AltTextValidator, CanvasOverflowValidator, LabelCheckValidator, LangValidator,
-    ValidationConfig, ZeroSlideValidator,
+    ValidationConfig, ValueRangeValidator, ZeroSlideValidator,
 };
 
 // ── Surface 6: MathRenderer ───────────────────────────────────────────────────
@@ -57,12 +57,14 @@ use slideforge_plugin_api::slide_types::{
     executive_summary::ExecutiveSummarySlideType, financials::FinancialsSlideType,
     image::ImageSlideType, kpi_dashboard::KpiDashboardSlideType, matrix::MatrixSlideType,
     org_chart::OrgChartSlideType, problem_statement::ProblemStatementSlideType,
-    process_flow::ProcessFlowSlideType, quote::QuoteSlideType,
+    process_flow::ProcessFlowSlideType, progress_bar::ProgressBarSlideType, quote::QuoteSlideType,
     recommendation::RecommendationSlideType, risk_register::RiskRegisterSlideType,
     roadmap::RoadmapSlideType, screenshot::ScreenshotSlideType,
     section_break::SectionBreakSlideType, stat_callout::StatCalloutSlideType,
-    survey_results::SurveyResultsSlideType, team::TeamSlideType, timeline::TimelineSlideType,
-    title::TitleSlideType, toc::TocSlideType, two_col::TwoColSlideType, video::VideoSlideType,
+    status::StatusSlideType, survey_results::SurveyResultsSlideType, team::TeamSlideType,
+    timeline::TimelineSlideType, title::TitleSlideType, toc::TocSlideType,
+    two_col::TwoColSlideType, video::VideoSlideType,
+    weighted_composite::WeightedCompositeSlideType,
 };
 use slideforge_plugin_api::{
     AppendixSectionType, ApprovalSectionType, DefaultInlineFormat, ExecutiveSummarySectionType,
@@ -78,6 +80,10 @@ use slideforge_plugin_api::{
 /// After this call, `builder` has at least one plugin registered for each
 /// of the 10 required surfaces. Calling `builder.build()` will return
 /// `Ok(PluginRegistry)`.
+///
+/// Surface 8 (`SlideType`) registers all 34 bundled implementations:
+/// 31 original types (STORY-003) + `status`, `progress_bar`, `weighted_composite`
+/// (STORY-087, BC-1.17.001/002/003).
 ///
 /// ## Traceability
 ///
@@ -111,6 +117,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
         &ValidationConfig::default(),
     )));
     builder.register_validator(Box::new(LabelCheckValidator));
+    builder.register_validator(Box::new(ValueRangeValidator));
     builder.register_validator(Box::new(LangValidator));
 
     // ── Surface 6: MathRenderer (1 bundled implementation — pulldown-latex) ──
@@ -122,7 +129,9 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     builder.register_brand_provider(Box::new(BrandLoader::new()));
     builder.register_brand_provider(Box::new(BrandSynthesizer));
 
-    // ── Surface 8: SlideType (31 bundled implementations) ────────────────────
+    // ── Surface 8: SlideType (34 bundled implementations) ────────────────────
+    // 31 original types (STORY-003) + 3 color-coded types (STORY-087):
+    // status, progress_bar, weighted_composite (BC-1.17.001/002/003).
     builder.register_slide_type(Box::new(TitleSlideType::new()));
     builder.register_slide_type(Box::new(SectionBreakSlideType::new()));
     builder.register_slide_type(Box::new(ContentSlideType::new()));
@@ -154,6 +163,10 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     builder.register_slide_type(Box::new(OrgChartSlideType::new()));
     builder.register_slide_type(Box::new(RoadmapSlideType::new()));
     builder.register_slide_type(Box::new(ClosingSlideType::new()));
+    // Color-coded status types (STORY-087 — BC-1.17.001/002/003)
+    builder.register_slide_type(Box::new(StatusSlideType::new()));
+    builder.register_slide_type(Box::new(ProgressBarSlideType::new()));
+    builder.register_slide_type(Box::new(WeightedCompositeSlideType::new()));
 
     // ── Surface 9: SectionType (7 bundled implementations) ───────────────────
     // All 7 section types are unit structs from slideforge-plugin-api/src/section_types/.

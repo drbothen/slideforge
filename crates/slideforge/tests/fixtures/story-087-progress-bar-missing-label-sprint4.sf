@@ -1,0 +1,18 @@
+# STORY-087 pass-5 fixture: progress_bar slide with title "Sprint 4", value 65, NO label.
+#
+# Used by:
+#   - test_BC_1_17_002_ac009_progress_bar_missing_label_message_contains_title
+#     (P05-HIGH-001 Red Gate: E-A11-002 message must contain "progress_bar" AND "Sprint 4")
+#
+# BC-1.17.002 PC2 mandates the message format:
+#   Missing label on color-coded element 'progress_bar' '<title-value>' at <file>:<line>:<col>.
+#   Color alone must not convey meaning. Add label "...".
+#
+# BC-1.17.002 EC-001 uses title "Sprint 4" as the canonical missing-label input.
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4"
+  value 65

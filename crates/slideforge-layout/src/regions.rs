@@ -1,4 +1,7 @@
-//! Region maps for the 32 built-in slide types.
+//! Region maps for the built-in slide types.
+//!
+//! Started with 32 types; STORY-087 added `status`, `progress_bar`, and
+//! `weighted_composite` (total: 35).
 //!
 //! A region map defines the canonical [`BoundingBox`] for each content frame
 //! within a slide type, computed relative to the default 16:9 widescreen page
@@ -43,10 +46,10 @@ use crate::types::{
 /// A `Vec<Frame>` with `FrameContent::Empty` placeholders, ordered
 /// semantically (title before subtitle/body). The implementer will fill
 /// `FrameContent` variants with resolved content in `layout::run`.
-// This function is a data-driven region map for 32 built-in slide types.
+// This function is a data-driven region map for the built-in slide types.
 // Its length exceeds the clippy::too_many_lines limit by design — a match
-// over 32 named slide types is inherently long and is the correct structure
-// for this data. Each arm is a named slide type with its canonical geometry.
+// over the full set of named slide types is inherently long and is the correct
+// structure for this data. Each arm is a named slide type with its geometry.
 //
 // Several slide types share the standard two-region layout (title header +
 // full-width body) and are merged into a single arm to satisfy
@@ -366,6 +369,113 @@ pub fn region_frames_for(
             },
         ],
 
+        // ── status ────────────────────────────────────────────────────────
+        // Static skeleton: color indicator strip (left) + label/title body (right).
+        // Value-proportional geometry (color fill width) is computed in
+        // StatusSlideType::lay_out(), which has access to the slide fields.
+        // Frame 0 (color indicator): 0.5in, 0.4in, 0.75in, 4.5in
+        // Frame 1 (label + title):   1.5in, 0.4in, 8.0in,  4.5in
+        "status" => vec![
+            Frame {
+                bbox: bbox(457_200, 365_760, 685_800, 4_114_800),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            Frame {
+                bbox: bbox(1_371_600, 365_760, 7_315_200, 4_114_800),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            },
+        ],
+
+        // ── progress_bar ──────────────────────────────────────────────────
+        // Static skeleton: title (top) + bar background (full-width strip) +
+        // label text (below bar). The bar fill frame with value-proportional
+        // width is constructed in ProgressBarSlideType::lay_out(), NOT here.
+        // Frame 0 (title):    0.5in, 0.4in, 9.0in, 0.75in
+        // Frame 1 (bar bg):   0.5in, 1.3in, 9.0in, 0.75in
+        // Frame 2 (label):    0.5in, 2.2in, 9.0in, 0.75in
+        "progress_bar" => vec![
+            Frame {
+                bbox: bbox(457_200, 365_760, 8_229_600, 685_800),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Title),
+            },
+            Frame {
+                bbox: bbox(457_200, 1_188_720, 8_229_600, 685_800),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            Frame {
+                bbox: bbox(457_200, 2_011_680, 8_229_600, 685_800),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            },
+        ],
+
+        // ── weighted_composite ────────────────────────────────────────────
+        // Static skeleton: title + aggregate label at top; 5 fixed-height
+        // component row slots (Empty frames). Since N is not known at
+        // region-skeleton time, we use 5 fixed slots. lay_out() constructs
+        // the actual per-component geometry from the resolved components field.
+        // Frame 0 (title):         0.5in, 0.3in, 9.0in, 0.55in
+        // Frame 1 (agg. label):    0.5in, 0.9in, 9.0in, 0.45in
+        // Frames 2–6 (row slots):  0.5in, 1.5in+N*0.7in, 9.0in, 0.65in (× 5)
+        "weighted_composite" => vec![
+            Frame {
+                bbox: bbox(457_200, 274_320, 8_229_600, 502_920),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Title),
+            },
+            Frame {
+                bbox: bbox(457_200, 822_960, 8_229_600, 411_480),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            },
+            // Component row slot 0
+            Frame {
+                bbox: bbox(457_200, 1_371_600, 8_229_600, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            // Component row slot 1
+            Frame {
+                bbox: bbox(457_200, 2_011_680, 8_229_600, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            // Component row slot 2
+            Frame {
+                bbox: bbox(457_200, 2_651_760, 8_229_600, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            // Component row slot 3
+            Frame {
+                bbox: bbox(457_200, 3_291_840, 8_229_600, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+            // Component row slot 4
+            Frame {
+                bbox: bbox(457_200, 3_931_920, 8_229_600, 594_360),
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Generic),
+            },
+        ],
+
         // Unknown keyword — caller should return LayoutError::UnknownSlideType
         _ => return None,
     };
@@ -485,7 +595,9 @@ mod tests {
         );
     }
 
-    /// AC-014 — All 32 built-in slide types produce valid `BoundingBox`es.
+    /// AC-014 — All built-in slide types produce valid `BoundingBox`es.
+    ///
+    /// STORY-087 added `status`, `progress_bar`, `weighted_composite` — count is now 35.
     #[test]
     fn test_bc_3_06_003_all_slide_types_valid_bounding_boxes() {
         let known_types = [
@@ -521,8 +633,12 @@ mod tests {
             "org_chart",
             "roadmap",
             "closing",
+            // STORY-087 additions (BC-1.17.001/002/003)
+            "status",
+            "progress_bar",
+            "weighted_composite",
         ];
-        assert_eq!(known_types.len(), 32, "must cover all 32 built-in types");
+        assert_eq!(known_types.len(), 35, "must cover all 35 built-in types");
         for kw in known_types {
             assert_all_valid(kw);
         }

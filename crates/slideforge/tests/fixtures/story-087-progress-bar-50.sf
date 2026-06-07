@@ -1,0 +1,21 @@
+# STORY-087 fixture: progress_bar slide with value=50 (valid, mid-range).
+#
+# Used by: test_BC_1_17_002_build_progress_bar_value_50_is_ok
+#
+# Expected: build() returns Ok(BuildOutput). No E-VAL-011 diagnostics.
+#
+# Red Gate: this test is a POSITIVE test — it expects Ok. Currently build()
+# returns Ok (no validator yet). After ValueRangeValidator is wired, it still
+# returns Ok (value=50 is in range). This test passes at Red Gate AND after
+# implementation — it is a correctness guard, not a Red Gate failing test.
+#
+# Note: this test ALSO serves as a regression guard: if the validator is
+# incorrectly implemented and emits E-VAL-011 for valid values, this test fails.
+
+slideforge_version "1"
+lang "en-US"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "50% complete"
+  value 50

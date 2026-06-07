@@ -67,7 +67,7 @@ pub use layout::run;
 pub use sections::{GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource};
 pub use types::{
     BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, LayoutWarning, PageSize,
-    RegisterSet, RegisterTag, Rgb, ShapeFrame, ShapeType, TextFlow, TextOverflow,
+    RegionRole, RegisterSet, RegisterTag, Rgb, ShapeFrame, ShapeType, TextFlow, TextOverflow,
 };
 
 #[cfg(test)]
@@ -1820,11 +1820,13 @@ mod tests {
             FrameContent::Shape(sf) => sf.text.as_deref().map_or_else(String::new, inline_text),
             // Non-text-bearing variants: Image, Chart, Diagram, Empty,
             // ErrorSlidePlaceholder. Return empty — no user text in frames.
+            // STORY-087 pass-2: ColorBar is geometry-only; no user text.
             FrameContent::Image { .. }
             | FrameContent::Chart { .. }
             | FrameContent::Diagram { .. }
             | FrameContent::Empty
-            | FrameContent::ErrorSlidePlaceholder { .. } => String::new(),
+            | FrameContent::ErrorSlidePlaceholder { .. }
+            | FrameContent::ColorBar { .. } => String::new(),
         }
     }
 

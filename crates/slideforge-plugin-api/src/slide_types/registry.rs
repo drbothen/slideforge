@@ -1,4 +1,4 @@
-//! [`SlideTypeRegistry`] — the runtime registry of all 31 built-in slide types.
+//! [`SlideTypeRegistry`] — the runtime registry of all 34 built-in slide types.
 //!
 //! The registry maps DSL keywords (e.g., `"title"`, `"content"`) to their
 //! [`SlideType`] implementations. It is the single source of truth for:
@@ -9,7 +9,12 @@
 //!
 //! ## Default registry
 //!
-//! [`SlideTypeRegistry::default`] pre-registers all 31 built-in slide types.
+//! [`SlideTypeRegistry::default`] pre-registers all 34 built-in slide types
+//! (31 original + `status`, `progress_bar`, `weighted_composite` added in STORY-087).
+//!
+//! Note: the parser keyword set (`SLIDE_TYPE_KEYWORDS` in `slideforge-syntax`) contains
+//! 35 entries — the 34 registered types plus `severity_cards`, which is a color-coded
+//! scan target without a standalone `SlideType` registration.
 //!
 //! ## Thread safety
 //!
@@ -32,12 +37,14 @@ use super::{
     executive_summary::ExecutiveSummarySlideType, financials::FinancialsSlideType,
     image::ImageSlideType, kpi_dashboard::KpiDashboardSlideType, matrix::MatrixSlideType,
     org_chart::OrgChartSlideType, problem_statement::ProblemStatementSlideType,
-    process_flow::ProcessFlowSlideType, quote::QuoteSlideType,
+    process_flow::ProcessFlowSlideType, progress_bar::ProgressBarSlideType, quote::QuoteSlideType,
     recommendation::RecommendationSlideType, risk_register::RiskRegisterSlideType,
     roadmap::RoadmapSlideType, screenshot::ScreenshotSlideType,
     section_break::SectionBreakSlideType, stat_callout::StatCalloutSlideType,
-    survey_results::SurveyResultsSlideType, team::TeamSlideType, timeline::TimelineSlideType,
-    title::TitleSlideType, toc::TocSlideType, two_col::TwoColSlideType, video::VideoSlideType,
+    status::StatusSlideType, survey_results::SurveyResultsSlideType, team::TeamSlideType,
+    timeline::TimelineSlideType, title::TitleSlideType, toc::TocSlideType,
+    two_col::TwoColSlideType, video::VideoSlideType,
+    weighted_composite::WeightedCompositeSlideType,
 };
 
 /// The runtime registry of all registered slide types.
@@ -132,11 +139,16 @@ impl SlideTypeRegistry {
 }
 
 impl Default for SlideTypeRegistry {
-    /// Create a registry pre-populated with all 31 built-in slide types.
+    /// Create a registry pre-populated with all 34 built-in slide types.
     ///
     /// Registration order matches the canonical slide type table. All types
     /// use underscore-separated keywords (e.g., `section_break`, `stat_callout`).
     /// Types are accessible by keyword via [`Self::lookup_by_keyword`].
+    ///
+    /// Count: 31 original types + `status`, `progress_bar`, `weighted_composite`
+    /// (color-coded types added in STORY-087). `severity_cards` is NOT registered
+    /// here — it is a color-coded scan target handled by region frames; its keyword
+    /// is reserved in `slideforge-syntax::keywords::SLIDE_TYPE_KEYWORDS`.
     fn default() -> Self {
         let mut r = Self::new();
         // Core presentation structure
@@ -177,6 +189,10 @@ impl Default for SlideTypeRegistry {
         r.register(Box::new(SurveyResultsSlideType::new()));
         r.register(Box::new(OrgChartSlideType::new()));
         r.register(Box::new(RoadmapSlideType::new()));
+        // Color-coded status (STORY-087 — BC-1.17.001/002/003)
+        r.register(Box::new(StatusSlideType::new()));
+        r.register(Box::new(ProgressBarSlideType::new()));
+        r.register(Box::new(WeightedCompositeSlideType::new()));
         // Closing
         r.register(Box::new(ClosingSlideType::new()));
         r
@@ -675,13 +691,16 @@ mod tests {
     // ── AC-017: all_keywords().len() == N ────────────────────────────────────
 
     /// Exercises BC-1.03.017: `all_keywords()` length matches registration count.
+    ///
+    /// STORY-087 added `status`, `progress_bar`, `weighted_composite` — count is now 34.
     #[test]
-    fn test_bc_1_03_017_all_keywords_len_equals_31() {
+    fn test_bc_1_03_017_all_keywords_len_equals_34() {
         let reg = SlideTypeRegistry::default();
         assert_eq!(
             reg.all_keywords().len(),
-            31,
-            "SlideTypeRegistry::default must register all 31 built-in slide types; \
+            34,
+            "SlideTypeRegistry::default must register all 34 built-in slide types \
+             (31 original + status + progress_bar + weighted_composite); \
              currently registers {}",
             reg.all_keywords().len()
         );
@@ -698,14 +717,20 @@ mod tests {
         assert_eq!(reg.suggest("BLANK"), Some("blank"));
     }
 
-    // ── F-011: parameterized lay_out test for all 31 types ────────────────────
+    // ── F-011: parameterized lay_out test for all 34 types ────────────────────
 
-    /// Exercises BC-1.03.012 for all 31 types: `lay_out` returns Ok for every
+    /// Exercises BC-1.03.012 for all 34 registered types: `lay_out` returns Ok for every
     /// registered slide type (not just the 4 representative ones).
+    ///
+    /// STORY-087: The 3 color-coded types (`status`, `progress_bar`,
+    /// `weighted_composite`) perform field validation in `lay_out()`. For these
+    /// types, a slide with the minimum required fields is used so `lay_out()`
+    /// returns `Ok`. The other 31 types are called with empty fields (their
+    /// `lay_out()` stubs return `Ok` regardless of fields).
     #[test]
-    fn test_all_31_types_lay_out_returns_ok() {
+    fn test_all_34_types_lay_out_returns_ok() {
         use crate::traits::Canvas;
-        use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+        use slideforge_types::{Brand, BrandFonts, BrandPalette};
 
         let brand = Brand {
             name: Arc::from("stub"),
@@ -727,7 +752,89 @@ mod tests {
         let reg = SlideTypeRegistry::default();
         for kw in reg.all_keywords() {
             let slide_type = reg.lookup_by_keyword(kw.as_ref()).unwrap();
-            let slide = make_slide(kw.as_ref(), vec![]);
+
+            // The 3 STORY-087 color-coded types validate fields in lay_out().
+            // Provide minimum required fields so they return Ok.
+            let slide = match kw.as_ref() {
+                "status" => {
+                    let mut fields = OrderedMap::new();
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Test"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("On Track"))),
+                    );
+                    Slide {
+                        slide_type: Arc::clone(kw),
+                        fields,
+                        blocks: vec![],
+                        register: None,
+                        tags: vec![],
+                        source_span: SourceSpan::default(),
+                        overlay: None,
+                        register_content: vec![],
+                    }
+                },
+                "progress_bar" => {
+                    let mut fields = OrderedMap::new();
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Progress"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("50% done"))),
+                    );
+                    fields.insert(Arc::from("value"), FieldValue::Literal(Value::Int(50)));
+                    Slide {
+                        slide_type: Arc::clone(kw),
+                        fields,
+                        blocks: vec![],
+                        register: None,
+                        tags: vec![],
+                        source_span: SourceSpan::default(),
+                        overlay: None,
+                        register_content: vec![],
+                    }
+                },
+                "weighted_composite" => {
+                    let mut comp = OrderedMap::new();
+                    comp.insert(Arc::from("name"), Value::Str(Arc::from("Quality")));
+                    comp.insert(
+                        Arc::from("weight"),
+                        Value::Float(ordered_float::OrderedFloat(0.5)),
+                    );
+                    comp.insert(Arc::from("score"), Value::Int(80));
+                    comp.insert(Arc::from("label"), Value::Str(Arc::from("Good")));
+                    let mut fields = OrderedMap::new();
+                    fields.insert(
+                        Arc::from("title"),
+                        FieldValue::Literal(Value::Str(Arc::from("Scorecard"))),
+                    );
+                    fields.insert(
+                        Arc::from("label"),
+                        FieldValue::Literal(Value::Str(Arc::from("Overall: Good"))),
+                    );
+                    fields.insert(
+                        Arc::from("components"),
+                        FieldValue::Literal(Value::List(vec![Value::Map(comp)])),
+                    );
+                    Slide {
+                        slide_type: Arc::clone(kw),
+                        fields,
+                        blocks: vec![],
+                        register: None,
+                        tags: vec![],
+                        source_span: SourceSpan::default(),
+                        overlay: None,
+                        register_content: vec![],
+                    }
+                },
+                _ => make_slide(kw.as_ref(), vec![]),
+            };
+
             let result = slide_type.lay_out(&slide, &brand, Canvas::default());
             assert!(
                 result.is_ok(),

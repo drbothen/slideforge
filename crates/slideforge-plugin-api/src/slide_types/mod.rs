@@ -7,11 +7,11 @@
 //! 2. **[`validate_fields`]** — accumulates all field-validation diagnostics
 //!    for a slide against its declared type schema.
 //! 3. **Individual slide type structs** — one per built-in type keyword.
-//!    All 31 built-in types are implemented as part of STORY-003.
+//!    34 built-in types: 31 implemented in STORY-003 + 3 color-coded types added in STORY-087.
 //! 4. **[`SLIDE_TYPE_REGISTRY`]** — a process-wide lazy singleton holding the
 //!    default registry for use by the evaluator and layout engine.
 //! 5. **[`common_optional_fields`]** — returns the universal optional fields
-//!    shared by all 31 slide types.
+//!    shared by all built-in slide types.
 //!
 //! ## Adding a new slide type
 //!
@@ -20,7 +20,9 @@
 //! 3. `pub mod <name>;` in this file
 //! 4. Add `r.register(Box::new(<Name>SlideType::new()))` in
 //!    [`SlideTypeRegistry::default`]
-//! 5. Update the assertion in `test_bc_1_03_017_all_keywords_len_equals_31`
+//! 5. Update the count assertion in `test_bc_1_03_017_all_keywords_len_equals_34`
+//!    (registry count) and the `SLIDE_TYPE_KEYWORDS` set in `slideforge-syntax::keywords`
+//!    (keyword count — currently one more than the registry due to `severity_cards`)
 
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -44,6 +46,7 @@ pub mod matrix;
 pub mod org_chart;
 pub mod problem_statement;
 pub mod process_flow;
+pub mod progress_bar;
 pub mod quote;
 pub mod recommendation;
 pub mod registry;
@@ -52,6 +55,7 @@ pub mod roadmap;
 pub mod screenshot;
 pub mod section_break;
 pub mod stat_callout;
+pub mod status;
 pub mod survey_results;
 pub mod team;
 pub mod timeline;
@@ -59,10 +63,11 @@ pub mod title;
 pub mod toc;
 pub mod two_col;
 pub mod video;
+pub mod weighted_composite;
 
 pub use registry::{SlideTypeRegistry, validate_fields};
 
-/// Returns the universal optional fields shared by all 31 built-in slide types.
+/// Returns the universal optional fields shared by all 34 built-in slide types.
 ///
 /// These fields are accepted on every slide regardless of type. Individual
 /// slide types call this function and extend their type-specific optional

@@ -17,10 +17,23 @@
 use std::sync::Arc;
 
 use slideforge_types::{
-    Block, BulletItem, ContentBlock, Deck, FieldValue, InlineNode, SourceSpan, TextBlock, TextTag,
-    Value,
+    Block, BulletItem, ColorBarSpec, ContentBlock, Deck, FieldValue, InlineNode, OrderedMap,
+    SourceSpan, TextBlock, TextTag, Value,
     specs::{AltText, ChartSpec, DiagramSpec, ImageSpec},
 };
+
+/// Maximum number of component rows rendered for a `weighted_composite` slide.
+///
+/// `slideforge-layout` pre-allocates exactly 5 Generic-role region slots for
+/// `weighted_composite` (see `slideforge_layout::regions` — "component row slot
+/// 0" through "component row slot 4"). Threading more than 5 components would
+/// generate Body blocks that find no pre-allocated Generic slot and fall through
+/// to the layout Phase-3 fallback (appending stray full-page frames).
+///
+/// BC-1.17.003 PC-9 mandates silent drop: components beyond index 4 produce no
+/// additional frame. This constant is the single source of truth for the cap.
+/// (F-087-P7-001)
+const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
 
 /// Post-eval field-to-block threading pass (Stage 2b, ADR-019).
 ///
@@ -86,6 +99,12 @@ use slideforge_types::{
 /// If `Slide.blocks` is already non-empty for a slide, this function
 /// appends to it rather than replacing it. In practice, `eval_deck`
 /// always produces `Slide.blocks = vec![]`, so this is a no-op guard.
+// The function is the chartered Stage 2b threading pass (ADR-019 Decision 3).
+// It handles 6 logical sections (title, subtitle, body, bullets, media, color-coded
+// types) each requiring their own match/if-let chains. Extracting further would
+// scatter the field-threading contract across multiple files and harm readability.
+// The allow is justified by the function's chartered monolithic threading contract.
+#[allow(clippy::too_many_lines)]
 pub fn thread_fields_to_blocks(deck: &mut Deck) {
     for slide in &mut deck.slides {
         // ── 1. Title ─────────────────────────────────────────────────────────
@@ -264,7 +283,166 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 );
             }
         }
+
+        // ── 6. Color-coded slide types (status / progress_bar / weighted_composite / stat_callout)
+        //
+        // These types carry fields beyond title/subtitle/body that encode WCAG co-encoding
+        // text (`label`) and numeric state (`value`, `components`). Stage 2b threads them
+        // into ContentBlocks so that `layout::run` can fill the pre-allocated region slots.
+        //
+        // Threading contract per architect pass-2 adjudication §4.2 (STORY-087):
+        //   "label"       → ContentBlock::Text(TextTag::ColorLabel) — Body-role slot
+        //   "value"       → ContentBlock::ColorBar(ColorBarSpec)    — Generic-role bar-fill
+        //   "components"  → ContentBlock::Text(TextTag::Body) × N  — Generic-role row slots
+        //   stat fields   → ContentBlock::Text(TextTag::Body) × N  — Generic-role stat slots
+        //
+        // Purity: this block is a pure extension; no I/O, no global state, no existing
+        // slide-type code path is modified (blast radius = zero per adjudication §5).
+        match slide_type {
+            "status" => {
+                // Thread "label" → ColorLabel (Body-role slot: wide right-side frame).
+                if let Some(text) = extract_str_field(slide, "label")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
+                }
+            },
+            "progress_bar" => {
+                // Thread "label" → ColorLabel (Body-role slot: label below bar).
+                if let Some(text) = extract_str_field(slide, "label")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
+                }
+                // Thread "value" → ColorBar (Generic-role slot: bar-fill geometry).
+                // ValueRangeValidator already rejects out-of-range values at Stage 5;
+                // clamp defensively here to prevent layout panics on invalid inputs.
+                if let Some(FieldValue::Literal(Value::Int(v))) = slide.fields.get("value") {
+                    let pct = (*v).clamp(0, 100);
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let percent = pct as u8;
+                    slide.blocks.push(Block {
+                        content: ContentBlock::ColorBar(ColorBarSpec { percent }),
+                        label: None,
+                        span: SourceSpan::default(),
+                    });
+                }
+            },
+            "weighted_composite" => {
+                // Thread "label" (aggregate) → ColorLabel (Body-role slot).
+                if let Some(text) = extract_str_field(slide, "label")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
+                }
+                // Thread each component → TextTag::Body (one per component, Generic-role slots).
+                // compose_component_row_text formats: "<name>: <score>/100 (wt: <weight>) — <label>".
+                //
+                // BC-1.17.003 PC-9: cap at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5) — exactly the
+                // number of Generic-role slots pre-allocated in `slideforge-layout/src/regions.rs`
+                // for `weighted_composite`. Components beyond index 4 produce no Body block and
+                // therefore claim no additional frame. (F-087-P7-001)
+                if let Some(FieldValue::Literal(Value::List(components))) =
+                    slide.fields.get("components")
+                {
+                    for comp_val in components
+                        .iter()
+                        .take(MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS)
+                    {
+                        if let Value::Map(comp) = comp_val {
+                            let row_text = compose_component_row_text(comp);
+                            if !row_text.is_empty() {
+                                slide
+                                    .blocks
+                                    .push(make_text_block_tagged(&row_text, TextTag::Body));
+                            }
+                        }
+                    }
+                }
+            },
+            "stat_callout" => {
+                // Thread stat_1/label_1/stat_2/label_2/stat_3/label_3 → TextTag::Body
+                // (each claims a Generic-role slot in registration order).
+                for field_name in &[
+                    "stat_1", "label_1", "stat_2", "label_2", "stat_3", "label_3",
+                ] {
+                    if let Some(text) = extract_str_field(slide, field_name)
+                        && !text.trim().is_empty()
+                    {
+                        slide
+                            .blocks
+                            .push(make_text_block_tagged(text, TextTag::Body));
+                    }
+                }
+            },
+            _ => {},
+        }
     }
+}
+
+/// Compose a single accessible text string for one `weighted_composite` component.
+///
+/// Format: `"<name>: <score>/100 (wt: <weight>) — <label>"`.
+///
+/// Any absent field is omitted from the output. The string is non-empty when at
+/// least the `name` or `score` field is present. An empty string signals to the
+/// caller that no `ContentBlock::Text` should be emitted for this component.
+///
+/// This is a pure helper — no I/O, no global state.
+fn compose_component_row_text(comp: &OrderedMap<Arc<str>, Value>) -> String {
+    use std::fmt::Write as _;
+
+    let name = match comp.get("name") {
+        Some(Value::Str(s)) => s.as_ref().to_owned(),
+        _ => String::new(),
+    };
+    let score = match comp.get("score") {
+        Some(Value::Int(n)) => Some(*n),
+        _ => None,
+    };
+    // Weight is display-only (formatted as-is); i64→f64 precision loss is
+    // acceptable here because the value is user-supplied and only used for
+    // human-readable output in the composed text string.
+    #[allow(clippy::cast_precision_loss)]
+    let weight: Option<f64> = match comp.get("weight") {
+        Some(Value::Float(f)) => Some(f.0),
+        Some(Value::Int(n)) => Some(*n as f64),
+        _ => None,
+    };
+    let label = match comp.get("label") {
+        Some(Value::Str(s)) => s.as_ref().to_owned(),
+        _ => String::new(),
+    };
+
+    if name.is_empty() && score.is_none() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    if !name.is_empty() {
+        out.push_str(&name);
+    }
+    if let Some(s) = score {
+        if !out.is_empty() {
+            out.push_str(": ");
+        }
+        // Use write! to avoid the format_push_string lint (clippy::pedantic).
+        let _ = write!(out, "{s}/100");
+    }
+    if let Some(w) = weight {
+        let _ = write!(out, " (wt: {w})");
+    }
+    if !label.is_empty() {
+        out.push_str(" \u{2014} "); // em dash
+        out.push_str(&label);
+    }
+    out
 }
 
 /// Extract a `Str` value from `slide.fields[key]` as a `&str`.

@@ -1,0 +1,15 @@
+# STORY-087 pass-2 fixture: status slide with NO label field.
+#
+# Used by:
+#   - test_AC_003_status_missing_label_is_error (strict mode → Err, E-A11-002)
+#   - test_AC_005_status_missing_label_warn_only_is_ok (warn-only → Ok)
+#
+# The LabelCheckValidator (STORY-087 pass-1) fires E-A11-002 when a color-coded
+# slide type is missing its required `label` field in strict mode.
+# In warn-only mode, the build pipeline produces a warning but returns Ok.
+
+slideforge_version "1"
+lang "en-US"
+
+slide status:
+  title "Project Alpha"

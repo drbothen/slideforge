@@ -23,5 +23,6 @@ slideforge-layout = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+ordered-float = { workspace = true }
 slideforge-eval = { workspace = true }
 slideforge-syntax = { workspace = true }

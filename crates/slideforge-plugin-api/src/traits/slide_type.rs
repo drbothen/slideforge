@@ -6,8 +6,9 @@
 //! 2. The PPTX layout name to inherit from
 //! 3. A layout algorithm that positions content on a [`Canvas`]
 //!
-//! All 31 built-in slide types are implemented as `SlideType` plugins. External
-//! plugins can register additional slide types without modifying the core.
+//! All 34 built-in slide types are implemented as `SlideType` plugins
+//! (31 original + `status`, `progress_bar`, `weighted_composite` added in STORY-087).
+//! External plugins can register additional slide types without modifying the core.
 
 use std::sync::Arc;
 

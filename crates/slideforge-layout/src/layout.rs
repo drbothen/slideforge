@@ -58,6 +58,25 @@ use crate::error::LayoutError;
 /// the proof would bound the children chain length and verify that traversal
 /// always terminates within `MAX_BULLET_DEPTH` frames.
 pub const MAX_BULLET_DEPTH: usize = 64;
+
+/// Maximum number of `weighted_composite` component rows that layout will
+/// route into Generic-role region slots.
+///
+/// `slideforge-layout::regions` pre-allocates exactly 5 Generic-role frames
+/// for `weighted_composite` (component row slots 0–4). A 6th (or later)
+/// `TextTag::Body` block finds all Generic Empty slots consumed and would
+/// otherwise fall through to the Phase-3 append fallback, producing a stray
+/// full-page-bbox frame with `region_role: None`.
+///
+/// BC-1.17.003 PC-9 mandates silent drop: components beyond index 4 produce
+/// no additional frame. Layout enforces this by counting filled Generic-role
+/// Body frames and skipping the `fill_region_slot_or_append` call once the
+/// cap is reached. (F-087-P7-001)
+///
+/// This constant must stay in sync with the 5 Generic-role slot count in
+/// `slideforge-layout::regions` (`weighted_composite` arm).
+const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
+
 use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
@@ -327,6 +346,32 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             )?;
                         },
                         TextTag::Body => {
+                            // BC-1.17.003 PC-9 / F-087-P7-001: for `weighted_composite`,
+                            // cap component rows at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5).
+                            // The region map pre-allocates exactly 5 Generic-role Empty slots;
+                            // once all 5 are filled, additional Body blocks would exhaust all
+                            // Empty slots and trigger Phase-3 (appending a stray full-page-bbox
+                            // frame with region_role: None). BC-1.17.003 PC-9 mandates silent
+                            // drop: components beyond index 4 produce no additional frame.
+                            if keyword_str == "weighted_composite" {
+                                let filled_generic_body_count = all_frames
+                                    .iter()
+                                    .filter(|f| {
+                                        f.region_role == Some(crate::types::RegionRole::Generic)
+                                            && matches!(
+                                                f.content,
+                                                crate::types::FrameContent::Body(_)
+                                            )
+                                    })
+                                    .count();
+                                if filled_generic_body_count
+                                    >= MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS
+                                {
+                                    // Silent drop: all 5 Generic slots consumed.
+                                    // No Phase-3 append; no error. Per BC-1.17.003 PC-9.
+                                    continue;
+                                }
+                            }
                             // Body carries ContentBlock items for rich body content.
                             // Wrap the text block's content as a single ContentBlock::Text.
                             // The PPTX serializer's extract_body_text traverses these ContentBlocks.
@@ -337,6 +382,26 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             fill_region_slot_or_append(
                                 &mut all_frames,
                                 TextTag::Body,
+                                content,
+                                &text_block.inlines,
+                                page_size,
+                                source_index,
+                            )?;
+                        },
+                        // STORY-087 pass-2: ColorLabel routes to the Body-role region slot.
+                        // Same slot-selection logic as TextTag::Body (fill_region_slot_or_append
+                        // maps both to RegionRole::Body per adjudication §4.6), but the
+                        // TextTag::ColorLabel value is passed through to preserve semantic
+                        // intent for exporters (label-specific font styling, WCAG co-encoding).
+                        // BC-1.17.001 PC-8 / BC-1.17.002 PC-9 / BC-1.17.003 PC-9.
+                        TextTag::ColorLabel => {
+                            let content =
+                                crate::types::FrameContent::Body(vec![ContentBlock::Text(
+                                    text_block.clone(),
+                                )]);
+                            fill_region_slot_or_append(
+                                &mut all_frames,
+                                TextTag::ColorLabel,
                                 content,
                                 &text_block.inlines,
                                 page_size,
@@ -391,6 +456,51 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                 // are handled elsewhere (shape pass above) or do not carry InlineNode
                 // content that needs layout-time TextRun frames.
                 _ => {},
+            }
+        }
+
+        // STORY-087 pass-2: ColorBar materialization pass.
+        //
+        // After the ContentBlock loop has filled all Text/Bullets slots, process
+        // any ContentBlock::ColorBar in the block list. The pass finds the first
+        // FrameContent::Empty frame with RegionRole::Generic (the bar-background slot
+        // for progress_bar slides) and replaces it with FrameContent::ColorBar{...}.
+        //
+        // Geometry (integer EMU — no f64, BC-3.06.003 exact arithmetic):
+        //   filled_width_emu = (percent as i64 * total_width_emu.0) / 100
+        //
+        // Color: brand.palette.primary parsed as #RRGGBB hex; falls back to
+        // Rgb { r: 0, g: 112, b: 192 } (#0070C0, blue) on parse failure or absence.
+        //
+        // Blast radius: zero on all existing slide types — no other type produces
+        // ContentBlock::ColorBar. The pass is a no-op unless the block list contains
+        // a ColorBar block. (Adjudication §4.4.)
+        for block in &slide.blocks {
+            if let ContentBlock::ColorBar(spec) = &block.content {
+                // Find the first Empty Generic-role slot (bar-background frame).
+                let generic_slot_idx = all_frames.iter().position(|f| {
+                    matches!(f.content, crate::types::FrameContent::Empty)
+                        && f.region_role == Some(crate::types::RegionRole::Generic)
+                });
+                if let Some(idx) = generic_slot_idx {
+                    let total_width = all_frames[idx].bbox.width;
+                    let filled_width =
+                        crate::types::Emu((i64::from(spec.percent) * total_width.0) / 100);
+                    let color = parse_hex_color(brand.palette.primary.as_ref()).unwrap_or(
+                        crate::types::Rgb {
+                            r: 0,
+                            g: 112,
+                            b: 192,
+                        },
+                    );
+                    all_frames[idx].content = crate::types::FrameContent::ColorBar {
+                        filled_width_emu: filled_width,
+                        total_width_emu: total_width,
+                        color,
+                    };
+                }
+                // At most one ColorBar block per slide (progress_bar has one value field).
+                break;
             }
         }
 
@@ -756,7 +866,11 @@ fn fill_region_slot_or_append(
     let expected_role = match tag {
         TextTag::Title => crate::types::RegionRole::Title,
         TextTag::Subtitle => crate::types::RegionRole::Subtitle,
-        TextTag::Body => crate::types::RegionRole::Body,
+        // STORY-087 pass-2: ColorLabel maps to Body role — same slot routing as
+        // TextTag::Body but with a semantically distinct tag (adjudication §4.6).
+        // This ensures status/progress_bar/weighted_composite label text claims the
+        // pre-allocated Body-role region slot.
+        TextTag::Body | TextTag::ColorLabel => crate::types::RegionRole::Body,
         // Untagged blocks are never routed through this function — they are
         // handled separately by the TextTag::Untagged arm in layout::run.
         TextTag::Untagged => crate::types::RegionRole::Generic,
@@ -827,6 +941,22 @@ fn fill_region_slot_or_append(
         region_role: None,
     });
     Ok(())
+}
+
+/// Parse a `#RRGGBB` hex color string into an [`crate::types::Rgb`] value.
+///
+/// Returns `None` if the string is not a valid 7-character `#RRGGBB` hex color.
+/// Used by the `ColorBar` materialization pass to derive the bar fill color from
+/// the brand's primary palette color (adjudication §4.4, STORY-087).
+fn parse_hex_color(hex: &str) -> Option<crate::types::Rgb> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(crate::types::Rgb { r, g, b })
 }
 
 /// Collect all plain-text from a slice of inline nodes into a single `String`.

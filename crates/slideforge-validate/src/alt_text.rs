@@ -104,13 +104,16 @@ impl Validator for AltTextValidator {
                     // Non-visual blocks: Text, Bullets, Math, Table — no alt text required.
                     // Tables are text content that is already readable by screen readers
                     // (story spec, STORY-015 line 309). Alt text on tables is not validated.
+                    // STORY-087 pass-2: ColorBar is geometry-only; no alt text required here.
+                    // The adjacent ColorLabel text block carries the accessibility co-encoding.
                     ContentBlock::Chart(_)
                     | ContentBlock::Image(_)
                     | ContentBlock::Diagram(_)
                     | ContentBlock::Text(_)
                     | ContentBlock::Bullets(_)
                     | ContentBlock::Math(_)
-                    | ContentBlock::Table(_) => {},
+                    | ContentBlock::Table(_)
+                    | ContentBlock::ColorBar(_) => {},
                 }
             }
         }

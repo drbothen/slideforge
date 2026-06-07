@@ -364,6 +364,30 @@ impl SlideTagEngine {
                     part_group.push(p_group);
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
+
+                // ColorBar — marked as PDF Artifact (decorative shape).
+                //
+                // The bar frame carries no text and no alt text; WCAG accessibility
+                // co-encoding is satisfied by the adjacent ColorLabel (Body-role) text
+                // frame which renders the percentage label. Marking the bar as an
+                // Artifact suppresses it from the PDF logical structure tree, avoiding
+                // a spurious unmarked-content finding without falsely claiming it as
+                // a tagged Figure.
+                //
+                // The draw pass in exporter.rs renders the bar as a filled rectangle
+                // wrapped in `/Artifact BMC … EMC` (BC-1.17.002 PC-9 / STORY-087).
+                // Upgrading to a full PDF/UA-1 Figure structure element with `/Alt`
+                // text (e.g., "75% filled bar") is a future enhancement; the current
+                // Artifact tagging satisfies PDF/UA-1 for decorative visual elements.
+                FrameContent::ColorBar { .. } => {
+                    tracing::debug!(
+                        frame_idx,
+                        "FrameContent::ColorBar marked as PDF Artifact; \
+                         filled rectangle drawn by exporter draw_color_bar_rect; \
+                         label text is in adjacent ColorLabel frame (BC-1.17.002 PC-9)"
+                    );
+                    decorative_frame_indices.push(frame_idx);
+                },
             }
         }
 
@@ -501,6 +525,11 @@ impl SlideTagEngine {
                 let table_group = self.tag_table(table_spec)?;
                 Ok(Some(table_group))
             },
+
+            // STORY-087 pass-2: ColorBar is geometry-only and produces_structure_group()
+            // returns false, so tag_content_block is never called for ColorBar blocks.
+            // This arm is a defensive catch-all in case the call site changes.
+            ContentBlock::ColorBar(_) => Ok(None),
         }
     }
 

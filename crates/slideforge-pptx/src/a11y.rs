@@ -133,13 +133,15 @@ impl AltTextEmbedder {
                     | slideforge_types::AltText::Unspecified => Some(AltDecision::Decorative),
                 },
                 // Text frames and non-visual frames do not get descr attributes.
+                // STORY-087 pass-2: ColorBar is geometry-only; no descr attribute.
                 FrameContent::Title(_)
                 | FrameContent::Subtitle(_)
                 | FrameContent::Body(_)
                 | FrameContent::TextRun(_)
                 | FrameContent::Shape(_)
                 | FrameContent::ErrorSlidePlaceholder { .. }
-                | FrameContent::Empty => None,
+                | FrameContent::Empty
+                | FrameContent::ColorBar { .. } => None,
             };
             if let Some(d) = decision {
                 decisions.push((frame_idx, d));
