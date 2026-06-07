@@ -397,8 +397,14 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
         match item {
             BlockItem::Slide(spanned_slide) => {
                 let slide_node = spanned_slide.value();
+                // Capture the slide's source span so it can be threaded into
+                // the resulting Slide IR (PR-A Finding 2 / diag-span fix).
+                let slide_span = crate::if_eval::span_to_source_span(spanned_slide.span());
                 // Evaluate the primary slide.
-                if let Some(slide) = eval_slide_node(env, slide_node, set_rule_defaults, sink) {
+                if let Some(mut slide) = eval_slide_node(env, slide_node, set_rule_defaults, sink) {
+                    // Thread the real byte-offset span into the Slide so that
+                    // downstream validation diagnostics carry file:line:col.
+                    slide.source_span = slide_span;
                     slides.push(slide);
                 }
                 // I05: Process element-scope inline items (@for/@if) inside

@@ -34,6 +34,7 @@
 mod alt_text;
 mod canvas_overflow;
 mod error_slide;
+mod image_path;
 mod label_check;
 mod lang_validator;
 mod mode;
@@ -45,6 +46,7 @@ mod zero_slide;
 pub use alt_text::AltTextValidator;
 pub use canvas_overflow::CanvasOverflowValidator;
 pub use error_slide::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
+pub use image_path::{E_VAL_012, ImagePathValidator};
 pub use label_check::{COLOR_CODED_TYPES, LabelCheckValidator};
 pub use lang_validator::{LangValidator, inject_lang_default};
 pub use mode::{ValidationConfig, ValidationMode};
