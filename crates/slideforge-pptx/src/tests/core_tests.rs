@@ -1814,6 +1814,90 @@ fn test_sec039_001_lang_with_soh_control_char_returns_error() {
     );
 }
 
+// ─── SEC-100: body-text XML-1.0 control-character stripping (CWE-116) ────────
+
+/// SEC-100 (CWE-116): A `progress_bar` label (or any body-text field) containing
+/// XML-1.0-illegal control characters must NOT appear verbatim in `slide1.xml`.
+///
+/// The illegal byte U+0001 (SOH) must be stripped from `Run.text` before the
+/// ooxmlsdk serializer writes the OOXML XML.  The exported PPTX must be
+/// well-formed XML — no `\x01` byte in the slide part.
+///
+/// This mirrors the DOCX SEC-002 fix (`strip_xml10_invalid_chars` in
+/// `slideforge-docx/src/document_body.rs`) applied to the PPTX body-text path
+/// (`build_shape` → `Run.text` in `slide_serializer.rs`).
+#[test]
+fn test_sec100_progress_bar_label_with_control_char_stripped_from_slide_xml() {
+    use slideforge_types::{ContentBlock, InlineNode, TextBlock};
+
+    // Build a LaidOutSlide whose Body frame contains a label with U+0001 (SOH).
+    // This simulates a `progress_bar` `label` field containing a control char —
+    // the exact injection vector identified in SEC-100.
+    let poison_label = "75% complete\x01";
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("progress_bar"),
+        frames: vec![
+            Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Title(Arc::from("Progress")),
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: body_bbox(),
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(poison_label))],
+                    span: slideforge_types::SourceSpan::default(),
+                    tag: slideforge_types::block::TextTag::Body,
+                })]),
+                text_flow: None,
+                region_role: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let laid_out = LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+    };
+
+    let deck = make_deck(1);
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+    let exporter = PptxExporter::new();
+
+    // Export must succeed — stripping is silent (no error on control chars).
+    let pptx_bytes = exporter
+        .export(&deck, &laid_out, &brand, &opts)
+        .expect("SEC-100: export with control-char label must succeed (strip, not reject)");
+
+    // Read slide1.xml from the ZIP and assert the XML is clean.
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // The U+0001 byte must NOT appear anywhere in the slide XML.
+    assert!(
+        !slide_xml.contains('\x01'),
+        "SEC-100 (CWE-116): slide1.xml must NOT contain U+0001 (SOH); \
+         control chars must be stripped from Run.text before ooxmlsdk serialization. \
+         Got slide XML excerpt: {}",
+        &slide_xml[..slide_xml.len().min(500)]
+    );
+
+    // The clean text must still be present (stripping is lossless for valid chars).
+    assert!(
+        slide_xml.contains("75% complete"),
+        "SEC-100 losslessness: the valid portion of the label ('75% complete') must \
+         still appear in slide1.xml after stripping. Got slide XML excerpt: {}",
+        &slide_xml[..slide_xml.len().min(500)]
+    );
+}
+
 /// SEC-039-001 losslessness (BC-5.01.005 invariant 1):
 /// Valid BCP-47 tags — "en-US" and the 4-part "zh-Hant-TW" — must still export
 /// successfully (lossless pass-through; no false positives from the validator).

@@ -53,6 +53,7 @@ use slideforge_layout::{FrameContent, LaidOutSlide, LayoutWarning};
 use slideforge_types::{BulletItem, ContentBlock, InlineNode, Rgb};
 
 use crate::error::PptxError;
+use crate::xml_escape::strip_xml10_invalid_chars;
 
 /// Serializes one `LaidOutSlide` into `slide*.xml` bytes.
 ///
@@ -923,9 +924,15 @@ fn build_shape(
     };
 
     // Text body with one paragraph containing the text.
+    // SEC-100 / CWE-116: strip XML-1.0-invalid control characters before placing
+    // user-controlled text in Run.text. ooxmlsdk writes Run.text directly as
+    // element content; invalid chars (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F,
+    // U+FFFE, U+FFFF) would produce malformed XML and enable XML injection.
+    // Mirrors the DOCX SEC-002 fix in slideforge-docx/src/document_body.rs.
+    let sanitized_text = strip_xml10_invalid_chars(text);
     let run = Run {
         run_properties: Some(Box::default()),
-        text: text.to_string(),
+        text: sanitized_text,
         xmlns: vec![],
         xml_other_children: vec![],
     };
