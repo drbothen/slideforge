@@ -111,14 +111,14 @@ fn validate_progress_bar_value(
             // Wrong type (not Int).
             let actual_type = value_type_name(other);
             diagnostics.push(make_range_error(
-                &format!("progress_bar value must be an integer; got {actual_type} or absent."),
+                &format!("progress_bar value must be an integer; got {actual_type}."),
                 span,
             ));
         },
         _ => {
             // Absent (None) or non-Literal FieldValue.
             diagnostics.push(make_range_error(
-                "progress_bar value must be an integer; got absent or absent.",
+                "progress_bar value must be an integer; field is absent.",
                 span,
             ));
         },
