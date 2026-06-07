@@ -8,7 +8,7 @@
 //! [`slideforge_plugin_api::validate_fields`] would never be emitted at build
 //! time — `validate_fields` would be dead code.
 //!
-//! ## Architecture: Route B (STORY-089 / ADR-020 Decision 4)
+//! ## Architecture: Route B (STORY-089 / ADR-020 Decision 8)
 //!
 //! This implementation uses **Route B**: look up each slide's type in the
 //! process-wide [`slideforge_plugin_api::SLIDE_TYPE_REGISTRY`] (the
@@ -35,7 +35,7 @@
 //! ## Traceability
 //!
 //! - BC-1.18.001 postcondition 7: E-VAL-104 reachable from `build()` (STORY-089 AC-009)
-//! - ADR-020 Decision 4: `FieldSchemaValidator` as Stage-5 `Validator` plugin
+//! - ADR-020 Decision 8: `FieldSchemaValidator` as Stage-5 `Validator` plugin
 //! - STORY-089 AC-009, AC-010
 
 use slideforge_plugin_api::{

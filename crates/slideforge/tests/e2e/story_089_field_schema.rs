@@ -60,7 +60,7 @@
 //!
 //! - BC-1.18.001 postcondition 2 (T1): Str on Int field → E-VAL-104
 //! - BC-1.18.001 postcondition 7: E-VAL-104 reachable from build() strict-mode exit (AC-009/AC-010)
-//! - ADR-020 Decision 4: FieldSchemaValidator as Stage-5 Validator plugin
+//! - ADR-020 Decision 8: FieldSchemaValidator as Stage-5 Validator plugin
 //! - ADR-016 Decision 3: Validator surface registered in registry.rs
 
 #![allow(clippy::unwrap_used)] // integration tests — panics on assertion failure are correct
@@ -120,7 +120,7 @@ use crate::e2e::{BrandTmpDir, fixture_source};
 ///   value "fifty"
 /// ```
 ///
-/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 4; STORY-089 AC-009.
+/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 8; STORY-089 AC-009.
 #[test]
 fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
     let brand = BrandTmpDir::new("s089_ac009_strict");
@@ -256,7 +256,7 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
 /// If warn-only diagnostic surfacing is added to `BuildOutput` in a future story,
 /// this test should be updated to assert E-VAL-104 presence in the output.
 ///
-/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 4; STORY-089 AC-010.
+/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 8; STORY-089 AC-010.
 #[test]
 fn test_BC_1_18_001_ac010_warn_only_progress_bar_str_value_returns_ok() {
     let brand = BrandTmpDir::new("s089_ac010_warn");
