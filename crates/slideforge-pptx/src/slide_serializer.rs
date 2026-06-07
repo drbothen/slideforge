@@ -657,6 +657,7 @@ impl SlideSerializer {
                 FrameContent::ColorBar {
                     filled_width_emu,
                     total_width_emu: _,
+                    percent: _,
                     color,
                 } => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
