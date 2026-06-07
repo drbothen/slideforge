@@ -31,11 +31,11 @@ total_stories: 82
 | Wave 2 | EPIC-03, EPIC-04 | 7 | Partial — STORY-011→012→013 chain; STORY-011+012→014 (fork, not sequential after 013); STORY-015→016→017 chain | Wave 1 gate PASS |
 | Wave 3 | EPIC-05, EPIC-06, EPIC-07, EPIC-10, EPIC-11, EPIC-12 | 17 | Partial — multiple sub-chains within epics (EPIC-05: 018→019/020→021; EPIC-06: 022→023→024/025; EPIC-07: 026→027/028; EPIC-10: 029→030; EPIC-11: 031→032; EPIC-12: 033→034) | Wave 2 gate PASS |
 | Wave 4 | EPIC-06, EPIC-07, EPIC-08, EPIC-09, EPIC-13, EPIC-18, EPIC-21 | 17 | Partial — Batch A parallel: STORY-035→036, STORY-043→044→045, STORY-073, STORY-075, STORY-076, STORY-077; Batch B parallel: STORY-037→038→039→040, STORY-041→042; Batch C: STORY-049→050 | Wave 3 gate PASS; Phase 4 crates added to workspace |
-| Wave 5 | EPIC-07, EPIC-08, EPIC-12, EPIC-14, EPIC-15, EPIC-16, EPIC-17, EPIC-18, EPIC-19 | 20 | Partial — EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074, STORY-079, STORY-080, STORY-082 independent of EPIC-14/15 chain; STORY-081 independent; STORY-082 depends on STORY-040 (Wave 4) | Wave 4 gate PASS |
+| Wave 5 | EPIC-01, EPIC-07, EPIC-08, EPIC-12, EPIC-14, EPIC-15, EPIC-16, EPIC-17, EPIC-18, EPIC-19 | 22 | Partial — STORY-089 is fully independent (slot 1, zero Wave 5 deps); EPIC-16 and EPIC-17 independent of EPIC-14/15; EPIC-15 depends on EPIC-14 (STORY-056 requires STORY-047 for live reload). Chains: EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; STORY-072, STORY-074, STORY-079, STORY-080, STORY-082, STORY-088, STORY-089 independent of EPIC-14/15 chain; STORY-081 independent; STORY-082 depends on STORY-040 (Wave 4) | Wave 4 gate PASS |
 | Wave 6 | EPIC-20 (Phase 6) | 6 | Partial — STORY-066/067/068 independent; STORY-071 depends on 066+067; STORY-069/070 independent | Wave 5 gate PASS; Kani + cargo-fuzz available on CI |
 
-**Total: 82 stories, 497 points across 6 waves.**
-(Wave 4: 18 stories / 115 pts — STORY-040 trimmed 5→3 pts per scope split 2026-06-04; Wave 5: 20 stories / 114 pts — STORY-082 added per scope split 2026-06-04)
+**Total: 89 stories, 553 points across 6 waves.**
+(Wave 4: 23 stories / 163 pts — includes STORY-086 remediation + STORY-087 pull-in [human-authorized 2026-06-06]; Wave 5: 22 stories / 130 pts — STORY-089 added as slot 1 [human-authorized 2026-06-07, Wave-4 follow-up (d)])
 
 > History: Wave 4 was 17 stories / 104 pts (2026-05-31: STORY-077 added per architect directive F-002); Wave 5 was 16 stories / 90 pts (2026-05-31 per human approval). All subsequent expansions documented in STORY-INDEX.md Story Points Summary notes.
 
@@ -761,7 +761,7 @@ added to `[workspace] members` at start of wave (previously in `exclude`).
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (20 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (22 stories)
 
 **Theme:** CLI binary, web preview, package management, workspace configuration.
 The complete user-facing product. Depends on all exporters being complete.
@@ -780,6 +780,29 @@ reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
 - STORY-082 (5 pts) — PPTX: Slide-Grouping Sections (sectionLst) — P0, EPIC-08
   (Half B of BC-4.01.003; carved from STORY-040 because requires new DSL construct +
   `slide_sections` IR field + eval mapping not yet implemented)
+
+**Added to Wave 5 (Wave-4 follow-up (d), human-authorized 2026-06-07):**
+- STORY-089 (8 pts) — FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement — P0, EPIC-01
+  (schema-driven field-value type validation; BC-1.18.001; ADR-020; fully independent of all other Wave 5 stories; slot 1)
+
+### STORY-089 — FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement (Wave-4 follow-up (d))
+- **Epic:** EPIC-01
+- **Crate:** slideforge-plugin-api (SS-14)
+- **BCs:** BC-1.18.001
+- **Points:** 8
+- **Priority:** P0
+- **tdd_mode:** strict
+- **Batch:** Independent slot 1 — no Wave 5 dependencies; may execute immediately after Wave 4 gate PASS
+- Adds `FieldType` enum (7 variants: Any, Str, Int, Float, Bool, List, Map, OneOf) and
+  `expected_type: Option<FieldType>` to `FieldDef` in `slide_type.rs`. Adds `type_matches()`
+  pure function. Adds E-VAL-104 arm to `validate_fields` in `registry.rs` (T1 type-mismatch +
+  T2 OneOf violation). Sweeps all 80-120 `FieldDef` construction sites to add `expected_type`.
+  Priority-1 annotations: `progress_bar.value` → Int, `chart.chart_type` → OneOf(7 values),
+  `decorative` (common optional) → Bool, `weighted_composite.components` → List,
+  `kpi_dashboard.kpis`/`roadmap.milestones`/`matrix.rows`/`agenda.items`/`toc.items`/`team.members` → List.
+  Formally registers E-VAL-101/102/W-VAL-103 and allocates E-VAL-104 in error-taxonomy.md.
+  ADR-020 governs all design decisions (commit 32fddb9a). Resolves v1.0 quality gap: type-mismatched
+  field values currently reach `lay_out()` silently; E-VAL-104 is the Stage 5 pre-layout gate.
 
 ### STORY-055 — CLI: build command + miette error rendering
 - **Epic:** EPIC-15

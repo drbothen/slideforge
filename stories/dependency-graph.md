@@ -192,6 +192,7 @@ canonical — individual story files use these exact IDs.
 
 | Story ID | Epic | Title | Depends On | Blocks |
 |----------|------|-------|------------|--------|
+| STORY-089 | EPIC-01 | FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement | — (all deps merged: STORY-003 Wave 1, STORY-086 Wave 4) | — |
 | STORY-046 | EPIC-14 | Static HTML Exporter: WCAG AA via axe-core | STORY-026, STORY-034, STORY-049 | STORY-047, STORY-048 |
 | STORY-047 | EPIC-14 | Web Preview Server: axum + WebSocket + SVG Canvas | STORY-046 | STORY-048 |
 | STORY-048 | EPIC-14 | Web Preview: Live Reload + Accessibility (ARIA, keyboard nav) | STORY-047 | — |
@@ -313,6 +314,10 @@ canonical — individual story files use these exact IDs.
 | STORY-083 | EPIC-21 | plugin-registry-builder | 4 | P0 | 3 |
 | STORY-084 | EPIC-21 | bundled-section-types | 4 | P0 | 3 |
 | STORY-085 | EPIC-21 | bundled-inline-formats | 4 | P0 | 8 |
+| STORY-086 | EPIC-03 | slide-field-to-block-threading | 4 | P0 | 21 |
+| STORY-087 | EPIC-01 | color-coded-slide-types | 4 | P1 | 13 |
+| STORY-088 | EPIC-02 | bullets-list-literal-dsl-syntax | 5 | P1 | 8 |
+| STORY-089 | EPIC-01 | field-value-type-validation | 5 | P0 | 8 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -353,15 +358,17 @@ Wave 4 (prereqs all in Waves 1-3):
   STORY-073, STORY-075, STORY-076,              ← EPIC-06/07 (pulled-in P1)
   STORY-078,                                    ← EPIC-02 (Batch A prerequisite)
   STORY-083, STORY-084, STORY-085,              ← EPIC-21 Batch C prerequisites (LESSON-13)
-  STORY-049, STORY-050                          ← EPIC-21 (depend on 083+084+085)
+  STORY-049, STORY-050,                         ← EPIC-21 (depend on 083+084+085)
+  STORY-086, STORY-087                          ← EPIC-03/01 (Wave 4 remediation + pull-in)
 
 Wave 5 (prereqs all in Waves 1-4):
+  STORY-089,                                    ← EPIC-01 (slot 1 — independent, zero Wave 5 deps; Wave-4 follow-up (d))
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
   STORY-055, STORY-056, STORY-057, STORY-058, STORY-059,  ← EPIC-15
   STORY-060, STORY-061, STORY-062, STORY-063,   ← EPIC-16
   STORY-064, STORY-065,                         ← EPIC-17
   STORY-072, STORY-074, STORY-079, STORY-080,   ← EPIC-07/12/19 (deferred surfaces)
-  STORY-081, STORY-082                          ← EPIC-18/08 (follow-up stories)
+  STORY-081, STORY-082, STORY-088              ← EPIC-18/08/02 (follow-up stories)
 
 Wave 6 (prereqs all in Waves 1-5):
   STORY-066, STORY-067, STORY-068, STORY-069, STORY-070, STORY-071  ← EPIC-20

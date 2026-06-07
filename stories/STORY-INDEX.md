@@ -9,8 +9,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 88
-stories_written: 88
+total_stories: 89
+stories_written: 89
 stories_ready: 0
 stories_in_progress: 0
 stories_merged: 59
@@ -34,9 +34,9 @@ stories_merged: 59
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
 | Wave 4 | 23 | 1 | 0 | 1 | 21 | 0 |
-| Wave 5 | 21 | 21 | 0 | 0 | 0 | 0 |
+| Wave 5 | 22 | 22 | 0 | 0 | 0 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **88** | **28** | **0** | **1** | **59** | **0** |
+| **Total** | **89** | **29** | **0** | **1** | **59** | **0** |
 
 ---
 
@@ -137,10 +137,11 @@ stories_merged: 59
 
 ---
 
-## Wave 5: CLI + User-Facing Features + Deferred Surfaces (21 stories)
+## Wave 5: CLI + User-Facing Features + Deferred Surfaces (22 stories)
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
+| [STORY-089](stories/STORY-089-field-value-type-validation.md) | EPIC-01 | FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement | BC-1.18.001 | P0 | 8 | strict | draft |
 | [STORY-046](stories/STORY-046-html-exporter-wcag.md) | EPIC-14 | Static HTML Exporter: WCAG AA via axe-core | BC-4.03.003 | P0 | 8 | strict | draft |
 | [STORY-047](stories/STORY-047-preview-server-websocket.md) | EPIC-14 | Web Preview Server: axum + WebSocket + SVG Canvas | BC-4.03.004 | P1 | 8 | strict | draft |
 | [STORY-048](stories/STORY-048-preview-live-reload-a11y.md) | EPIC-14 | Web Preview: Live Reload + Accessibility | BC-5.05.005 | P1 | 8 | strict | draft |
@@ -163,7 +164,7 @@ stories_merged: 59
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
 | [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | draft |
 
-**Wave 5 total points: 122** _(135 prior − 13 STORY-087 moved to Wave 4 [human-authorized 2026-06-06])_
+**Wave 5 total points: 130** _(122 prior + 8 STORY-089 added [human-authorized 2026-06-07, Wave-4 follow-up (d) folded into Wave 5 slot 1])_
 
 ---
 
@@ -200,10 +201,16 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
 | Wave 4 | 23 | 163 | 7.1 |
-| Wave 5 | 21 | 122 | 5.8 |
+| Wave 5 | 22 | 130 | 5.9 |
 | Wave 6 | 6 | 42 | 7.0 |
-| **Total** | **88** | **545** | **6.2** |
+| **Total** | **89** | **553** | **6.2** |
 
+> STORY-089 (FieldDef Type Annotation + E-VAL-104 Enforcement, 8 pts, P0, Wave 5 slot 1,
+> EPIC-01, BC-1.18.001) created 2026-06-07 per human authorization. Wave-4 follow-up (d)
+> folded into Wave 5 as slot 1 (zero Wave 5 dependencies; independent of all other Wave 5
+> stories). ADR-020 governs the design. Wave 5: 21 → 22 stories, 122 → 130 pts.
+> Total: 88 → 89 stories, 545 → 553 pts.
+>
 > STORY-086 points bumped from 13 → 21 per human-authorized scope expansion (2026-06-06):
 > TextTag enum + TextBlock.tag field + PPTX title-placeholder routing + DOCX Heading1
 > routing added to scope (adversary findings F-086-P1-MED-002/003 required placement
@@ -320,8 +327,8 @@ All previously Wave TBD stories have been assigned waves per human approval 2026
 
 | Metric | Count | Status |
 |--------|-------|--------|
-| Total BCs | 116 | — |
-| BCs covered by at least one story | 116 | PASS — 100% (BC-1.16.001 covered by STORY-086; BC-1.17.001 covered by STORY-087; BC-1.17.002 covered by STORY-087; BC-1.17.003 covered by STORY-087; BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
+| Total BCs | 117 | — |
+| BCs covered by at least one story | 117 | PASS — 100% (BC-1.16.001 covered by STORY-086; BC-1.17.001 covered by STORY-087; BC-1.17.002 covered by STORY-087; BC-1.17.003 covered by STORY-087; BC-1.18.001 covered by STORY-089; BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
 | Orphan BCs (no story) | 0 | PASS |
 | Total VPs | 15 | — |
 | VPs covered | 15 | PASS — 100% |

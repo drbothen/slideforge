@@ -688,3 +688,18 @@ stories:
     bcs: [BC-1.01.002]
     closes_findings: []
     notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Scope expanded 2026-06-06 (adversary pass-5 D5 correction): @var/vars-block list-literal does NOT parse at time of STORY-086 (parser gap discovered); STORY-088 now covers BOTH bullets DSL forms (direct list-literal AND @var/vars-block binding). Points bumped 5→8, estimated_days 2→3. Adds `[...]` list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs AND @var/vars-block binding form. TextTag follow-up story was absorbed into STORY-086 (not created here). EPIC-02 (parser)."
+  STORY-089:
+    status: draft
+    wave: 5
+    wave_slot: 1
+    priority: P0
+    points: 8
+    estimated_days: 5
+    epic: EPIC-01
+    target_module: slideforge-plugin-api
+    subsystems: [SS-14]
+    depends_on: []
+    blocks: []
+    bcs: [BC-1.18.001]
+    closes_findings: []
+    notes: "FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement. Created 2026-06-07 per human authorization. Wave-4 follow-up (d) folded into Wave 5 as slot 1. Implements ADR-020 (commit 32fddb9a): FieldType enum {Any,Str,Int,Float,Bool,List,Map,OneOf} in slide_type.rs; FieldDef.expected_type: Option<FieldType>; #[non_exhaustive] on FieldDef; FieldDef::new()/with_type() constructors; type_matches() pure function (Kani-amenable); E-VAL-104 arm in validate_fields (T1 type-mismatch + T2 OneOf violation); Priority-1 annotations: progress_bar.value→Int, chart.chart_type→OneOf(7), decorative→Bool, weighted_composite.components→List, kpi_dashboard.kpis/roadmap.milestones/matrix.rows/agenda.items/toc.items/team.members→List. Mechanical sweep: ~80-120 FieldDef construction sites across 34+ slide type files add expected_type:None. Formally registers E-VAL-101/102/W-VAL-103 + allocates E-VAL-104 in error-taxonomy.md. BC-1.18.001 (commit def8bb74) is the governing contract. Minimal overlap with STORY-088: disjoint areas in slideforge-plugin-api (089=slide_types/traits schema, 088=parser/eval). Independent — zero Wave 5 deps."
