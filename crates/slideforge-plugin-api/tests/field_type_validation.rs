@@ -111,7 +111,7 @@ fn test_BC_1_18_001_type_matches_int_matches_int() {
 fn test_BC_1_18_001_type_matches_str_fails_int() {
     assert!(
         !type_matches(&Value::Str(Arc::from("42")), &FieldType::Int),
-        "Str value must NOT match FieldType::Int — expected false, got true (stub)"
+        "Str value must NOT match FieldType::Int (expected false)"
     );
 }
 
@@ -1323,7 +1323,7 @@ fn test_list_fields_on_kpi_roadmap_agenda_team() {
         phases_def.expected_type,
         Some(FieldType::List),
         "roadmap.phases must have expected_type: Some(FieldType::List); \
-         field is named 'phases' per ADR-020/BC-1.18.001 v1.1 (stub has None — RED)"
+         field is named 'phases' per ADR-020/BC-1.18.001 v1.1"
     );
 
     // agenda.items — optional field, expected_type: Some(List).
