@@ -36,6 +36,7 @@ impl ClosingSlideType {
                 description: Arc::from("A prominent call to action displayed below the title."),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("contact"),
@@ -44,6 +45,7 @@ impl ClosingSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
         ];
         optional.extend(common_optional_fields());
@@ -56,6 +58,7 @@ impl ClosingSlideType {
                 ),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

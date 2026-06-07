@@ -40,7 +40,7 @@ use std::sync::Arc;
 use slideforge_layout::LaidOutSlide;
 use slideforge_types::{Brand, Slide};
 
-use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+use crate::traits::{Canvas, FieldDef, FieldType, LayoutError, SlideType};
 
 use super::common_optional_fields;
 
@@ -86,6 +86,7 @@ impl WeightedCompositeSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("label"),
@@ -96,7 +97,15 @@ impl WeightedCompositeSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
+                // Priority-1 annotation: components must be a list of component maps.
+                // AC-015 (BC-1.18.001 postcondition 9):
+                //   `components: "see attached"` emits E-VAL-104 T1 ("expected list, got string").
+                // Note: per-component `weight` is inside the Map values — it is not a top-level
+                // FieldDef. The Float annotation on weight would require a future nested-field
+                // validation feature (T3+ scope). The top-level `components` field is annotated
+                // as List to catch the most common type error at this level.
                 FieldDef {
                     name: Arc::from("components"),
                     description: Arc::from(
@@ -107,6 +116,7 @@ impl WeightedCompositeSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: Some(FieldType::List),
                 },
             ],
             optional,

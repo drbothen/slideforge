@@ -41,6 +41,7 @@ impl StatCalloutSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("label_3"),
@@ -49,6 +50,7 @@ impl StatCalloutSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
         ];
         optional.extend(common_optional_fields());
@@ -61,6 +63,7 @@ impl StatCalloutSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("label_1"),
@@ -69,6 +72,7 @@ impl StatCalloutSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("stat_2"),
@@ -77,6 +81,7 @@ impl StatCalloutSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("label_2"),
@@ -85,6 +90,7 @@ impl StatCalloutSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

@@ -63,10 +63,10 @@ pub use slide_types::{SLIDE_TYPE_REGISTRY, SlideTypeRegistry, validate_fields};
 pub use traits::{
     BrandError, BrandProvider, BrandSource, Canvas, ChartError, ChartRenderer, DataSource,
     DataSourceError, DataSourceOptions, Diagnostic, DiagnosticSeverity, DiagramError,
-    DiagramOptions, DiagramRenderer, ExportError, ExportOptions, Exporter, FieldDef, InlineError,
-    InlineFormat, InlineOutputFormat, InlineRenderContext, LayoutError, MathError,
+    DiagramOptions, DiagramRenderer, ExportError, ExportOptions, Exporter, FieldDef, FieldType,
+    InlineError, InlineFormat, InlineOutputFormat, InlineRenderContext, LayoutError, MathError,
     MathOutputFormat, MathRenderer, SectionBlock, SectionType, SlideType, Validator,
-    ValidatorOptions,
+    ValidatorOptions, type_matches, value_type_name,
 };
 
 // Compile-time assertion: PluginRegistry is Send + Sync (AC-014).

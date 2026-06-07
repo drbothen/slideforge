@@ -40,6 +40,7 @@ impl RiskRegisterSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -48,6 +49,7 @@ impl RiskRegisterSlideType {
                 description: Arc::from("The slide title (e.g., \"Risk Register\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

@@ -41,6 +41,7 @@ impl CodeSampleSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -50,6 +51,7 @@ impl CodeSampleSlideType {
                     description: Arc::from("The slide title shown above the code block."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("code"),
@@ -59,6 +61,7 @@ impl CodeSampleSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

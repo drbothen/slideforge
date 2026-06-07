@@ -41,6 +41,7 @@ impl ScreenshotSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         // `alt` is required on screenshot slides; exclude it from the common optional
         // fields to avoid duplicating it in required ∪ optional (F-P2-003).
@@ -56,6 +57,7 @@ impl ScreenshotSlideType {
                     description: Arc::from("The slide title shown above the screenshot."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("src"),
@@ -65,6 +67,7 @@ impl ScreenshotSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("alt"),
@@ -74,6 +77,7 @@ impl ScreenshotSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

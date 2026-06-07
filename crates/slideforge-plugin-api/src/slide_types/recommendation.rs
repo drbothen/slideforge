@@ -39,6 +39,7 @@ impl RecommendationSlideType {
                 description: Arc::from("The reasoning or evidence supporting the recommendation."),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("risk"),
@@ -47,6 +48,7 @@ impl RecommendationSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
         ];
         optional.extend(common_optional_fields());
@@ -57,12 +59,14 @@ impl RecommendationSlideType {
                     description: Arc::from("The slide title (e.g., \"Our Recommendation\")."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("recommendation"),
                     description: Arc::from("The specific action or decision being recommended."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

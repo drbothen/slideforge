@@ -36,6 +36,7 @@ impl SectionBreakSlideType {
             description: Arc::from("An optional subtitle or brief description of the section."),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -44,6 +45,7 @@ impl SectionBreakSlideType {
                 description: Arc::from("The section title displayed prominently on the divider."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

@@ -41,6 +41,7 @@ impl QuoteSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("attribution"),
@@ -49,6 +50,7 @@ impl QuoteSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional: common_optional_fields(),

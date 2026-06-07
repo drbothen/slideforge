@@ -40,6 +40,7 @@ impl ContentSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("takeaway"),
@@ -48,6 +49,7 @@ impl ContentSlideType {
                 ),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
         ];
         optional.extend(common_optional_fields());
@@ -57,6 +59,7 @@ impl ContentSlideType {
                 description: Arc::from("The slide title shown in the title area."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

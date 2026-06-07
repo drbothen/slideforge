@@ -32,6 +32,13 @@ impl MatrixSlideType {
     /// Construct a new `MatrixSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // STORY-089 note: the story spec (AC-016) references `matrix.rows → FieldType::List`
+        // but the existing FieldDef uses the name `cells`. The implementer must reconcile this
+        // discrepancy (spec wins per VSDD rule). The story also notes: "cells is polymorphic → None"
+        // (AC-016 architecture mapping). These two statements conflict: rows should be List (if it
+        // exists), but cells is polymorphic → None. Implementer: add a `rows` FieldDef annotated
+        // as List if rows is the correct field name, and keep `cells` as None (polymorphic).
+        // At this stub stage, `cells` remains with expected_type: None per the polymorphic note.
         let mut optional = vec![FieldDef {
             name: Arc::from("cells"),
             description: Arc::from(
@@ -40,6 +47,7 @@ impl MatrixSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -48,6 +56,7 @@ impl MatrixSlideType {
                 description: Arc::from("The slide title (e.g., \"Impact / Effort Matrix\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

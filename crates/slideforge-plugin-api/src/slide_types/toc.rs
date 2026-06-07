@@ -31,6 +31,9 @@ impl TocSlideType {
     /// Construct a new `TocSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // STORY-089 note: the story spec (AC-016) references `toc.items → FieldType::List`
+        // but the existing implementation has no `items` FieldDef. The implementer must add
+        // an `items` optional field with `expected_type: Some(FieldType::List)` to match the spec.
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),
@@ -39,6 +42,7 @@ impl TocSlideType {
                 ),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional: common_optional_fields(),
         }

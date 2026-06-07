@@ -36,18 +36,21 @@ impl TitleSlideType {
                 description: Arc::from("A subtitle or deck description below the title."),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("author"),
                 description: Arc::from("The presenter or author name."),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
             FieldDef {
                 name: Arc::from("date"),
                 description: Arc::from("The presentation date."),
                 required: false,
                 default_value: None,
+                expected_type: None,
             },
         ];
         optional.extend(common_optional_fields());
@@ -57,6 +60,7 @@ impl TitleSlideType {
                 description: Arc::from("The main title displayed prominently on the slide."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

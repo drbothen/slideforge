@@ -32,6 +32,12 @@ impl RoadmapSlideType {
     /// Construct a new `RoadmapSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // STORY-089 note: the story spec (AC-016) references `roadmap.milestones → FieldType::List`
+        // but the existing FieldDef uses the name `phases`. The implementer must reconcile this
+        // discrepancy (spec wins per VSDD rule): either rename `phases` to `milestones` here and
+        // update all callers, or file a spec amendment. At this stub stage `phases` is kept as-is
+        // with expected_type: None. The Priority-1 annotation will be applied by the implementer
+        // once the field-name discrepancy is resolved.
         let mut optional = vec![FieldDef {
             name: Arc::from("phases"),
             description: Arc::from(
@@ -40,6 +46,7 @@ impl RoadmapSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -50,6 +57,7 @@ impl RoadmapSlideType {
                 ),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

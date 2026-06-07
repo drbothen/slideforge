@@ -42,6 +42,7 @@ impl DiagramSlideType {
                     description: Arc::from("The slide title shown above the diagram."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("diagram"),
@@ -51,6 +52,7 @@ impl DiagramSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional: common_optional_fields(),

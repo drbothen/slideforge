@@ -13,7 +13,7 @@ use std::sync::Arc;
 use slideforge_layout::LaidOutSlide;
 use slideforge_types::{Brand, Slide};
 
-use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+use crate::traits::{Canvas, FieldDef, FieldType, LayoutError, SlideType};
 
 use super::common_optional_fields;
 
@@ -44,7 +44,12 @@ impl ChartSlideType {
                     description: Arc::from("The slide title shown above the chart."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
+                // Priority-1 annotation: chart_type must be one of the 7 allowed values.
+                // AC-013 (BC-1.18.001 postcondition 9):
+                //   `chart_type: "donut"` emits E-VAL-104 T2 (disallowed value).
+                //   `chart_type: 42` emits E-VAL-104 T1 (expected string, got integer).
                 FieldDef {
                     name: Arc::from("chart_type"),
                     description: Arc::from(
@@ -53,7 +58,18 @@ impl ChartSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: Some(FieldType::OneOf(vec![
+                        Arc::from("bar"),
+                        Arc::from("line"),
+                        Arc::from("pie"),
+                        Arc::from("scatter"),
+                        Arc::from("area"),
+                        Arc::from("stacked-bar"),
+                        Arc::from("stacked-area"),
+                    ])),
                 },
+                // Polymorphic: data may be a List or a Str data-source reference.
+                // AC-021 (BC-1.18.001 invariant 5): must be None to avoid false E-VAL-104.
                 FieldDef {
                     name: Arc::from("data"),
                     description: Arc::from(
@@ -62,6 +78,7 @@ impl ChartSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional: common_optional_fields(),

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use slideforge_types::Slide;
 
-use crate::traits::{Diagnostic, DiagnosticSeverity, SlideType};
+use crate::traits::{Diagnostic, DiagnosticSeverity, FieldType, SlideType, type_matches, value_type_name};
 use slideforge_types::{FieldValue, Value};
 
 use super::{
@@ -212,11 +212,18 @@ impl Default for SlideTypeRegistry {
 /// | Required field absent | `Error` | `"E-VAL-101"` |
 /// | Required field is empty string | `Error` | `"E-VAL-102"` |
 /// | Unknown field (not in required or optional) | `Warning` | `"W-VAL-103"` |
+/// | Field value type mismatch or `OneOf` violation | `Error` | `"E-VAL-104"` |
 ///
 /// # Arguments
 ///
 /// * `slide` — The semantic slide to validate.
 /// * `slide_type` — The registered slide type to validate against.
+///
+/// # STORY-089 stub
+///
+/// The E-VAL-104 arm is structurally present but inert — it never emits any
+/// diagnostic yet. Implementer: replace the arm body with the real T1/T2 logic
+/// from BC-1.18.001 postconditions 2 and 3 in Task T4.
 #[must_use]
 pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
@@ -267,6 +274,61 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
                 });
             },
             _ => {},
+        }
+    }
+
+    // ── E-VAL-104: type-mismatch / OneOf violation ───────────────────────────
+    // STORY-089 stub: structural hook is present; the arm is inert and emits
+    // nothing yet. Implementer: fill this body with the T1/T2 logic from
+    // BC-1.18.001 postconditions 2 and 3 in Task T4.
+    //
+    // Required iteration order: check ALL fields across required + optional;
+    // accumulate ALL E-VAL-104 diagnostics before returning (DI-018 / BC-1.18.001
+    // invariant 7). Do NOT halt on the first mismatch.
+    //
+    // Algorithm (to be implemented):
+    //   for field_def in required + optional:
+    //     if let Some(expected) = &field_def.expected_type:
+    //       if expected == FieldType::Any: continue
+    //       match slide.fields.get(field_def.name.as_ref()):
+    //         Some(FieldValue::Literal(v)):
+    //           if !type_matches(v, expected):
+    //             // T2: if expected is OneOf AND v is Str → disallowed-value message
+    //             // T1: otherwise → type-mismatch message
+    //             push E-VAL-104 Diagnostic
+    //         Some(FieldValue::Inlines(_)): skip (untypeable at Stage 5)
+    //         None: skip (E-VAL-101 arm handles absence)
+    for field_def in slide_type
+        .required_fields()
+        .iter()
+        .chain(slide_type.optional_fields().iter())
+    {
+        if let Some(expected) = &field_def.expected_type {
+            // Skip FieldType::Any — no type constraint.
+            // The matches! guard below uses the discriminant.
+            // STORY-089 stub: only the structural skeleton; no diagnostic emitted.
+            // Implementer: add real T1/T2 logic here.
+            if matches!(expected, FieldType::Any) {
+                continue;
+            }
+            match slide.fields.get(field_def.name.as_ref()) {
+                Some(FieldValue::Literal(_v)) => {
+                    // STORY-089 stub — E-VAL-104 arm is inert.
+                    // type_matches(_v, expected) is deliberately NOT called here yet.
+                    // Implementer: call type_matches(_v, expected), inspect the
+                    // result, and push the appropriate T1 or T2 Diagnostic.
+                    // The _ prefix suppresses unused-variable warnings on stub imports.
+                    let _ = (expected, type_matches, value_type_name);
+                },
+                Some(
+                    FieldValue::Inlines(_) | FieldValue::Expr(_) | FieldValue::Interpolated(_),
+                )
+                | None => {
+                    // Inlines: untypeable at Stage 5 — skip (BC-1.18.001 postcondition 5).
+                    // Expr / Interpolated: pre-eval template variants — skip at Stage 5.
+                    // None: absence is the E-VAL-101 concern — skip here.
+                },
+            }
         }
     }
 

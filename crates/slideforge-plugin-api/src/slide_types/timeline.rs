@@ -39,6 +39,7 @@ impl TimelineSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -47,6 +48,7 @@ impl TimelineSlideType {
                 description: Arc::from("The slide title (e.g., \"Project Timeline\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

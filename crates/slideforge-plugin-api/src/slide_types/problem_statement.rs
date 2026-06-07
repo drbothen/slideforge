@@ -38,6 +38,7 @@ impl ProblemStatementSlideType {
             description: Arc::from("The business or human impact of the problem if left unsolved."),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -47,6 +48,7 @@ impl ProblemStatementSlideType {
                     description: Arc::from("The slide title (e.g., \"The Problem\")."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("problem"),
@@ -55,6 +57,7 @@ impl ProblemStatementSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,
