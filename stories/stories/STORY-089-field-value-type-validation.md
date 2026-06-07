@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.2"
+spec_version: "1.3"
 last_updated: "2026-06-07"
 changelog:
   - version: "1.0"
@@ -21,6 +21,9 @@ changelog:
   - version: "1.2"
     date: "2026-06-07"
     note: "Subsystem anchor correction (adversary pass observation): add SS-03 (slideforge-validate) to subsystems. Pipeline wiring (human-authorized, adversary HIGH-1) added a new FieldSchemaValidator in slideforge-validate/src/field_schema.rs (Validator surface #5) and registered it in the slideforge bundled-plugins registry. This is what makes validate_fields live at build, satisfying AC-009/AC-010 and BC-1.18.001 PC-7. Prior claim that no changes to slideforge-validate were required was inaccurate."
+  - version: "1.3"
+    date: "2026-06-07"
+    note: "chart.data reclassification: AC-021 updated to record that STORY-089 reclassifies chart.data from required→OPTIONAL at the field-schema level (no E-VAL-101 on absent data; enforcement is at render time by ChartRenderer). Cross-references BC-1.18.001 v1.2 Invariant 8. Adversary M2; BC-1.18.001 v1.2 Invariant 8."
 target_module: slideforge-plugin-api
 subsystems: [SS-14, SS-03]
 behavioral_contracts: [BC-1.18.001]
@@ -305,7 +308,14 @@ BC-1.18.001 precondition 1 — fields are FieldValue::Literal or Inlines; absenc
 Fields with runtime value diversity (e.g., `data` on `chart` slides — may be `Value::List` or
 `Value::Str` data-source reference) have `expected_type: None`. A test confirms that
 `Value::Str` on a `None`-annotated field produces no E-VAL-104 regardless of the value.
+Additionally, STORY-089 reclassifies `chart.data` from required→OPTIONAL at the field-schema
+level: a chart slide without a `data` field does NOT emit E-VAL-101 (required field absent);
+data presence is enforced at render time by `ChartRenderer`, not by `validate_fields`. This
+means the field-schema treats `chart.data` as optional (`required: false`) with
+`expected_type: None` (polymorphic). See BC-1.18.001 v1.2 Invariant 8 for the authoritative
+statement of this contract.
 (traces to BC-1.18.001 invariant 5 — polymorphic fields must use expected_type: None;
+BC-1.18.001 invariant 8 — chart.data is OPTIONAL at field-schema level; required at render by ChartRenderer, not E-VAL-101 at validation;
 BC-1.18.001 EC-009 — unannotated field skip;
 ADR-020 Decision 2 — None ≡ Any semantics)
 
