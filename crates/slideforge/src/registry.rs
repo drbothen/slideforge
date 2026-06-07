@@ -123,7 +123,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     // FieldSchemaValidator: calls validate_fields() for each slide, emitting
     // E-VAL-101 (missing required), E-VAL-102 (empty required), W-VAL-103
     // (unknown field), and E-VAL-104 (type mismatch / OneOf violation).
-    // BC-1.18.001 postcondition 10; ADR-020 Decision 4; STORY-089 AC-009.
+    // BC-1.18.001 postcondition 7; ADR-020 Decision 4; STORY-089 AC-009.
     builder.register_validator(Box::new(FieldSchemaValidator));
 
     // ── Surface 6: MathRenderer (1 bundled implementation — pulldown-latex) ──

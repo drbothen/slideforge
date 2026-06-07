@@ -62,8 +62,7 @@
 //! ## Traceability
 //!
 //! - BC-1.18.001 postcondition 2 (T1): Str on Int field → E-VAL-104
-//! - BC-1.18.001 postcondition 10: E-VAL-104 reachable from build() (AC-009)
-//! - BC-1.18.001 postcondition 11: warn-only → Ok (AC-010)
+//! - BC-1.18.001 postcondition 7: E-VAL-104 reachable from build() strict-mode exit (AC-009/AC-010)
 //! - ADR-020 Decision 4: FieldSchemaValidator as Stage-5 Validator plugin
 //! - ADR-016 Decision 3: Validator surface registered in registry.rs
 
@@ -78,7 +77,7 @@ use crate::e2e::{BrandTmpDir, fixture_source};
 // AC-009: strict mode — E-VAL-104 from FieldSchemaValidator
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.18.001 postcondition 10 / AC-009 — RED GATE:
+/// BC-1.18.001 postcondition 7 / AC-009:
 /// `build()` in strict mode on a `progress_bar` with `value "fifty"` (Str instead
 /// of Int) MUST return `Err(BuildError::ValidationFailed)` AND the failure MUST
 /// carry at least one diagnostic with `code == "E-VAL-104"`.
@@ -127,7 +126,7 @@ use crate::e2e::{BrandTmpDir, fixture_source};
 ///   value "fifty"
 /// ```
 ///
-/// Traceability: BC-1.18.001 postcondition 10; ADR-020 Decision 4; STORY-089 AC-009.
+/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 4; STORY-089 AC-009.
 #[test]
 fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
     let brand = BrandTmpDir::new("s089_ac009_strict");
@@ -137,9 +136,11 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
     let result = slideforge::build(&source, &opts);
 
     // Must be Err — any strict violation causes ValidationFailed.
-    // Note: ValueRangeValidator already produces E-VAL-011 for Str on value field,
-    // so strict=true causes Err even without FieldSchemaValidator. The primary
-    // assertion passes trivially pre-wiring.
+    // Post-wiring: FieldSchemaValidator produces E-VAL-104 for Str on Int field.
+    // ValueRangeValidator (BC-1.17.002 v1.3 / BC-1.18.001 EC-001) does NOT emit
+    // E-VAL-011 for wrong-type — range-only validator; type checking delegated to
+    // FieldSchemaValidator. So E-VAL-104 is the ONLY diagnostic code that causes
+    // strict mode to return Err(ValidationFailed) here.
     assert!(
         matches!(
             result,
@@ -156,12 +157,9 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
     // can cause ValidationFailed. E-VAL-104 specifically proves that FieldSchemaValidator
     // (which calls validate_fields) is registered and wired at Stage 5.
     //
-    // Pre-wiring RED GATE: only E-VAL-011 is present (from ValueRangeValidator
-    // detecting wrong type). E-VAL-104 is ABSENT (validate_fields is dead code).
-    // → This assertion FAILS.
-    //
-    // Post-wiring: FieldSchemaValidator also runs → E-VAL-104 added to diagnostics.
-    // → Both E-VAL-011 and E-VAL-104 are present. This assertion PASSES.
+    // Post-wiring: FieldSchemaValidator runs → E-VAL-104 for Str on Int field.
+    // ValueRangeValidator does NOT emit E-VAL-011 for wrong-type (BC-1.17.002 v1.3).
+    // → Only E-VAL-104 is present. This assertion PASSES.
     let Err(slideforge::error::BuildError::ValidationFailed {
         ref diagnostics, ..
     }) = result
@@ -176,12 +174,28 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
 
     assert!(
         !e_val_104_diags.is_empty(),
-        "AC-009 RED GATE: ValidationFailed.diagnostics must contain at least one E-VAL-104 \
+        "AC-009: ValidationFailed.diagnostics must contain at least one E-VAL-104 \
          diagnostic (T1 type-mismatch: expected integer, got string — from FieldSchemaValidator \
          calling validate_fields). \
-         \nPre-wiring: only E-VAL-011 present (ValueRangeValidator) — FieldSchemaValidator \
-         is not registered, validate_fields() is dead code. \
-         \nPost-wiring: both E-VAL-011 and E-VAL-104 must appear. \
+         \nGot diagnostic codes: {:?}",
+        diagnostics
+            .iter()
+            .map(|d| d.code.as_ref())
+            .collect::<Vec<_>>()
+    );
+
+    // Boundary assertion: E-VAL-011 must be ABSENT for wrong-type value.
+    // BC-1.17.002 v1.3 / BC-1.18.001 EC-001: ValueRangeValidator is range-only;
+    // it must NOT emit E-VAL-011 for a Str on an Int field.
+    let e_val_011_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code.as_ref() == "E-VAL-011")
+        .collect();
+    assert!(
+        e_val_011_diags.is_empty(),
+        "AC-009 boundary: E-VAL-011 must be ABSENT for wrong-type progress_bar value \
+         (BC-1.17.002 v1.3 / BC-1.18.001 EC-001 — ValueRangeValidator is range-only; \
+         type checking delegated to FieldSchemaValidator). \
          \nGot diagnostic codes: {:?}",
         diagnostics
             .iter()
@@ -215,7 +229,7 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
 // AC-010: warn-only mode — no ValidationFailed on type-mismatch fixture
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-1.18.001 postcondition 11 / AC-010 — guard test:
+/// BC-1.18.001 postcondition 7 / AC-010 — guard test:
 /// `build()` in warn-only mode (`strict=false`) on the same `progress_bar` fixture
 /// with `value "fifty"` MUST return `Ok(BuildOutput)` — the build does NOT hard-fail.
 ///
@@ -248,7 +262,7 @@ fn test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104() {
 /// If warn-only diagnostic surfacing is added to `BuildOutput` in a future story,
 /// this test should be updated to assert E-VAL-104 presence in the output.
 ///
-/// Traceability: BC-1.18.001 postcondition 11; ADR-020 Decision 4; STORY-089 AC-010.
+/// Traceability: BC-1.18.001 postcondition 7; ADR-020 Decision 4; STORY-089 AC-010.
 #[test]
 fn test_BC_1_18_001_ac010_warn_only_progress_bar_str_value_returns_ok() {
     let brand = BrandTmpDir::new("s089_ac010_warn");

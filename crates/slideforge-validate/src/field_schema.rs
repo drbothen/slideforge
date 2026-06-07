@@ -34,7 +34,7 @@
 //!
 //! ## Traceability
 //!
-//! - BC-1.18.001 postcondition 10: E-VAL-104 reachable from `build()` (STORY-089 AC-009)
+//! - BC-1.18.001 postcondition 7: E-VAL-104 reachable from `build()` (STORY-089 AC-009)
 //! - ADR-020 Decision 4: `FieldSchemaValidator` as Stage-5 `Validator` plugin
 //! - STORY-089 AC-009, AC-010
 

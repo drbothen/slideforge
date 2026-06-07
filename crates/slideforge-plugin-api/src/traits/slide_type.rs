@@ -214,7 +214,7 @@ pub fn type_matches(value: &Value, expected: &FieldType) -> bool {
 /// );
 /// ```
 ///
-/// Traceability: AC-018; ADR-020 Decision 3; BC-1.18.001 invariant 8.
+/// Traceability: AC-018; ADR-020 Decision 3.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FieldDef {

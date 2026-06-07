@@ -13,15 +13,26 @@
 //! by reading `Slide.fields` directly. `SlideType::lay_out()` is geometry-only and
 //! does NOT perform value-range validation.
 //!
+//! ## Responsibility boundary (BC-1.17.002 v1.3 / BC-1.18.001 EC-001)
+//!
+//! `ValueRangeValidator` owns **range** checking ONLY.
+//!
+//! - Absent or wrong-type `value` on `progress_bar` → **no** E-VAL-011.
+//!   Those cases are `FieldSchemaValidator`'s responsibility:
+//!   - Absent required field → E-VAL-101
+//!   - Wrong type (e.g., Str on Int field) → E-VAL-104
+//! - E-VAL-011 fires **only** when the value is `Value::Int(n)` with `n ∉ [0, 100]`.
+//!
 //! ## Error codes
 //!
 //! | Code | Severity | Meaning |
 //! |------|----------|---------|
-//! | `E-VAL-011` | Error | Numeric field out of required range or wrong type |
+//! | `E-VAL-011` | Error | Numeric field out of required range |
 //!
 //! ## Traceability
 //!
-//! - BC-1.17.002 PC3: `progress_bar` `value` outside [0, 100] → E-VAL-011
+//! - BC-1.17.002 v1.3 PC3: `progress_bar` `value` outside [0, 100] → E-VAL-011
+//! - BC-1.18.001 EC-001: presence and type checks delegated to `FieldSchemaValidator`
 //! - BC-1.17.003 inv 6: `weighted_composite` component `weight` ≤ 0 → E-VAL-011
 //! - BC-1.17.003 inv 7: `weighted_composite` component `score` outside [0, 100] → E-VAL-011
 //! - DI-018: all component errors accumulated before returning (no bail-on-first)
@@ -32,10 +43,13 @@ use std::sync::Arc;
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, FieldValue, SourceSpan, Value};
 
-/// Error code for a numeric field that is absent, wrong type, or out of range.
+/// Error code for a numeric field that is out of range.
 ///
-/// Traces to BC-1.17.002 PC3 and BC-1.17.003 inv 6/7.
+/// Traces to BC-1.17.002 v1.3 PC3 and BC-1.17.003 inv 6/7.
 /// Allocated by architect adjudication F-087-P1-001 (2026-06-06).
+///
+/// Note: absent or wrong-type `value` fields produce E-VAL-101 / E-VAL-104
+/// from `FieldSchemaValidator` (BC-1.18.001 EC-001) — NOT E-VAL-011.
 pub const E_VAL_011: &str = "E-VAL-011";
 
 /// Validates numeric field ranges for slide types that have strict numeric contracts.
@@ -43,7 +57,10 @@ pub const E_VAL_011: &str = "E-VAL-011";
 /// ## Slide types checked
 ///
 /// - `progress_bar` — `Slide.fields["value"]` must be `Value::Int(n)` with
-///   `0 ≤ n ≤ 100`. Absent or wrong-type fields also produce E-VAL-011.
+///   `0 ≤ n ≤ 100`. Emits E-VAL-011 ONLY when the value is an integer outside
+///   [0, 100]. Absent or wrong-type `value` fields are NOT checked here —
+///   those are `FieldSchemaValidator`'s responsibility (E-VAL-101 / E-VAL-104
+///   per BC-1.18.001 EC-001 / BC-1.17.002 v1.3).
 /// - `weighted_composite` — for each `Value::Map` in `Slide.fields["components"]`:
 ///   - `weight` must be a positive `Value::Float` or positive `Value::Int`.
 ///   - `score` must be `Value::Int(n)` with `0 ≤ n ≤ 100`.
@@ -89,40 +106,32 @@ impl Validator for ValueRangeValidator {
 
 /// Validate the `value` field on a `progress_bar` slide.
 ///
-/// BC-1.17.002 PC3: `value` must be `Value::Int(n)` with `0 ≤ n ≤ 100`.
-/// Absent or wrong-type → E-VAL-011 (type error message).
-/// Out-of-range → E-VAL-011 (range error message with actual value).
+/// BC-1.17.002 v1.3 PC3: when `value` is `Value::Int(n)`, `n` must be in [0, 100].
+/// Out-of-range integer → E-VAL-011 (range error message with actual value).
+///
+/// ## Responsibility boundary (BC-1.18.001 EC-001)
+///
+/// This function does NOT emit E-VAL-011 for absent or wrong-type `value` fields.
+/// Those cases are `FieldSchemaValidator`'s responsibility:
+/// - Absent required field → E-VAL-101
+/// - Wrong type (e.g., `Str` on `Int` field) → E-VAL-104
+///
+/// Only `Some(FieldValue::Literal(Value::Int(n)))` with `n ∉ [0, 100]` → E-VAL-011.
 fn validate_progress_bar_value(
     fields: &slideforge_types::OrderedMap<Arc<str>, FieldValue>,
     span: &SourceSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match fields.get("value") {
-        Some(FieldValue::Literal(Value::Int(n))) => {
-            if !(0..=100).contains(n) {
-                diagnostics.push(make_range_error(
-                    &format!("progress_bar value must be between 0 and 100; got {n}."),
-                    span,
-                ));
-            }
-            // In-range: no diagnostic.
-        },
-        Some(FieldValue::Literal(other)) => {
-            // Wrong type (not Int).
-            let actual_type = value_type_name(other);
-            diagnostics.push(make_range_error(
-                &format!("progress_bar value must be an integer; got {actual_type}."),
-                span,
-            ));
-        },
-        _ => {
-            // Absent (None) or non-Literal FieldValue.
-            diagnostics.push(make_range_error(
-                "progress_bar value must be an integer; field is absent.",
-                span,
-            ));
-        },
+    if let Some(FieldValue::Literal(Value::Int(n))) = fields.get("value")
+        && !(0..=100).contains(n)
+    {
+        diagnostics.push(make_range_error(
+            &format!("progress_bar value must be between 0 and 100; got {n}."),
+            span,
+        ));
     }
+    // In-range integer, absent, or wrong-type `value`: no E-VAL-011 from this validator.
+    // FieldSchemaValidator emits E-VAL-101 (absent) or E-VAL-104 (wrong type).
 }
 
 /// Validate `weight` and `score` on each component of a `weighted_composite` slide.
@@ -477,7 +486,10 @@ mod tests {
         );
     }
 
-    /// BC-1.17.002 PC3: absent `value` field → 1 E-VAL-011.
+    /// BC-1.17.002 v1.3 / BC-1.18.001 EC-001: absent `value` field → 0 E-VAL-011.
+    ///
+    /// Absent required field is `FieldSchemaValidator`'s responsibility (E-VAL-101).
+    /// `ValueRangeValidator` must NOT emit E-VAL-011 for an absent field.
     #[test]
     fn test_BC_1_17_002_value_absent() {
         let slide = make_progress_bar_slide(None);
@@ -487,14 +499,18 @@ mod tests {
             .iter()
             .filter(|d| d.code.as_ref() == E_VAL_011)
             .collect();
-        assert_eq!(
-            errors.len(),
-            1,
-            "progress_bar with absent value must produce 1 E-VAL-011; got {diags:?}"
+        assert!(
+            errors.is_empty(),
+            "BC-1.17.002 v1.3 / BC-1.18.001 EC-001: ValueRangeValidator must emit ZERO \
+             E-VAL-011 for absent progress_bar value — absent required field is \
+             FieldSchemaValidator's responsibility (E-VAL-101). Got {diags:?}"
         );
     }
 
-    /// BC-1.17.002 PC3: `value` is `Str` (wrong type) → 1 E-VAL-011.
+    /// BC-1.17.002 v1.3 / BC-1.18.001 EC-001: `value` is `Str` (wrong type) → 0 E-VAL-011.
+    ///
+    /// Wrong-type field is `FieldSchemaValidator`'s responsibility (E-VAL-104).
+    /// `ValueRangeValidator` must NOT emit E-VAL-011 for a Str value.
     #[test]
     fn test_BC_1_17_002_value_wrong_type() {
         let slide =
@@ -505,10 +521,11 @@ mod tests {
             .iter()
             .filter(|d| d.code.as_ref() == E_VAL_011)
             .collect();
-        assert_eq!(
-            errors.len(),
-            1,
-            "progress_bar value=Str must produce 1 E-VAL-011; got {diags:?}"
+        assert!(
+            errors.is_empty(),
+            "BC-1.17.002 v1.3 / BC-1.18.001 EC-001: ValueRangeValidator must emit ZERO \
+             E-VAL-011 for wrong-type (Str) progress_bar value — type mismatch is \
+             FieldSchemaValidator's responsibility (E-VAL-104). Got {diags:?}"
         );
     }
 
