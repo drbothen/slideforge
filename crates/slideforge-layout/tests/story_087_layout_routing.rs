@@ -439,6 +439,97 @@ fn test_weighted_composite_2_components_fill_2_generic_slots() {
     );
 }
 
+/// BC-1.17.003 PC-9 / F-087-P7-001:
+/// `weighted_composite` with 6 component Body blocks MUST cap at 5 rendered rows.
+/// The 6th component exceeds the 5 pre-allocated Generic-role slots; it must be
+/// silently dropped — no additional/stray frame is appended.
+///
+/// ## RED GATE
+///
+/// The current `field_to_block.rs` threading iterates ALL components with no
+/// `.take(5)` cap (lines ~336-345). When 6 Body blocks arrive at `layout::run`,
+/// the 6th exhausts all 5 Generic-role Empty slots and falls through to
+/// `fill_region_slot_or_append` Phase 3 (layout.rs ~870-898), which APPENDS a
+/// stray full-page-bbox frame with:
+///   - bbox: x=Emu(0), y=Emu(0), width=page_width, height=Emu(914_400)
+///   - region_role: None
+///
+/// This test fails until the cap (`.take(5)`) is applied at threading
+/// (`field_to_block.rs`) or at layout-slot fill (layout.rs Generic fallback).
+///
+/// ## Assertions (both load-bearing, not "doesn't panic")
+///
+/// 1. Exactly 5 `FrameContent::Body` frames with `region_role == Generic` exist
+///    (the 6th component row must NOT appear).
+/// 2. No frame has `bbox.x == Emu(0) && bbox.y == Emu(0) && region_role == None`
+///    (i.e., no Phase-3 stray full-page-bbox frame was appended).
+///
+/// Traceability: BC-1.17.003 PC-9, F-087-P7-001.
+#[test]
+#[allow(non_snake_case)]
+fn test_BC_1_17_003_pc9_six_components_caps_at_5_no_stray_frame() {
+    // Build 1 ColorLabel (aggregate) + 6 component Body blocks — one more than
+    // the 5 Generic-role slots pre-allocated for weighted_composite.
+    let mut blocks = vec![text_block_tagged("Overall: Good", TextTag::ColorLabel)];
+    for i in 1..=6 {
+        blocks.push(text_block_tagged(
+            &format!("Component {i}: 80/100 (wt: 0.17) — Good"),
+            TextTag::Body,
+        ));
+    }
+    let slide = make_slide_with_blocks("weighted_composite", blocks, Some("Vendor A"));
+    let deck = make_deck_one_slide(slide);
+    let brand = make_brand();
+
+    let laid_out = run(&deck, &brand).expect("layout::run must not fail");
+    let frames = &laid_out.slides[0].frames;
+
+    // Assertion 1: exactly 5 Generic-role Body frames (not 6).
+    // The ColorLabel fills the Body-role slot; each component Body fills a Generic slot.
+    // If a 6th component slips through, the Generic-slot count would still be 5 but
+    // an extra Phase-3 frame (region_role: None) would be appended — caught by
+    // Assertion 2. We verify the Generic Body count is exactly 5.
+    let generic_body_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| {
+            matches!(f.content, FrameContent::Body(_))
+                && f.region_role == Some(slideforge_layout::RegionRole::Generic)
+        })
+        .collect();
+
+    assert_eq!(
+        generic_body_frames.len(),
+        5,
+        "RED GATE (BC-1.17.003 PC-9 / F-087-P7-001): \
+         weighted_composite with 6 component Body blocks must produce EXACTLY 5 \
+         Generic-role Body frames (5-slot cap), not {}. \
+         All frames: {frames:?}",
+        generic_body_frames.len()
+    );
+
+    // Assertion 2: no stray Phase-3 full-page-bbox frame appended.
+    // Phase-3 fallback frames have region_role == None and bbox at (0,0).
+    // Any such frame indicates the 6th component overflowed the slot list.
+    let stray_frames: Vec<_> = frames
+        .iter()
+        .filter(|f| {
+            f.region_role.is_none()
+                && f.bbox.x == slideforge_types::Emu(0)
+                && f.bbox.y == slideforge_types::Emu(0)
+                && matches!(f.content, FrameContent::Body(_))
+        })
+        .collect();
+
+    assert_eq!(
+        stray_frames.len(),
+        0,
+        "RED GATE (BC-1.17.003 PC-9 / F-087-P7-001): \
+         a stray Phase-3 full-page-bbox frame was appended for the 6th component \
+         (region_role=None, bbox origin at (0,0)). The threading cap (.take(5)) \
+         is missing. Stray frame(s): {stray_frames:?}. All frames: {frames:?}"
+    );
+}
+
 /// BC-1.17.003 PC-9 / adjudication §10.2:
 /// 5 component blocks → all 5 Generic-role slots filled.
 ///
