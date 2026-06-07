@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: active
 producer: product-owner
 timestamp: 2026-06-07T00:00:00
@@ -19,6 +19,10 @@ modified:
     date: 2026-06-07
     by: product-owner
     reason: "Field-name corrections per architect adjudication / ADR-020: roadmap.milestones → roadmap.phases; dropped matrix.rows (cells is polymorphic, expected_type: None) and toc.items (TOC entries auto-generated, no list field) from Priority-1 annotated list. Authoritative total: 9 annotated field sites across 8 slide types."
+  - version: "1.2"
+    date: 2026-06-07
+    by: product-owner
+    reason: "STORY-089 adversary findings M1 + M2. M1: removed trailing ' (at <file>:<line>:<col>)' from all E-VAL-104 message templates in PC-2, PC-3, EC-001, EC-003, and canonical test vectors — aligning with E-VAL-101/102 convention where the source span is carried structurally in Diagnostic.span (rendered by miette) rather than embedded literally in the message string. M2: added Invariant 8 recording that chart.data is optional at field-schema level (validate_fields does not emit E-VAL-101 for absent chart.data); data is required at render time by ChartRenderer, not at schema-validation time. Cross-reference STORY-089."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -68,8 +72,8 @@ skipped — no type check is performed for polymorphic or unannotated fields.
    `Diagnostic` with:
    - `severity: DiagnosticSeverity::Error`
    - `code: Arc::from("E-VAL-104")`
-   - `message`: `Field '<name>' on <type> slide has wrong type: expected <expected_display>, got <actual_type>. See the DSL reference for valid field types. (at <file>:<line>:<col>)`
-   - `span`: the slide's `source_span`
+   - `message`: `Field '<name>' on <type> slide has wrong type: expected <expected_display>, got <actual_type>. See the DSL reference for valid field types.`
+   - `span`: the slide's `source_span` (rendered by miette as `file:line:col` — not embedded in the message string, consistent with E-VAL-101/102)
 
 3. **T2 — OneOf violation.** When a field is present as
    `FieldValue::Literal(Value::Str(s))`, `expected_type` is
@@ -77,8 +81,8 @@ skipped — no type check is performed for polymorphic or unannotated fields.
    pushes exactly one `Diagnostic` with:
    - `severity: DiagnosticSeverity::Error`
    - `code: Arc::from("E-VAL-104")`
-   - `message`: `Field '<name>' on <type> slide has disallowed value "<s>": allowed values are [<v1>, <v2>, ...]. (at <file>:<line>:<col>)`
-   - `span`: the slide's `source_span`
+   - `message`: `Field '<name>' on <type> slide has disallowed value "<s>": allowed values are [<v1>, <v2>, ...].`
+   - `span`: the slide's `source_span` (rendered by miette as `file:line:col` — not embedded in the message string, consistent with E-VAL-101/102)
    (Note: `FieldType::OneOf` is reached only when `Value::Str` is the variant. If the
    value is `Value::Int` on a `OneOf`-typed field, the T1 type-mismatch message fires
    first — `OneOf` expects `Str`; an `Int` is a type mismatch, not an allowed-values
@@ -167,13 +171,29 @@ skipped — no type check is performed for polymorphic or unannotated fields.
    collect ALL E-VAL-104 diagnostics before returning. Halting on the first mismatch is
    a violation of the error-accumulation invariant.
 
+8. **`chart.data` is optional at field-schema level; required at render time.** The
+   `data` field on `chart` slides is annotated `expected_type: None` (polymorphic —
+   may be `Value::List` for inline data or `Value::Str` for a data-source reference).
+   Crucially, `data` is also declared **optional** in `optional_fields()`, not in
+   `required_fields()`. This means `validate_fields` does NOT emit E-VAL-101 when a
+   chart slide has no `data` field. The absence is deliberately permitted at schema-
+   validation time (Stage 5, pre-layout). The `ChartRenderer` plugin is responsible for
+   enforcing data presence at render time (export stage) — a chart with no data
+   produces a render-time error (E-EXP-005 or equivalent), not a Stage-5 validation
+   error. This separation allows chart slides to be data-bound at runtime (e.g., via
+   `@data` in a watch-mode context) without requiring inline `data:` at parse time.
+   The reclassification from required to optional was applied in STORY-089 wiring and
+   is tested by the chart-without-data test vector in the STORY-089 test suite. See
+   also Invariant 5 (polymorphic fields use `expected_type: None`) and Postcondition 4
+   (`FieldType::Any / unannotated skip`).
+
 ## Edge Cases
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | `progress_bar` slide with `value: "75%"` (Value::Str instead of Int) | E-VAL-104 T1 emitted: `Field 'value' on progress_bar slide has wrong type: expected integer, got string. See the DSL reference for valid field types. (at <file>:<line>:<col>)`. E-VAL-011 from ValueRangeValidator does NOT fire (it reads Int value; the Str is caught first by E-VAL-104). |
+| EC-001 | `progress_bar` slide with `value: "75%"` (Value::Str instead of Int) | E-VAL-104 T1 emitted: `Field 'value' on progress_bar slide has wrong type: expected integer, got string. See the DSL reference for valid field types.` (source span rendered by miette as `file:line:col`). E-VAL-011 from ValueRangeValidator does NOT fire (it reads Int value; the Str is caught first by E-VAL-104). |
 | EC-002 | `chart` slide with `chart_type: 42` (Value::Int on OneOf-typed field) | E-VAL-104 T1 (type-mismatch, not T2/OneOf): `Field 'chart_type' on chart slide has wrong type: expected string, got integer. ...` OneOf allowlist check is never reached because the value is not Str. |
-| EC-003 | `chart` slide with `chart_type: "donut"` (Value::Str, not in OneOf allowlist) | E-VAL-104 T2 emitted: `Field 'chart_type' on chart slide has disallowed value "donut": allowed values are [bar, line, pie, scatter, area, stacked-bar, stacked-area]. (at <file>:<line>:<col>)`. |
+| EC-003 | `chart` slide with `chart_type: "donut"` (Value::Str, not in OneOf allowlist) | E-VAL-104 T2 emitted: `Field 'chart_type' on chart slide has disallowed value "donut": allowed values are [bar, line, pie, scatter, area, stacked-bar, stacked-area].` (source span rendered by miette as `file:line:col`). |
 | EC-004 | `decorative: "yes"` (Value::Str on Bool-typed field) | E-VAL-104 T1: `Field 'decorative' on <type> slide has wrong type: expected boolean, got string. ...` |
 | EC-005 | `decorative: true` (Value::Bool on Bool-typed field) | No E-VAL-104. type_matches(Bool(true), FieldType::Bool) returns true. No false positive. |
 | EC-006 | `weighted_composite` slide with `components: "see attached"` (Value::Str on List-typed field) | E-VAL-104 T1: `Field 'components' on weighted_composite slide has wrong type: expected list, got string. ...` |
@@ -190,9 +210,9 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 | Input | Expected Output | Category |
 |-------|----------------|----------|
 | `progress_bar` slide: `fields["value"] = FieldValue::Literal(Value::Int(42))` with `FieldDef { name: "value", expected_type: Some(FieldType::Int), ... }` | No E-VAL-104 diagnostic. `validate_fields` returns empty E-VAL-104 list for this field. | happy-path (Int matches Int) |
-| `progress_bar` slide: `fields["value"] = FieldValue::Literal(Value::Str("42"))` with `FieldType::Int` | One E-VAL-104 with message `Field 'value' on progress_bar slide has wrong type: expected integer, got string. See the DSL reference for valid field types. (at <file>:<line>:<col>)` | error-path (T1 type-mismatch) |
+| `progress_bar` slide: `fields["value"] = FieldValue::Literal(Value::Str("42"))` with `FieldType::Int` | One E-VAL-104 with message `Field 'value' on progress_bar slide has wrong type: expected integer, got string. See the DSL reference for valid field types.` (source span in `Diagnostic.span`, rendered by miette) | error-path (T1 type-mismatch) |
 | `chart` slide: `fields["chart_type"] = FieldValue::Literal(Value::Str("bar"))` with `FieldType::OneOf(["bar","line","pie","scatter","area","stacked-bar","stacked-area"])` | No E-VAL-104. | happy-path (OneOf — value in allowlist) |
-| `chart` slide: `fields["chart_type"] = FieldValue::Literal(Value::Str("donut"))` with `FieldType::OneOf([...])` | One E-VAL-104 with message `Field 'chart_type' on chart slide has disallowed value "donut": allowed values are [bar, line, pie, scatter, area, stacked-bar, stacked-area]. (at <file>:<line>:<col>)` | error-path (T2 OneOf violation) |
+| `chart` slide: `fields["chart_type"] = FieldValue::Literal(Value::Str("donut"))` with `FieldType::OneOf([...])` | One E-VAL-104 with message `Field 'chart_type' on chart slide has disallowed value "donut": allowed values are [bar, line, pie, scatter, area, stacked-bar, stacked-area].` (source span in `Diagnostic.span`, rendered by miette) | error-path (T2 OneOf violation) |
 | `chart` slide: `fields["chart_type"] = FieldValue::Literal(Value::Int(42))` with `FieldType::OneOf([...])` | One E-VAL-104 T1 (type-mismatch, not T2): `Field 'chart_type' on chart slide has wrong type: expected string, got integer. ...` | error-path (Int on OneOf-typed field triggers T1 before T2) |
 | Any slide: `fields["decorative"] = FieldValue::Literal(Value::Bool(true))` with `FieldType::Bool` | No E-VAL-104. | happy-path (Bool matches Bool, no false positive) |
 | Any slide: `fields["decorative"] = FieldValue::Literal(Value::Str("yes"))` with `FieldType::Bool` | One E-VAL-104 T1: `Field 'decorative' on <type> slide has wrong type: expected boolean, got string. ...` | error-path (T1 — YAML-style coercible string) |
@@ -226,7 +246,7 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 
 - BC-1.17.002 — sibling (progress_bar required-field contract; this BC adds type enforcement for `value: Int` on the same slide type)
 - BC-1.17.003 — sibling (weighted_composite required-field contract; this BC adds type enforcement for `components: List` and per-component `weight: Float`)
-- BC-1.15.001 — depends on (diagnostic reporting with source spans; E-VAL-104 uses `slide.source_span` for file:line:col in all messages)
+- BC-1.15.001 — depends on (diagnostic reporting with source spans; E-VAL-104 carries `slide.source_span` in `Diagnostic.span` — rendered by miette as `file:line:col`, not embedded in the message string)
 - BC-1.15.002 — depends on (error accumulation invariant; E-VAL-104 participates in the same accumulation pool as E-VAL-101/102/W-VAL-103)
 - BC-3.03.002 — composes with (strict mode produces no output on validation error; E-VAL-104 participates in this gate — at least one E-VAL-104 causes exit 2 and no output)
 - BC-3.03.003 — composes with (warn-only mode renders error-slide placeholders; E-VAL-104 is downgraded to warning in warn-only)
