@@ -11,8 +11,6 @@
 # Used by:
 #   test_BC_1_18_001_ac009_strict_progress_bar_str_value_returns_e_val_104
 #   test_BC_1_18_001_ac010_warn_only_progress_bar_str_value_returns_ok
-#   test_BC_1_18_001_ac009_positive_int_value_strict_ok (negative control)
-#   test_BC_1_18_001_ac009_chart_no_data_strict_ok (regression intent)
 #
 # Expected AC-009 behavior (post-wiring):
 #   build() with strict=true → Err(BuildError::ValidationFailed)
