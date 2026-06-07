@@ -62,7 +62,7 @@ use slideforge_types::{Slide, SourceSpan, Value};
 /// Full `<file>:<line>:<col>` resolution is deferred to when the evaluator
 /// receives `SourceMap` context (a future story that threads `SourceMap` through
 /// the pipeline). Until then this is better than a zero-origin default.
-fn span_to_source_span(syntax_span: slideforge_syntax::span::Span) -> SourceSpan {
+pub(crate) fn span_to_source_span(syntax_span: slideforge_syntax::span::Span) -> SourceSpan {
     if syntax_span.start == 0 && syntax_span.end == 0 {
         // Synthetic span from test helpers — return default (unknown).
         SourceSpan::default()

@@ -4,3 +4,4 @@
 //! access to private helpers via `crate::` imports.
 
 pub mod section_register_routing_tests;
+pub mod slide_source_span_tests;
