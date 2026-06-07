@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
 timestamp: 2026-06-07T00:00:00
@@ -18,11 +18,15 @@ modified:
   - version: "1.1"
     date: 2026-06-07
     by: product-owner
-    reason: "Field-name corrections per architect adjudication / ADR-020: roadmap.milestones → roadmap.phases; dropped matrix.rows (cells is polymorphic, expected_type: None) and toc.items (TOC entries auto-generated, no list field) from Priority-1 annotated list. Authoritative total: 9 annotated field sites across 8 slide types."
+    reason: "Field-name corrections per architect adjudication / ADR-020: roadmap.milestones → roadmap.phases; dropped matrix.rows (cells is polymorphic, expected_type: None) and toc.items (TOC entries auto-generated, no list field) from Priority-1 annotated list. Authoritative total: 8 annotated field sites across 8 slide types."
   - version: "1.2"
     date: 2026-06-07
     by: product-owner
     reason: "STORY-089 adversary findings M1 + M2. M1: removed trailing ' (at <file>:<line>:<col>)' from all E-VAL-104 message templates in PC-2, PC-3, EC-001, EC-003, and canonical test vectors — aligning with E-VAL-101/102 convention where the source span is carried structurally in Diagnostic.span (rendered by miette) rather than embedded literally in the message string. M2: added Invariant 8 recording that chart.data is optional at field-schema level (validate_fields does not emit E-VAL-101 for absent chart.data); data is required at render time by ChartRenderer, not at schema-validation time. Cross-reference STORY-089."
+  - version: "1.3"
+    date: 2026-06-07
+    by: product-owner
+    reason: "STORY-089 adversary LOW fixes. (1) Corrected annotated-site count from 9 to 8 in all three locations (frontmatter v1.1 reason, PC-9 body, Traceability Slide Types Affected table): per-component `weight: Float` on weighted_composite is validated via nested Map, not a top-level FieldDef (T3 deferred, ADR-020 Decision 6). PC-9 body carries the first-occurrence clarifying parenthetical. (2) No other content changes."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -113,7 +117,9 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 
 9. **Priority-1 annotated fields validated.** The following fields across the listed
    slide types are annotated (Priority-1 — realistic type-mismatch risk) and therefore
-   produce E-VAL-104 signals in practice (9 field sites across 8 slide types):
+   produce E-VAL-104 signals in practice (8 annotated FieldDef sites across 8 slide types;
+   per-component `weight: Float` on weighted_composite is validated via nested Map, not a
+   top-level FieldDef — T3 deferred, ADR-020 Decision 6):
    - `progress_bar.value` → `FieldType::Int`
    - `chart.chart_type` → `FieldType::OneOf(["bar", "line", "pie", "scatter", "area", "stacked-bar", "stacked-area"])`
    - `decorative` (all slides via `common_optional_fields`) → `FieldType::Bool`
@@ -240,7 +246,7 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 | Architecture Module | slideforge-plugin-api crate (SS-14) — `src/traits/slide_type.rs` (FieldType enum, FieldDef.expected_type), `src/slide_types/registry.rs` (validate_fields E-VAL-104 arm, type_matches helper) |
 | Architecture Decision | Proposal: `.factory/planning/d-fielddef-type-validation-proposal.md` (commit 5d60a39b). No ADR required (additive field on existing struct, no architectural trade-off requiring formal record). |
 | Stories | STORY-089 (to be filed by story-writer — field-value type validation Wave 5 slot 1) |
-| Slide Types Affected | **Priority-1 annotated (9 field sites, 8 slide types):** progress_bar, chart, weighted_composite, kpi_dashboard, roadmap, agenda, team (+ `decorative` on all slides via common_optional_fields). **Mechanical only (`expected_type: None` sweep):** matrix (cells → None; polymorphic), toc (no list field; entries auto-generated). All 34 slide types receive the mechanical unannotated-FieldDef None sweep. |
+| Slide Types Affected | **Priority-1 annotated (8 annotated FieldDef sites, 8 slide types):** progress_bar, chart, weighted_composite, kpi_dashboard, roadmap, agenda, team (+ `decorative` on all slides via common_optional_fields). **Mechanical only (`expected_type: None` sweep):** matrix (cells → None; polymorphic), toc (no list field; entries auto-generated). All 34 slide types receive the mechanical unannotated-FieldDef None sweep. |
 
 ## Related BCs
 
