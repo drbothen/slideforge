@@ -110,7 +110,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     // ── Surface 4: DiagramRenderer (1 bundled implementation — mermaid-rs) ──
     builder.register_diagram_renderer(Box::new(DiagramRendererImpl::new()));
 
-    // ── Surface 5: Validator (7 bundled implementations) ─────────────────────
+    // ── Surface 5: Validator (8 bundled implementations) ─────────────────────
     builder.register_validator(Box::new(AltTextValidator));
     builder.register_validator(Box::new(ZeroSlideValidator));
     builder.register_validator(Box::new(CanvasOverflowValidator::from_config(
