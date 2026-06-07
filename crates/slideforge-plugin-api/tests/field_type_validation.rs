@@ -4,14 +4,14 @@
 //! against the runtime `Value` variant and emits E-VAL-104 on type mismatch or
 //! OneOf violation.
 //!
-//! ## Red Gate contract
+//! ## Red Gate contract (historical — implementation complete)
 //!
-//! ALL tests in this file MUST FAIL before the implementer fills in
-//! `type_matches` (currently returns `true` unconditionally) and the E-VAL-104
-//! arm in `validate_fields` (currently inert). Tests that assert `false` results
-//! from `type_matches` fail because the stub returns `true`. Tests that assert
-//! E-VAL-104 diagnostics from `validate_fields` fail because the arm never
-//! pushes any diagnostic.
+//! These were Red Gate tests written before the STORY-089 implementer filled in
+//! `type_matches` and the E-VAL-104 arm in `validate_fields`. At the Red Gate,
+//! tests asserting `false` from `type_matches` failed because the stub returned
+//! `true` unconditionally, and tests asserting E-VAL-104 diagnostics failed
+//! because the E-VAL-104 arm in `validate_fields` was inert. The implementation
+//! is now complete and all tests in this file pass.
 //!
 //! ## Test naming
 //!

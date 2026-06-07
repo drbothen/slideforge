@@ -164,30 +164,24 @@ pub fn type_matches(value: &Value, expected: &FieldType) -> bool {
 /// `cannot create non-exhaustive structs with struct literal syntax`.
 ///
 /// ```compile_fail
-/// // This simulates external-crate construction: struct literal syntax is
-/// // prohibited by `#[non_exhaustive]` outside of `slideforge-plugin-api`.
+/// // This compile_fail doctest guards #[non_exhaustive] on FieldDef.
 /// //
-/// // In an external crate (e.g., a third-party SlideType plugin), writing:
+/// // The struct literal below names EVERY public field of FieldDef, including
+/// // `expected_type`. With all fields present the ONLY reason this fails is
+/// // E0639: "cannot create non-exhaustive structs with struct literal syntax".
 /// //
-/// //   use slideforge_plugin_api::FieldDef;
-/// //   let _ = FieldDef { name: ..., description: ..., required: true,
-/// //                       default_value: None };
+/// // If #[non_exhaustive] were ever removed, this struct literal would compile
+/// // successfully, the doctest would turn green, and CI would catch the regression.
 /// //
-/// // produces: "cannot create non-exhaustive structs with struct literal syntax"
-/// //
-/// // We force compile_fail here by using a deliberately incomplete struct literal
-/// // that would fail even without #[non_exhaustive], to document the constraint:
-/// use slideforge_plugin_api::FieldDef;
-/// let _f: FieldDef = FieldDef {
+/// // External plugin authors MUST use FieldDef::new or FieldDef::with_type
+/// // instead of struct literals — those constructors are the stable public API.
+/// use slideforge_plugin_api::{FieldDef, FieldType};
+/// let _f = FieldDef {
 ///     name: std::sync::Arc::from("title"),
 ///     description: std::sync::Arc::from("The slide title"),
 ///     required: true,
 ///     default_value: None,
-///     // `expected_type` is intentionally OMITTED to simulate what an external
-///     // crate would write if it didn't know about the `expected_type` field
-///     // (which #[non_exhaustive] adds without breaking external code that uses
-///     // the constructor APIs). An external crate cannot name all fields in a
-///     // struct literal of a #[non_exhaustive] struct — the compiler rejects it.
+///     expected_type: Some(FieldType::Str),
 /// };
 /// ```
 ///
