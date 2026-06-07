@@ -73,3 +73,11 @@ mod e2e_story_087_value_range;
 // RED GATE: layout::run has no ColorLabel arm or ColorBar materialization pass yet.
 #[path = "e2e/story_087_content_rendering.rs"]
 mod e2e_story_087_content_rendering;
+
+// STORY-087 pass-3 — BC-1.17.002 PC-9 bar-render Red Gate tests for PDF, HTML, DOCX.
+// These tests prove the progress_bar bar is rendered visibly in ALL output formats
+// (PC-9 requires ALL exporters, not just PPTX). HTML exporter not yet registered;
+// PDF uses export_uncompressed boundary test; DOCX uses build()-level test.
+// RED GATE: PDF ColorBar arm is tracing::debug! no-op; DOCX has no ColorBar arm.
+#[path = "e2e/story_087_bar_export.rs"]
+mod e2e_story_087_bar_export;

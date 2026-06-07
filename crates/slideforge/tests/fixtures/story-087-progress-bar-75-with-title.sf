@@ -1,0 +1,24 @@
+# STORY-087 fixture: progress_bar slide with value=75 preceded by a title slide.
+#
+# Used by: test_BC_1_17_002_pdf_build_returns_ok_for_progress_bar
+#
+# The title slide is required so the eval stage derives a non-None
+# DeckMetadata.title (from the first `slide title:` block per STORY-050 Gap 1).
+# PDF/UA-1 requires a document title in XMP metadata; without a deck title the
+# export fails with "NoDocumentTitle" before the ColorBar rendering path is reached.
+#
+# This fixture is PDF-safe: it has a title slide for deck metadata, then a
+# progress_bar slide. The PDF pipeline plumbing guard test verifies that build()
+# returns Ok for this deck (no bar render assertion — only Ok/Err check).
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Sprint Progress Deck"
+  subtitle "Q2 2026"
+
+slide progress_bar:
+  title "Sprint 4 Progress"
+  label "75% complete"
+  value 75
