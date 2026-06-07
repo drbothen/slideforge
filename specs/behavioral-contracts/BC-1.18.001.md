@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: active
 producer: product-owner
 timestamp: 2026-06-07T00:00:00
@@ -31,6 +31,10 @@ modified:
     date: 2026-06-07
     by: product-owner
     reason: "STORY-089 adversary MED-1 follow-up. Updated Traceability / Architecture Decision row to cite ADR-020 Decision 8 (FieldSchemaValidator Stage-5 wiring, Route B), which records the validate_fields live-at-build wiring that satisfies PC-4 and closes the dead-letter gap identified in MED-1. Replaced 'No ADR required' with the ADR-020 Decision 8 reference."
+  - version: "1.5"
+    date: 2026-06-07
+    by: product-owner
+    reason: "STORY-089 cascade hygiene. Disambiguated ambiguous 'PC-4' shorthand in the v1.4 modified reason and the Traceability / Architecture Decision row. 'PC-4' was ambiguous (reads as Postcondition 4 — FieldType::Any / unannotated skip — which is unrelated to the wiring). The intended reference is Precondition 4 ('validate_fields is called at Stage 5 as part of build_inner') AND Postcondition 7 (strict-mode E-VAL-104 → Err(BuildError::ValidationFailed)), which the ADR-020 Decision 8 wiring together enables. Both terms are now spelled out fully; the ambiguous 'PC-N' shorthand is not used in these wiring-traceability sentences."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -248,7 +252,7 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 | Capability Anchor Justification | CAP-022 ("Compile-Time Content Validation") per capabilities.md §CAP-022 — this BC defines the schema-driven type validation arm of the compile-time content validation pipeline. `validate_fields` enforcing `FieldDef.expected_type` is a compile-time check (Stage 5, pre-layout) that prevents type-mismatched field values from reaching `lay_out()`, producing user-visible E-VAL-104 diagnostics in strict mode. This is exactly what CAP-022 defines: "validate ... weight normalization. Strict mode (default build): validation errors produce no output." |
 | L2 Domain Invariants | DI-018 (error accumulation — `validate_fields` accumulates all E-VAL-104 before returning; no fail-on-first), DI-004 (type safety — the "no implicit coercion" rule makes `Value::Int` on a `FieldType::Str` field a hard error, not a silent coercion) |
 | Architecture Module | slideforge-plugin-api crate (SS-14) — `src/traits/slide_type.rs` (FieldType enum, FieldDef.expected_type), `src/slide_types/registry.rs` (validate_fields E-VAL-104 arm, type_matches helper) |
-| Architecture Decision | Proposal: `.factory/planning/d-fielddef-type-validation-proposal.md` (commit 5d60a39b). ADR-020 Decision 8 (FieldSchemaValidator Stage-5 wiring, Route B) — records that `validate_fields` is called live at `build_inner` Stage 5 (not deferred to layout), wiring that satisfies PC-4 and closes the dead-letter gap flagged in adversary MED-1. See `.factory/specs/architecture/adr/ADR-020-*.md` Decision 8. |
+| Architecture Decision | Proposal: `.factory/planning/d-fielddef-type-validation-proposal.md` (commit 5d60a39b). ADR-020 Decision 8 (FieldSchemaValidator Stage-5 wiring, Route B) — records that `validate_fields` is called live at `build_inner` Stage 5 (not deferred to layout), wiring that satisfies **Precondition 4** (`validate_fields` is called at Stage 5 as part of `build_inner`) and thereby enables **Postcondition 7** (strict-mode E-VAL-104 → `Err(BuildError::ValidationFailed)`, which the implementation and AC-009/AC-010 cite). This wiring closes the dead-letter gap flagged in adversary MED-1. See `.factory/specs/architecture/adr/ADR-020-*.md` Decision 8. |
 | Stories | STORY-089 (to be filed by story-writer — field-value type validation Wave 5 slot 1) |
 | Slide Types Affected | **Priority-1 annotated (8 annotated FieldDef sites, 8 slide types):** progress_bar, chart, weighted_composite, kpi_dashboard, roadmap, agenda, team (+ `decorative` on all slides via common_optional_fields). **Mechanical only (`expected_type: None` sweep):** matrix (cells → None; polymorphic), toc (no list field; entries auto-generated). All 34 slide types receive the mechanical unannotated-FieldDef None sweep. |
 
