@@ -28,10 +28,10 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
-develop_sha: "0d0113a2"
-develop_pr_count: 65
-error_taxonomy_version: "v2.18"
-workspace_tests: "3393+/3393+ (develop 0d0113a2; +2 SEC-002 a11y tests added in PR #65; 18 skipped)"
+develop_sha: "23f09c62"
+develop_pr_count: 66
+error_taxonomy_version: "v2.19"
+workspace_tests: "3393+/3393+ (develop 23f09c62; +15 PR-A tests: 11 ImagePathValidator + 4 diag-span; 18 skipped; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080)"
 workspace_test_failures: 0
 ---
 
@@ -42,11 +42,11 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `0d0113a2` (65 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `23f09c62` (66 merged PRs, 1 open PR: PR-C).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04). Fresh machines: `git clone <repo> && git worktree add .factory factory-artifacts`.
 
-**Current position:** Phase 3, Wave 4 **COMPLETE + follow-up fix-bursts IN PROGRESS**. PR #65 (0d0113a2) merged (SEC-002 closed). Wave-4 follow-ups (a)(b) in PR-A; (e)(f) in PR-C; (d) reframed to authorized feature story.
+**Current position:** Phase 3, Wave 4 **COMPLETE + follow-up fix-bursts IN PROGRESS**. PR #66 (23f09c62) merged (SEC-001 + diag-span CLOSED). PR #65 (0d0113a2) merged (SEC-002 closed). Wave-4 follow-ups (e)(f) remain in PR-C; (d) reframed to authorized feature story.
 
 **THE NEXT ACTION — Wave-4 Follow-up Fix-Bursts (pre-Wave-5):**
 
@@ -54,12 +54,13 @@ Human dispositioned ALL 6 follow-ups to address NOW before Wave 5:
 
 | ID | Status | Details |
 |----|--------|---------|
-| (b) SEC-001 CWE-22 MED | IN PROGRESS — PR-A | ImagePathValidator in slideforge-validate; pre-emptive (no disk I/O yet; architect-confirmed latent) |
-| (a) diag-span | IN PROGRESS — PR-A | eval_slide_node (for_eval.rs:346) hardcodes SourceSpan::default(); fix threads spanned_slide.span() via span_to_source_span bridge (byte-offset; miette resolves line:col at render). Full SourceMap line:col = future story. |
+| (b) SEC-001 CWE-22 MED | CLOSED — PR #66 (23f09c62) | ImagePathValidator + E-VAL-012 (error-taxonomy v2.19; BC-1.16.001 EC-012 v1.5). Pre-emptive CWE-22 containment. |
+| (a) diag-span | CLOSED — PR #66 (23f09c62) | eval_slide_node now threads spanned_slide.span() into Slide.source_span via span_to_source_span bridge. |
 | (c) SEC-002 LOW | CLOSED — PR #65 (0d0113a2) | Split a11y arm: AltText::Unspecified → tracing::warn!; Decorative stays silent. Security CLEAN, pr-reviewer APPROVE, CI green. |
 | (d) validate_fields | AUTHORIZED feature story | validate_fields (E-VAL-101/102, W-VAL-103) complete for current schema; type/enum/format checks need FieldDef type-annotation extension = E-VAL-104 (NEW BC) = feature work. Human AUTHORIZED: PO (BC) + architect (FieldDef design) + story-writer + full TDD + adversary cascade. |
-| (e) OBS-P6-001 | IN PROGRESS — PR-C | Status title geometry; needs visual-reviewer characterization first |
-| (f) OBS-P6-002 | IN PROGRESS — PR-C | DOCX percent rounding floor-vs-round (document_body.rs:229) |
+| SEC-001-HARDENING | OPEN (non-blocking) | security-reviewer noted residual string-layer bypass vectors in ImagePathValidator: percent-encoding (%2e%2e), leading/trailing whitespace, unicode full-width dots. Defense-in-depth gaps (no disk I/O yet; validator is DSL-layer lint). ANCHORED to image-loading story: MUST (1) OS-level std::fs::canonicalize + source-root prefix check as PRIMARY defense before open(); (2) harden ImagePathValidator: percent-decode + strip whitespace + unicode look-alike rejection. Severity: SUGGESTION (non-blocking). |
+| (e) OBS-P6-001 | IN PROGRESS — PR-C | REAL DEFECT: status slide lacked RegionRole::Title frame (title routed into 0.75in color strip). Fix adds canonical Title frame. |
+| (f) OBS-P6-002 | IN PROGRESS — PR-C | REAL DEFECT: DOCX double-floor off-by-one. Fix carries canonical percent:u8 in FrameContent::ColorBar. |
 
 **AFTER follow-ups resolve:** Wave 5 — **PENDING human go-ahead** (STORY-082, STORY-081, STORY-088; 21 stories, 122 pts). Do NOT auto-start Wave 5.
 
@@ -73,10 +74,10 @@ Human dispositioned ALL 6 follow-ups to address NOW before Wave 5:
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — COMPLETE + follow-up fix-bursts IN PROGRESS** (develop `0d0113a2`, 65 merged PRs). BLK-002 CLOSED. SEC-002 CLOSED (PR #65). PR-A: (a)(b) in progress. PR-C: (e)(f) in progress. (d) authorized as feature story. **NEXT: Wave 5 — PENDING human go-ahead (after follow-ups resolve).**
+Phase 3, **Wave 4 — COMPLETE + follow-up fix-bursts IN PROGRESS** (develop `23f09c62`, 66 merged PRs). BLK-002 CLOSED. SEC-002 CLOSED (PR #65). SEC-001 + diag-span CLOSED (PR #66). PR-C: (e)(f) in progress. (d) authorized as feature story. **NEXT: Wave 5 — PENDING human go-ahead (after follow-ups resolve).**
 
-- Active worktrees: PR-A (SEC-001 + diag-span), PR-C (OBS-P6-001 + OBS-P6-002). Open PRs: 2.
-- Workspace: 3393+/3393+ pass (18 skipped; +2 SEC-002 a11y tests in PR #65).
+- Active worktrees: PR-C (OBS-P6-001 + OBS-P6-002). Open PRs: 1.
+- Workspace: 3393+/3393+ pass (18 skipped; +15 PR-A tests in PR #66; known flaky: slideforge-diagrams cold_budget tracked STORY-080).
 
 ---
 
@@ -87,8 +88,8 @@ Phase 3, **Wave 4 — COMPLETE + follow-up fix-bursts IN PROGRESS** (develop `0d
 Follow-up disposition table in ZERO-CONTEXT RESUME above.
 
 **Pending work before Wave 5:**
-1. Merge PR-A: (b) SEC-001 ImagePathValidator + (a) diag-span threading fix.
-2. Merge PR-C: (e) OBS-P6-001 (after visual-reviewer characterization) + (f) OBS-P6-002 DOCX rounding.
+1. ~~Merge PR-A~~ DONE — PR #66 (23f09c62): (b) SEC-001 + (a) diag-span CLOSED.
+2. Merge PR-C: (e) OBS-P6-001 + (f) OBS-P6-002 DOCX rounding.
 3. Initiate authorized feature story for (d) validate_fields / E-VAL-104 (PO → architect → story-writer).
 4. Await human go-ahead for Wave 5 (STORY-082, STORY-081, STORY-088).
 
@@ -126,17 +127,17 @@ Follow-up disposition table in ZERO-CONTEXT RESUME above.
 
 ## Session Resume Checkpoint
 
-**Wave 4 follow-up fix-bursts IN PROGRESS. develop 0d0113a2 (65 merged PRs). SEC-002 CLOSED (PR #65). Wave 5 PENDING human go-ahead (after follow-ups resolve).**
+**Wave 4 follow-up fix-bursts IN PROGRESS. develop 23f09c62 (66 merged PRs). SEC-001 + diag-span CLOSED (PR #66). SEC-002 CLOSED (PR #65). Wave 5 PENDING human go-ahead (after PR-C resolves).**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-07 |
-| **Position** | Wave 4 COMPLETE + follow-up fix-bursts in progress. (c) CLOSED PR #65; (a)(b) PR-A; (e)(f) PR-C; (d) authorized feature story. 88 stories / 545 pts. |
-| **develop SHA** | `0d0113a2` (65 merged PRs; origin/develop confirmed; 2 open PRs: PR-A, PR-C) |
-| **Active worktrees** | PR-A (SEC-001 + diag-span), PR-C (OBS-P6-001 + OBS-P6-002) |
-| **Workspace tests** | 3393+/3393+ (develop 0d0113a2; +2 SEC-002 a11y tests; 18 skipped) |
+| **Position** | Wave 4 COMPLETE + follow-up fix-bursts in progress. (a)(b) CLOSED PR #66; (c) CLOSED PR #65; (e)(f) PR-C; (d) authorized feature story. 88 stories / 545 pts. |
+| **develop SHA** | `23f09c62` (66 merged PRs; origin/develop confirmed; 1 open PR: PR-C) |
+| **Active worktrees** | PR-C (OBS-P6-001 + OBS-P6-002) |
+| **Workspace tests** | 3393+/3393+ (develop 23f09c62; +15 PR-A tests; 18 skipped; known flaky: cold_budget STORY-080) |
 | **factory-artifacts** | PUSHED to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Complete PR-A + PR-C. Initiate (d) feature story (PO/architect). Then Wave 5: STORY-082/081/088. Await human go-ahead for Wave 5. Phases 4-7 remain for v1.0. |
+| **RESUME INSTRUCTION** | Merge PR-C (e)(f). Initiate (d) feature story (PO/architect). Then Wave 5: STORY-082/081/088. Await human go-ahead for Wave 5. Phases 4-7 remain for v1.0. |
 
 ---
 
@@ -179,6 +180,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-07 | PR-A-MERGE | PR #66 merged → develop 23f09c62. SEC-001 (E-VAL-012, error-taxonomy v2.19, BC-1.16.001 EC-012) + diag-span CLOSED. +15 tests (11 ImagePathValidator + 4 diag-span). Security CLEAN (1 defense-in-depth suggestion anchored to image-I/O story as SEC-001-HARDENING). pr-reviewer APPROVE; CI green. |
 | 2026-06-07 | WAVE4-FOLLOWUP-DISPOSITION | Human dispositioned all 6 Wave-4 follow-ups to fix NOW pre-Wave-5. (c) SEC-002 CLOSED PR #65 (0d0113a2): split a11y arm, AltText::Unspecified → tracing::warn!, Security CLEAN + pr-reviewer APPROVE. (d) validate_fields reframed: complete for current schema; type/enum/format checks need E-VAL-104 (new BC) + FieldDef extension = authorized feature story (PO/architect/story-writer). (a) diag-span + (b) SEC-001 CWE-22: IN PROGRESS PR-A. (e) OBS-P6-001 + (f) OBS-P6-002: IN PROGRESS PR-C. develop 0d0113a2. |
 | 2026-06-07 | WAVE4-COMPLETE | Wave 4 COMPLETE. image-alt fix (PR #64) squash-merged -> develop 02d484cf (64 PRs; LESSON-12+18 applied). Re-gate FULLY PASSED: Gate 1 PASS; Gate 2 SKIP; Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt resolved — image.rs/known_fields.rs/field_to_block.rs aligned; validate_fields wired); Gate 5 PASS (mean 1.00; min_critical 1.00; trajectory 0.56->0.86->1.00; all 5 critical scenarios pass). BLK-002 CLOSED. Wave 5 (STORY-082/081/088) PENDING human go-ahead. |
 | 2026-06-07 | WAVE4-REGATE-V2 | Wave 4 re-gate on correct tree (develop 54b8d3b1; LESSON-WORKTREE-SYNC applied — first attempt reviewed stale tree). Gate 3 PASS (all 4 original findings closed; 1 MED NEW-INT-001 image-alt remaining). Gate 5 FAIL (mean 0.860 PASS; min_critical 0.500 FAIL). BLK-002 remained open pending image-alt fix. |
