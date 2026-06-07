@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 last_updated: "2026-06-07"
 changelog:
   - version: "1.0"
@@ -17,13 +17,16 @@ changelog:
     note: "Initial story creation. Human-authorized Wave-4 follow-up (d), folded into Wave 5 slot 1. Implements ADR-020: FieldType enum + FieldDef.expected_type + type_matches + E-VAL-104 in validate_fields. BC-1.18.001 is the governing contract. Error taxonomy v2.20 formally registers E-VAL-101/102/W-VAL-103 and allocates E-VAL-104."
   - version: "1.1"
     date: "2026-06-07"
-    note: "Field-name corrections per ADR-020/BC-1.18.001 v1.1 architect adjudication: roadmap list field is 'phases' (not 'milestones'); matrix.cells is polymorphic → expected_type: None (no Priority-1 annotation, drop matrix.rows); toc has no list field (entries auto-generated) → no annotation, mechanical sweep only. Priority-1 authoritative mapping (9 sites / 8 types): progress_bar.value→Int, chart.chart_type→OneOf(7), decorative→Bool, weighted_composite.components→List, kpi_dashboard.kpis→List, roadmap.phases→List, agenda.items→List, team.members→List. Polymorphic/None: matrix.cells, chart.data. toc: no annotation."
+    note: "Field-name corrections per ADR-020/BC-1.18.001 v1.1 architect adjudication: roadmap list field is 'phases' (not 'milestones'); matrix.cells is polymorphic → expected_type: None (no Priority-1 annotation, drop matrix.rows); toc has no list field (entries auto-generated) → no annotation, mechanical sweep only. Priority-1 authoritative mapping (8 sites / 8 types): progress_bar.value→Int, chart.chart_type→OneOf(7), decorative→Bool, weighted_composite.components→List, kpi_dashboard.kpis→List, roadmap.phases→List, agenda.items→List, team.members→List. Polymorphic/None: matrix.cells, chart.data. toc: no annotation. (Note: per-component weight:Float is a nested Map key, not a top-level FieldDef — T3 deferred; corrected in v1.4.)"
   - version: "1.2"
     date: "2026-06-07"
     note: "Subsystem anchor correction (adversary pass observation): add SS-03 (slideforge-validate) to subsystems. Pipeline wiring (human-authorized, adversary HIGH-1) added a new FieldSchemaValidator in slideforge-validate/src/field_schema.rs (Validator surface #5) and registered it in the slideforge bundled-plugins registry. This is what makes validate_fields live at build, satisfying AC-009/AC-010 and BC-1.18.001 PC-7. Prior claim that no changes to slideforge-validate were required was inaccurate."
   - version: "1.3"
     date: "2026-06-07"
     note: "chart.data reclassification: AC-021 updated to record that STORY-089 reclassifies chart.data from required→OPTIONAL at the field-schema level (no E-VAL-101 on absent data; enforcement is at render time by ChartRenderer). Cross-references BC-1.18.001 v1.2 Invariant 8. Adversary M2; BC-1.18.001 v1.2 Invariant 8."
+  - version: "1.4"
+    date: "2026-06-07"
+    note: "Adversary corrections: (MED-1) AC-002 removed literal span-suffix '(at <file>:<line>:<col>)' from message requirement — per BC-1.18.001 PC-2, the source span is carried in Diagnostic.span and rendered by miette, not embedded in the message string; message ends at the documented content. (LOW) Count corrected 9→8: the per-component weight:Float is a nested Map key, not a top-level FieldDef (T3 deferred); authoritative Priority-1 count is 8 annotated FieldDef sites across 8 slide types. Changelog v1.1 and T5 updated accordingly."
 target_module: slideforge-plugin-api
 subsystems: [SS-14, SS-03]
 behavioral_contracts: [BC-1.18.001]
@@ -147,7 +150,7 @@ A `progress_bar` slide constructed with
 `Diagnostic` with:
 - `severity: DiagnosticSeverity::Error`
 - `code: Arc::from("E-VAL-104")`
-- `message` containing: `"Field 'value' on progress_bar slide has wrong type: expected integer, got string."` and the source span `(at <file>:<line>:<col>)`
+- `message` containing: `"Field 'value' on progress_bar slide has wrong type: expected integer, got string."` — the message text ends at this documented content; the source span is carried in `Diagnostic.span` and rendered by miette as `file:line:col`, NOT embedded literally in the message string (per BC-1.18.001 PC-2)
 (traces to BC-1.18.001 postcondition 2 — T1 type-mismatch, E-VAL-104 emitted;
 BC-1.18.001 EC-001 — `value: "75%"` case; BC-1.18.001 canonical test vector row 2)
 
@@ -729,7 +732,7 @@ Write unit tests that fail (Red Gate) because `type_matches` is still `todo!()`:
 **Files:** progress_bar.rs, chart.rs, weighted_composite.rs, kpi_dashboard.rs, roadmap.rs, matrix.rs, agenda.rs, toc.rs, team.rs
 
 Update the `FieldDef` for each Priority-1 field from `expected_type: None` to the correct annotation.
-Authoritative Priority-1 mapping (9 sites / 8 types):
+Authoritative Priority-1 mapping (8 sites / 8 types):
 - `progress_bar.value` → `Some(FieldType::Int)`
 - `chart.chart_type` → `Some(FieldType::OneOf([7 values]))`
 - `weighted_composite.components` → `Some(FieldType::List)`
