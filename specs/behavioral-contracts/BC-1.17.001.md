@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.2.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-8 added — label threading mechanism via Stage 2b (TextTag::ColorLabel → RegionRole::Body → visible ContentBlock)."]
+modified: ["2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-8 added — label threading mechanism via Stage 2b (TextTag::ColorLabel → RegionRole::Body → visible ContentBlock).", "2026-06-06 v1.2.1 (F-087-P3-001 follow-through): PC-3 HTML clause scoped with contingency note — HtmlExporter is deferred project-wide to STORY-050/Phase-4; layout IR materialized by STORY-087."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -56,6 +56,11 @@ missing `label` is a fatal error (E-A11-002) in strict mode.
    - PPTX: the label text is present in an OOXML element accessible to screen readers.
    - PDF: the label text is included in the PDF structure tree.
    - HTML: the label text is present in the DOM (not hidden via CSS).
+     **Contingency:** HTML rendering of the color label is CONTINGENT on the
+     HtmlExporter being registered, which is deferred project-wide (anchor:
+     STORY-050 / Phase-4). The layout IR (ColorLabel → RegionRole::Body) is
+     materialized correctly by STORY-087 and will render once HTML export
+     exists. PPTX/PDF/DOCX rendering is delivered in STORY-087.
 4. The `LabelCheck.validate()` pre-layout pass (Stage 5) operates on `Slide.fields`
    directly (not on `Slide.blocks`), so it is functional for `status` slides regardless
    of whether Stage 2b has run.
@@ -155,3 +160,4 @@ missing `label` is a fatal error (E-A11-002) in strict mode.
 |---------|------|---------|
 | 1.0 | 2026-06-05 | Initial creation — status slide type label-mandatory contract |
 | 1.2 | 2026-06-06 | PC-8 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): label field threaded by Stage 2b as TextTag::ColorLabel → RegionRole::Body → visible FrameContent::Body. Rendering mechanism decided (Option T — Threading). |
+| 1.2.1 | 2026-06-06 | PC-3 HTML clause scoped with contingency note (F-087-P3-001 follow-through): HTML rendering of the color label is deferred project-wide pending HtmlExporter registration (anchor: STORY-050 / Phase-4). Layout IR correctly materialized by STORY-087. PPTX/PDF/DOCX unaffected. |

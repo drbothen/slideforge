@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.2.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): PC3b added; Inv 6/7 amended to cite ValueRangeValidator Stage 5 + E-VAL-011 + DI-018 accumulation; Inv-9 added; enforcement point moved from lay_out() to ValueRangeValidator.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — aggregate label and per-component row text threaded as visible ContentBlocks via compose_component_row_text; empty-components → E-VAL-011 reaffirmed (F-087-P2-001)."]
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): PC3b added; Inv 6/7 amended to cite ValueRangeValidator Stage 5 + E-VAL-011 + DI-018 accumulation; Inv-9 added; enforcement point moved from lay_out() to ValueRangeValidator.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — aggregate label and per-component row text threaded as visible ContentBlocks via compose_component_row_text; empty-components → E-VAL-011 reaffirmed (F-087-P2-001).", "2026-06-06 v1.2.1 (F-087-P3-001 follow-through): PC-6 HTML clause and PC-9 exporters clause scoped with contingency notes — HtmlExporter deferred project-wide to STORY-050/Phase-4; layout IR materialized by STORY-087."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -73,7 +73,14 @@ are mandatory. `LabelCheck` enforces this at compile time.
    - The slide renders the composite score visually with per-component rows.
    - The top-level `label` text is rendered visibly (accessible co-encoding of the aggregate).
    - Each component's `label` text is rendered adjacent to that component's score bar.
-   - PPTX, PDF, HTML: all label texts are in the accessibility tree.
+   - PPTX, PDF: all label texts are in the accessibility tree.
+   - HTML: all label texts are in the accessibility tree.
+     **Contingency:** HTML rendering of label texts is CONTINGENT on the
+     HtmlExporter being registered, which is deferred project-wide (anchor:
+     STORY-050 / Phase-4). The layout IR (ColorLabel → RegionRole::Body;
+     per-component rows → RegionRole::Generic) is materialized correctly by
+     STORY-087 and will render once HTML export exists. PPTX/PDF/DOCX
+     rendering is delivered in STORY-087.
 7. `LabelCheck.validate()` (Stage 5, pre-layout) reads `Slide.fields["label"]` and
    iterates `Slide.fields["components"]` (the resolved list) to check each component's
    `label` sub-field. This does NOT require Stage 2b.
@@ -81,7 +88,8 @@ are mandatory. `LabelCheck` enforces this at compile time.
    `ContentBlock::Text(TextTag::ColorLabel)` by `thread_fields_to_blocks` (Stage 2b,
    ADR-019 Decision 3). At layout time, `fill_region_slot_or_append` routes
    `TextTag::ColorLabel → RegionRole::Body`, placing the aggregate label text into the
-   Body-role frame as `FrameContent::Body(...)`, rendered visibly by exporters.
+   Body-role frame as `FrameContent::Body(...)`, rendered visibly by exporters (PPTX/PDF/DOCX
+   delivered in STORY-087; HTML CONTINGENT on HtmlExporter — deferred, anchor: STORY-050/Phase-4).
    Each component in `components[]` is threaded as `ContentBlock::Text(TextTag::Body)`
    with composed text `'<name>: <score>/100 (wt: <weight>) — <label>'` (produced by the
    pure helper `compose_component_row_text`). Each composed block claims one of the five
@@ -194,3 +202,4 @@ are mandatory. `LabelCheck` enforces this at compile time.
 | 1.0 | 2026-06-05 | Initial creation — weighted_composite slide type label + component validation contract |
 | 1.1 | 2026-06-06 | PC-3b / Inv-6/7/9 added per architect adjudication F-087-P1-001: ValueRangeValidator Stage 5 enforcement; E-VAL-011 allocated; lay_out() is geometry-only |
 | 1.2 | 2026-06-06 | PC-9 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): aggregate label threaded as TextTag::ColorLabel → Body-role frame; per-component rows threaded as TextTag::Body via compose_component_row_text → Generic-role row frames. Empty-components → E-VAL-011 ("weighted_composite requires at least one component; got empty list.") reaffirmed per F-087-P2-001. Rendering mechanism decided (Option T — Threading). |
+| 1.2.1 | 2026-06-06 | PC-6 HTML clause split and scoped; PC-9 exporters clause annotated (F-087-P3-001 follow-through): HTML rendering of aggregate label and per-component row labels is CONTINGENT on HtmlExporter registration, deferred project-wide (anchor: STORY-050 / Phase-4). Layout IR (ColorLabel→Body, Body→Generic) materialized by STORY-087. PPTX/PDF/DOCX unaffected. |

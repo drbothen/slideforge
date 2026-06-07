@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.2.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — label and value field threading mechanism via Stage 2b; new ContentBlock::ColorBar(ColorBarSpec) and FrameContent::ColorBar materialization."]
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — label and value field threading mechanism via Stage 2b; new ContentBlock::ColorBar(ColorBarSpec) and FrameContent::ColorBar materialization.", "2026-06-06 v1.2.1 (F-087-P3-001 follow-through): PC-4 HTML clause and PC-9 PDF/HTML clause scoped with contingency notes — HtmlExporter deferred project-wide to STORY-050/Phase-4; FrameContent::ColorBar materialized by STORY-087."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -64,6 +64,11 @@ strict mode.
    - PPTX: label text in accessible OOXML element.
    - PDF: label text in PDF structure tree.
    - HTML: label text in DOM.
+     **Contingency:** HTML rendering of the color label is CONTINGENT on the
+     HtmlExporter being registered, which is deferred project-wide (anchor:
+     STORY-050 / Phase-4). The layout IR (ColorLabel → RegionRole::Body) is
+     materialized correctly by STORY-087 and will render once HTML export
+     exists. PPTX/PDF/DOCX rendering is delivered in STORY-087.
 5. `LabelCheck.validate()` (Stage 5) reads `Slide.fields["label"]` directly.
    LabelCheck does NOT require Stage 2b to have run.
 6. The `value` field validation is performed by `ValueRangeValidator` — a `Validator` plugin
@@ -82,7 +87,10 @@ strict mode.
    ColorBar materialization pass after `fill_region_slot_or_append`, computing
    `filled_width_emu = (percent as i64 * bar_background_width_emu) / 100` (integer EMU
    arithmetic, no f64). The filled bar frame is rendered visibly in the output (PPTX: solid-fill
-   `<p:sp>` at proportional width; PDF/HTML: filled rectangle; DOCX: percentage text fallback).
+   `<p:sp>` at proportional width; PDF: filled rectangle; DOCX: percentage text fallback;
+   HTML: filled rectangle — CONTINGENT on HtmlExporter registration, deferred project-wide,
+   anchor: STORY-050 / Phase-4; FrameContent::ColorBar is materialized by STORY-087 and
+   will render once HTML export exists).
    (Mechanism: architect adjudication F-087-P2-002.)
 
 ## Invariants
@@ -178,3 +186,4 @@ strict mode.
 | 1.0 | 2026-06-05 | Initial creation — progress_bar slide type label + value-range contract |
 | 1.1 | 2026-06-06 | PC-6 / Inv-7 amended per architect adjudication F-087-P1-001: enforcement point moved from lay_out() to ValueRangeValidator Stage 5; E-VAL-011 allocated |
 | 1.2 | 2026-06-06 | PC-9 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): label threaded as TextTag::ColorLabel → Body-role frame; value threaded as ContentBlock::ColorBar(ColorBarSpec{percent}) → FrameContent::ColorBar materialized with proportional filled_width_emu. Rendering mechanism decided (Option T — Threading). |
+| 1.2.1 | 2026-06-06 | PC-4 HTML clause and PC-9 PDF/HTML clause scoped with contingency notes (F-087-P3-001 follow-through): HTML rendering of the color label and filled bar is CONTINGENT on HtmlExporter registration, deferred project-wide (anchor: STORY-050 / Phase-4). FrameContent::ColorBar and ColorLabel→Body IR materialized by STORY-087. PPTX/PDF/DOCX unaffected. |
