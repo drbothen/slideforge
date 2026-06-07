@@ -201,6 +201,36 @@ impl DocumentBodySerializer {
                 }
             }
 
+            // ── ColorBar (FrameContent::ColorBar → percentage text fallback) ───
+            // BC-1.17.002 PC-9 (DOCX clause): "DOCX: percentage text fallback".
+            // DOCX has no native progress-bar element, so the DOCX exporter emits
+            // the bar percentage as a standalone Normal-styled paragraph containing
+            // exactly "{percent}%" (e.g., `<w:t>75%</w:t>`). This is a DEDICATED
+            // bar representation from the ColorBar frame — distinct from the
+            // ColorLabel text block ("75% complete") which is routed via Body above.
+            // The discriminating test (`test_BC_1_17_002_docx_bar_percentage_text_in_document_xml`)
+            // asserts `<w:t>75%</w:t>` specifically to distinguish this from the label.
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } =
+                    &frame.content
+                {
+                    // Compute the integer percentage from the EMU values.
+                    // `total_width_emu.0` is guaranteed non-zero by layout::run
+                    // (a zero-width bar would not be materialized). Guard anyway
+                    // to avoid a divide-by-zero if the IR is somehow malformed.
+                    let percent = if total_width_emu.0 > 0 {
+                        ((filled_width_emu.0 * 100) / total_width_emu.0) as u8
+                    } else {
+                        0_u8
+                    };
+                    let percent_text = format!("{percent}%");
+                    body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                        "Normal",
+                        &percent_text,
+                    ))));
+                }
+            }
+
             // Collect report entries for this slide.
             let report_entries: Vec<&slideforge_types::RegisteredContent> = slide
                 .register_content

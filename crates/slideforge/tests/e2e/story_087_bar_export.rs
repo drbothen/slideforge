@@ -219,24 +219,39 @@ fn test_BC_1_17_002_pdf_bar_rendered_in_content_stream() {
         &pdf_bytes[..pdf_bytes.len().min(8)]
     );
 
-    // Assert: the content stream contains the `re ` PDF path operator.
+    // Assert: the content stream contains the brand fill-color RGB operator for the bar.
     //
-    // `re x y w h` — PDF rectangle path operator (ISO 32000-1 §8.5.2, Table 59).
-    // This ONLY appears when a rectangle path is drawn; it is NOT emitted by text
-    // drawing operations (which use `Tf`, `Td`, `Tj`, etc.).
+    // BC-1.17.002 PC-9 requires a filled rectangle drawn in the brand primary color
+    // (#0070C0 → RGB 0, 112, 192). krilla's Surface encodes the fill color using the
+    // PDF `rg` operator (ISO 32000-1 §8.6.8) with normalized f32 components:
+    //
+    //   r=0/255=0.0,  g=112/255≈0.4392157,  b=192/255≈0.7529412
+    //
+    // krilla emits this as "0 0.4392157 0.7529412 rg" in the uncompressed content
+    // stream. This byte sequence ONLY appears when the ColorBar arm explicitly calls
+    // `surface.set_fill(Fill { paint: rgb::Color::new(0, 112, 192).into(), .. })` —
+    // it is NOT emitted by text drawing operations (which use `Tf`, `Td`, `Tj`, etc.)
+    // or by SVG/diagram frames (which would use different color values).
+    //
+    // Note on `re` vs. `m/l/h`: the PDF rectangle shorthand `re x y w h` and the
+    // equivalent `x y m ... h` (move-to / line-to / close) both draw a rectangle.
+    // krilla 0.6.0 always uses the `m/l/h` form via tiny_skia_path, so the `re`
+    // operator does NOT appear. The color assertion below is both more specific
+    // (proves the correct brand color was used) and correct for krilla's actual output.
     //
     // With `compress_content_streams: false` (export_uncompressed), the content stream
     // is plain text and scannable. In the compressed (production) path these bytes
-    // would be inside a Deflate stream.
+    // would be inside a Deflate stream and inaccessible.
     //
-    // RED GATE: the `draw_frame` ColorBar arm at exporter.rs:780-791 is a
-    // `tracing::debug!` no-op — it draws nothing. No `re ` operator appears.
+    // RED GATE (pre-implementation): the `draw_frame` ColorBar arm at exporter.rs:780-791
+    // was a `tracing::debug!` no-op — it drew nothing. No `rg` color operator appeared.
     assert!(
-        bytes_contain(&pdf_bytes, b"re "),
+        bytes_contain(&pdf_bytes, b"0.4392157"),
         "BC-1.17.002 PC-9 PDF Red Gate: the uncompressed PDF content stream must contain \
-         the `re ` rectangle path operator emitted when drawing the filled bar. \
-         The `draw_frame` ColorBar arm (exporter.rs:780-791) is currently a \
-         `tracing::debug!` no-op that emits zero content-stream bytes. \
+         the brand fill-color component '0.4392157' (g=112/255 from #0070C0) emitted by \
+         the `rg` operator when drawing the filled ColorBar rectangle. \
+         This value only appears when `draw_color_bar_rect` explicitly sets the bar fill \
+         color — it cannot come from text drawing or other frame types. \
          First 2048 bytes of PDF:\n{:.2048}",
         String::from_utf8_lossy(&pdf_bytes)
     );
