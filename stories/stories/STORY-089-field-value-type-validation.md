@@ -9,12 +9,15 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.1"
 last_updated: "2026-06-07"
 changelog:
   - version: "1.0"
     date: "2026-06-07"
     note: "Initial story creation. Human-authorized Wave-4 follow-up (d), folded into Wave 5 slot 1. Implements ADR-020: FieldType enum + FieldDef.expected_type + type_matches + E-VAL-104 in validate_fields. BC-1.18.001 is the governing contract. Error taxonomy v2.20 formally registers E-VAL-101/102/W-VAL-103 and allocates E-VAL-104."
+  - version: "1.1"
+    date: "2026-06-07"
+    note: "Field-name corrections per ADR-020/BC-1.18.001 v1.1 architect adjudication: roadmap list field is 'phases' (not 'milestones'); matrix.cells is polymorphic → expected_type: None (no Priority-1 annotation, drop matrix.rows); toc has no list field (entries auto-generated) → no annotation, mechanical sweep only. Priority-1 authoritative mapping (9 sites / 8 types): progress_bar.value→Int, chart.chart_type→OneOf(7), decorative→Bool, weighted_composite.components→List, kpi_dashboard.kpis→List, roadmap.phases→List, agenda.items→List, team.members→List. Polymorphic/None: matrix.cells, chart.data. toc: no annotation."
 target_module: slideforge-plugin-api
 subsystems: [SS-14]
 behavioral_contracts: [BC-1.18.001]
@@ -244,12 +247,17 @@ E-VAL-104 T1 (`"expected list, got string"`).
 (traces to BC-1.18.001 postcondition 9 — Priority-1 annotation: weighted_composite.components → List;
 BC-1.18.001 EC-006 — `components: "see attached"` case)
 
-### AC-016 — Priority-1 annotated fields: kpi_dashboard.kpis, roadmap.milestones, matrix.rows, agenda.items, toc.items, team.members all enforce FieldType::List
+### AC-016 — Priority-1 annotated fields: kpi_dashboard.kpis, roadmap.phases, weighted_composite.components, agenda.items, team.members all enforce FieldType::List
 Unit tests for each slide type confirm the respective list field has `expected_type: Some(FieldType::List)`
 and that passing a `Value::Str` on that field emits E-VAL-104 T1.
-Slide types: `kpi_dashboard` (`kpis`), `roadmap` (`milestones`), `matrix` (`rows`),
-`agenda` (`items`), `toc` (`items`), `team` (`members`).
-(traces to BC-1.18.001 postcondition 9 — Priority-1 annotation: 6 additional List-typed fields;
+Slide types: `kpi_dashboard` (`kpis`), `roadmap` (`phases`), `agenda` (`items`), `team` (`members`).
+Note: `weighted_composite.components` is also a List-annotated Priority-1 field (covered by AC-015).
+Note: `matrix.cells` is polymorphic → `expected_type: None` (no Priority-1 annotation); `matrix` has
+no `rows` field to annotate.
+Note: `toc` has no list field (entries are auto-generated, not user-supplied) → no Priority-1 annotation;
+`toc.rs` receives only mechanical `expected_type: None` sweep.
+(traces to BC-1.18.001 postcondition 9 — Priority-1 annotation: kpi_dashboard.kpis, roadmap.phases,
+agenda.items, team.members → List; weighted_composite.components → List per AC-015;
 BC-1.18.001 EC-006 pattern — Str on List-typed field emits T1)
 
 ### AC-017 — FieldDef::new() constructor: returns FieldDef with expected_type: None
@@ -307,10 +315,10 @@ ADR-020 Decision 2 — None ≡ Any semantics)
 | `chart.rs` — `chart_type: FieldType::OneOf([...])` annotation | `slideforge-plugin-api` | `src/slide_types/chart.rs` | MODIFY: annotate `chart_type` FieldDef with `expected_type: Some(FieldType::OneOf([...]))`; add `expected_type: None` to all others | Pure |
 | `weighted_composite.rs` — `components: FieldType::List`, `weight: FieldType::Float` | `slideforge-plugin-api` | `src/slide_types/weighted_composite.rs` | MODIFY: annotate `components` + per-component `weight` FieldDef; `expected_type: None` to remaining | Pure |
 | `kpi_dashboard.rs` — `kpis: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/kpi_dashboard.rs` | MODIFY: annotate `kpis`; `expected_type: None` to remaining | Pure |
-| `roadmap.rs` — `milestones: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/roadmap.rs` | MODIFY: annotate `milestones`; `expected_type: None` to remaining | Pure |
-| `matrix.rs` — `rows: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/matrix.rs` | MODIFY: annotate `rows`; `expected_type: None` to remaining; note: `cells` is polymorphic → None | Pure |
+| `roadmap.rs` — `phases: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/roadmap.rs` | MODIFY: annotate `phases`; `expected_type: None` to remaining | Pure |
+| `matrix.rs` — mechanical sweep only; `cells: expected_type: None` (polymorphic) | `slideforge-plugin-api` | `src/slide_types/matrix.rs` | MODIFY: `cells` → `expected_type: None` (polymorphic); `expected_type: None` to all remaining FieldDef sites; NO Priority-1 annotation (no `rows` field exists) | Pure |
 | `agenda.rs` — `items: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/agenda.rs` | MODIFY: annotate `items`; `expected_type: None` to remaining | Pure |
-| `toc.rs` — `items: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/toc.rs` | MODIFY: annotate `items`; `expected_type: None` to remaining | Pure |
+| `toc.rs` — mechanical sweep only; no list field annotation | `slideforge-plugin-api` | `src/slide_types/toc.rs` | MODIFY: mechanical sweep only — add `expected_type: None` to existing FieldDef sites (title required + commons); toc entries are auto-generated, not user-supplied; NO `items` annotation | Pure |
 | `team.rs` — `members: FieldType::List` | `slideforge-plugin-api` | `src/slide_types/team.rs` | MODIFY: annotate `members`; `expected_type: None` to remaining | Pure |
 | All remaining 23+ slide type files | `slideforge-plugin-api` | `src/slide_types/*.rs` | MODIFY: add `expected_type: None` to every FieldDef construction site (mechanical; compiler-directed — will not compile until ALL sites are updated) | Pure |
 | Error taxonomy formal registration | `.factory/specs/prd-supplements/error-taxonomy.md` | — | MODIFY: formally register E-VAL-101, E-VAL-102, W-VAL-103 (existing informal codes); allocate E-VAL-104 (new) | Spec artifact |
@@ -508,21 +516,24 @@ crates/slideforge-plugin-api/src/slide_types/kpi_dashboard.rs
     [Add expected_type: None to remaining FieldDef construction sites]
 
 crates/slideforge-plugin-api/src/slide_types/roadmap.rs
-    [Annotate "milestones" FieldDef: expected_type: Some(FieldType::List)]
+    [Annotate "phases" FieldDef: expected_type: Some(FieldType::List)]
+    [NOTE: field is named "phases", NOT "milestones" — per ADR-020/BC-1.18.001 v1.1]
     [Add expected_type: None to remaining FieldDef construction sites]
 
 crates/slideforge-plugin-api/src/slide_types/matrix.rs
-    [Annotate "rows" FieldDef: expected_type: Some(FieldType::List)]
-    [Note: "cells" field is polymorphic → None (not annotated)]
-    [Add expected_type: None to remaining FieldDef construction sites]
+    [Mechanical sweep only — NO Priority-1 annotation]
+    ["cells" field is polymorphic → expected_type: None (no specific type annotation)]
+    [No "rows" field exists to annotate]
+    [Add expected_type: None to all remaining FieldDef construction sites]
 
 crates/slideforge-plugin-api/src/slide_types/agenda.rs
     [Annotate "items" FieldDef: expected_type: Some(FieldType::List)]
     [Add expected_type: None to remaining FieldDef construction sites]
 
 crates/slideforge-plugin-api/src/slide_types/toc.rs
-    [Annotate "items" FieldDef: expected_type: Some(FieldType::List)]
-    [Add expected_type: None to remaining FieldDef construction sites]
+    [Mechanical sweep only — NO Priority-1 annotation]
+    [toc entries are auto-generated, not user-supplied; no "items" field to annotate]
+    [Add expected_type: None to all existing FieldDef construction sites (title required + commons)]
 
 crates/slideforge-plugin-api/src/slide_types/team.rs
     [Annotate "members" FieldDef: expected_type: Some(FieldType::List)]
@@ -697,18 +708,25 @@ Write unit tests that fail (Red Gate) because `type_matches` is still `todo!()`:
 
 **Files:** progress_bar.rs, chart.rs, weighted_composite.rs, kpi_dashboard.rs, roadmap.rs, matrix.rs, agenda.rs, toc.rs, team.rs
 
-Update the `FieldDef` for each Priority-1 field from `expected_type: None` to the correct annotation:
+Update the `FieldDef` for each Priority-1 field from `expected_type: None` to the correct annotation.
+Authoritative Priority-1 mapping (9 sites / 8 types):
 - `progress_bar.value` → `Some(FieldType::Int)`
 - `chart.chart_type` → `Some(FieldType::OneOf([7 values]))`
 - `weighted_composite.components` → `Some(FieldType::List)`
 - `weighted_composite` per-component `weight` → `Some(FieldType::Float)` (if modeled as a FieldDef)
 - `kpi_dashboard.kpis` → `Some(FieldType::List)`
-- `roadmap.milestones` → `Some(FieldType::List)`
-- `matrix.rows` → `Some(FieldType::List)` — note: `cells` stays `None` (polymorphic)
+- `roadmap.phases` → `Some(FieldType::List)` — NOTE: field is named `phases`, NOT `milestones`
 - `agenda.items` → `Some(FieldType::List)`
-- `toc.items` → `Some(FieldType::List)`
 - `team.members` → `Some(FieldType::List)`
 - `decorative` in `common_optional_fields()` → `Some(FieldType::Bool)` (done in T2)
+
+Polymorphic fields (remain `None`):
+- `matrix.cells` → `expected_type: None` (polymorphic — no Priority-1 annotation; `matrix` has no `rows` field)
+- `chart.data` → `expected_type: None` (polymorphic)
+
+toc.rs — mechanical sweep ONLY:
+- `toc` has no user-supplied list field (entries are auto-generated); no `items` annotation
+- Apply `expected_type: None` to all existing FieldDef construction sites in `toc.rs` (title required + commons)
 
 After applying annotations, run `cargo nextest run -p slideforge-plugin-api` to confirm
 Priority-1 tests in T3 now pass.
@@ -760,7 +778,7 @@ still passes with zero unsafe blocks introduced.
 | T3-17 | `test_weighted_composite_components_list_annotation` | components FieldDef has expected_type: Some(FieldType::List) | AC-015 |
 | T3-18 | `test_weight_float_annotation` | per-component weight FieldDef has expected_type: Some(FieldType::Float) | AC-019 |
 | T3-19 | `test_weight_int_emits_e_val_104` | `weight: 1` (Int) emits E-VAL-104 T1 (no int→float coercion) | AC-019 |
-| T3-20 | `test_list_fields_on_kpi_roadmap_matrix_agenda_toc_team` | all 6 List-typed fields have correct annotations | AC-016 |
+| T3-20 | `test_list_fields_on_kpi_roadmap_agenda_team` | kpi_dashboard.kpis, roadmap.phases, agenda.items, team.members have expected_type: Some(FieldType::List); roadmap asserts optional_fields() has FieldDef name=="phases" with expected_type==Some(FieldType::List) (NOT milestones); matrix and toc excluded from List-assertion scope (polymorphic/auto-generated) | AC-016 |
 | T3-21 | `test_e_val_104_code_exact_string` | Emitted code is exactly `"E-VAL-104"`, not a variant | AC-002, AC-004 |
 | T3-22 | `test_fieldddef_new_returns_none_annotation` | FieldDef::new() returns expected_type: None | AC-017 |
 | T3-23 | `test_e_val_101_still_fires_for_absent_required_field` | Absent required field → E-VAL-101, not E-VAL-104 | AC-020 |
