@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 last_updated: "2026-06-07"
 changelog:
   - version: "1.0"
@@ -18,8 +18,11 @@ changelog:
   - version: "1.1"
     date: "2026-06-07"
     note: "Field-name corrections per ADR-020/BC-1.18.001 v1.1 architect adjudication: roadmap list field is 'phases' (not 'milestones'); matrix.cells is polymorphic → expected_type: None (no Priority-1 annotation, drop matrix.rows); toc has no list field (entries auto-generated) → no annotation, mechanical sweep only. Priority-1 authoritative mapping (9 sites / 8 types): progress_bar.value→Int, chart.chart_type→OneOf(7), decorative→Bool, weighted_composite.components→List, kpi_dashboard.kpis→List, roadmap.phases→List, agenda.items→List, team.members→List. Polymorphic/None: matrix.cells, chart.data. toc: no annotation."
+  - version: "1.2"
+    date: "2026-06-07"
+    note: "Subsystem anchor correction (adversary pass observation): add SS-03 (slideforge-validate) to subsystems. Pipeline wiring (human-authorized, adversary HIGH-1) added a new FieldSchemaValidator in slideforge-validate/src/field_schema.rs (Validator surface #5) and registered it in the slideforge bundled-plugins registry. This is what makes validate_fields live at build, satisfying AC-009/AC-010 and BC-1.18.001 PC-7. Prior claim that no changes to slideforge-validate were required was inaccurate."
 target_module: slideforge-plugin-api
-subsystems: [SS-14]
+subsystems: [SS-14, SS-03]
 behavioral_contracts: [BC-1.18.001]
 verification_properties: []
 nfr_refs: [NFR-022, NFR-024]
@@ -51,17 +54,24 @@ history_note: >
 
 ## Subsystem Anchor Justifications
 
-- **SS-14 (Plugin API, `slideforge-plugin-api`)** owns this story's entire scope. `FieldType`
-  is a schema constraint on `FieldDef`, which is the schema surface of the `SlideType` trait.
-  Both `FieldDef` and the `SlideType` trait live in `slideforge-plugin-api/src/traits/slide_type.rs`.
-  The `validate_fields` function (which gains the E-VAL-104 arm) lives in
-  `slideforge-plugin-api/src/slide_types/registry.rs`. All 34+ bundled `SlideType` implementations
-  live in `slideforge-plugin-api/src/slide_types/`. This is purely an SS-14 story — no changes
-  to `slideforge-validate` (SS-03) are required. `ValueRangeValidator` (SS-03, STORY-087)
-  is orthogonal and unchanged.
+- **SS-14 (Plugin API, `slideforge-plugin-api`)** owns the core schema surface of this story.
+  `FieldType` is a schema constraint on `FieldDef`, which is the schema surface of the `SlideType`
+  trait. Both `FieldDef` and the `SlideType` trait live in
+  `slideforge-plugin-api/src/traits/slide_type.rs`. The `validate_fields` function (which gains
+  the E-VAL-104 arm) lives in `slideforge-plugin-api/src/slide_types/registry.rs`. All 34+
+  bundled `SlideType` implementations live in `slideforge-plugin-api/src/slide_types/`.
   Per ARCH-INDEX Subsystem Registry, SS-14 = Plugin API: all `SlideType` trait implementations,
-  `FieldDef`, `validate_fields`, and the plugin registry. This is the correct and only subsystem
-  anchor.
+  `FieldDef`, `validate_fields`, and the plugin registry.
+
+- **SS-03 (Validation, `slideforge-validate`)** is also in scope. Pipeline wiring (human-authorized
+  per adversary HIGH-1) required adding a new `FieldSchemaValidator` in
+  `slideforge-validate/src/field_schema.rs` (Validator extensibility surface #5) and registering
+  it in the `slideforge` bundled-plugins registry. This is what makes `validate_fields` execute
+  at Stage 5 of the build pipeline, satisfying AC-009/AC-010 and BC-1.18.001 postcondition 7
+  (PC-7). Without this wiring, `validate_fields` is dead code and E-VAL-104 never fires at
+  build time. The earlier claim that no changes to `slideforge-validate` were required was
+  inaccurate; this correction was identified as an adversary pass observation and authorized
+  as a justified scope expansion.
 
 ## Dependency Anchor Justifications
 
