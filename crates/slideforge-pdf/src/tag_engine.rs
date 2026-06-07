@@ -365,18 +365,25 @@ impl SlideTagEngine {
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
-                // STORY-087 pass-2: ColorBar — geometry-only fill directive.
-                // The bar frame carries no text and no alt text (accessibility
-                // co-encoding is provided by the adjacent ColorLabel text frame).
-                // Mark as PDF Artifact (same as a decorative shape). The visible
-                // label text frame produces its own P structure element separately.
-                // TODO(STORY-087): implementer should emit a Figure with dimensions
-                // as actual text (e.g., "/Alt (75% filled bar)") for full PDF/UA-1.
+                // ColorBar — marked as PDF Artifact (decorative shape).
+                //
+                // The bar frame carries no text and no alt text; WCAG accessibility
+                // co-encoding is satisfied by the adjacent ColorLabel (Body-role) text
+                // frame which renders the percentage label. Marking the bar as an
+                // Artifact suppresses it from the PDF logical structure tree, avoiding
+                // a spurious unmarked-content finding without falsely claiming it as
+                // a tagged Figure.
+                //
+                // Full PDF/UA-1 Figure tagging with `/Alt` text (e.g., "75% filled bar")
+                // requires PDF draw ops and a Figure structure element in the content
+                // stream, deferred to STORY-091 (PDF ColorBar filled-rectangle via
+                // krilla content stream).
                 FrameContent::ColorBar { .. } => {
-                    tracing::warn!(
+                    tracing::debug!(
                         frame_idx,
-                        "STORY-087: FrameContent::ColorBar rendered as PDF Artifact (stub) — \
-                         full Figure tagging pending implementer TDD green pass"
+                        "FrameContent::ColorBar marked as PDF Artifact; \
+                         label text is in adjacent ColorLabel frame; \
+                         full Figure tagging deferred to STORY-091"
                     );
                     decorative_frame_indices.push(frame_idx);
                 },

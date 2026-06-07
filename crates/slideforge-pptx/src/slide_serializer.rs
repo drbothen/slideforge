@@ -16,6 +16,7 @@
 //! | `Diagram`              | `<p:pic>`     | SVG written to `ppt/media/`; `descr` from `AltText` (STORY-039) |
 //! | `Image`                | `<p:pic>`     | `descr` from `AltText` via `AltTextEmbedder` (STORY-039) |
 //! | `Chart`                | `<p:pic>`     | Placeholder `<p:pic>` with `descr` from `AltText` (STORY-039); SVG embed in future story |
+//! | `ColorBar`             | `<p:sp>`      | No `<p:ph>` — free-standing solid-fill rect at proportional width (BC-1.17.002 PC-9) |
 //! | `Shape`, `Empty`, `ErrorSlidePlaceholder` | — skipped — | Logged at `debug!` level |
 //!
 //! ## Element ordering (AC-006 / R4 finding)
@@ -37,18 +38,19 @@
 
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::a::{
-    Extents, FillRectangle, Offset, ParagraphChoice, PictureLocks, Run, Stretch, Transform2D,
+    Extents, FillRectangle, Offset, ParagraphChoice, PictureLocks, RgbColorModelHex, Run,
+    SolidFill, SolidFillChoice, Stretch, Transform2D,
 };
 use ooxmlsdk::schemas::p::{
     ApplicationNonVisualDrawingProperties, BlipFill, BlipFillChoice, ColorMapOverride,
     ColorMapOverrideChoice, CommonSlideData, GroupShapeProperties, NonVisualDrawingProperties,
     NonVisualPictureDrawingProperties, NonVisualPictureProperties, NonVisualShapeDrawingProperties,
     NonVisualShapeProperties, Picture, PlaceholderShape, PlaceholderValues, Shape, ShapeProperties,
-    ShapePropertiesChoice, ShapeTree, ShapeTreeChoice, Slide, TextBody,
+    ShapePropertiesChoice, ShapePropertiesChoice2, ShapeTree, ShapeTreeChoice, Slide, TextBody,
 };
 
 use slideforge_layout::{FrameContent, LaidOutSlide, LayoutWarning};
-use slideforge_types::{BulletItem, ContentBlock, InlineNode};
+use slideforge_types::{BulletItem, ContentBlock, InlineNode, Rgb};
 
 use crate::error::PptxError;
 
@@ -634,24 +636,41 @@ impl SlideSerializer {
                     );
                 },
 
-                // STORY-087 pass-2: ColorBar — full PPTX solid-fill rectangle rendering
-                // is deferred to the implementer (STORY-087 TDD green pass). This stub
-                // emits a visible warning so silent content loss is never tolerated
-                // (AC-002/008 visible-output requirement; adjudication §6).
-                // TODO(STORY-087): implement full ColorBar PPTX rendering.
+                // ColorBar — solid-fill <p:sp> for the progress_bar filled portion.
+                //
+                // BC-1.17.002 PC-9: the filled bar must appear in the PPTX slide XML
+                // as a non-placeholder <p:sp> with <a:solidFill>. The unfilled portion
+                // shows through to the slide background (no second shape needed).
+                //
+                // Element structure:
+                //   <p:sp>
+                //     <p:nvSpPr>…no <p:ph>…</p:nvSpPr>
+                //     <p:spPr>
+                //       <a:xfrm><a:off x=… y=…/><a:ext cx=filled_width cy=height/></a:xfrm>
+                //       <a:prstGeom prst="rect"/>
+                //       <a:solidFill><a:srgbClr val="RRGGBB"/></a:solidFill>
+                //     </p:spPr>
+                //   </p:sp>
+                //
+                // Traceability: BC-1.17.002 PC-9; architect pass-2 adjudication §6 (STORY-087).
                 FrameContent::ColorBar {
                     filled_width_emu,
-                    total_width_emu,
-                    ..
+                    total_width_emu: _,
+                    color,
                 } => {
-                    tracing::warn!(
-                        slide_index,
-                        frame_idx,
-                        filled_width_emu = filled_width_emu.0,
-                        total_width_emu = total_width_emu.0,
-                        "STORY-087: FrameContent::ColorBar not yet rendered to PPTX — \
-                         full solid-fill rectangle rendering pending implementer TDD green pass"
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let sp = build_color_bar_shape(
+                        shape_id,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        filled_width_emu.0,
+                        frame.bbox.height.0,
+                        *color,
                     );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
                 },
             }
         }
@@ -929,6 +948,115 @@ fn build_shape(
         shape_properties: Box::new(sp_pr),
         shape_style: None,
         text_body: Some(Box::new(tx_body)),
+        extension_list_with_modification: None,
+    }
+}
+
+/// Build a solid-fill `<p:sp>` for a `FrameContent::ColorBar` frame.
+///
+/// Produces a free-standing (non-placeholder) rectangle with `<a:solidFill>`
+/// sized to the proportional filled width computed by the layout engine.
+/// The unfilled portion of the bar is left to the slide background.
+///
+/// ## OOXML contract (BC-1.17.002 PC-9)
+///
+/// - No `<p:ph>` element — this is not a placeholder.
+/// - `<a:prstGeom prst="rect"/>` — rect preset geometry.
+/// - `<a:solidFill><a:srgbClr val="RRGGBB"/></a:solidFill>` — explicit color.
+/// - `cx = filled_width_emu` (may be 0 when `value == 0`; `PowerPoint` renders 0-width rects).
+/// - No `<p:txBody>` — the bar is geometry only; text is in the adjacent `ColorLabel` frame.
+///
+/// ## Arguments
+///
+/// - `shape_id` — numeric shape ID for `<p:cNvPr id="…">`.
+/// - `x, y` — top-left position in EMU (from the bar-background frame bbox).
+/// - `cx` — filled width in EMU (`filled_width_emu` from `FrameContent::ColorBar`).
+/// - `cy` — bar height in EMU (= bar-background frame bbox height).
+/// - `color` — fill color from the `FrameContent::ColorBar.color` field.
+fn build_color_bar_shape(shape_id: u32, x: i64, y: i64, cx: i64, cy: i64, color: Rgb) -> Shape {
+    let cnv_pr = NonVisualDrawingProperties {
+        id: shape_id,
+        name: format!("ColorBar {shape_id}"),
+        description: None,
+        hidden: None,
+        title: None,
+        hyperlink_on_click: None,
+        hyperlink_on_hover: None,
+        non_visual_drawing_properties_extension_list: None,
+        xmlns: vec![],
+    };
+
+    let cnv_sp_pr = NonVisualShapeDrawingProperties::default();
+
+    // No <p:ph> — this is a free-standing fill shape, not a placeholder.
+    let nv_pr = ApplicationNonVisualDrawingProperties {
+        is_photo: None,
+        user_drawn: None,
+        placeholder_shape: None,
+        application_non_visual_drawing_properties_choice: None,
+        p_cust_data_lst: None,
+        p_ext_lst: None,
+    };
+
+    let nv_sp_pr = NonVisualShapeProperties {
+        non_visual_drawing_properties: Box::new(cnv_pr),
+        non_visual_shape_drawing_properties: Box::new(cnv_sp_pr),
+        application_non_visual_drawing_properties: Box::new(nv_pr),
+    };
+
+    // Transform: position at frame origin, width = filled_width_emu.
+    let xfrm = Transform2D {
+        rotation: None,
+        horizontal_flip: None,
+        vertical_flip: None,
+        offset: Some(Offset { x, y }),
+        extents: Some(Extents { cx, cy }),
+        xmlns: vec![],
+    };
+
+    // Solid fill using the brand-derived (or default) color.
+    // The hex value is uppercase 6 hex digits per ECMA-376 ST_HexColorRGB.
+    let hex_val = format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+    let srgb = RgbColorModelHex {
+        val: hex_val,
+        legacy_spreadsheet_color_index: None,
+        rgb_color_model_hex_choice: vec![],
+        xmlns: vec![],
+        xml_other_attrs: vec![],
+    };
+    let solid_fill = SolidFill {
+        solid_fill_choice: Some(SolidFillChoice::ASrgbClr(Box::new(srgb))),
+        xmlns: vec![],
+        xml_other_attrs: vec![],
+    };
+
+    let sp_pr = ShapeProperties {
+        transform2_d: Some(Box::new(xfrm)),
+        shape_properties_choice1: Some(ShapePropertiesChoice::APrstGeom(Box::new(
+            ooxmlsdk::schemas::a::PresetGeometry {
+                preset: ooxmlsdk::schemas::a::ShapeTypeValues::Rectangle,
+                adjust_value_list: None,
+                xmlns: vec![],
+            },
+        ))),
+        shape_properties_choice2: Some(ShapePropertiesChoice2::ASolidFill(Box::new(solid_fill))),
+        shape_properties_choice3: None,
+        black_white_mode: None,
+        a_ln: None,
+        a_scene3d: None,
+        a_sp3d: None,
+        a_ext_lst: None,
+        xmlns: vec![],
+    };
+
+    // No text body — the bar is geometry-only.
+    // Label text is in the adjacent ColorLabel (Body-role) frame.
+    Shape {
+        use_background_fill: None,
+        non_visual_shape_properties: Box::new(nv_sp_pr),
+        shape_properties: Box::new(sp_pr),
+        shape_style: None,
+        text_body: None,
         extension_list_with_modification: None,
     }
 }

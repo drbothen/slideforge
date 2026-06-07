@@ -33,6 +33,7 @@
 
 #![allow(clippy::unwrap_used)] // integration tests — panics are intentional
 #![allow(clippy::doc_markdown)] // references like `E-A11-002`
+#![allow(clippy::uninlined_format_args)] // width-limited format strings ({:.N}) require positional args
 #![allow(non_snake_case)] // BC-traceability IDs use uppercase
 
 use std::sync::Arc;
@@ -528,7 +529,10 @@ fn read_zip_entry(
 fn extract_pptx_sp_blocks(xml: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut remaining = xml;
-    while let Some(start) = remaining.find("<p:sp>").or_else(|| remaining.find("<p:sp ")) {
+    while let Some(start) = remaining
+        .find("<p:sp>")
+        .or_else(|| remaining.find("<p:sp "))
+    {
         let tag_end = remaining[start..].find('>').map(|i| start + i + 1);
         let Some(tag_end) = tag_end else { break };
         let Some(end_offset) = remaining[tag_end..].find("</p:sp>") else {
