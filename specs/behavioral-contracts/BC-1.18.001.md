@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.0"
+version: "1.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-07T00:00:00
@@ -14,7 +14,11 @@ subsystem: SS-14
 capability: CAP-022
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified:
+  - version: "1.1"
+    date: 2026-06-07
+    by: product-owner
+    reason: "Field-name corrections per architect adjudication / ADR-020: roadmap.milestones → roadmap.phases; dropped matrix.rows (cells is polymorphic, expected_type: None) and toc.items (TOC entries auto-generated, no list field) from Priority-1 annotated list. Authoritative total: 9 annotated field sites across 8 slide types."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -105,16 +109,22 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 
 9. **Priority-1 annotated fields validated.** The following fields across the listed
    slide types are annotated (Priority-1 — realistic type-mismatch risk) and therefore
-   produce E-VAL-104 signals in practice:
+   produce E-VAL-104 signals in practice (9 field sites across 8 slide types):
    - `progress_bar.value` → `FieldType::Int`
    - `chart.chart_type` → `FieldType::OneOf(["bar", "line", "pie", "scatter", "area", "stacked-bar", "stacked-area"])`
    - `decorative` (all slides via `common_optional_fields`) → `FieldType::Bool`
    - `weighted_composite.components` → `FieldType::List`
    - `kpi_dashboard.kpis` → `FieldType::List`
-   - `roadmap.milestones` → `FieldType::List`
-   - `matrix.rows` → `FieldType::List`
-   - `agenda.items`, `toc.items` → `FieldType::List`
+   - `roadmap.phases` → `FieldType::List`
+   - `agenda.items` → `FieldType::List`
    - `team.members` → `FieldType::List`
+
+   Note: `matrix.cells` is polymorphic (structure depends on configured dimensions) →
+   `expected_type: None`, NO Priority-1 annotation; only the mechanical `None` sweep
+   applies. `toc` has no list field (TOC entries are auto-generated from section
+   structure, not stored in a user-authored list field) → no Priority-1 annotation for
+   `toc`. Both receive only the mechanical `expected_type: None` sweep covering all
+   unannotated FieldDef sites. (Correction per architect adjudication / ADR-020.)
 
 ## Invariants
 
@@ -210,7 +220,7 @@ skipped — no type check is performed for polymorphic or unannotated fields.
 | Architecture Module | slideforge-plugin-api crate (SS-14) — `src/traits/slide_type.rs` (FieldType enum, FieldDef.expected_type), `src/slide_types/registry.rs` (validate_fields E-VAL-104 arm, type_matches helper) |
 | Architecture Decision | Proposal: `.factory/planning/d-fielddef-type-validation-proposal.md` (commit 5d60a39b). No ADR required (additive field on existing struct, no architectural trade-off requiring formal record). |
 | Stories | STORY-089 (to be filed by story-writer — field-value type validation Wave 5 slot 1) |
-| Slide Types Affected | progress_bar, chart, weighted_composite, kpi_dashboard, roadmap, matrix, agenda, toc, team (Priority-1 annotated); all 34 slide types receive `expected_type: None` on unannotated FieldDef sites (mechanical) |
+| Slide Types Affected | **Priority-1 annotated (9 field sites, 8 slide types):** progress_bar, chart, weighted_composite, kpi_dashboard, roadmap, agenda, team (+ `decorative` on all slides via common_optional_fields). **Mechanical only (`expected_type: None` sweep):** matrix (cells → None; polymorphic), toc (no list field; entries auto-generated). All 34 slide types receive the mechanical unannotated-FieldDef None sweep. |
 
 ## Related BCs
 
