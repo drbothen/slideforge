@@ -1,0 +1,23 @@
+# Wave 4 Gate-5 fixture: image slide with canonical `src` keyword + valid alt text.
+#
+# Used by: test_bc_1_16_001_wave4_gate5_image_src_alt_build_ok_pptx_carries_descr
+# (Gate-5 remediation — image-slide src+alt Red Gate test)
+#
+# The CANONICAL DSL keyword for the image-source field is `src` (BC-1.16.001
+# PC-10/EC-006). Stage 2b threading (field_to_block.rs:239) reads field key "src"
+# to populate ContentBlock::Image.
+#
+# Known_fields defect: known_fields.rs currently lists "image" (not "src") for
+# image/screenshot slides; image.rs/screenshot.rs FieldDef names use "image".
+# After the fix, known_fields + FieldDef are aligned to "src".
+#
+# The `src` value is a path string — build() stores it in ImageSpec.path without
+# filesystem access at build time (SEC-001: no fs read during parse/layout).
+
+slideforge_version "1"
+lang "en-US"
+
+slide image:
+  title "Mountain at Sunrise"
+  src "photo.png"
+  alt "A snow-capped mountain peak lit by early morning sun"

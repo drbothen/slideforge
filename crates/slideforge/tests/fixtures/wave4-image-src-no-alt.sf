@@ -1,0 +1,15 @@
+# Wave 4 Gate-5 fixture: image slide with canonical `src` keyword but NO alt text.
+#
+# Used by: test_bc_1_16_001_wave4_gate5_image_src_no_alt_fails_e_a11_001
+# (regression/negative test — strict build must fail with E-A11-001)
+#
+# An image slide with a valid src path but no alt text and no decorative: true
+# must fire E-A11-001 in strict mode (WCAG AA enforcement).
+# This test must PASS both before and after the fix.
+
+slideforge_version "1"
+lang "en-US"
+
+slide image:
+  title "Unlabelled Photo"
+  src "unlabelled.png"

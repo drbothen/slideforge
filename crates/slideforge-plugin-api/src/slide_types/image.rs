@@ -17,8 +17,10 @@ use super::common_optional_fields;
 
 /// The built-in `image` slide type.
 ///
-/// Required fields: `title`, `image`, `alt`.
+/// Required fields: `title`, `src`, `alt`.
 /// Optional fields: `caption`, plus common optional fields.
+///
+/// The canonical media-source field keyword is `src` per BC-1.16.001 PC-10/EC-006.
 ///
 /// Maps to the `"Picture with Caption"` OOXML layout.
 #[derive(Debug)]
@@ -55,8 +57,11 @@ impl ImageSlideType {
                     default_value: None,
                 },
                 FieldDef {
-                    name: Arc::from("image"),
-                    description: Arc::from("Path or URL to the image asset (PNG, JPEG, SVG, GIF)."),
+                    name: Arc::from("src"),
+                    description: Arc::from(
+                        "Path or URL to the image asset (PNG, JPEG, SVG, GIF). \
+                         Canonical keyword per BC-1.16.001 PC-10/EC-006.",
+                    ),
                     required: true,
                     default_value: None,
                 },
