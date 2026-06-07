@@ -26,7 +26,7 @@ dtu_services: []
 wave_1_gate: "PASS 2026-05-27 — 3 gate passes, 11 findings fixed"
 wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (passes 9-10-11)"
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
-wave_4_gate: "PARTIAL 2026-06-07 — Gate 1 PASS (carryover); Gate 2 SKIP (no DTU); Gate 3 PASS (adversary; 4 original findings closed; 1 MED NEW-INT-001 non-blocking); Gate 5 FAIL (holdout mean 0.860 PASS but min_critical 0.500 < 0.60 — image-alt field-name contradiction). BLK-002 OPEN."
+wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS (carryover); Gate 2 SKIP (no DTU); Gate 3 PASS (adversary; all 4 original findings closed; 1 MED NEW-INT-001 image-alt path RESOLVED by PR #64); Gate 5 PASS (holdout mean 1.00 ≥ 0.85, min_critical 1.00 ≥ 0.60). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
 wave_4_merged: 23
@@ -37,10 +37,10 @@ wave_4_started: 2026-05-31
 wave_4_total_stories: 23
 wave_4_total_points: 163
 wave_5_total_points: 122
-develop_sha: "54b8d3b1"
-develop_pr_count: 63
+develop_sha: "02d484cf"
+develop_pr_count: 64
 error_taxonomy_version: "v2.18"
-workspace_tests: "3393/3393 (STORY-087 MERGED PR #63; develop 54b8d3b1; 18 skipped)"
+workspace_tests: "3393/3393 (image-alt fix MERGED PR #64; develop 02d484cf; 18 skipped)"
 workspace_test_failures: 0
 ---
 
@@ -58,42 +58,34 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63; develop 54b8d3b1). Wave 4 re-gate COMPLETE: Gate 1 PASS (carryover), Gate 2 SKIP (no DTU), Gate 3 PASS (adversary — 4 original findings closed; content-EMPTY root cause resolved; mean holdout 0.86 up from 0.56), Gate 5 FAIL (holdout min_critical 0.500 < 0.60 threshold — image-alt path broken: BC-1.16.001 says `src`, image.rs/known_fields says `image`; validate_fields unwired). BLK-002 OPEN. NEXT: resolve image-alt field-name contradiction → re-run Gate 5 → BLK-002 closes → Wave 5.**
+Phase 3, **Wave 4 — COMPLETE. Re-gate FULLY PASSED (develop 02d484cf, 64 merged PRs). Gate 1 PASS (carryover). Gate 2 SKIP (no DTU). Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED by PR #64). Gate 5 PASS (mean 1.00 ≥ 0.85; min_critical 1.00 ≥ 0.60; trajectory 0.56→0.86→1.00). BLK-002 CLOSED. NEXT: Wave 5 — PENDING human go-ahead (STORY-082, STORY-081, STORY-088).**
 
-- `develop` = `54b8d3b1` (63 merged PRs; origin/develop confirmed — LESSON-12 verified at merge). **Open PRs: 0.**
-- Active worktrees: none (STORY-087 worktree removed; local branch feature/STORY-087 deleted).
-- Workspace: 3393/3393 pass (develop 54b8d3b1; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 per STORY-088).
-- Wave 4 re-gate ran 2026-06-07 on correct tree (54b8d3b1; LESSON-WORKTREE-SYNC applied — first attempt reviewed stale tree; fixed via `git restore --source=HEAD --staged --worktree .`). Gate 1 PASS (carryover). Gate 2 SKIP (no DTU). Gate 3 PASS: all 4 original findings CLOSED (F-G3-CRIT-001, F-G3-HIGH-001/002, F-G3-HIGH-003); 1 MED NEW-INT-001 (image field-name mismatch: `src` vs `image`) + 2 LOW obs non-blocking. Gate 5 FAIL: mean 0.860 (PASS ≥ 0.85; huge improvement from 0.56 — content-EMPTY root cause resolved), but min_critical 0.500 (FAIL < 0.60). Blocking scenario: image-slide alt path — user writes `image:` but image.rs/known_fields require `image`, BC-1.16.001 PC-10 + field_to_block.rs use `src` → no ContentBlock::Image produced → E-A11-001 fires even with valid alt. validate_fields also unwired (fails silent). All other scenarios pass (status/progress_bar/missing-label/value-range/content-visible).
+- `develop` = `02d484cf` (64 merged PRs; origin/develop confirmed — LESSON-12 + LESSON-18 applied). **Open PRs: 0.**
+- Active worktrees: none.
+- Workspace: 3393/3393 pass (develop 02d484cf; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 per STORY-088).
+- Wave 4 re-gate FULLY PASSED on develop 02d484cf. Gate 3: all 4 original findings closed + NEW-INT-001 (image field-name) resolved by image-alt fix PR #64. Gate 5 re-run: mean 1.00 (5/5 critical scenarios pass: content visible PPTX/PDF/DOCX; chart+alt AND image+alt build Ok strict; status/progress_bar render label + proportional bar (75%→6172200/8229600 EMU exact); missing label→E-A11-002; value 250→E-VAL-011). BLK-002 CLOSED.
 
 ---
 
 ## NEXT ACTIONS (zero-context orchestrator: execute in order)
 
-**STATUS: Wave 4 re-gate complete (2026-06-07). Gate 3 PASS. Gate 5 FAIL — image-alt field-name contradiction (NEW-INT-001). BLK-002 OPEN. develop 54b8d3b1. NEXT: resolve image-alt contradiction → re-run Gate 5 → BLK-002 closes → Wave 5.**
+**STATUS: Wave 4 COMPLETE. Re-gate FULLY PASSED (2026-06-07). BLK-002 CLOSED. develop 02d484cf (64 merged PRs). NEXT: Wave 5 — PENDING human go-ahead.**
 
-### Steps 1–4 — DONE: Remediation + STORY-086 + STORY-087 MERGED + Gate 3 PASS
+### DONE: Wave 4 Complete + BLK-002 Closed
 
-See Decisions Log WAVE4-REMEDIATION-SETUP, STORY-086-MERGED, STORY-087-MERGED, WAVE4-REGATE-V2.
+See Decisions Log WAVE4-COMPLETE. All Wave 4 stories delivered (23/23). Re-gate fully passed. image-alt fix (PR #64) merged. Gate 5 re-run: mean 1.00, min_critical 1.00.
 
-### Step 5 — NEXT: Resolve image-alt field-name contradiction (NEW-INT-001)
+### NEXT: Wave 5 — PENDING human go-ahead
 
-**Blocking defect for Gate 5:** BC-1.16.001 PC-10 + field_to_block.rs thread `src`; image.rs declares required field `image`; known_fields.rs lists `image`. A user writing `image: "path.png" alt: "..."` gets no ContentBlock::Image → post-layout fires E-A11-001 even with valid alt. validate_fields also unwired (fails silent).
+Wave 5 queue: **STORY-082** (PPTX Slide-Grouping Sections, 5 pts, P0, BC-4.01.003 Half B, BC-1.14.003; split from STORY-040, human-authorized 2026-06-04, EPIC-08), **STORY-081** (slide-level inline markup, P0, Wave 5, EPIC-18, depends STORY-077), **STORY-088** (bullets list-literal DSL, 8 pts, P0). Total Wave 5: 21 stories, 122 pts.
 
-Actions required (human decision needed first):
-1. **Architect/PO adjudicate canonical image keyword** — is it `src` (per BC-1.16.001 PC-10) or `image` (per image.rs/known_fields)? Update spec or code to match; the other side must be aligned.
-2. **Implementer** — align image.rs required_fields + known_fields.rs + field_to_block threading to use the canonical keyword; wire validate_fields into the main build pipeline.
-3. **Test-writer** — add image-with-alt fixture (.sf source using canonical keyword) + black-box integration test: build() produces ContentBlock::Image with alt path; no E-A11-001 fired.
-4. **Re-run Gate 5** on develop after fix merged — min_critical must reach ≥ 0.60.
-
-**SEC-001 / SEC-002 / SEC-003 / SEC-004 (STORY-086 security follow-ups — human disposition required, NOT tech-debt entries):**
-- SEC-001 (MED, CWE-22): ImageSpec.path stored unvalidated; latent path traversal — anchor as precondition of future image-I/O story + `// SECURITY: SEC-001` marker.
-- SEC-002 (LOW): AltText::Unspecified → AltDecision::Decorative in PPTX a11y path; add error!-level guard.
-- SEC-003 (LOW): tracing-test 0.2.5 pulls tracing-subscriber pre-0.3.20 (CVE-2025-58160 ANSI injection); dev-only; re-pin when tracing-test updates.
-- SEC-004 (suggestion): AltText::Unspecified public API; consider #[doc(hidden)] / non-construction guard.
-
-### Step 6 — After Gate 5 re-passes: Advance to Wave 5
-
-Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B, BC-1.14.003). Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. BLK-002 closes on Gate 5 re-pass.
+**Tracked follow-ups (human disposition required — NOT tech-debt-register entries):**
+- **(a) Diag-span**: validation diagnostic spans report file:"", line:0, col:0 — codes/messages/gating correct but source-location attribution absent. Polish candidate for future story.
+- **(b) SEC-001** (CWE-22, MED): ImageSpec.path stored unvalidated; latent path traversal — anchor as precondition of future image-I/O story + `// SECURITY: SEC-001` marker.
+- **(c) SEC-002** (LOW): AltText::Unspecified → AltDecision::Decorative in PPTX a11y path; add error!-level guard.
+- **(d) validate_fields wiring**: validate_fields exists but not wired into main pipeline (NEW-INT-001 root cause beyond field-name fix). Candidate for wave-gate validator-hardening story before Phase 6.
+- **(e) OBS-P6-001**: status title geometry visual-nit — deferred to VISUAL-REVIEW/Phase-4.
+- **(f) OBS-P6-002**: DOCX percent rounding for progress_bar — deferred to VISUAL-REVIEW/Phase-4 human disposition.
 
 ---
 
@@ -114,7 +106,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grou
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (112 BCs, 15 HS, 4 supplements) + arch (14 ADRs (+4 added Phase 3: ADR-015..018), 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 88 stories, 21 epics, 6 waves, 545 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04; STORY-086/087 added 2026-06-06 +26 pts; STORY-086 scope 13→21 pts + STORY-088 added +5 pts; STORY-088 expanded 5→8 pts 2026-06-06 per pass-5 D5 correction, net +3). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 23/23 COMPLETE; re-gate Gate 3 PASS / Gate 5 FAIL (image-alt NEW-INT-001; min_critical 0.500 < 0.60). BLK-002 OPEN. develop 54b8d3b1. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE; re-gate FULLY PASSED (Gate 3+5, develop 02d484cf). BLK-002 CLOSED. Wave 5 PENDING human go-ahead. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -140,24 +132,24 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grou
 
 **STORY-087** (Wave 4 pull-in — human-authorized 2026-06-06 — Color-Coded Slide Types: status/progress_bar/weighted_composite registration + LabelCheck WCAG enforcement) MERGED PR #63 (54b8d3b1, 2026-06-06). 13 pts, P1, BC-1.17.001/002/003 (all v1.2.1). CI all-green (incl bench + 4-platform matrix + all-checks-pass). Security-reviewer APPROVE/CLEAN (SEC-100 MEDIUM XML-control-char-strip fixed in-scope + re-reviewed CLOSED; SEC-101 LOW info; SEC-107 resolved). pr-reviewer APPROVE (re-reviewed after SEC-100 fix; 2 NITs resolved). LOCAL cascade 3/3 strict-CLEAN (10 passes). Worktree `.worktrees/STORY-087` removed; local branch feature/STORY-087 deleted. Closes F-G3-HIGH-003. SEC-100 fix also hardened the pre-existing PPTX body-text path for ALL slide types. OBS-P6-001 + OBS-P6-002 tracked NON-blocking VISUAL-REVIEW/Phase-4.
 
-**Wave 4 = 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63). ALL FOUR Gate-3 findings closed. Re-gate PENDING on develop 54b8d3b1.**
-**STORY-082** (slide-grouping sections) remains Wave 5 (human-authorized split from STORY-040)
+**Wave 4 = 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63 + image-alt fix PR #64). Re-gate FULLY PASSED on develop 02d484cf (Gate 3+5, holdout trajectory 0.56→0.86→1.00). BLK-002 CLOSED. WAVE 4 COMPLETE.**
+**STORY-082** (slide-grouping sections) Wave 5 (human-authorized split from STORY-040)
 
 ---
 
 ## Session Resume Checkpoint
 
-**Wave 4 re-gate complete (2026-06-07). Gate 3 PASS. Gate 5 FAIL — image-alt field-name contradiction (NEW-INT-001). BLK-002 OPEN. NEXT: human adjudicates canonical image keyword (src vs image) → implementer aligns image.rs/known_fields/field_to_block + wires validate_fields → test-writer image-alt fixture + black-box test → re-run Gate 5 → BLK-002 closes → Wave 5.**
+**Wave 4 COMPLETE. Re-gate FULLY PASSED (2026-06-07). BLK-002 CLOSED. develop 02d484cf (64 merged PRs). NEXT: Wave 5 — PENDING human go-ahead.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-07 |
-| **Position** | Wave 4: 23/23 COMPLETE. Re-gate: Gate 1 PASS (carryover), Gate 2 SKIP (no DTU), Gate 3 PASS (all 4 original findings closed; holdout mean 0.56→0.86), Gate 5 FAIL (min_critical 0.500 < 0.60 — NEW-INT-001 image-alt path). BLK-002 OPEN. Stories 88 / 545 pts. |
-| **develop SHA** | `54b8d3b1` (63 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Active worktrees** | none (STORY-087 worktree removed; local branch feature/STORY-087 deleted) |
-| **Workspace tests** | 3393/3393 (develop 54b8d3b1; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 pending STORY-088) |
+| **Position** | Wave 4: COMPLETE (23/23 + image-alt fix PR #64). Re-gate FULLY PASSED: Gate 1 PASS (carryover), Gate 2 SKIP (no DTU), Gate 3 PASS (all 4 original findings closed; NEW-INT-001 resolved), Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56→0.86→1.00). BLK-002 CLOSED. Stories 88 / 545 pts. |
+| **develop SHA** | `02d484cf` (64 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Active worktrees** | none |
+| **Workspace tests** | 3393/3393 (develop 02d484cf; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 pending STORY-088) |
 | **factory-artifacts** | PUSHED to origin (human-authorized 2026-06-04). Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **BLOCKING: NEW-INT-001 — image-alt field-name contradiction. Human must first adjudicate canonical keyword (BC-1.16.001 PC-10 says `src`; image.rs/known_fields say `image`). Then: (1) implementer aligns image.rs required_fields + known_fields.rs + field_to_block.rs + wires validate_fields into build pipeline; (2) test-writer adds image-with-alt fixture + black-box integration test; (3) merge fix; (4) re-run Gate 5 holdout on develop; (5) min_critical ≥ 0.60 → BLK-002 closes → begin Wave 5 (STORY-082, STORY-081, STORY-088).** |
+| **RESUME INSTRUCTION** | Wave 5 queue ready: STORY-082 (PPTX slide-grouping sections, 5 pts, P0), STORY-081 (slide-level inline markup, P0), STORY-088 (bullets list-literal DSL, 8 pts, P0). Await human go-ahead before dispatching. Tracked follow-ups (a)-(f) listed in NEXT ACTIONS for human disposition. Phases 4-7 (holdout / adversarial / hardening / convergence) remain ahead at v1.0. |
 
 ---
 
@@ -190,7 +182,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grou
 | ID | Description | Opened | Status |
 |----|-------------|--------|--------|
 | BLK-001 | Alt-text enforcement non-functional end-to-end (Gap 2). | 2026-06-05 | RESOLVED — STORY-050 ADR-018 post-layout validation pass. |
-| BLK-002 | Wave 4 gate — Gate 3 PASS (2026-06-07; all 4 original findings closed; content-EMPTY root cause resolved; holdout mean improved 0.56→0.86). Gate 5 FAIL: min_critical 0.500 < 0.60. Blocking defect: image-alt path broken (NEW-INT-001 — BC-1.16.001 `src` vs image.rs/known_fields `image`; validate_fields unwired). Wave 4 does NOT advance to Wave 5 until Gate 5 re-passes. | 2026-06-06 | OPEN — Closes on Gate 5 re-run PASS after image-alt field-name fix. Requires human decision on canonical keyword first. |
+| BLK-002 | Wave 4 gate. Evidence: STORY-086 (content threading) + STORY-087 (color-coded types) + image-alt fix PR #64 (NEW-INT-001) + Wave 4 re-gate Gate 3+5 PASS on develop 02d484cf. Gate 5 trajectory: 0.56→0.86→1.00. All 5 critical holdout scenarios pass. | 2026-06-06 | CLOSED 2026-06-07 — Wave 4 Gate 5 re-pass (mean 1.00, min_critical 1.00). Wave 4 COMPLETE. |
 
 ---
 
@@ -198,19 +190,19 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grou
 
 | Item | Severity | Target |
 |------|----------|--------|
-| **NEW-INT-001 (Wave 4 Gate 5, MED): Image slide alt path broken — BC-1.16.001 PC-10 + field_to_block.rs use `src` as image keyword, but image.rs required_fields + known_fields.rs declare `image`. User writing `image: "path.png" alt: "..."` gets no ContentBlock::Image → post-layout fires E-A11-001 even with valid alt. Additionally, validate_fields is not wired into the main build pipeline (fails silent). BLOCKING Gate 5. Requires: (1) human adjudication of canonical keyword; (2) align image.rs + known_fields.rs + field_to_block.rs; (3) wire validate_fields; (4) add image-with-alt black-box test; (5) re-run Gate 5.** | MED (gate-blocking) | Gate 5 re-run |
-| **VP-INDEX propagation: BC-5.01.001 v1.3 / BC-5.02.001 v1.6 updated VP language for the AltTextValidator post-layout path — VP-INDEX may require update to reflect new VP wording. Verify and propagate during STORY-086 delivery (vp_index_is_vp_catalog_source_of_truth policy).** | LOW (hygiene) | STORY-086 delivery |
-| **OBS-1 (STORY-050 pass-1, expanded at Wave 4 gate): CanvasOverflowValidator + AltText pre-layout + LabelCheck are ALL functionally inert end-to-end — reads `Slide.blocks` which is always empty post-eval (for_eval.rs:342). Gate G3-HIGH-002: 3/5 validators dead (AltTextValidator pre-layout, CanvasOverflowValidator, LabelCheck). Gate G3-HIGH-003: LabelCheck COLOR_CODED_TYPES matches no registered slide types → WCAG 1.4.1 dead. These are BLOCKED on the content-threading gap fix (BLK-002). Target: resolve via Wave 4 remediation (Steps 1-2) + validator-hardening story before Phase 6.** | HIGH (a11y + WCAG correctness gap) | Wave 4 remediation (BLK-002) |
-| **F-G3-CRIT-001 (Wave 4 gate adversary): Default strict build of ANY chart/diagram/image/screenshot/bio deck unconditionally fails E-A11-001 even with correct alt — because eval sets slide.blocks=vec![] (for_eval.rs:342) so thread_media_alt_into_frames never runs; decorative:true won't parse (E-PAR-002) so no remedy exists. Root cause: content-threading gap. Remediation: architect design (Step 1) + implementer fix (Step 2). IN PROGRESS.** | CRITICAL | Wave 4 remediation Steps 1-2 |
-| **F-G3-HIGH-002 (Wave 4 gate adversary): AltText pre-layout validator + LabelCheck are inert (3/5 validators dead) — same root cause as F-G3-CRIT-001 content-threading gap. Fix via Steps 1-2.** | HIGH | Wave 4 remediation Steps 1-2 |
-| **F-G3-HIGH-003 (Wave 4 gate adversary): LabelCheck COLOR_CODED_TYPES matches no registered slide types → WCAG 1.4.1 enforcement is dead letter. Fix via Steps 1-2.** | HIGH | Wave 4 remediation Steps 1-2 |
-| **E-PAR-002 (Wave 4 gate adversary): decorative:true won't parse — missing parser rule. Fix in-scope with Steps 1-2.** | HIGH | Wave 4 remediation Steps 1-2 |
-| **F-G3-HIGH-004 (Wave 4 gate adversary): for_eval.rs:336-341 comment misleading — implies blocks are populated but they are not. Fix in-scope.** | MED (misleading comment) | Wave 4 remediation fix-burst |
-| **NOTE — Wave 4 story-spec frontmatter stale:** 19/21 Wave 4 story spec files have stale `status:` frontmatter fields (e.g. `draft`, `in-progress`, `ready` instead of `merged`). Canonical status = sprint-state.yaml + STORY-INDEX.md (both now corrected). Story-spec frontmatter is a hygiene gap, not a blocker. Hygiene follow-up anchored to a spec-steward pass before Phase 4 begins. | LOW (hygiene) | Spec-steward pass before Phase 4 |
-| **EC-003/EC-002 (STORY-050 pass-4/5): story spec Edge Cases reference future `BuildError::DataFailed` + `E-DAT-001` (and `@include`/`@data` behavior) that are unimplemented upstream; E2E tests assert no-panic only. Sanctioned cross-story deferral — Wave 4 gate / future @data+@include stories must tighten EC-002/EC-003 to assert the real error variants once those features land.** | integration | wave-gate / @data story |
-| ~~**[DRIFT-CRITICAL-1] PDF export non-functional since STORY-044.**~~ **RESOLVED via STORY-050 (030dec6c, 2026-06-06).** eval.rs title derivation fixed; PDF/UA-1 passes. Wave 4 gate must verify closure end-to-end. | RESOLVED | Wave 4 gate verification |
-| ~~**[DRIFT-CRITICAL-2] Alt-text enforcement non-functional end-to-end.**~~ **RESOLVED via STORY-050 (030dec6c, 2026-06-06).** Post-layout validation pass (ADR-018) implemented; AltTextValidator now fires end-to-end. Wave 4 gate must verify closure. | RESOLVED | Wave 4 gate verification |
-| ~~OBS-E (STORY-049 pass-4): STORY-050 E2E must include multi-slide deck with inline formatting + data binding routed through build() to close BC-5.02.002 EC-004 end-to-end.~~ **NOTE: Wave 4 gate holdout (Gate 5) found exporters produce content-EMPTY output (for_eval.rs:342 gap) — BC-5.02.002 EC-004 end-to-end coverage is effectively blocked until BLK-002 content-threading is fixed. OBS-E remains open pending BLK-002 remediation.** | content-threading blocked | Wave 4 remediation (BLK-002) |
+| ~~NEW-INT-001 image-alt field-name (Wave 4 Gate 5, MED)~~ **RESOLVED PR #64** — image.rs/known_fields.rs/field_to_block.rs aligned to canonical `image` keyword; validate_fields wired into pipeline. Gate 5 re-run PASS. | RESOLVED | — |
+| ~~VP-INDEX propagation (STORY-086 delivery)~~ — swept during STORY-086 delivery. | RESOLVED | — |
+| ~~OBS-1: CanvasOverflowValidator + AltText pre-layout + LabelCheck functionally inert~~ **RESOLVED STORY-086** — content threading live; validators fire end-to-end. | RESOLVED | — |
+| ~~F-G3-CRIT-001 / F-G3-HIGH-001/002/003/004~~ **ALL RESOLVED** — STORY-086 (content threading) + STORY-087 (color-coded types) + image-alt fix PR #64. | RESOLVED | — |
+| ~~E-PAR-002 (decorative:true won't parse)~~ **RESOLVED STORY-086** — parser rule added in-scope. | RESOLVED | — |
+| **Wave 4 story-spec frontmatter stale:** 19/21 Wave 4 story spec files have stale `status:` frontmatter fields. Canonical status = sprint-state.yaml + STORY-INDEX.md (both corrected). Hygiene gap; spec-steward pass before Phase 4. | LOW (hygiene) | Spec-steward pass before Phase 4 |
+| **EC-003/EC-002 (STORY-050): story spec Edge Cases reference future `BuildError::DataFailed` + `E-DAT-001` (and `@include`/`@data` behavior) unimplemented upstream; E2E tests assert no-panic only. Sanctioned cross-story deferral — future @data+@include stories must tighten EC-002/EC-003.** | integration | @data story |
+| ~~OBS-E (BLK-002 blocked)~~ **RESOLVED** — content threading live (STORY-086); BC-5.02.002 EC-004 end-to-end path now exercised. | RESOLVED | — |
+| **Diag-span (Gate 5 re-run observation):** validation diagnostic spans report file:"", line:0, col:0 — codes/messages/gating correct; source-location attribution absent. Candidate for future diagnostic-span polish story. Human disposition needed. | LOW | Future story |
+| **SEC-001** (CWE-22, MED, STORY-086): ImageSpec.path stored unvalidated; latent path traversal — precondition of future image-I/O story; anchor with `// SECURITY: SEC-001` marker. Human disposition needed. | MED (latent) | image-I/O story precondition |
+| **SEC-002** (LOW, STORY-086): AltText::Unspecified → AltDecision::Decorative in PPTX a11y path; add error!-level guard. | LOW | Hardening story |
+| **SEC-003** (LOW, STORY-086, CVE-2025-58160): tracing-test 0.2.5 pulls tracing-subscriber pre-0.3.20 (ANSI injection); dev-only; re-pin when tracing-test updates. | LOW | Upstream dep update |
+| **validate_fields pipeline wiring:** validate_fields wired for image keyword fix (PR #64) but broader field-validation completeness sweep pending. | LOW | Validator-hardening story before Phase 6 |
 | SEC-042-001 (CWE-400): docx section serializers no upper bound on items count | LOW | STORY-049 / layout hardening |
 | SEC-001 (CWE-494, veraPDF): Docker `verapdf/cli:latest` not digest-pinned | MED | Before v1.0 / Phase 6 |
 | SEC-003 (CWE-189): `emu_to_pt` i64→f32 precision loss | LOW | Phase 6 Kani |
@@ -245,6 +237,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grou
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-07 | WAVE4-COMPLETE | Wave 4 COMPLETE. image-alt fix (PR #64) squash-merged to develop 02d484cf (64 merged PRs; LESSON-12+18 applied). Wave 4 re-gate FULLY PASSED on develop 02d484cf. Gate 1: PASS (carryover). Gate 2: SKIP (no DTU). Gate 3 (adversary): PASS — all 4 original findings CLOSED; NEW-INT-001 image-alt field-name RESOLVED by PR #64 (image.rs required_fields + known_fields.rs + field_to_block.rs aligned; validate_fields wired). Gate 5 (holdout): PASS — mean 1.00 (≥0.85), min_critical 1.00 (≥0.60). All 5 critical scenarios pass: content visible PPTX/PDF/DOCX; chart+alt AND image+alt build Ok strict (image-alt blocker RESOLVED, alt→descr); status/progress_bar render label + proportional bar (75%→6172200/8229600 EMU exact); missing label→E-A11-002; out-of-range value→E-VAL-011. Holdout trajectory: 0.56 (original) → 0.86 (after STORY-086/087) → 1.00 (after image-alt fix). BLK-002 CLOSED. New non-blocking observation: validation diagnostic spans report file:"", line:0, col:0 (codes/messages/gating correct; source-location attribution absent; candidate for future diagnostic-span polish story). Wave 4 COMPLETE — Wave 5 (STORY-082, STORY-081, STORY-088) PENDING human go-ahead. Phases 4-7 remain ahead at v1.0. |
 | 2026-06-07 | WAVE4-REGATE-V2 | Wave 4 re-gate result on correct tree (develop 54b8d3b1; LESSON-WORKTREE-SYNC applied — first attempt reviewed stale tree, fixed via `git restore --source=HEAD --staged --worktree .`). Gate 1: PASS (carryover). Gate 2: SKIP (no DTU). Gate 3 (adversary): PASS — all 4 original findings CLOSED (F-G3-CRIT-001 content threading; F-G3-HIGH-001/002 validators live; F-G3-HIGH-003 color-coded types registered+rendering+E-A11-002+E-VAL-011; F-G3-HIGH-004 comment). Zero new CRIT/HIGH. 1 MED: NEW-INT-001 (image field-name mismatch: BC-1.16.001 `src` vs image.rs/known_fields `image`; validate_fields unwired). 2 LOW observations (non-blocking). Gate 5 (holdout): FAIL — mean 0.860 (PASS ≥ 0.85; huge improvement from 0.56; content-EMPTY root cause resolved) but min_critical 0.500 (FAIL < 0.60). Single blocking defect: image slide alt path — DSL keyword contradiction causes no ContentBlock::Image to be produced → E-A11-001 fires even with valid alt. All other scenarios PASS (status/progress_bar build+render proportional bar; missing label → E-A11-002; value 250 → E-VAL-011; content visible PPTX/PDF/DOCX). BLK-002 REMAINS OPEN. Wave 4 does NOT advance to Wave 5 until Gate 5 re-passes. Lessons: `.factory/cycles/wave-4-gate/lessons.md`. |
 | 2026-06-06 | STORY-087-MERGED | STORY-087 MERGED PR #63 (squash SHA 54b8d3b1, 2026-06-06). Title: "feat(plugin-api,eval,layout,validate,pptx,pdf,docx): color-coded slide types — status/progress_bar/weighted_composite (STORY-087) (#63)". CI all-green (incl bench + 4-platform matrix + all-checks-pass). Security-reviewer APPROVE/CLEAN: SEC-100 MEDIUM XML-control-char-strip fixed in-scope (also hardened pre-existing PPTX body-text path for ALL slide types) + re-reviewed CLOSED; SEC-101 LOW info; SEC-107 resolved. pr-reviewer APPROVE: re-reviewed after SEC-100 fix; 2 NITs resolved. LOCAL cascade 3/3 strict-CLEAN (10 passes). develop 298ae518 → 54b8d3b1 (63 merged PRs); origin/develop confirmed, LESSON-12 verified. Worktree .worktrees/STORY-087 removed; local branch feature/STORY-087 deleted (remote branch remains on origin, harmless). Wave 4 = 23/23. ALL FOUR original Wave 4 Gate-3 findings now closed: F-G3-CRIT-001 + F-G3-HIGH-001/002 (STORY-086) + F-G3-HIGH-003 (STORY-087). Wave 4 re-gate NEXT on develop 54b8d3b1 (Gate 3 adversary + Gate 5 holdout; Gate 1 carried over; Gate 2 SKIP). BLK-002 OPEN until re-gate pass. OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) remain tracked NON-blocking at VISUAL-REVIEW/Phase-4 gate. |
 | 2026-06-06 | STORY-087-CONVERGED | STORY-087 LOCAL adversary cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10 per BC-5.39.001; 10 passes total). Demo recorded by demo-recorder: 3 VHS recordings (GIF+WebM+tape) at docs/demo-evidence/STORY-087/ covering F-G3-HIGH-003 closure (LabelCheck COLOR_CODED_TYPES now matches all 3 registered color-coded slide types — status/progress_bar/weighted_composite); visible bar+label output incl PPTX <a:solidFill> solid-fill bar element; validation error paths E-A11-002 (missing label) + E-VAL-011 (value out of range). evidence-report.md maps all ACs to load-bearing tests or documented SID-1 deferrals. Clippy gate clean (demo evidence tapes only — no new production code). Worktree HEAD 96c2af83 → 15297d49 (demo commit; pushed to origin/feature/STORY-087). OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) remain tracked NON-blocking at VISUAL-REVIEW/Phase-4 gate. Next: pr-manager 9-step PR cycle → security-reviewer + pr-reviewer (independent) → CI → merge (STANDING MERGE AUTH) → Wave 4 re-gate (Gate 3 adversary + Gate 5 holdout on develop with BOTH STORY-086 + STORY-087 closed). BLK-002 closes on re-gate pass. |
