@@ -40,6 +40,7 @@ impl VideoSlideType {
                     description: Arc::from("The slide title shown above the video player."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("video_url"),
@@ -49,6 +50,7 @@ impl VideoSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("alt"),
@@ -59,6 +61,7 @@ impl VideoSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             // `alt` is required on video slides; exclude it from the common optional

@@ -38,6 +38,7 @@ impl ExecutiveSummarySlideType {
             description: Arc::from("Supporting bullet points that elaborate on the summary."),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -47,12 +48,14 @@ impl ExecutiveSummarySlideType {
                     description: Arc::from("The slide title (e.g., \"Executive Summary\")."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("summary"),
                     description: Arc::from("The one-paragraph executive summary (3-5 sentences)."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

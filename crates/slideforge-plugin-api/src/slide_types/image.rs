@@ -40,6 +40,7 @@ impl ImageSlideType {
             description: Arc::from("A caption displayed below the image (visible to all viewers)."),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         // `alt` is required on image slides; exclude it from the common optional
         // fields to avoid duplicating it in required ∪ optional (F-P2-003).
@@ -55,6 +56,7 @@ impl ImageSlideType {
                     description: Arc::from("The slide title shown above the image."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("src"),
@@ -64,6 +66,7 @@ impl ImageSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("alt"),
@@ -73,6 +76,7 @@ impl ImageSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

@@ -29,6 +29,11 @@ pub struct TocSlideType {
 
 impl TocSlideType {
     /// Construct a new `TocSlideType` with its canonical field definitions.
+    ///
+    /// `toc` intentionally has no list-typed field for entries — TOC entries are
+    /// auto-generated from `section_break` slides by the layout engine (per BC-1.18.001
+    /// v1.1 / ADR-020). There is no `items` field; authors do not supply the TOC list
+    /// manually.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -39,6 +44,7 @@ impl TocSlideType {
                 ),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional: common_optional_fields(),
         }

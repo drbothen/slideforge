@@ -32,6 +32,9 @@ impl MatrixSlideType {
     /// Construct a new `MatrixSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // ADR-020 v1.1 / BC-1.18.001 v1.1 PC-9 adjudication: `cells` is the correct field name.
+        // Matrix has no `rows` field and receives no Priority-1 annotation. `cells` is polymorphic
+        // (structure depends on matrix dimensions — 2×2, N×M, etc.) → expected_type: None.
         let mut optional = vec![FieldDef {
             name: Arc::from("cells"),
             description: Arc::from(
@@ -40,6 +43,7 @@ impl MatrixSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -48,6 +52,7 @@ impl MatrixSlideType {
                 description: Arc::from("The slide title (e.g., \"Impact / Effort Matrix\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

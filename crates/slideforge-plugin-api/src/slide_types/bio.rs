@@ -45,6 +45,7 @@ impl BioSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -54,12 +55,14 @@ impl BioSlideType {
                     description: Arc::from("The person's full name."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("title"),
                     description: Arc::from("The person's job title or role."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("bio"),
@@ -68,6 +71,7 @@ impl BioSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

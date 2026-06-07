@@ -40,6 +40,7 @@ impl FinancialsSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -50,6 +51,7 @@ impl FinancialsSlideType {
                 ),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

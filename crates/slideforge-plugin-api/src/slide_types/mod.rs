@@ -27,7 +27,7 @@
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use crate::traits::FieldDef;
+use crate::traits::{FieldDef, FieldType};
 
 pub mod agenda;
 pub mod bio;
@@ -94,6 +94,7 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             description: Arc::from("Presenter notes for this slide (notes writing register)."),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("report"),
@@ -102,6 +103,7 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("detail"),
@@ -110,12 +112,14 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("tags"),
             description: Arc::from("User-defined tags for filtering and grouping slides."),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("alt"),
@@ -124,6 +128,7 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("lang"),
@@ -133,7 +138,10 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         },
+        // Priority-1 annotation: decorative must be a boolean value.
+        // AC-014 (BC-1.18.001 postcondition 9): `decorative: "yes"` emits E-VAL-104 T1.
         FieldDef {
             name: Arc::from("decorative"),
             description: Arc::from(
@@ -142,18 +150,21 @@ pub fn common_optional_fields() -> Vec<FieldDef> {
             ),
             required: false,
             default_value: None,
+            expected_type: Some(FieldType::Bool),
         },
         FieldDef {
             name: Arc::from("footer"),
             description: Arc::from("Override footer text for this slide."),
             required: false,
             default_value: None,
+            expected_type: None,
         },
         FieldDef {
             name: Arc::from("logo"),
             description: Arc::from("Override the brand logo for this slide."),
             required: false,
             default_value: None,
+            expected_type: None,
         },
     ]
 }

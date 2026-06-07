@@ -27,7 +27,9 @@ use std::sync::Arc;
 
 use slideforge_types::Slide;
 
-use crate::traits::{Diagnostic, DiagnosticSeverity, SlideType};
+use crate::traits::{
+    Diagnostic, DiagnosticSeverity, FieldType, SlideType, type_matches, value_type_name,
+};
 use slideforge_types::{FieldValue, Value};
 
 use super::{
@@ -212,11 +214,16 @@ impl Default for SlideTypeRegistry {
 /// | Required field absent | `Error` | `"E-VAL-101"` |
 /// | Required field is empty string | `Error` | `"E-VAL-102"` |
 /// | Unknown field (not in required or optional) | `Warning` | `"W-VAL-103"` |
+/// | Field value type mismatch or `OneOf` violation | `Error` | `"E-VAL-104"` |
 ///
 /// # Arguments
 ///
 /// * `slide` — The semantic slide to validate.
 /// * `slide_type` — The registered slide type to validate against.
+///
+/// # Diagnostics produced
+///
+/// See the table above. All four error codes are fully implemented.
 #[must_use]
 pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
@@ -270,6 +277,77 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
         }
     }
 
+    // ── E-VAL-104: type-mismatch / OneOf violation ───────────────────────────
+    // BC-1.18.001 postconditions 2 and 3.
+    //
+    // Iterates ALL fields (required + optional). Accumulates ALL E-VAL-104
+    // diagnostics without halting (DI-018 / BC-1.18.001 invariant 7).
+    //
+    // Two message branches:
+    //   T1 — value variant wrong for expected type (including non-Str on OneOf):
+    //     "Field '<name>' on <type> slide has wrong type: expected <expected>, got <actual>.
+    //      See the DSL reference for valid field types."
+    //   T2 — value IS Str but not in the OneOf allowlist:
+    //     "Field '<name>' on <type> slide has disallowed value \"<val>\":
+    //      allowed values are [<list>]."
+    for field_def in slide_type
+        .required_fields()
+        .iter()
+        .chain(slide_type.optional_fields().iter())
+    {
+        if let Some(expected) = &field_def.expected_type {
+            // Skip FieldType::Any — no type constraint.
+            if matches!(expected, FieldType::Any) {
+                continue;
+            }
+            if let Some(FieldValue::Literal(v)) = slide.fields.get(field_def.name.as_ref())
+                && !type_matches(v, expected)
+            {
+                let field_name = &field_def.name;
+                let message: Arc<str> = if let FieldType::OneOf(allowed) = expected {
+                    if let Value::Str(s) = v {
+                        // T2: Str value not in the allowlist.
+                        let allowed_list: Vec<&str> =
+                            allowed.iter().map(std::convert::AsRef::as_ref).collect();
+                        let allowed_str = allowed_list.join(", ");
+                        Arc::from(format!(
+                            "Field '{field_name}' on {type_id} slide has disallowed value \
+                             \"{s}\": allowed values are [{allowed_str}]."
+                        ))
+                    } else {
+                        // T1: non-Str value on a OneOf field.
+                        let expected_name = expected.display_name();
+                        let actual_name = value_type_name(v);
+                        Arc::from(format!(
+                            "Field '{field_name}' on {type_id} slide has wrong type: \
+                             expected {expected_name}, got {actual_name}. \
+                             See the DSL reference for valid field types."
+                        ))
+                    }
+                } else {
+                    // T1: value variant wrong for expected type.
+                    let expected_name = expected.display_name();
+                    let actual_name = value_type_name(v);
+                    Arc::from(format!(
+                        "Field '{field_name}' on {type_id} slide has wrong type: \
+                         expected {expected_name}, got {actual_name}. \
+                         See the DSL reference for valid field types."
+                    ))
+                };
+                diags.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: Arc::from("E-VAL-104"),
+                    message,
+                    span: slide.source_span.clone(),
+                    hint: None,
+                });
+            }
+            // FieldValue::Inlines / Expr / Interpolated / absent: skip.
+            // Inlines are untypeable at Stage 5 (BC-1.18.001 postcondition 5).
+            // Absence is the E-VAL-101 concern.
+        }
+    }
+
     // Check for unknown fields: not in required ∪ optional → W-VAL-103.
     // Build known-field list once for the diagnostic message (F-P2-001 / AC-008).
     let mut known_list: Vec<&str> = known.iter().map(std::convert::AsRef::as_ref).collect();
@@ -312,7 +390,7 @@ fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Ar
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Red Gate tests — ALL tests MUST FAIL before implementation begins.
+// Tests — BC-1.03 and BC-1.18.001 (validate_fields, SlideTypeRegistry)
 //
 // Test naming: test_BC_1_03_NNN_xxx  (BC-1.03 = STORY-003 slide type registry)
 // ─────────────────────────────────────────────────────────────────────────────

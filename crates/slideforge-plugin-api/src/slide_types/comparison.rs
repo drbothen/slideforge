@@ -37,6 +37,7 @@ impl ComparisonSlideType {
             description: Arc::from("Evaluation criteria dimensions used to compare the options."),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -46,6 +47,7 @@ impl ComparisonSlideType {
                     description: Arc::from("The slide title (e.g., \"Option Comparison\")."),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("option_a"),
@@ -54,6 +56,7 @@ impl ComparisonSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("option_b"),
@@ -62,6 +65,7 @@ impl ComparisonSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
             ],
             optional,

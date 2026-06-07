@@ -38,6 +38,7 @@ impl ProcessFlowSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: None,
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -46,6 +47,7 @@ impl ProcessFlowSlideType {
                 description: Arc::from("The slide title (e.g., \"Our Process\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

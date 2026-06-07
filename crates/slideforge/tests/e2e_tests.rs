@@ -91,3 +91,13 @@ mod e2e_story_087_bar_export;
 //               (TRUE RED GATE unit test — currently FAILS: known_fields has "image").
 #[path = "e2e/wave4_gate5_image_alt.rs"]
 mod e2e_wave4_gate5_image_alt;
+
+// STORY-089 — BC-1.18.001 Field-Schema Validator Pipeline Wiring tests.
+// AC-009 (strict): progress_bar with value "fifty" (Str on Int field) → Err(ValidationFailed)
+//   with E-VAL-104. Was RED at Red Gate (no FieldSchemaValidator registered → Ok returned);
+//   now GREEN: FieldSchemaValidator is registered and strict build returns Err(E-VAL-104).
+// AC-010 (warn-only): same fixture → Ok (guard test: documents post-wiring contract).
+// Positive control: progress_bar value=75 (valid Int) → strict Ok (false-positive guard).
+// Regression intent: chart without `data` → strict Ok (chart.data → optional per architect).
+#[path = "e2e/story_089_field_schema.rs"]
+mod e2e_story_089_field_schema;

@@ -30,7 +30,7 @@ use std::sync::Arc;
 use slideforge_layout::LaidOutSlide;
 use slideforge_types::{Brand, Slide};
 
-use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+use crate::traits::{Canvas, FieldDef, FieldType, LayoutError, SlideType};
 
 use super::common_optional_fields;
 
@@ -74,6 +74,7 @@ impl ProgressBarSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
                 FieldDef {
                     name: Arc::from("label"),
@@ -84,7 +85,10 @@ impl ProgressBarSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: None,
                 },
+                // Priority-1 annotation: value must be an integer (BC-1.18.001 postcondition 9).
+                // AC-012: `value: "75%"` emits E-VAL-104 T1 ("expected integer, got string").
                 FieldDef {
                     name: Arc::from("value"),
                     description: Arc::from(
@@ -94,6 +98,7 @@ impl ProgressBarSlideType {
                     ),
                     required: true,
                     default_value: None,
+                    expected_type: Some(FieldType::Int),
                 },
             ],
             optional,

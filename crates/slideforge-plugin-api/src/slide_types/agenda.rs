@@ -10,7 +10,7 @@ use std::sync::Arc;
 use slideforge_layout::LaidOutSlide;
 use slideforge_types::{Brand, Slide};
 
-use crate::traits::{Canvas, FieldDef, LayoutError, SlideType};
+use crate::traits::{Canvas, FieldDef, FieldType, LayoutError, SlideType};
 
 use super::common_optional_fields;
 
@@ -32,6 +32,8 @@ impl AgendaSlideType {
     /// Construct a new `AgendaSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        // Priority-1 annotation: items must be a list.
+        // AC-016 (BC-1.18.001 postcondition 9): `items: "see below"` emits E-VAL-104 T1.
         let mut optional = vec![FieldDef {
             name: Arc::from("items"),
             description: Arc::from(
@@ -39,6 +41,7 @@ impl AgendaSlideType {
             ),
             required: false,
             default_value: None,
+            expected_type: Some(FieldType::List),
         }];
         optional.extend(common_optional_fields());
         Self {
@@ -47,6 +50,7 @@ impl AgendaSlideType {
                 description: Arc::from("The slide title (e.g., \"Today's Agenda\" or \"Agenda\")."),
                 required: true,
                 default_value: None,
+                expected_type: None,
             }],
             optional,
         }

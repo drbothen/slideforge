@@ -15,6 +15,7 @@
 //! | [`LabelCheckValidator`] | `"label-check"` | Enforces `label "..."` on color-coded slide types (WCAG 1.4.1) |
 //! | [`LangValidator`] | `"lang"` | Warns on missing deck `lang` declaration; injects default "en" |
 //! | [`ValueRangeValidator`] | `"value-range"` | Enforces numeric field ranges for color-coded slide types (E-VAL-011) |
+//! | [`FieldSchemaValidator`] | `"field-schema"` | Type-checks slide fields against `FieldDef.expected_type` (E-VAL-101/102/103/104) |
 //!
 //! ## Validation pipeline configuration
 //!
@@ -34,6 +35,7 @@
 mod alt_text;
 mod canvas_overflow;
 mod error_slide;
+mod field_schema;
 mod image_path;
 mod label_check;
 mod lang_validator;
@@ -46,6 +48,7 @@ mod zero_slide;
 pub use alt_text::AltTextValidator;
 pub use canvas_overflow::CanvasOverflowValidator;
 pub use error_slide::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
+pub use field_schema::FieldSchemaValidator;
 pub use image_path::{E_VAL_012, ImagePathValidator};
 pub use label_check::{COLOR_CODED_TYPES, LabelCheckValidator};
 pub use lang_validator::{LangValidator, inject_lang_default};
