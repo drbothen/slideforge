@@ -639,7 +639,11 @@ impl SlideSerializer {
                 // emits a visible warning so silent content loss is never tolerated
                 // (AC-002/008 visible-output requirement; adjudication §6).
                 // TODO(STORY-087): implement full ColorBar PPTX rendering.
-                FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } => {
+                FrameContent::ColorBar {
+                    filled_width_emu,
+                    total_width_emu,
+                    ..
+                } => {
                     tracing::warn!(
                         slide_index,
                         frame_idx,

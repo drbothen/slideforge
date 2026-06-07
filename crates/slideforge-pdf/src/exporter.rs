@@ -770,7 +770,11 @@ fn draw_frame(
         // emits a visible warning so silent content loss is never tolerated
         // (AC-002/008 visible-output requirement; adjudication §6).
         // TODO(STORY-087): implement full ColorBar PDF filled-rectangle draw.
-        FrameContent::ColorBar { filled_width_emu, total_width_emu, .. } => {
+        FrameContent::ColorBar {
+            filled_width_emu,
+            total_width_emu,
+            ..
+        } => {
             tracing::warn!(
                 filled_width_emu = filled_width_emu.0,
                 total_width_emu = total_width_emu.0,

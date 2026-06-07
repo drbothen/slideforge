@@ -136,11 +136,19 @@ fn validate_weighted_composite_components(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let components = match fields.get("components") {
+        Some(FieldValue::Literal(Value::List(list))) if list.is_empty() => {
+            // BC-1.17.003 PC-3 / architect pass-2 adjudication §7 (F-087-P2-001):
+            // An empty list is a valid DSL value that violates the "non-empty components"
+            // postcondition. Emit E-VAL-011 and return.
+            diagnostics.push(make_range_error(
+                "weighted_composite requires at least one component; got empty list.",
+                span,
+            ));
+            return;
+        },
         Some(FieldValue::Literal(Value::List(list))) => list.as_slice(),
         _ => {
             // Absent or wrong type — not a range error; no E-VAL-011.
-            // (Empty-components validation is a separate concern; range validator
-            // only checks numeric field ranges when components are present and valid.)
             return;
         },
     };

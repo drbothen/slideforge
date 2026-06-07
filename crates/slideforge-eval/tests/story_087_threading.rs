@@ -20,13 +20,14 @@
 
 #![allow(clippy::unwrap_used)] // unit tests — panics are intentional
 #![allow(non_snake_case)] // BC-traceability IDs use uppercase
+#![allow(clippy::doc_markdown)] // test module doc has unbackticked slide-type names
 
 use std::sync::Arc;
 
 use slideforge_eval::thread_fields_to_blocks;
 use slideforge_types::{
-    Block, ContentBlock, Deck, DeckMetadata, FieldValue, OrderedMap, Slide,
-    SourceSpan, TextTag, Value,
+    Block, ContentBlock, Deck, DeckMetadata, FieldValue, OrderedMap, Slide, SourceSpan, TextTag,
+    Value,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,7 +156,9 @@ fn body_blocks(blocks: &[Block]) -> Vec<&Block> {
 #[test]
 fn test_status_label_threads_as_color_label() {
     let mut slide = make_slide("status");
-    slide.fields.insert(Arc::from("label"), str_field("On Track"));
+    slide
+        .fields
+        .insert(Arc::from("label"), str_field("On Track"));
     let mut deck = make_deck(vec![slide]);
 
     thread_fields_to_blocks(&mut deck);
@@ -202,7 +205,9 @@ fn test_status_no_label_no_block() {
 #[test]
 fn test_progress_bar_label_threads_as_color_label() {
     let mut slide = make_slide("progress_bar");
-    slide.fields.insert(Arc::from("label"), str_field("75% done"));
+    slide
+        .fields
+        .insert(Arc::from("label"), str_field("75% done"));
     slide.fields.insert(Arc::from("value"), int_field(75));
     let mut deck = make_deck(vec![slide]);
 
@@ -267,7 +272,11 @@ fn test_progress_bar_value_zero_threads_as_color_bar() {
         "RED GATE: progress_bar value=0 must produce 1 ColorBar block; got {blocks:?}"
     );
     if let ContentBlock::ColorBar(spec) = &bar_blocks[0].content {
-        assert_eq!(spec.percent, 0, "ColorBarSpec.percent must be 0; got {}", spec.percent);
+        assert_eq!(
+            spec.percent, 0,
+            "ColorBarSpec.percent must be 0; got {}",
+            spec.percent
+        );
     }
 }
 
@@ -289,7 +298,11 @@ fn test_progress_bar_value_100_threads_as_color_bar() {
         "RED GATE: progress_bar value=100 must produce 1 ColorBar block; got {blocks:?}"
     );
     if let ContentBlock::ColorBar(spec) = &bar_blocks[0].content {
-        assert_eq!(spec.percent, 100, "ColorBarSpec.percent must be 100; got {}", spec.percent);
+        assert_eq!(
+            spec.percent, 100,
+            "ColorBarSpec.percent must be 100; got {}",
+            spec.percent
+        );
     }
 }
 
@@ -302,7 +315,9 @@ fn test_progress_bar_value_100_threads_as_color_bar() {
 #[test]
 fn test_weighted_composite_label_threads_as_color_label() {
     let mut slide = make_slide("weighted_composite");
-    slide.fields.insert(Arc::from("label"), str_field("Overall: Good"));
+    slide
+        .fields
+        .insert(Arc::from("label"), str_field("Overall: Good"));
     // No components (empty list for simplicity — threading is independent of component count)
     slide.fields.insert(
         Arc::from("components"),
@@ -348,7 +363,9 @@ fn test_weighted_composite_2_components_produce_2_body_blocks() {
     comp2.insert(Arc::from("label"), Value::Str(Arc::from("Good")));
 
     let mut slide = make_slide("weighted_composite");
-    slide.fields.insert(Arc::from("label"), str_field("Overall: Good"));
+    slide
+        .fields
+        .insert(Arc::from("label"), str_field("Overall: Good"));
     slide.fields.insert(
         Arc::from("components"),
         FieldValue::Literal(Value::List(vec![Value::Map(comp1), Value::Map(comp2)])),
@@ -361,8 +378,7 @@ fn test_weighted_composite_2_components_produce_2_body_blocks() {
     // Count ONLY TextTag::Body blocks (not ColorLabel or other tags)
     let body_count = body_blocks(blocks).len();
     assert_eq!(
-        body_count,
-        2,
+        body_count, 2,
         "RED GATE: `weighted_composite` with 2 components must produce exactly 2 \
          ContentBlock::Text(TextTag::Body) blocks (one per component). \
          Stage 2b does not thread `components` yet. \

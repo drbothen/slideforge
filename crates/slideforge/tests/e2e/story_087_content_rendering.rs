@@ -135,9 +135,7 @@ fn make_slide_with_blocks(slide_type: &str, blocks: Vec<Block>, title: Option<&s
 /// and the Body-role frame remains `FrameContent::Empty`.
 #[test]
 fn test_AC_002_status_label_visible_in_output() {
-    let blocks = vec![
-        text_block_tagged("On Track", TextTag::ColorLabel),
-    ];
+    let blocks = vec![text_block_tagged("On Track", TextTag::ColorLabel)];
     let slide = make_slide_with_blocks("status", blocks, Some("Project Alpha"));
     let deck = make_deck_one_slide(slide);
     let brand = make_brand();
@@ -149,9 +147,9 @@ fn test_AC_002_status_label_visible_in_output() {
         if let FrameContent::Body(blocks) = &f.content {
             blocks.iter().any(|b| {
                 if let ContentBlock::Text(tb) = b {
-                    tb.inlines.iter().any(|n| {
-                        matches!(n, InlineNode::Plain(s) if s.as_ref().contains("On Track"))
-                    })
+                    tb.inlines.iter().any(
+                        |n| matches!(n, InlineNode::Plain(s) if s.as_ref().contains("On Track")),
+                    )
                 } else {
                     false
                 }
@@ -272,7 +270,10 @@ fn test_AC_008_progress_bar_label_and_bar_visible() {
          Got {}: frames: {frames:?}",
         color_bar_frames.len()
     );
-    if let FrameContent::ColorBar { filled_width_emu, .. } = &color_bar_frames[0].content {
+    if let FrameContent::ColorBar {
+        filled_width_emu, ..
+    } = &color_bar_frames[0].content
+    {
         assert!(
             filled_width_emu.0 > 0,
             "AC-008: filled_width_emu must be > 0 for value=75; got {}",
@@ -332,9 +333,9 @@ fn test_AC_015_weighted_composite_labels_visible() {
         if let FrameContent::Body(blocks) = &f.content {
             blocks.iter().any(|b| {
                 if let ContentBlock::Text(tb) = b {
-                    tb.inlines.iter().any(|n| {
-                        matches!(n, InlineNode::Plain(s) if s.as_ref().contains("Quality"))
-                    })
+                    tb.inlines.iter().any(
+                        |n| matches!(n, InlineNode::Plain(s) if s.as_ref().contains("Quality")),
+                    )
                 } else {
                     false
                 }

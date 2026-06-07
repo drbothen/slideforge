@@ -25,15 +25,16 @@
 #![allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    clippy::doc_markdown
 )]
 
 use std::sync::Arc;
 
 use slideforge_layout::{FrameContent, run};
 use slideforge_types::{
-    Block, Brand, BrandFonts, BrandPalette, ColorBarSpec, ContentBlock, Deck, DeckMetadata,
-    Emu, FieldValue, InlineNode, OrderedMap, Slide, SourceSpan, TextBlock, TextTag, Value,
+    Block, Brand, BrandFonts, BrandPalette, ColorBarSpec, ContentBlock, Deck, DeckMetadata, Emu,
+    FieldValue, InlineNode, OrderedMap, Slide, SourceSpan, TextBlock, TextTag, Value,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -130,9 +131,7 @@ fn color_bar_block(percent: u8) -> Block {
 /// currently dropped (falls through to `_ => {}`).
 #[test]
 fn test_status_label_fills_body_slot() {
-    let blocks = vec![
-        text_block_tagged("On Track", TextTag::ColorLabel),
-    ];
+    let blocks = vec![text_block_tagged("On Track", TextTag::ColorLabel)];
     let slide = make_slide_with_blocks("status", blocks, Some("Project Alpha"));
     let deck = make_deck_one_slide(slide);
     let brand = make_brand();
@@ -290,7 +289,10 @@ fn test_progress_bar_color_bar_value_0() {
         1,
         "RED GATE: progress_bar value=0 must produce 1 FrameContent::ColorBar; got {frames:?}"
     );
-    if let FrameContent::ColorBar { filled_width_emu, .. } = &color_bar_frames[0].content {
+    if let FrameContent::ColorBar {
+        filled_width_emu, ..
+    } = &color_bar_frames[0].content
+    {
         assert_eq!(
             *filled_width_emu,
             Emu(0),
@@ -346,9 +348,7 @@ fn test_progress_bar_color_bar_value_100() {
 /// RED GATE: layout::run has no ColorLabel arm.
 #[test]
 fn test_weighted_composite_agg_label_fills_body_slot() {
-    let blocks = vec![
-        text_block_tagged("Overall: Good", TextTag::ColorLabel),
-    ];
+    let blocks = vec![text_block_tagged("Overall: Good", TextTag::ColorLabel)];
     let slide = make_slide_with_blocks("weighted_composite", blocks, Some("Vendor A"));
     let deck = make_deck_one_slide(slide);
     let brand = make_brand();
@@ -427,8 +427,7 @@ fn test_weighted_composite_2_components_fill_2_generic_slots() {
         .iter()
         .filter(|f| {
             matches!(f.content, FrameContent::Empty)
-                && f.region_role
-                    == Some(slideforge_layout::RegionRole::Generic)
+                && f.region_role == Some(slideforge_layout::RegionRole::Generic)
         })
         .collect();
 
@@ -446,9 +445,7 @@ fn test_weighted_composite_2_components_fill_2_generic_slots() {
 /// RED GATE: depends on layout::run routing Body blocks into Generic slots.
 #[test]
 fn test_weighted_composite_5_components_fill_5_generic_slots() {
-    let mut blocks = vec![
-        text_block_tagged("Overall: Excellent", TextTag::ColorLabel),
-    ];
+    let mut blocks = vec![text_block_tagged("Overall: Excellent", TextTag::ColorLabel)];
     for i in 1..=5 {
         blocks.push(text_block_tagged(
             &format!("Component {i}: 80/100"),
@@ -467,8 +464,7 @@ fn test_weighted_composite_5_components_fill_5_generic_slots() {
         .iter()
         .filter(|f| {
             matches!(f.content, FrameContent::Empty)
-                && f.region_role
-                    == Some(slideforge_layout::RegionRole::Generic)
+                && f.region_role == Some(slideforge_layout::RegionRole::Generic)
         })
         .collect();
 
