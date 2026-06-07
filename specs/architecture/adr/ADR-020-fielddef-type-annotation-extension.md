@@ -156,6 +156,54 @@ ignore of the new variant. The T3 deferral is anchored to a future Wave-TBD stor
 it is NOT a "ship and polish later" deferral — the mechanism is fully in place, only
 the format-specific variant definitions are absent.
 
+### Decision 8: FieldSchemaValidator Stage-5 wiring (Route B) — human-authorized scope expansion
+
+During STORY-089 implementation, the adversary raised HIGH-1: the `validate_fields` function
+enforcing E-VAL-101/102/103/104 existed in the plugin-api / registry but was never wired into
+the build pipeline — making it a "dead-letter" gate. No `Validator` plugin called
+`validate_fields` per-slide at any build stage, so schema validation never executed on real
+decks. BC-1.18.001 PC-7 requires that `validate_fields` run at Stage 5 (pre-layout) on every
+slide. The human authorized the scope expansion to close the gap in STORY-089.
+
+**Wiring decision:** A bundled `FieldSchemaValidator` struct (implementing the `Validator`
+plugin surface, Extensibility Surface #5 per ADR-006/ADR-016) is introduced in
+`crates/slideforge-validate/src/field_schema.rs`. It is registered as a bundled plugin in the
+`slideforge` crate's bundled-plugins registry assembly (`registry.rs`) alongside all other
+bundled validators. During Stage 5 (pre-layout, inside `build_inner`), the pipeline invokes
+every registered `Validator`; `FieldSchemaValidator::validate` iterates over every slide in
+the `Deck` and calls `validate_fields(slide, registry)`, making E-VAL-101 (missing required
+field), E-VAL-102 (required field empty), W-VAL-103 (unknown field), and E-VAL-104
+(field type mismatch) live at build time. This closes the dead-letter gap identified by
+adversary HIGH-1 and satisfies BC-1.18.001 PC-7.
+
+**Route A vs Route B trade-off:**
+
+| | Route A | Route B (chosen) |
+|---|---|---|
+| Slide-type resolution | Inject `Arc<PluginRegistry>` into `FieldSchemaValidator` | Resolve via process-wide `SLIDE_TYPE_REGISTRY` singleton |
+| Coverage | All slide types: bundled + externally-registered custom types | All 34 bundled slide types only |
+| Complexity | Requires `Arc<PluginRegistry>` threading through the Validator call chain | Zero additional coupling; singleton is already populated at startup |
+| v1.0 adequacy | Yes | Yes — all slide types in v1.0 are bundled |
+| Future-proof | Complete solution for external plugin authors | Requires Route A upgrade when custom `SlideType` plugins ship |
+
+**Decision: Route B for v1.0.** All slide types shipped in v1.0 are bundled in
+`slideforge-plugin-api/src/slide_types/` and registered in `SLIDE_TYPE_REGISTRY` at startup.
+Route B covers 100% of v1.0 slide types with zero additional coupling. Route A is the correct
+long-term solution for post-v1.0 external plugin support; it is deferred to a future story
+anchored by `// TODO(future story): Route A — inject Arc<PluginRegistry> to cover external SlideType plugins`
+markers in `field_schema.rs` and `chart.rs`. These markers make the deferral explicit and
+discoverable; they do NOT represent a "ship and polish later" shortcut — Route B is the
+complete, correct v1.0 solution given the stated scope constraint.
+
+**Scope authority:** This wiring was not in the original spec-first ADR body (authored before
+implementation). It was introduced as a human-authorized scope expansion during STORY-089 in
+response to adversary HIGH-1. This Decision is recorded post-implementation to close the
+architectural record gap identified by adversary MED-1 (STORY-089 Phase 5 adversarial review,
+2026-06-07). Code citations in `field_schema.rs`, `registry.rs`, and
+`tests/story_089_field_schema.rs` referencing "ADR-020 Decision 4" should be updated to cite
+"ADR-020 Decision 8" — Decision 4 ("No SlideType trait signature change") is unrelated to the
+wiring.
+
 ### Decision 7: Backward compatibility via pre-v1.0 SemVer
 
 Applying `#[non_exhaustive]` to `FieldDef` is a SemVer-breaking change for external
@@ -270,17 +318,32 @@ unannotated paths. Removing it would weaken the defense-in-depth posture.
 
 ### Status as of 2026-06-07
 
-Decision accepted and pending implementation. BC-1.18.001 is active (committed
-def8bb74). E-VAL-104 is registered in error-taxonomy.md v2.20. STORY-089 is the
-implementing story (Wave 5, slot 1). No production code changes have been made yet —
-this is a spec-first ADR preceding implementation.
+STORY-089 implementation delivered. BC-1.18.001 is active (committed def8bb74).
+E-VAL-104 is registered in error-taxonomy.md v2.20.
 
-**Count correction (2026-06-07, STORY-089 adversary LOW):** Priority-1 annotated
-FieldDef site count corrected from 9 to 8. The previously counted 9th site —
-`weighted_composite` per-component `weight: Float` — is a key inside `Value::Map`
-component entries (nested-field validation = T3, deferred per Decision 6), not a
-top-level `FieldDef` returned by `required_fields()` or `optional_fields()`. BC-1.18.001
-v1.3 and STORY-089 v1.4 carry the authoritative count of 8.
+**Production code status:**
+- Decisions 1–7 (FieldType enum, FieldDef.expected_type, #[non_exhaustive], constructor
+  API, type_matches, validation tiers, SemVer) are implemented in STORY-089 and merged
+  to develop.
+- Decision 8 (FieldSchemaValidator Stage-5 wiring, Route B) is implemented in
+  `crates/slideforge-validate/src/field_schema.rs` and wired into the bundled-plugins
+  registry in `crates/slideforge/src/registry.rs`. The prior "no production code yet"
+  note in this spec-first ADR is superseded by STORY-089 delivery.
+
+**Adversary corrections (2026-06-07):**
+
+- *STORY-089 adversary LOW:* Priority-1 annotated FieldDef site count corrected from 9
+  to 8. The previously counted 9th site — `weighted_composite` per-component
+  `weight: Float` — is a key inside `Value::Map` component entries (nested-field
+  validation = T3, deferred per Decision 6), not a top-level `FieldDef` returned by
+  `required_fields()` or `optional_fields()`. BC-1.18.001 v1.3 and STORY-089 v1.4 carry
+  the authoritative count of 8.
+
+- *STORY-089 adversary MED-1:* Six code citations across `field_schema.rs`,
+  `registry.rs`, and `tests/story_089_field_schema.rs` referenced "ADR-020 Decision 4"
+  as the authority for the FieldSchemaValidator wiring and Route B choice. Decision 4 is
+  "No SlideType trait signature change" — unrelated. Decision 8 (this decision) is the
+  correct anchor. All six citations should be updated to reference "ADR-020 Decision 8".
 
 ## Alternatives Considered
 
@@ -332,4 +395,6 @@ v1.3 and STORY-089 v1.4 carry the authoritative count of 8.
 - **Related ADRs:** ADR-006 (plugin-first architecture — `FieldDef` is the schema
   surface of the `SlideType` plugin trait); ADR-016 (bundled `SlideType` impls in
   `slideforge-plugin-api/src/slide_types/` — the annotation sweep is in that directory).
-- **Stories:** STORY-089 (Wave 5 slot 1, implementing story).
+- **Stories:** STORY-089 (Wave 5 slot 1, implementing story — delivered, merged to develop).
+  Decision 8 recorded post-implementation per adversary MED-1 (STORY-089 Phase 5
+  adversarial review, 2026-06-07).
