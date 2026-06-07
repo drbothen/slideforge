@@ -1,6 +1,6 @@
 //! Red Gate test suite for STORY-089: Field-Value Type Validation.
 //!
-//! Tests BC-1.18.001 (v1.1): `validate_fields` enforces `FieldDef.expected_type`
+//! Tests BC-1.18.001 (v1.2): `validate_fields` enforces `FieldDef.expected_type`
 //! against the runtime `Value` variant and emits E-VAL-104 on type mismatch or
 //! OneOf violation.
 //!
@@ -90,12 +90,12 @@ fn e_val_104(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 // Section A: type_matches pure-function truth table
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// The stub returns `true` unconditionally, so all assertions of `false` FAIL
-// at the Red Gate. Assertions of `true` (positive cases) PASS even with the
-// stub — they serve as regression guards for the implementer.
+// At the Red Gate the stub returned `true` unconditionally, so all assertions
+// of `false` failed. Assertions of `true` (positive cases) passed at the Red
+// Gate and continue to serve as regression guards post-implementation.
 
 /// BC-1.18.001 postcondition 1 / AC-001: `Value::Int` matches `FieldType::Int`.
-/// Passes even with the stub (positive case — regression guard).
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_int_matches_int() {
     assert!(
@@ -105,7 +105,8 @@ fn test_BC_1_18_001_type_matches_int_matches_int() {
 }
 
 /// BC-1.18.001 postcondition 2 / T1 mismatch: `Value::Str` on `FieldType::Int`
-/// must return `false`. FAILS with the stub (stub returns `true`).
+/// must return `false`. At the Red Gate this failed because the stub returned `true`
+/// unconditionally; the implementation now returns the correct result.
 #[test]
 fn test_BC_1_18_001_type_matches_str_fails_int() {
     assert!(
@@ -115,7 +116,7 @@ fn test_BC_1_18_001_type_matches_str_fails_int() {
 }
 
 /// BC-1.18.001 postcondition 2 / T1 mismatch: `Value::Bool` on `FieldType::Int`
-/// must return `false`. FAILS with the stub.
+/// must return `false`. At the Red Gate this failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_bool_fails_int() {
     assert!(
@@ -125,7 +126,7 @@ fn test_BC_1_18_001_type_matches_bool_fails_int() {
 }
 
 /// BC-1.18.001 postcondition 2 / T1 mismatch: `Value::Float` on `FieldType::Int`
-/// must return `false`. FAILS with the stub.
+/// must return `false`. At the Red Gate this failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_float_fails_int() {
     assert!(
@@ -135,7 +136,7 @@ fn test_BC_1_18_001_type_matches_float_fails_int() {
 }
 
 /// BC-1.18.001 postcondition 2 / T1 mismatch: `Value::List` on `FieldType::Int`
-/// must return `false`. FAILS with the stub.
+/// must return `false`. At the Red Gate this failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_list_fails_int() {
     assert!(
@@ -145,7 +146,7 @@ fn test_BC_1_18_001_type_matches_list_fails_int() {
 }
 
 /// BC-1.18.001: `Value::Str` matches `FieldType::Str`.
-/// Passes even with the stub (positive case).
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_str_matches_str() {
     assert!(
@@ -154,7 +155,8 @@ fn test_BC_1_18_001_type_matches_str_matches_str() {
     );
 }
 
-/// BC-1.18.001: `Value::Int` does NOT match `FieldType::Str`. FAILS with stub.
+/// BC-1.18.001: `Value::Int` does NOT match `FieldType::Str`. At the Red Gate this
+/// failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_int_fails_str() {
     assert!(
@@ -164,7 +166,7 @@ fn test_BC_1_18_001_type_matches_int_fails_str() {
 }
 
 /// BC-1.18.001: `Value::Bool` matches `FieldType::Bool`.
-/// Passes even with the stub.
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_bool_matches_bool() {
     assert!(
@@ -173,7 +175,8 @@ fn test_BC_1_18_001_type_matches_bool_matches_bool() {
     );
 }
 
-/// BC-1.18.001: `Value::Str` does NOT match `FieldType::Bool`. FAILS with stub.
+/// BC-1.18.001: `Value::Str` does NOT match `FieldType::Bool`. At the Red Gate this
+/// failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_str_fails_bool() {
     assert!(
@@ -183,7 +186,7 @@ fn test_BC_1_18_001_type_matches_str_fails_bool() {
 }
 
 /// BC-1.18.001 invariant 3: `Value::Float` matches `FieldType::Float`.
-/// Passes even with the stub.
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_float_matches_float() {
     assert!(
@@ -193,7 +196,7 @@ fn test_BC_1_18_001_type_matches_float_matches_float() {
 }
 
 /// BC-1.18.001 invariant 3 / AC-019: `Value::Int` does NOT match `FieldType::Float`.
-/// No int→float coercion. FAILS with the stub.
+/// No int→float coercion. At the Red Gate this failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_int_fails_float_no_coercion() {
     assert!(
@@ -203,7 +206,7 @@ fn test_BC_1_18_001_type_matches_int_fails_float_no_coercion() {
 }
 
 /// BC-1.18.001: `Value::List` matches `FieldType::List`.
-/// Passes even with the stub.
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_list_matches_list() {
     assert!(
@@ -212,7 +215,8 @@ fn test_BC_1_18_001_type_matches_list_matches_list() {
     );
 }
 
-/// BC-1.18.001: `Value::Str` does NOT match `FieldType::List`. FAILS with stub.
+/// BC-1.18.001: `Value::Str` does NOT match `FieldType::List`. At the Red Gate this
+/// failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_str_fails_list() {
     assert!(
@@ -222,7 +226,7 @@ fn test_BC_1_18_001_type_matches_str_fails_list() {
 }
 
 /// BC-1.18.001: `Value::Map` matches `FieldType::Map`.
-/// Passes even with the stub.
+/// Positive case — passed at the Red Gate and continues to serve as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_map_matches_map() {
     assert!(
@@ -231,7 +235,8 @@ fn test_BC_1_18_001_type_matches_map_matches_map() {
     );
 }
 
-/// BC-1.18.001: `Value::List` does NOT match `FieldType::Map`. FAILS with stub.
+/// BC-1.18.001: `Value::List` does NOT match `FieldType::Map`. At the Red Gate this
+/// failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_list_fails_map() {
     assert!(
@@ -241,7 +246,8 @@ fn test_BC_1_18_001_type_matches_list_fails_map() {
 }
 
 /// BC-1.18.001 postcondition 4 / AC-006: `FieldType::Any` matches ALL value variants.
-/// Passes even with the stub (positive case for all Any sub-tests).
+/// Positive case for all Any sub-tests — passed at the Red Gate and continues as a
+/// regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_any_always_true() {
     assert!(
@@ -275,7 +281,8 @@ fn test_BC_1_18_001_type_matches_any_always_true() {
 }
 
 /// BC-1.18.001 postcondition 3 (T2 pass) / AC-003: `OneOf` returns `true` for a
-/// `Value::Str` in the allowlist. Passes even with the stub.
+/// `Value::Str` in the allowlist. Positive case — passed at the Red Gate and continues
+/// as a regression guard.
 #[test]
 fn test_BC_1_18_001_type_matches_oneof_str_in_list() {
     let allowed = FieldType::OneOf(vec![Arc::from("bar"), Arc::from("line"), Arc::from("pie")]);
@@ -290,7 +297,8 @@ fn test_BC_1_18_001_type_matches_oneof_str_in_list() {
 }
 
 /// BC-1.18.001 postcondition 3 (T2 fail) / AC-004: `OneOf` returns `false` for a
-/// `Value::Str` NOT in the allowlist. FAILS with the stub.
+/// `Value::Str` NOT in the allowlist. At the Red Gate this failed because the stub
+/// returned `true` unconditionally.
 #[test]
 fn test_BC_1_18_001_type_matches_oneof_str_not_in_list() {
     let allowed = FieldType::OneOf(vec![
@@ -313,7 +321,8 @@ fn test_BC_1_18_001_type_matches_oneof_str_not_in_list() {
 }
 
 /// BC-1.18.001 postcondition 3 (T1 before T2) / AC-005: `Value::Int` on a
-/// `FieldType::OneOf` field returns `false` (T1 fires, NOT T2). FAILS with stub.
+/// `FieldType::OneOf` field returns `false` (T1 fires, NOT T2). At the Red Gate this
+/// failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_int_on_oneof_field() {
     let allowed = FieldType::OneOf(vec![Arc::from("bar"), Arc::from("line")]);
@@ -323,7 +332,8 @@ fn test_BC_1_18_001_type_matches_int_on_oneof_field() {
     );
 }
 
-/// BC-1.18.001: `Value::Bool` on `FieldType::OneOf` returns `false`. FAILS with stub.
+/// BC-1.18.001: `Value::Bool` on `FieldType::OneOf` returns `false`. At the Red Gate
+/// this failed because the stub returned `true`.
 #[test]
 fn test_BC_1_18_001_type_matches_bool_on_oneof_field() {
     let allowed = FieldType::OneOf(vec![Arc::from("true")]);
@@ -358,14 +368,15 @@ fn test_BC_1_18_001_type_matches_is_pure_deterministic() {
 // Section B: E-VAL-104 emission via validate_fields
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// The E-VAL-104 arm in `validate_fields` is INERT in the stub — it never emits
-// any diagnostic. All assertions that expect diagnostics to be present FAIL.
-// Assertions that expect ZERO E-VAL-104 on valid input PASS even with the stub.
+// At the Red Gate the E-VAL-104 arm in `validate_fields` was inert — it never
+// emitted any diagnostic. All assertions that expected diagnostics to be present
+// failed at the Red Gate. Assertions that expected ZERO E-VAL-104 on valid input
+// passed at the Red Gate and continue as regression guards post-implementation.
 
 /// BC-1.18.001 postcondition 2 / AC-002: `progress_bar` with `value: "fifty"`
 /// (Value::Str on FieldType::Int field) → exactly one E-VAL-104 with T1 message.
 ///
-/// FAILS with stub (arm is inert — emits no diagnostic).
+/// At the Red Gate this failed because the E-VAL-104 arm was inert (emitted no diagnostic).
 #[test]
 fn test_BC_1_18_001_e_val_104_t1_progress_bar_str_on_int_field() {
     let slide_type = ProgressBarSlideType::new();
@@ -431,7 +442,7 @@ fn test_BC_1_18_001_e_val_104_t1_progress_bar_str_on_int_field() {
 }
 
 /// BC-1.18.001 postcondition 1 / AC-001: `progress_bar` with `value: 75` (Int) →
-/// zero E-VAL-104. PASSES even with the stub.
+/// zero E-VAL-104. Positive case — passed at the Red Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_valid_progress_bar_value_int_no_e_val_104() {
     let slide_type = ProgressBarSlideType::new();
@@ -458,7 +469,7 @@ fn test_BC_1_18_001_valid_progress_bar_value_int_no_e_val_104() {
 /// `chart_type: "donut"` (valid Str, not in OneOf allowlist) →
 /// one E-VAL-104 with T2 (disallowed-value) message branch.
 ///
-/// FAILS with stub (arm is inert).
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_t2_chart_type_disallowed_value() {
     let slide_type = ChartSlideType::new();
@@ -521,7 +532,8 @@ fn test_BC_1_18_001_e_val_104_t2_chart_type_disallowed_value() {
 }
 
 /// BC-1.18.001 postcondition 1 / AC-003: `chart` with `chart_type: "bar"` (in
-/// OneOf allowlist) → zero E-VAL-104. PASSES even with stub.
+/// OneOf allowlist) → zero E-VAL-104. Positive case — passed at the Red Gate and
+/// continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_valid_chart_type_bar_no_e_val_104() {
     let slide_type = ChartSlideType::new();
@@ -551,7 +563,7 @@ fn test_BC_1_18_001_valid_chart_type_bar_no_e_val_104() {
 /// `chart` with `chart_type: 42` (Value::Int on OneOf-typed field) →
 /// one E-VAL-104 with T1 message ("expected string, got integer").
 ///
-/// FAILS with stub.
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_t1_fires_before_t2_for_non_str_on_oneof() {
     let slide_type = ChartSlideType::new();
@@ -597,7 +609,7 @@ fn test_BC_1_18_001_e_val_104_t1_fires_before_t2_for_non_str_on_oneof() {
 }
 
 /// BC-1.18.001 / AC-014 / EC-004: `decorative: "yes"` (Str on Bool field) →
-/// one E-VAL-104 T1. FAILS with stub.
+/// one E-VAL-104 T1. At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_t1_decorative_str_on_bool_field() {
     // Use a slide type that includes common_optional_fields (decorative is there).
@@ -644,7 +656,7 @@ fn test_BC_1_18_001_e_val_104_t1_decorative_str_on_bool_field() {
 }
 
 /// BC-1.18.001 / AC-014 / EC-005: `decorative: true` (Bool on Bool field) →
-/// zero E-VAL-104. PASSES even with stub.
+/// zero E-VAL-104. Positive case — passed at the Red Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_valid_decorative_bool_no_e_val_104() {
     let reg = SlideTypeRegistry::default();
@@ -669,7 +681,7 @@ fn test_BC_1_18_001_valid_decorative_bool_no_e_val_104() {
 
 /// BC-1.18.001 / AC-015 / EC-006: `weighted_composite` with
 /// `components: "see attached"` (Str on List field) → one E-VAL-104 T1.
-/// FAILS with stub.
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_t1_weighted_composite_str_on_list_field() {
     let slide_type = WeightedCompositeSlideType::new();
@@ -716,7 +728,7 @@ fn test_BC_1_18_001_e_val_104_t1_weighted_composite_str_on_list_field() {
 }
 
 /// BC-1.18.001 / EC-007: `weighted_composite` with `components: []` (empty List) →
-/// zero E-VAL-104. PASSES even with stub.
+/// zero E-VAL-104. Positive case — passed at the Red Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_valid_weighted_composite_empty_list_no_e_val_104() {
     let slide_type = WeightedCompositeSlideType::new();
@@ -748,7 +760,7 @@ fn test_BC_1_18_001_valid_weighted_composite_empty_list_no_e_val_104() {
 ///
 /// DI-018: validate_fields must NOT stop at the first mismatch.
 ///
-/// FAILS with stub (arm is inert — emits zero diagnostics).
+/// At the Red Gate this failed because the E-VAL-104 arm was inert (emitted zero diagnostics).
 #[test]
 fn test_BC_1_18_001_e_val_104_accumulates_two_mistyped_fields() {
     // Use progress_bar: value (Int) and inject decorative (Bool) with wrong types.
@@ -786,7 +798,8 @@ fn test_BC_1_18_001_e_val_104_accumulates_two_mistyped_fields() {
 }
 
 /// BC-1.18.001 postcondition 4 / AC-006 / EC-009: field with `expected_type: None`
-/// accepts ANY value without emitting E-VAL-104. PASSES even with stub.
+/// accepts ANY value without emitting E-VAL-104. Positive case — passed at the Red
+/// Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_none_annotation_skips_type_check() {
     // chart.data has expected_type: None (polymorphic).
@@ -817,7 +830,8 @@ fn test_BC_1_18_001_none_annotation_skips_type_check() {
 
 /// BC-1.18.001 / AC-021 / EC-014: polymorphic `data` field on chart with
 /// `Value::Str` (data-source reference) AND with `Value::List` (inline data) →
-/// both produce zero E-VAL-104. PASSES even with stub.
+/// both produce zero E-VAL-104. Positive case — passed at the Red Gate and continues
+/// as a regression guard.
 #[test]
 fn test_BC_1_18_001_polymorphic_data_field_no_false_positive() {
     let slide_type = ChartSlideType::new();
@@ -868,7 +882,7 @@ fn test_BC_1_18_001_polymorphic_data_field_no_false_positive() {
 /// BC-1.18.001 postcondition 5 / AC-007 / EC-010: `FieldValue::Inlines` on a
 /// Str-typed field → zero E-VAL-104 (Inlines are unconditionally skipped).
 ///
-/// PASSES even with stub (the arm skips FieldValue::Inlines).
+/// Passed at the Red Gate because the arm skips `FieldValue::Inlines` unconditionally.
 #[test]
 fn test_BC_1_18_001_inlines_field_value_skipped_no_e_val_104() {
     // chart.title is expected_type: None (no type annotation), so use progress_bar.value
@@ -901,7 +915,7 @@ fn test_BC_1_18_001_inlines_field_value_skipped_no_e_val_104() {
 /// To exercise this without requiring nested field access, we construct a
 /// minimal fake SlideType using direct FieldDef construction via `with_type`.
 ///
-/// FAILS with stub (arm is inert).
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_t1_int_on_float_field_no_coercion() {
     // The weighted_composite per-component weight is a Map key, not a top-level FieldDef.
@@ -983,7 +997,8 @@ fn test_BC_1_18_001_e_val_104_t1_int_on_float_field_no_coercion() {
 }
 
 /// BC-1.18.001 invariant 2 / AC-020: absent required field → E-VAL-101, NOT E-VAL-104.
-/// Type checking runs only on PRESENT field values. PASSES even with stub.
+/// Type checking runs only on PRESENT field values. Positive case — passed at the Red
+/// Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_absent_required_field_emits_e_val_101_not_e_val_104() {
     let slide_type = ProgressBarSlideType::new();
@@ -1020,7 +1035,8 @@ fn test_BC_1_18_001_absent_required_field_emits_e_val_101_not_e_val_104() {
 }
 
 /// BC-1.18.001: E-VAL-104 code is exactly the string "E-VAL-104" (not a prefix/variant).
-/// Validates T3-21 from the verification plan. FAILS with stub.
+/// Validates T3-21 from the verification plan. At the Red Gate this failed because the
+/// E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_code_exact_string() {
     let slide_type = ProgressBarSlideType::new();
@@ -1057,7 +1073,7 @@ fn test_BC_1_18_001_e_val_104_code_exact_string() {
 }
 
 /// BC-1.18.001: E-VAL-104 diagnostic has Error severity (not Warning or Info).
-/// FAILS with stub.
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_severity_is_error() {
     let slide_type = ProgressBarSlideType::new();
@@ -1089,7 +1105,7 @@ fn test_BC_1_18_001_e_val_104_severity_is_error() {
 }
 
 /// BC-1.18.001: E-VAL-104 diagnostic has a non-empty message.
-/// FAILS with stub.
+/// At the Red Gate this failed because the E-VAL-104 arm was inert.
 #[test]
 fn test_BC_1_18_001_e_val_104_message_is_non_empty() {
     let slide_type = ProgressBarSlideType::new();
@@ -1118,7 +1134,7 @@ fn test_BC_1_18_001_e_val_104_message_is_non_empty() {
 
 /// BC-1.18.001: matrix.cells has expected_type: None — giving it a Map OR
 /// a List produces zero E-VAL-104 (polymorphic, no false positive).
-/// PASSES even with stub.
+/// Positive case — passed at the Red Gate and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_matrix_cells_polymorphic_no_false_positive() {
     let slide_type = MatrixSlideType::new();
@@ -1159,11 +1175,14 @@ fn test_BC_1_18_001_matrix_cells_polymorphic_no_false_positive() {
 // Section C: Annotation-presence tests (FieldDef.expected_type correctness)
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Most of these PASS because the stub has set 6 of the 8 annotations.
-// The roadmap.phases assertion FAILS because the stub has expected_type: None there.
+// At the Red Gate, most of these passed because the stub had already set 6 of the
+// 8 annotations. The roadmap.phases assertion failed at the Red Gate because the stub
+// had expected_type: None there; the implementation now sets Some(FieldType::List) and
+// all assertions in this section pass.
 
 /// BC-1.18.001 postcondition 9 / AC-012: `progress_bar.value` FieldDef has
-/// `expected_type: Some(FieldType::Int)`. PASSES with stub (annotation set).
+/// `expected_type: Some(FieldType::Int)`. Passed at the Red Gate (annotation was already
+/// set in the stub) and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_ac012_progress_bar_value_annotation_is_int() {
     let slide_type = ProgressBarSlideType::new();
@@ -1181,7 +1200,8 @@ fn test_BC_1_18_001_ac012_progress_bar_value_annotation_is_int() {
 }
 
 /// BC-1.18.001 postcondition 9 / AC-013: `chart.chart_type` FieldDef has
-/// `expected_type: Some(FieldType::OneOf([7 values]))`. PASSES with stub.
+/// `expected_type: Some(FieldType::OneOf([7 values]))`. Passed at the Red Gate
+/// (annotation was already set in the stub) and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_ac013_chart_type_annotation_oneof_7_values() {
     let slide_type = ChartSlideType::new();
@@ -1225,7 +1245,8 @@ fn test_BC_1_18_001_ac013_chart_type_annotation_oneof_7_values() {
 }
 
 /// BC-1.18.001 postcondition 9 / AC-014: `decorative` in `common_optional_fields()`
-/// has `expected_type: Some(FieldType::Bool)`. PASSES with stub.
+/// has `expected_type: Some(FieldType::Bool)`. Passed at the Red Gate (annotation was
+/// already set in the stub) and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_ac014_decorative_annotation_is_bool() {
     let commons = common_optional_fields();
@@ -1242,7 +1263,8 @@ fn test_BC_1_18_001_ac014_decorative_annotation_is_bool() {
 }
 
 /// BC-1.18.001 postcondition 9 / AC-015: `weighted_composite.components` FieldDef
-/// has `expected_type: Some(FieldType::List)`. PASSES with stub.
+/// has `expected_type: Some(FieldType::List)`. Passed at the Red Gate (annotation was
+/// already set in the stub) and continues as a regression guard.
 #[test]
 fn test_BC_1_18_001_ac015_weighted_composite_components_annotation_is_list() {
     let slide_type = WeightedCompositeSlideType::new();
@@ -1263,8 +1285,9 @@ fn test_BC_1_18_001_ac015_weighted_composite_components_annotation_is_list() {
 /// `kpi_dashboard.kpis`, `roadmap.phases`, `agenda.items`, `team.members` all have
 /// `expected_type: Some(FieldType::List)`.
 ///
-/// FAILS for roadmap.phases because the stub has `expected_type: None` there.
-/// All other assertions PASS with the stub.
+/// At the Red Gate, the roadmap.phases assertion failed because the stub had
+/// `expected_type: None` there; all other assertions passed. The implementation now
+/// sets `Some(FieldType::List)` for roadmap.phases and all assertions pass.
 ///
 /// NOTE: `roadmap.phases` — field name is "phases" (NOT "milestones") per ADR-020/
 /// BC-1.18.001 v1.1 architect adjudication. The test asserts both the name ("phases")
@@ -1288,7 +1311,8 @@ fn test_list_fields_on_kpi_roadmap_agenda_team() {
     );
 
     // roadmap.phases — optional field named "phases", expected_type: Some(List).
-    // The stub has expected_type: None here — this assertion FAILS RED.
+    // At the Red Gate this assertion failed because the stub had expected_type: None;
+    // the implementation now sets Some(FieldType::List) and this assertion passes.
     let roadmap = RoadmapSlideType::new();
     let phases_def = roadmap
         .optional_fields()
@@ -1401,7 +1425,7 @@ fn test_BC_1_18_001_ac021_chart_data_annotation_is_none() {
 }
 
 /// BC-1.18.001 / AC-017: `FieldDef::new()` returns `expected_type: None`.
-/// PASSES with stub (constructor is implemented).
+/// Passed at the Red Gate (constructor was already implemented in the stub).
 #[test]
 fn test_BC_1_18_001_ac017_fielddef_new_returns_none_annotation() {
     let def = FieldDef::new("foo", "A field", false, None);
@@ -1415,7 +1439,7 @@ fn test_BC_1_18_001_ac017_fielddef_new_returns_none_annotation() {
 }
 
 /// BC-1.18.001: `FieldDef::with_type()` returns `expected_type: Some(provided)`.
-/// PASSES with stub (constructor is implemented).
+/// Passed at the Red Gate (constructor was already implemented in the stub).
 #[test]
 fn test_BC_1_18_001_fielddef_with_type_returns_some_annotation() {
     let def = FieldDef::with_type("val", "A value field", true, None, FieldType::Int);
@@ -1454,7 +1478,8 @@ fn test_BC_1_18_001_fielddef_with_type_returns_some_annotation() {
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // These tests verify that adding the E-VAL-104 arm does NOT break the existing
-// validation arms. All regression tests PASS even with the stub.
+// validation arms. All regression tests passed at the Red Gate and continue to
+// pass post-implementation.
 
 /// Regression: absent required field still produces E-VAL-101.
 #[test]
@@ -1565,7 +1590,8 @@ fn test_BC_1_18_001_regression_valid_slide_produces_no_diagnostics() {
 /// This test is important: it proves the E-VAL-104 arm never fires a false
 /// positive on the existing canonical test data for the 34 slide types.
 ///
-/// PASSES even with stub (arm is inert). Acts as a regression guard post-implementation.
+/// Passed at the Red Gate (E-VAL-104 arm was inert, so no false positives were possible).
+/// Acts as a regression guard ensuring no false positives are introduced post-implementation.
 #[test]
 fn test_BC_1_18_001_regression_no_false_positives_on_34_registered_types() {
     use slideforge_layout::LaidOutSlide;
