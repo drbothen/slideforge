@@ -28,17 +28,18 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_batch_a_complete: 10
 wave_4_batch_a_total: 10
-wave_4_merged: 21
+wave_4_merged: 23
 story_050_status: DONE
 story_086_status: DONE
+story_087_status: DONE
 wave_4_started: 2026-05-31
 wave_4_total_stories: 23
 wave_4_total_points: 163
 wave_5_total_points: 122
-develop_sha: "298ae518"
-develop_pr_count: 62
+develop_sha: "54b8d3b1"
+develop_pr_count: 63
 error_taxonomy_version: "v2.18"
-workspace_tests: "3393/3393 (STORY-087 LOCAL cascade CONVERGED 3/3 strict-CLEAN passes 8/9/10; demo recorded HEAD 15297d49; 18 skipped; develop 298ae518 + worktree 15297d49)"
+workspace_tests: "3393/3393 (STORY-087 MERGED PR #63; develop 54b8d3b1; 18 skipped)"
 workspace_test_failures: 0
 ---
 
@@ -56,44 +57,36 @@ slideforge is a DATA-REACTIVE BRANDED DOCUMENT PLATFORM. Generates branded .pptx
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 4 — 21/21 baseline MERGED + STORY-086 MERGED PR #62 (298ae518). STORY-087 LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10). Demo recorded (3 VHS recordings, docs/demo-evidence/STORY-087/). Worktree HEAD 15297d49. NEXT: pr-manager 9-step PR cycle → security-reviewer + pr-reviewer → CI → merge (STANDING MERGE AUTH) → Wave 4 re-gate (Gate 3 + Gate 5 on develop with BOTH STORY-086 + STORY-087 closed) → BLK-002 closes → Wave 5. OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) tracked NON-blocking for VISUAL-REVIEW/Phase-4.**
+Phase 3, **Wave 4 — 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63; develop 54b8d3b1). NEXT: Wave 4 re-gate — Gate 3 adversary on patched develop wave-4 diff + Gate 5 holdout on develop 54b8d3b1. Gate 1 carries over (re-validated by merge CI). Gate 2 SKIP (no DTU). After re-gate PASS → BLK-002 closes → Wave 5 (STORY-082, STORY-081, STORY-088). OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) tracked NON-blocking for VISUAL-REVIEW/Phase-4. SEC-100 XML-control-char fix in STORY-087 also hardened the pre-existing PPTX body-text path for ALL slide types.**
 
-- `develop` = `298ae518` (62 merged PRs; origin/develop confirmed — LESSON-12 verified at merge). **Open PRs: 0.**
-- Active worktrees: `.worktrees/STORY-087` on `feature/STORY-087` (forked from develop 298ae518, 2026-06-06). Worktree HEAD `15297d49` (demo commit).
-- Workspace: 3393/3393 pass (STORY-087 LOCAL cascade CONVERGED 3/3; demo recorded; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 per STORY-088).
-- Wave 4 gate ran 2026-06-06. Gate 1 PASS (carried over — re-validated by merge CI). Gate 2 SKIP (no DTU). Gate 3 FAIL (adversary: 1 CRITICAL + 3 HIGH including F-G3-HIGH-003). Gate 5 FAIL (holdout: mean 0.56 / min_critical 0.30). STORY-086 remediation MERGED. STORY-087 pulled into Wave 4 to close F-G3-HIGH-003 before re-gate.
+- `develop` = `54b8d3b1` (63 merged PRs; origin/develop confirmed — LESSON-12 verified at merge). **Open PRs: 0.**
+- Active worktrees: none (STORY-087 worktree removed; local branch feature/STORY-087 deleted).
+- Workspace: 3393/3393 pass (develop 54b8d3b1; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 per STORY-088).
+- Wave 4 gate ran 2026-06-06. Gate 1 PASS (carried over — re-validated by merge CI). Gate 2 SKIP (no DTU). Gate 3 FAIL (adversary: 1 CRITICAL + 3 HIGH including F-G3-HIGH-003). Gate 5 FAIL (holdout: mean 0.56 / min_critical 0.30). STORY-086 MERGED (closes F-G3-CRIT-001 + F-G3-HIGH-001/002). STORY-087 MERGED (closes F-G3-HIGH-003). ALL FOUR gate findings now closed. Re-gate PENDING on develop 54b8d3b1.
 
 ---
 
 ## NEXT ACTIONS (zero-context orchestrator: execute in order)
 
-**STATUS: STORY-086 MERGED PR #62 (298ae518, 2026-06-06). STORY-087 LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10 — 10 passes total; substantive findings at passes 1/2/3/5/7; clean at 4/6/8/9/10). Demo recorded (3 VHS recordings, docs/demo-evidence/STORY-087/; evidence-report.md maps all ACs). Clippy clean. Worktree HEAD 15297d49 (demo commit; pushed). BC-1.17.001/002/003 v1.2.1; error-taxonomy v2.18; STORY-087 spec v1.4. OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) remain tracked NON-blocking for VISUAL-REVIEW/Phase-4. Wave 4 re-gate gated on STORY-087 merge + Gate 3 adversary + Gate 5 holdout on develop with BOTH stories closed. BLK-002 OPEN.**
+**STATUS: STORY-087 MERGED PR #63 (54b8d3b1, 2026-06-06). Wave 4 now 23/23 (STORY-086 + STORY-087 both merged). ALL FOUR Wave 4 Gate-3 findings closed: F-G3-CRIT-001 + F-G3-HIGH-001/002 (STORY-086) + F-G3-HIGH-003 (STORY-087). BLK-002 OPEN pending re-gate. OBS-P6-001/002 tracked NON-blocking VISUAL-REVIEW/Phase-4. SEC-100 XML-control-char fix in STORY-087 also hardened the pre-existing PPTX body-text path for ALL slide types.**
 
-### Step 1 — DONE: Remediation scoped + de-risked
+### Steps 1–3 — DONE: Remediation scoped + STORY-086 MERGED + STORY-087 MERGED
 
-ADR-019 accepted; STORY-086/087/088 created; BCs + error-taxonomy updated.
+See Decisions Log entries WAVE4-REMEDIATION-SETUP, STORY-086-MERGED, STORY-087-MERGED for full detail.
 
-### Step 2 — DONE: STORY-086 MERGED
-
-STORY-086 delivered: 16-pass LOCAL adversary cascade (3/3 strict-CLEAN passes 14/15/16-rerun), demo recorded (3 VHS recordings, docs/demo-evidence/STORY-086/), PR #62 created, CI 22 checks all-green (4-platform matrix, bench, security scans), security-reviewer APPROVE/CLEAN (4 candidate follow-ups recorded below — NOT tech-debt-register), pr-reviewer APPROVE (NITs only). Squash-merged to develop 298ae518 (2026-06-06). Worktree + local branch cleaned up.
-
-**Candidate security follow-ups (human disposition required — NOT tech-debt-register entries):**
+**STORY-086 candidate security follow-ups (human disposition required — NOT tech-debt-register entries):**
 - SEC-001 (MED, CWE-22): ImageSpec.path stored unvalidated; latent path traversal — exploitable only when a future image-loading story wires fs::read. Recommend: anchor path-validation as precondition of the image-I/O story + add `// SECURITY: SEC-001` marker at future callsite.
 - SEC-002 (LOW): AltText::Unspecified → AltDecision::Decorative in PPTX a11y path; add error!-level guard so a validator-bypass fails loudly.
 - SEC-003 (LOW): tracing-test 0.2.5 transitively pulls tracing-subscriber pre-0.3.20 (CVE-2025-58160 ANSI injection); dev-only, accepted risk; re-pin when tracing-test updates.
 - SEC-004 (suggestion): AltText::Unspecified is public API; consider #[doc(hidden)] / non-construction guard.
 
-### Step 3 — DONE: Deliver STORY-087 (LOCAL cascade CONVERGED 3/3 + demo recorded)
+### Step 4 — NEXT: Re-run Wave 4 gates on develop 54b8d3b1
 
-STORY-087 (Color-Coded Slide Types — status/progress_bar/weighted_composite registration + LabelCheck WCAG enforcement; 13 pts, P1, BC-1.17.001/002/003). 10-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10). Substantive findings at passes 1/2/3/5/7; clean at 4/6/8/9/10. Demo recorded: 3 VHS recordings at docs/demo-evidence/STORY-087/ (registration/F-G3-HIGH-003 closure; visible bar+label output incl PPTX <a:solidFill>; validation error paths E-A11-002 + E-VAL-011) + evidence-report.md mapping all ACs. Clippy clean. Worktree HEAD 15297d49 (demo commit; pushed to origin/feature/STORY-087). BC-1.17.001/002/003 v1.2.1; error-taxonomy v2.18; STORY-087 spec v1.4. OBS-P6-001/002 remain tracked NON-blocking for VISUAL-REVIEW/Phase-4. Closes F-G3-HIGH-003.
-
-### Step 4 — After STORY-087 merged: Re-run Wave 4 gates
-
-Re-run Gate 3 (adversary) + Gate 5 (holdout) on develop with BOTH STORY-086 AND STORY-087 merged. Gate 1 carried over (re-validated by merge CI). Gate 2 SKIP (no DTU). All open HIGHs (including F-G3-HIGH-003) must be zero before re-gate PASS. BLK-002 closes on re-gate pass.
+Re-run Gate 3 (adversary on patched develop wave-4 diff) + Gate 5 (holdout) on develop 54b8d3b1 with BOTH STORY-086 AND STORY-087 merged. Gate 1 carried over (re-validated by merge CI). Gate 2 SKIP (no DTU). All open HIGHs must be zero before Gate 3 PASS. BLK-002 closes on re-gate pass.
 
 ### Step 5 — After re-gate passes: Advance to Wave 5
 
-Begin Wave 5 with STORY-082, STORY-081, STORY-088, etc. STORY-082 — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B, BC-1.14.003). Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. Remaining Wave 5 queue: STORY-082, STORY-081, STORY-088 (STORY-087 now Wave 4). BLK-002 closes on re-gate pass.
+Begin Wave 5 with STORY-082, STORY-081, STORY-088. STORY-082 — PPTX Slide-Grouping Sections (Wave 5, 5 pts, P0, BC-4.01.003 Half B, BC-1.14.003). Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. BLK-002 closes on re-gate pass.
 
 ---
 
@@ -114,7 +107,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088, etc. STORY-082 — PPTX Slide
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1–q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (112 BCs, 15 HS, 4 supplements) + arch (14 ADRs (+4 added Phase 3: ADR-015..018), 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 88 stories, 21 epics, 6 waves, 545 pts (LESSON-13 reconciliation: +4 stories/+14 pts added 2026-06-04; STORY-086/087 added 2026-06-06 +26 pts; STORY-086 scope 13→21 pts + STORY-088 added +5 pts; STORY-088 expanded 5→8 pts 2026-06-06 per pass-5 D5 correction, net +3). 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 21/21 baseline + STORY-086 MERGED. STORY-087 PULLED INTO WAVE 4 (human-authorized 2026-06-06) — IN PROGRESS (.worktrees/STORY-087). Wave 4 re-gate PENDING (gated on STORY-087 merge + Gate 3 + Gate 5 on develop). BLK-002 OPEN. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3 GATE PASSED. Wave 4: 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63; develop 54b8d3b1). Wave 4 re-gate PENDING (Gate 3 adversary + Gate 5 holdout on develop 54b8d3b1). BLK-002 OPEN. | Per-story delivery |
 | Phases 4–7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status
@@ -138,26 +131,26 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088, etc. STORY-082 — PPTX Slide
 
 **STORY-086** (Wave 4 remediation — Stage 2b field-to-block content threading + TextTag) MERGED PR #62 (298ae518, 2026-06-06). CI 22 checks all-green (4-platform matrix, bench, security). Security APPROVE/CLEAN. pr-reviewer APPROVE. 16-pass LOCAL cascade, 3/3 strict-CLEAN (passes 14/15/16-rerun). Closes F-G3-CRIT-001 + F-G3-HIGH-001/002.
 
-**STORY-087** (Wave 4 pull-in — human-authorized 2026-06-06 — Color-Coded Slide Types: status/progress_bar/weighted_composite + LabelCheck WCAG enforcement) LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10). Worktree `.worktrees/STORY-087` on `feature/STORY-087`. HEAD `15297d49` (demo commit; pushed). 13 pts, P1, BC-1.17.001/002/003 (all v1.2.1). 10-pass cascade: substantive findings at passes 1/2/3/5/7 (dead-code ValueRangeValidator; Option-T threading + 3 new IR types; bar render PPTX/PDF/DOCX; E-A11-002 PC2 title token + PC4; 6-component cap PC-9); clean at 4/6/8/9/10. Demo recorded: 3 VHS recordings (docs/demo-evidence/STORY-087/) covering registration/F-G3-HIGH-003 closure, visible bar+label incl PPTX <a:solidFill>, validation error paths E-A11-002 + E-VAL-011. Clippy clean. OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) tracked NON-blocking VISUAL-REVIEW/Phase-4. Closes F-G3-HIGH-003. NEXT: PR creation → merge → Wave 4 re-gate.
+**STORY-087** (Wave 4 pull-in — human-authorized 2026-06-06 — Color-Coded Slide Types: status/progress_bar/weighted_composite registration + LabelCheck WCAG enforcement) MERGED PR #63 (54b8d3b1, 2026-06-06). 13 pts, P1, BC-1.17.001/002/003 (all v1.2.1). CI all-green (incl bench + 4-platform matrix + all-checks-pass). Security-reviewer APPROVE/CLEAN (SEC-100 MEDIUM XML-control-char-strip fixed in-scope + re-reviewed CLOSED; SEC-101 LOW info; SEC-107 resolved). pr-reviewer APPROVE (re-reviewed after SEC-100 fix; 2 NITs resolved). LOCAL cascade 3/3 strict-CLEAN (10 passes). Worktree `.worktrees/STORY-087` removed; local branch feature/STORY-087 deleted. Closes F-G3-HIGH-003. SEC-100 fix also hardened the pre-existing PPTX body-text path for ALL slide types. OBS-P6-001 + OBS-P6-002 tracked NON-blocking VISUAL-REVIEW/Phase-4.
 
-**Wave 4 = 21/21 baseline + STORY-086 MERGED. STORY-087 IN PROGRESS (Wave 4 pull-in). Re-gate gated on STORY-087 merge.**
+**Wave 4 = 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 + STORY-087 PR #63). ALL FOUR Gate-3 findings closed. Re-gate PENDING on develop 54b8d3b1.**
 **STORY-082** (slide-grouping sections) remains Wave 5 (human-authorized split from STORY-040)
 
 ---
 
 ## Session Resume Checkpoint
 
-**STORY-087 LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10). Demo recorded. Worktree HEAD 15297d49 (demo commit; pushed). NEXT: pr-manager 9-step PR cycle → security-reviewer + pr-reviewer → CI → merge (STANDING MERGE AUTH) → Wave 4 re-gate (Gate 3 + Gate 5 on develop with BOTH STORY-086 + STORY-087 closed) → BLK-002 closes → Wave 5.**
+**STORY-087 MERGED PR #63 (54b8d3b1, 2026-06-06). Wave 4 now 23/23 COMPLETE. ALL FOUR Gate-3 findings closed. NEXT: Wave 4 re-gate (Gate 3 adversary on patched develop wave-4 diff + Gate 5 holdout) on develop 54b8d3b1. After re-gate PASS → BLK-002 closes → Wave 5.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-06 |
-| **Position** | Wave 4: 21/21 baseline merged + STORY-086 MERGED (PR #62, 298ae518) + STORY-087 LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10; 10 passes total). Demo recorded: 3 VHS recordings at docs/demo-evidence/STORY-087/ + evidence-report.md. Worktree HEAD 15297d49 (demo commit; pushed to origin/feature/STORY-087). BC-1.17.001/002/003 v1.2.1. OBS-P6-001/002 NON-blocking (VISUAL-REVIEW/Phase-4). Wave 4 re-gate PENDING — gated on STORY-087 merge THEN Gate 3 adversary + Gate 5 holdout on develop with BOTH STORY-086 + STORY-087 closed. BLK-002 OPEN. Gate 1 carried over. Gate 2 SKIP (no DTU). Stories 88 / 545 pts. |
-| **develop SHA** | `298ae518` (62 merged PRs; origin/develop confirmed — LESSON-12 verified; 0 open PRs) |
-| **Active worktrees** | `.worktrees/STORY-087` on `feature/STORY-087` (forked from develop 298ae518). HEAD `15297d49` (demo commit). |
-| **Workspace tests** | 3393/3393 (STORY-087 LOCAL cascade CONVERGED 3/3; demo recorded HEAD 15297d49; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 pending STORY-088) |
+| **Position** | Wave 4: 23/23 COMPLETE (21/21 baseline + STORY-086 PR #62 298ae518 + STORY-087 PR #63 54b8d3b1). ALL FOUR Wave 4 Gate-3 findings closed: F-G3-CRIT-001 + F-G3-HIGH-001/002 (STORY-086) + F-G3-HIGH-003 (STORY-087). BLK-002 OPEN — closes on Wave 4 re-gate pass. Gate 1 carried over (re-validated by merge CI). Gate 2 SKIP (no DTU). OBS-P6-001/002 tracked NON-blocking (VISUAL-REVIEW/Phase-4). Stories 88 / 545 pts. |
+| **develop SHA** | `54b8d3b1` (63 merged PRs; origin/develop confirmed — LESSON-12 verified; 0 open PRs) |
+| **Active worktrees** | none (STORY-087 worktree removed; local branch feature/STORY-087 deleted) |
+| **Workspace tests** | 3393/3393 (develop 54b8d3b1; 18 skipped; 2 weighted_composite e2e #[ignore]'d — SID-1 pending STORY-088) |
 | **factory-artifacts** | PUSHED to origin (human-authorized 2026-06-04). Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **NEXT: dispatch pr-manager 9-step PR cycle for STORY-087 (worktree .worktrees/STORY-087, HEAD 15297d49, branch feature/STORY-087, target develop). Dispatch security-reviewer + pr-reviewer independently. After CI-green + security CLEAN + pr-reviewer APPROVE: merge via STANDING MERGE AUTH. After STORY-087 merged: dispatch vsdd-factory:wave-gate for Wave 4 re-gate on develop (Gate 3 adversary + Gate 5 holdout; Gate 1 carries over; Gate 2 SKIP). F-G3-HIGH-003 closed by STORY-087; all open HIGHs must be zero before Gate 3 PASS. After re-gate PASS: begin Wave 5 (STORY-082, STORY-081, STORY-088). BLK-002 closes on re-gate pass.** |
+| **RESUME INSTRUCTION** | **NEXT: dispatch vsdd-factory:wave-gate for Wave 4 re-gate on develop 54b8d3b1 (Gate 3 adversary on patched wave-4 diff + Gate 5 holdout; Gate 1 carries over; Gate 2 SKIP). All open HIGHs must be zero before Gate 3 PASS. After re-gate PASS: BLK-002 closes → begin Wave 5 (STORY-082, STORY-081, STORY-088).** |
 
 ---
 
@@ -189,7 +182,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088, etc. STORY-082 — PPTX Slide
 | ID | Description | Opened | Status |
 |----|-------------|--------|--------|
 | BLK-001 | Alt-text enforcement non-functional end-to-end (Gap 2). | 2026-06-05 | RESOLVED — STORY-050 ADR-018 post-layout validation pass. |
-| BLK-002 | Wave 4 gate FAILED — content-rendering gap (eval emits no slide-body ContentBlocks, for_eval.rs:342) + a11y strict-gate unsatisfiable (F-G3-CRIT-001). All exporters produce content-EMPTY output; holdout mean 0.56 / min_critical 0.30 below thresholds. Wave 4 does NOT advance to Wave 5 until remediated. | 2026-06-06 | OPEN — STORY-086 MERGED PR #62 (298ae518). Closes on Wave 4 Gate 3 + Gate 5 RE-RUN PASS on develop 298ae518. |
+| BLK-002 | Wave 4 gate FAILED — content-rendering gap (eval emits no slide-body ContentBlocks, for_eval.rs:342) + a11y strict-gate unsatisfiable (F-G3-CRIT-001). All exporters produce content-EMPTY output; holdout mean 0.56 / min_critical 0.30 below thresholds. Wave 4 does NOT advance to Wave 5 until remediated. | 2026-06-06 | OPEN — STORY-086 MERGED PR #62 (298ae518); STORY-087 MERGED PR #63 (54b8d3b1). ALL FOUR Gate-3 findings closed. Closes on Wave 4 Gate 3 + Gate 5 RE-RUN PASS on develop 54b8d3b1. |
 
 ---
 
@@ -243,6 +236,7 @@ Begin Wave 5 with STORY-082, STORY-081, STORY-088, etc. STORY-082 — PPTX Slide
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-06 | STORY-087-MERGED | STORY-087 MERGED PR #63 (squash SHA 54b8d3b1, 2026-06-06). Title: "feat(plugin-api,eval,layout,validate,pptx,pdf,docx): color-coded slide types — status/progress_bar/weighted_composite (STORY-087) (#63)". CI all-green (incl bench + 4-platform matrix + all-checks-pass). Security-reviewer APPROVE/CLEAN: SEC-100 MEDIUM XML-control-char-strip fixed in-scope (also hardened pre-existing PPTX body-text path for ALL slide types) + re-reviewed CLOSED; SEC-101 LOW info; SEC-107 resolved. pr-reviewer APPROVE: re-reviewed after SEC-100 fix; 2 NITs resolved. LOCAL cascade 3/3 strict-CLEAN (10 passes). develop 298ae518 → 54b8d3b1 (63 merged PRs); origin/develop confirmed, LESSON-12 verified. Worktree .worktrees/STORY-087 removed; local branch feature/STORY-087 deleted (remote branch remains on origin, harmless). Wave 4 = 23/23. ALL FOUR original Wave 4 Gate-3 findings now closed: F-G3-CRIT-001 + F-G3-HIGH-001/002 (STORY-086) + F-G3-HIGH-003 (STORY-087). Wave 4 re-gate NEXT on develop 54b8d3b1 (Gate 3 adversary + Gate 5 holdout; Gate 1 carried over; Gate 2 SKIP). BLK-002 OPEN until re-gate pass. OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) remain tracked NON-blocking at VISUAL-REVIEW/Phase-4 gate. |
 | 2026-06-06 | STORY-087-CONVERGED | STORY-087 LOCAL adversary cascade CONVERGED 3/3 strict-CLEAN (passes 8/9/10 per BC-5.39.001; 10 passes total). Demo recorded by demo-recorder: 3 VHS recordings (GIF+WebM+tape) at docs/demo-evidence/STORY-087/ covering F-G3-HIGH-003 closure (LabelCheck COLOR_CODED_TYPES now matches all 3 registered color-coded slide types — status/progress_bar/weighted_composite); visible bar+label output incl PPTX <a:solidFill> solid-fill bar element; validation error paths E-A11-002 (missing label) + E-VAL-011 (value out of range). evidence-report.md maps all ACs to load-bearing tests or documented SID-1 deferrals. Clippy gate clean (demo evidence tapes only — no new production code). Worktree HEAD 96c2af83 → 15297d49 (demo commit; pushed to origin/feature/STORY-087). OBS-P6-001 (status title geometry) + OBS-P6-002 (DOCX percent) remain tracked NON-blocking at VISUAL-REVIEW/Phase-4 gate. Next: pr-manager 9-step PR cycle → security-reviewer + pr-reviewer (independent) → CI → merge (STANDING MERGE AUTH) → Wave 4 re-gate (Gate 3 adversary + Gate 5 holdout on develop with BOTH STORY-086 + STORY-087 closed). BLK-002 closes on re-gate pass. |
 | 2026-06-06 | STORY-087-PASS10 | Adversary LOCAL pass 10 strict-CLEAN — streak 2/3 → 3/3. CLEAN (strict): yes. CLEAN (PR-merge): yes. All prior findings (passes 1-9) verified closed. No new findings. CASCADE CONVERGED (3/3 consecutive strict-CLEAN at passes 8/9/10). |
 | 2026-06-06 | STORY-087-PASS9 | Adversary LOCAL pass 9 strict-CLEAN — streak 1/3 → 2/3. CLEAN (strict): yes. CLEAN (PR-merge): yes. All prior findings (passes 1-8) verified closed. No new findings. |
