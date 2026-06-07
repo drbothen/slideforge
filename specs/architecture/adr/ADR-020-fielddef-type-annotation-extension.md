@@ -234,11 +234,14 @@ unannotated paths. Removing it would weaken the defense-in-depth posture.
 - `FieldType::Format(FormatKind)` can be added in a future story for T3 format
   validation with zero risk of silent regression — exhaustive match arms enforce
   callsite updates.
-- Priority-1 annotations (10 field sites across 9 slide types — `progress_bar.value`,
+- Priority-1 annotations (9 field sites across 8 slide types — `progress_bar.value`,
   `chart.chart_type`, `decorative` common optional, `weighted_composite.components`,
-  `kpi_dashboard.kpis`, `roadmap.milestones`, `matrix.rows`, `agenda.items`,
-  `toc.items`, `team.members`) produce real E-VAL-104 signals in practice, closing
-  the most realistic author type-error paths.
+  `kpi_dashboard.kpis`, `roadmap.phases`, `agenda.items`, `team.members`) produce real
+  E-VAL-104 signals in practice, closing the most realistic author type-error paths.
+  `matrix.cells` is polymorphic (structure varies by dimension count — List or Map) and
+  MUST use `expected_type: None` to avoid false positives. `toc` has no list field —
+  TOC entries are auto-generated from `section_break` slides; the `TocSlideType` exposes
+  only `title` plus common optional fields. There is no `toc.items` field to annotate.
 
 ### Negative / Trade-offs
 
@@ -254,11 +257,14 @@ unannotated paths. Removing it would weaken the defense-in-depth posture.
   writing `weight: 1` (an integer literal) will receive E-VAL-104 and must correct to
   `weight: 1.0`. This is intentional per the no-implicit-coercion rule, but it is a
   usability friction point documented in BC-1.18.001 Invariant 3.
-- Polymorphic fields (`data` on chart slides, `cells` on matrix, etc.) MUST use
+- Polymorphic fields (`data` on chart slides, `cells` on matrix — structure varies by
+  dimension count and may be `Value::List` or `Value::Map`, etc.) MUST use
   `expected_type: None` — the annotation sweep requires per-field judgment, not
   mechanical coverage. Annotating a polymorphic field with the wrong `FieldType`
   produces false E-VAL-104 positives. This judgment call is the primary complexity
-  risk in STORY-089.
+  risk in STORY-089. In particular: `roadmap.phases` → `FieldType::List` (always a
+  list when supplied as a field); `matrix.cells` → `None` (polymorphic); no `toc.items`
+  field exists (TOC entries are auto-generated).
 
 ### Status as of 2026-06-07
 
