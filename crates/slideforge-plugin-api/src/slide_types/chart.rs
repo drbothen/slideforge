@@ -1,10 +1,13 @@
 //! The `chart` slide type — a data visualization chart slide.
 //!
 //! A `chart` slide renders a chart (bar, line, pie, scatter, etc.) from
-//! a data source using the `ChartRenderer` plugin. The `chart_type` and
-//! `data` fields are required. The `alt` field is optional per spec (it is
-//! part of common optional fields); `decorative` can suppress it when the
-//! chart is decorative only.
+//! a data source using the `ChartRenderer` plugin. The `chart_type` field is
+//! required. The `data` field is **optional at field-schema level**: it is
+//! required at render time by the `ChartRenderer` plugin, but a chart slide
+//! may be declared without `data` when using a `@data` reference resolved at
+//! runtime or when rendering a layout preview. The `alt` field is optional per
+//! spec (it is part of common optional fields); `decorative` can suppress it
+//! when the chart is decorative only.
 //!
 //! Maps to the `"Title and Content"` PPTX layout.
 
@@ -19,8 +22,14 @@ use super::common_optional_fields;
 
 /// The built-in `chart` slide type.
 ///
-/// Required fields: `title`, `chart_type`, `data`.
-/// Optional fields: `report`, `detail`, plus common optional fields.
+/// Required fields: `title`, `chart_type`.
+/// Optional fields: `data`, `report`, `detail`, plus common optional fields.
+///
+/// Note: `data` is required at render time by the `ChartRenderer` plugin, but
+/// is declared optional at field-schema level to allow layout previews and
+/// `@data` runtime references without triggering E-VAL-101. Authors should
+/// always provide `data` for charts that will be exported.
+///
 /// Note: `alt` is included via common optional fields. For WCAG AA compliance,
 /// authors should provide `alt` on every non-decorative chart.
 ///
@@ -37,6 +46,28 @@ impl ChartSlideType {
     /// Construct a new `ChartSlideType` with its canonical field definitions.
     #[must_use]
     pub fn new() -> Self {
+        let mut optional = vec![
+            // Polymorphic: data may be a List or a Str data-source reference.
+            // Optional at field-schema level (STORY-089 architect decision):
+            //   - `expected_type: None` to avoid false E-VAL-104 (BC-1.18.001 invariant 5).
+            //   - Required at render time by the ChartRenderer plugin (not enforced here).
+            //   - Declared optional to allow layout previews and @data runtime references.
+            // TODO(future story): Route A via Arc<PluginRegistry> would let ChartRenderer
+            // verify data presence at a later pipeline stage without field-schema false positives.
+            FieldDef {
+                name: Arc::from("data"),
+                description: Arc::from(
+                    "Data source for the chart. May be an inline data block or a \
+                     `@data` reference to an external file. Required at render time \
+                     by the ChartRenderer plugin; optional at field-schema level to \
+                     support layout previews and runtime @data references.",
+                ),
+                required: false,
+                default_value: None,
+                expected_type: None,
+            },
+        ];
+        optional.extend(common_optional_fields());
         Self {
             required: vec![
                 FieldDef {
@@ -68,20 +99,8 @@ impl ChartSlideType {
                         Arc::from("stacked-area"),
                     ])),
                 },
-                // Polymorphic: data may be a List or a Str data-source reference.
-                // AC-021 (BC-1.18.001 invariant 5): must be None to avoid false E-VAL-104.
-                FieldDef {
-                    name: Arc::from("data"),
-                    description: Arc::from(
-                        "Data source for the chart. May be an inline data block or a \
-                         `@data` reference to an external file.",
-                    ),
-                    required: true,
-                    default_value: None,
-                    expected_type: None,
-                },
             ],
-            optional: common_optional_fields(),
+            optional,
         }
     }
 }

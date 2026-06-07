@@ -29,11 +29,13 @@ pub struct TocSlideType {
 
 impl TocSlideType {
     /// Construct a new `TocSlideType` with its canonical field definitions.
+    ///
+    /// `toc` intentionally has no list-typed field for entries — TOC entries are
+    /// auto-generated from `section_break` slides by the layout engine (per BC-1.18.001
+    /// v1.1 / ADR-020). There is no `items` field; authors do not supply the TOC list
+    /// manually.
     #[must_use]
     pub fn new() -> Self {
-        // STORY-089 note: the story spec (AC-016) references `toc.items → FieldType::List`
-        // but the existing implementation has no `items` FieldDef. The implementer must add
-        // an `items` optional field with `expected_type: Some(FieldType::List)` to match the spec.
         Self {
             required: vec![FieldDef {
                 name: Arc::from("title"),

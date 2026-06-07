@@ -221,11 +221,9 @@ impl Default for SlideTypeRegistry {
 /// * `slide` — The semantic slide to validate.
 /// * `slide_type` — The registered slide type to validate against.
 ///
-/// # STORY-089 stub
+/// # Diagnostics produced
 ///
-/// The E-VAL-104 arm is structurally present but inert — it never emits any
-/// diagnostic yet. Implementer: replace the arm body with the real T1/T2 logic
-/// from BC-1.18.001 postconditions 2 and 3 in Task T4.
+/// See the table above. All four error codes are fully implemented.
 #[must_use]
 pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
@@ -307,20 +305,14 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
             {
                 let field_name = &field_def.name;
                 let message: Arc<str> = if let FieldType::OneOf(allowed) = expected {
-                    if matches!(v, Value::Str(_)) {
+                    if let Value::Str(s) = v {
                         // T2: Str value not in the allowlist.
                         let allowed_list: Vec<&str> =
                             allowed.iter().map(std::convert::AsRef::as_ref).collect();
                         let allowed_str = allowed_list.join(", ");
-                        let val_str = if let Value::Str(s) = v {
-                            s.as_ref().to_owned()
-                        } else {
-                            // Unreachable: we matched Value::Str above.
-                            String::new()
-                        };
                         Arc::from(format!(
                             "Field '{field_name}' on {type_id} slide has disallowed value \
-                             \"{val_str}\": allowed values are [{allowed_str}]."
+                             \"{s}\": allowed values are [{allowed_str}]."
                         ))
                     } else {
                         // T1: non-Str value on a OneOf field.
@@ -398,7 +390,7 @@ fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Ar
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Red Gate tests — ALL tests MUST FAIL before implementation begins.
+// Tests — BC-1.03 and BC-1.18.001 (validate_fields, SlideTypeRegistry)
 //
 // Test naming: test_BC_1_03_NNN_xxx  (BC-1.03 = STORY-003 slide type registry)
 // ─────────────────────────────────────────────────────────────────────────────

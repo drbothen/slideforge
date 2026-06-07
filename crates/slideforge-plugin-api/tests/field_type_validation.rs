@@ -1365,18 +1365,38 @@ fn test_list_fields_on_kpi_roadmap_agenda_team() {
 }
 
 /// BC-1.18.001 / AC-021: chart.data has expected_type: None (polymorphic).
-/// PASSES with stub.
+///
+/// STORY-089 architect decision: chart.data was reclassified as optional
+/// (required at render time by ChartRenderer, not at field-schema level).
+/// The core AC-021 behavioral assertion — `expected_type: None` — is unchanged.
+/// The lookup now searches optional_fields() per the reclassification.
 #[test]
 fn test_BC_1_18_001_ac021_chart_data_annotation_is_none() {
     let slide_type = ChartSlideType::new();
+    // STORY-089: data was moved from required_fields to optional_fields.
+    // Search optional_fields for the data field definition.
     let data_def = slide_type
-        .required_fields()
+        .optional_fields()
         .iter()
         .find(|f| f.name.as_ref() == "data")
-        .expect("chart must have a required 'data' field");
+        .expect(
+            "chart must have an 'data' field (optional per STORY-089 architect decision: \
+             data is required at render time by ChartRenderer, not at field-schema level)",
+        );
+    // Core AC-021 assertion: polymorphic field must have expected_type: None.
     assert_eq!(
         data_def.expected_type, None,
         "chart.data must have expected_type: None (polymorphic — may be Str or List)"
+    );
+    // Confirm data is not present in required_fields (it was reclassified).
+    let data_required = slide_type
+        .required_fields()
+        .iter()
+        .find(|f| f.name.as_ref() == "data");
+    assert!(
+        data_required.is_none(),
+        "chart.data must NOT be in required_fields after STORY-089 reclassification; \
+         it is optional (required at ChartRenderer render time, not at field-schema level)"
     );
 }
 
