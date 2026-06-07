@@ -38,8 +38,8 @@ use slideforge_diagrams::DiagramRendererImpl;
 
 // ── Surface 5: Validator ──────────────────────────────────────────────────────
 use slideforge_validate::{
-    AltTextValidator, CanvasOverflowValidator, LabelCheckValidator, LangValidator,
-    ValidationConfig, ValueRangeValidator, ZeroSlideValidator,
+    AltTextValidator, CanvasOverflowValidator, ImagePathValidator, LabelCheckValidator,
+    LangValidator, ValidationConfig, ValueRangeValidator, ZeroSlideValidator,
 };
 
 // ── Surface 6: MathRenderer ───────────────────────────────────────────────────
@@ -110,7 +110,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     // ── Surface 4: DiagramRenderer (1 bundled implementation — mermaid-rs) ──
     builder.register_diagram_renderer(Box::new(DiagramRendererImpl::new()));
 
-    // ── Surface 5: Validator (5 bundled implementations) ─────────────────────
+    // ── Surface 5: Validator (6 bundled implementations) ─────────────────────
     builder.register_validator(Box::new(AltTextValidator));
     builder.register_validator(Box::new(ZeroSlideValidator));
     builder.register_validator(Box::new(CanvasOverflowValidator::from_config(
@@ -119,6 +119,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     builder.register_validator(Box::new(LabelCheckValidator));
     builder.register_validator(Box::new(ValueRangeValidator));
     builder.register_validator(Box::new(LangValidator));
+    builder.register_validator(Box::new(ImagePathValidator));
 
     // ── Surface 6: MathRenderer (1 bundled implementation — pulldown-latex) ──
     builder.register_math_renderer(Box::new(MathRendererImpl::new()));
