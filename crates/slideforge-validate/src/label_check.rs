@@ -83,8 +83,15 @@ impl Validator for LabelCheckValidator {
             };
 
             if !label_valid {
+                // BC-1.17.001/002/003 PC2: message must include the slide's title value
+                // so the user can identify which specific slide is missing its label.
+                let title = match slide.fields.get("title") {
+                    Some(FieldValue::Literal(Value::Str(s))) => s.as_ref(),
+                    _ => "",
+                };
                 diagnostics.push(make_missing_label_error(
                     slide.slide_type.as_ref(),
+                    title,
                     &slide.source_span,
                 ));
             }
@@ -156,19 +163,22 @@ impl Validator for LabelCheckValidator {
 
 /// Construct an `E-A11-002` error diagnostic for a missing or blank label.
 ///
-/// # BC-5.01.003 postcondition 1 — identifier token
+/// # BC-1.17.001/002/003 PC2 — message format
 ///
-/// The BC postcondition specifies `<identifier>` in the error message, but the
-/// `Slide` IR has no identifier field — only `slide_type` and `source_span`.
-/// Story spec AC-001 adapted the message to use `slide_type` in place of
-/// `<identifier>`. This matches the available IR data; no information is lost
-/// because `slide_type` is the primary identifier for a color-coded slide.
-fn make_missing_label_error(slide_type: &str, span: &SourceSpan) -> Diagnostic {
+/// The BC postcondition specifies the exact message format:
+/// `Missing label on color-coded element '<slide_type>' '<title-value>' at <file>:<line>:<col>.
+///  Color alone must not convey meaning. Add label "...".`
+///
+/// The `title` parameter carries the slide's `fields["title"]` string value.
+/// Pass an empty string `""` when no title is available (synthetic test slides
+/// constructed without a title field); the message will then read `''` as the
+/// title token, which is correct for that case.
+fn make_missing_label_error(slide_type: &str, title: &str, span: &SourceSpan) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
         code: Arc::from(E_A11_002),
         message: Arc::from(format!(
-            "Missing label on color-coded element '{slide_type}' at {span}. \
+            "Missing label on color-coded element '{slide_type}' '{title}' at {span}. \
              Color alone must not convey meaning. Add label \"...\"."
         )),
         span: span.clone(),
@@ -189,7 +199,7 @@ fn make_missing_component_label_error(comp_name: &str, span: &SourceSpan) -> Dia
         message: Arc::from(format!(
             "Missing label on color-coded element 'weighted_composite.component' \
              '{comp_name}' at {span}. \
-             Color alone must not convey meaning. Add label \"...\" to this component."
+             Add label \"...\" to this component."
         )),
         span: span.clone(),
         hint: Some(Arc::from(

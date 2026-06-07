@@ -234,7 +234,10 @@ fn test_BC_1_17_001_ac003_status_missing_label_message_contains_title() {
             !e_a11_002_diags.is_empty(),
             "BC-1.17.001 AC-003: Err(ValidationFailed) must contain at least one \
              E-A11-002 diagnostic; got codes: {:?}",
-            diagnostics.iter().map(|d| d.code.as_ref()).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|d| d.code.as_ref())
+                .collect::<Vec<_>>()
         );
 
         // The BC-1.17.001 PC2 message format includes the slide type and the title value.
@@ -326,7 +329,10 @@ fn test_BC_1_17_002_ac009_progress_bar_missing_label_message_contains_title() {
             !e_a11_002_diags.is_empty(),
             "BC-1.17.002 AC-009: Err(ValidationFailed) must contain at least one \
              E-A11-002 diagnostic; got codes: {:?}",
-            diagnostics.iter().map(|d| d.code.as_ref()).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|d| d.code.as_ref())
+                .collect::<Vec<_>>()
         );
 
         let msg = e_a11_002_diags[0].message.as_ref();
