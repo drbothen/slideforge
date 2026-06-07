@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated."]
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — label and value field threading mechanism via Stage 2b; new ContentBlock::ColorBar(ColorBarSpec) and FrameContent::ColorBar materialization."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -71,6 +71,19 @@ strict mode.
    reads `Slide.fields["value"]` directly, before layout. Error code: E-VAL-011. Severity:
    `DiagnosticSeverity::Error` (strict-mode fatal). `SlideType::lay_out()` is geometry-only
    and does NOT perform value-range validation.
+9. The `label` field is threaded into `Slide.blocks` as
+   `ContentBlock::Text(TextTag::ColorLabel)` by `thread_fields_to_blocks` (Stage 2b,
+   ADR-019 Decision 3). At layout time, `fill_region_slot_or_append` routes
+   `TextTag::ColorLabel → RegionRole::Body`, placing the label text into the Body-role
+   frame (frame index 2) as `FrameContent::Body(...)`, rendered visibly by exporters.
+   The `value` field is threaded as `ContentBlock::ColorBar(ColorBarSpec { percent })` where
+   `percent` is the clamped `value` integer (0–100). The layout engine materialises this into
+   `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }` in a dedicated
+   ColorBar materialization pass after `fill_region_slot_or_append`, computing
+   `filled_width_emu = (percent as i64 * bar_background_width_emu) / 100` (integer EMU
+   arithmetic, no f64). The filled bar frame is rendered visibly in the output (PPTX: solid-fill
+   `<p:sp>` at proportional width; PDF/HTML: filled rectangle; DOCX: percentage text fallback).
+   (Mechanism: architect adjudication F-087-P2-002.)
 
 ## Invariants
 
@@ -157,3 +170,11 @@ strict mode.
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Summary |
+|---------|------|---------|
+| 1.0 | 2026-06-05 | Initial creation — progress_bar slide type label + value-range contract |
+| 1.1 | 2026-06-06 | PC-6 / Inv-7 amended per architect adjudication F-087-P1-001: enforcement point moved from lay_out() to ValueRangeValidator Stage 5; E-VAL-011 allocated |
+| 1.2 | 2026-06-06 | PC-9 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): label threaded as TextTag::ColorLabel → Body-role frame; value threaded as ContentBlock::ColorBar(ColorBarSpec{percent}) → FrameContent::ColorBar materialized with proportional filled_width_emu. Rendering mechanism decided (Option T — Threading). |

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
+version: "1.2"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): PC3b added; Inv 6/7 amended to cite ValueRangeValidator Stage 5 + E-VAL-011 + DI-018 accumulation; Inv-9 added; enforcement point moved from lay_out() to ValueRangeValidator."]
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): PC3b added; Inv 6/7 amended to cite ValueRangeValidator Stage 5 + E-VAL-011 + DI-018 accumulation; Inv-9 added; enforcement point moved from lay_out() to ValueRangeValidator.", "2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-9 added — aggregate label and per-component row text threaded as visible ContentBlocks via compose_component_row_text; empty-components → E-VAL-011 reaffirmed (F-087-P2-001)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -77,6 +77,23 @@ are mandatory. `LabelCheck` enforces this at compile time.
 7. `LabelCheck.validate()` (Stage 5, pre-layout) reads `Slide.fields["label"]` and
    iterates `Slide.fields["components"]` (the resolved list) to check each component's
    `label` sub-field. This does NOT require Stage 2b.
+9. The top-level `label` field is threaded into `Slide.blocks` as
+   `ContentBlock::Text(TextTag::ColorLabel)` by `thread_fields_to_blocks` (Stage 2b,
+   ADR-019 Decision 3). At layout time, `fill_region_slot_or_append` routes
+   `TextTag::ColorLabel → RegionRole::Body`, placing the aggregate label text into the
+   Body-role frame as `FrameContent::Body(...)`, rendered visibly by exporters.
+   Each component in `components[]` is threaded as `ContentBlock::Text(TextTag::Body)`
+   with composed text `'<name>: <score>/100 (wt: <weight>) — <label>'` (produced by the
+   pure helper `compose_component_row_text`). Each composed block claims one of the five
+   pre-allocated `RegionRole::Generic` row frames in registration order via
+   `fill_region_slot_or_append`'s generic-fallback path. A maximum of 5 component rows
+   are rendered; components beyond index 4 produce no additional frames (the 5 Generic
+   slots are exhausted). (Mechanism: architect adjudication F-087-P2-002.)
+   An empty `components: []` list (postcondition 3 / invariant 4) causes
+   `ValueRangeValidator` to emit E-VAL-011 with message
+   `"weighted_composite requires at least one component; got empty list."` — confirmed
+   per architect adjudication F-087-P2-001. `Err(BuildError::ValidationFailed)` is
+   returned; no output is produced.
 
 ## Invariants
 
@@ -169,3 +186,11 @@ are mandatory. `LabelCheck` enforces this at compile time.
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Summary |
+|---------|------|---------|
+| 1.0 | 2026-06-05 | Initial creation — weighted_composite slide type label + component validation contract |
+| 1.1 | 2026-06-06 | PC-3b / Inv-6/7/9 added per architect adjudication F-087-P1-001: ValueRangeValidator Stage 5 enforcement; E-VAL-011 allocated; lay_out() is geometry-only |
+| 1.2 | 2026-06-06 | PC-9 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): aggregate label threaded as TextTag::ColorLabel → Body-role frame; per-component rows threaded as TextTag::Body via compose_component_row_text → Generic-role row frames. Empty-components → E-VAL-011 ("weighted_composite requires at least one component; got empty list.") reaffirmed per F-087-P2-001. Rendering mechanism decided (Option T — Threading). |

@@ -403,7 +403,17 @@ Strict-mode fatal: `DiagnosticSeverity::Error` → `BuildError::ValidationFailed
 **Error accumulation:** `ValueRangeValidator` iterates ALL components and collects ALL
 E-VAL-011 diagnostics before returning (DI-018). It does NOT bail on the first failure.
 
+**Additional message variant — empty components (BC-1.17.003, F-087-P2-001):**
+
+> Note: E-VAL-011 is also emitted when `weighted_composite.components` is present but
+> empty (`[]`). Message: `"weighted_composite requires at least one component; got empty list."`.
+> This is a structural value contract violation, not a type error. `Value::List([])` is a
+> valid DSL value that passes Stage 2a evaluation but violates BC-1.17.003 postcondition 3.
+> The empty-list check is performed in `ValueRangeValidator::validate_weighted_composite_components`
+> before the per-component iteration loop.
+
 Allocated per architect adjudication F-087-P1-001 (STORY-087 pass 1, 2026-06-06).
+Empty-components variant added per architect adjudication F-087-P2-001 (STORY-087 pass 2, 2026-06-06).
 
 ---
 
@@ -462,3 +472,4 @@ Per DI-018 and BC-1.15.002:
 | 2.15 | 2026-06-05 | product-owner | STORY-050 PR #61 security review (SEC-050-001) taxonomy consistency: **E-EXP-003 note added** for `PdfExportError::InvalidXmpTitle`. Confirmed that the analogous PPTX variant `PptxError::InvalidLanguageTag` (SEC-039-001) has no dedicated taxonomy code — it routes through E-EXP-001 as a variant-only pattern. Per consistency-mirror rule: `InvalidXmpTitle` likewise receives no dedicated code; it routes through E-EXP-003 as a variant-only pattern. E-EXP-003 table row updated to cite the variant; explanatory note added documenting the routing, the CWE-116 security context, the parallel with SEC-039-001, and confirming no Rust variant change is required. No new E-EXP-NNN code allocated. |
 | 2.17 | 2026-06-06 | product-owner | STORY-086 pass-5 adjudication (F-086-P5-MED-002): **W-A11-002 registered** — new "Accessibility Warnings (W-A11)" section added. W-A11-002 was referenced in BC-3.04.001 v1.5.1+, BC-1.16.001 EC-004, and STORY-086 adjudication but had no taxonomy entry (the W-A11 warning namespace was empty prior to this version). Pre-registration collision check confirmed W-A11-002 free. Semantics: fires when both `decorative: true` and a non-empty `alt "..."` are set on the same element, flagging a likely authoring mistake. Two-context warning: (1) Stage-2b `resolve_alt` for charts/images/diagrams — decorative wins, W-A11-002 emitted via `tracing::warn!(code = "W-A11-002")` at resolution time; (2) shape DSL `slideforge-validate` — alt wins (BC-3.04.001 Inv-11), W-A11-002 emitted post-layout. W-A11-001 (deprecated predecessor) is NOT registered — it is retired. Taxonomy version 2.16 → 2.17. Note: changelog row 2.15 appears after 2.16 in the table due to authoring order — this is a documentation sequencing artifact, not a retcon; both v2.15 and v2.16 were produced on the same date (2026-06-05) in separate bursts. |
 | 2.18 | 2026-06-06 | product-owner | STORY-087 pass-1 adjudication (F-087-P1-001): **E-VAL-011 registered** — new "Validation Errors (E-VAL)" section added. E-VAL-011 is allocated for numeric field out-of-range violations emitted by `ValueRangeValidator` at Stage 5 (pre-layout). Covers `progress_bar` value out of [0, 100] (BC-1.17.002 PC3) and `weighted_composite` component `weight` non-positive / `score` out of [0, 100] (BC-1.17.003 inv 6/7). Severity: broken. Exit 2 (strict-mode fatal). Error accumulation per DI-018: all component errors collected before returning. Pre-registration collision check: E-VAL-011 confirmed free — no existing E-VAL-NNN entries in taxonomy prior to this version. The informally-used codes E-VAL-101, E-VAL-102, W-VAL-103 in `registry.rs::validate_fields` remain unregistered (future burst). |
+| 2.18-addendum | 2026-06-06 | product-owner | STORY-087 pass-2 adjudication (F-087-P2-001): **E-VAL-011 addendum** — empty-components message variant added to existing E-VAL-011 Note. No new code allocated (same error code, same severity/exit). `weighted_composite.components: []` (empty list) is now an explicitly documented E-VAL-011 trigger with exact message `"weighted_composite requires at least one component; got empty list."`. Implementation directive: `ValueRangeValidator::validate_weighted_composite_components` must add an early-return arm for `Value::List(list) if list.is_empty()` that emits the diagnostic before the per-component loop. No taxonomy version bump per adjudication directive. |

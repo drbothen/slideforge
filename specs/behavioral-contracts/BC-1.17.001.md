@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.0"
+version: "1.2"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["2026-06-06 v1.2 (architect adjudication F-087-P2-002, pass-2 adjudication 2026-06-06): PC-8 added — label threading mechanism via Stage 2b (TextTag::ColorLabel → RegionRole::Body → visible ContentBlock)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -61,6 +61,12 @@ missing `label` is a fatal error (E-A11-002) in strict mode.
    of whether Stage 2b has run.
 5. The slide type is registered in `COLOR_CODED_TYPES` within `LabelCheckValidator`
    and in `SLIDE_TYPE_KEYWORDS` in `keywords.rs` and the region map in `regions.rs`.
+8. The `label` field is threaded into `Slide.blocks` as
+   `ContentBlock::Text(TextTag::ColorLabel)` by `thread_fields_to_blocks` (Stage 2b,
+   ADR-019 Decision 3). At layout time, `fill_region_slot_or_append` routes
+   `TextTag::ColorLabel → RegionRole::Body`, placing the label text into the Body-role
+   frame as `FrameContent::Body(...)`. Exporters render this frame as visible text
+   accessible to screen readers. (Mechanism: architect adjudication F-087-P2-002.)
 
 ## Invariants
 
@@ -142,3 +148,10 @@ missing `label` is a fatal error (E-A11-002) in strict mode.
 ## VP Anchors
 
 (filled after VP creation)
+
+## Changelog
+
+| Version | Date | Summary |
+|---------|------|---------|
+| 1.0 | 2026-06-05 | Initial creation — status slide type label-mandatory contract |
+| 1.2 | 2026-06-06 | PC-8 added per architect adjudication F-087-P2-002 (pass-2, 2026-06-06): label field threaded by Stage 2b as TextTag::ColorLabel → RegionRole::Body → visible FrameContent::Body. Rendering mechanism decided (Option T — Threading). |

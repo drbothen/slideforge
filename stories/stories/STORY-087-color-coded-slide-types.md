@@ -9,9 +9,23 @@ points: 13
 priority: P1
 tdd_mode: strict
 status: in-progress
-spec_version: "1.3"
+spec_version: "1.4"
 last_updated: "2026-06-06"
 changelog:
+  - version: "1.4"
+    date: "2026-06-06"
+    note: "Architect pass-2 adjudication: content rendering mechanism decided (Option T —
+           Threading). Stage 2b (field_to_block.rs) extended to thread label/value/components
+           into ContentBlocks for status/progress_bar/weighted_composite AND stat_callout.
+           New IR types: TextTag::ColorLabel (slideforge-types), ContentBlock::ColorBar(ColorBarSpec)
+           (slideforge-types), FrameContent::ColorBar{filled_width_emu,total_width_emu,color}
+           (slideforge-layout/src/types.rs). ColorBar materialization pass added to layout::run.
+           Exporter arms added for FrameContent::ColorBar. lay_out() stays geometry-only.
+           AC-002/008/015 now have a load-bearing mechanism for visible output (threading +
+           fill_region_slot_or_append + ColorBar materialization + build()-level visible-output
+           tests per §10.4). F-087-P2-001: ValueRangeValidator empty-list check added for
+           weighted_composite (E-VAL-011 for components: []). Architecture Mapping table updated.
+           File Structure Requirements updated with threading files. Tasks T4.2/T4.3/T4.6 updated."
   - version: "1.3"
     date: "2026-06-06"
     note: "F-087-P1-001 architect adjudication: value-range validation moves from SlideType::lay_out() to dedicated ValueRangeValidator (Stage 5, slideforge-validate/src/value_range.rs), wired after LabelCheckValidator in slideforge::registry.rs; lay_out() in progress_bar.rs and weighted_composite.rs is now geometry-only; ACs re-targeted to BuildError::ValidationFailed with E-VAL-011; File Structure Requirements updated; Tasks T4.2/T4.3 updated."
@@ -172,20 +186,28 @@ No `E-PAR-NNN` (unknown keyword) is emitted.
 (traces to BC-1.17.001 precondition 3 — keyword registered in SLIDE_TYPE_KEYWORDS;
 BC-1.17.001 invariant 5 — keyword registration required before pipeline runs)
 
-#### AC-002 — status slide with title + label builds successfully under strict=true
+#### AC-002 — status slide with title + label builds successfully and label is visible in output
 `slideforge::build(FIXTURE_STATUS_VALID, BuildOptions { strict: true, format: "pptx", .. })`
 returns `Ok(BuildOutput)`. The fixture contains `slide status: title "Project Alpha" label "On Track"`.
-The PPTX output contains a slide with the label text "On Track" accessible to screen readers
-(present in an OOXML element, not hidden via CSS-equivalent styling in OOXML).
+The label text "On Track" MUST be present as visible content in the `LaidOutSlide` — specifically,
+at least one frame in the laid-out slide must carry `FrameContent::Body(...)` containing "On Track"
+(produced by Stage 2b threading `label` as `ContentBlock::Text(TextTag::ColorLabel)` and
+`fill_region_slot_or_append` routing it into the Body-role slot). Enforcement: a
+`test_AC_002_status_label_visible_in_output` build-level test inspects `build_output.laid_out_deck`
+(or rendered PPTX XML) to assert visible presence of "On Track" — not merely `Ok` return.
 No E-A11-002 is emitted.
 (traces to BC-1.17.001 postcondition 2 — when both present, valid;
-BC-1.17.001 postcondition 3 — label text visible in PPTX)
+BC-1.17.001 postcondition 3 — label text visible in PPTX;
+BC-1.17.001 postcondition 8 — label threaded via Stage 2b as ContentBlock::Text(TextTag::ColorLabel))
 
 #### AC-003 — status slide missing label → E-A11-002 in strict mode
 A fixture with `slide status: title "Project Beta"` (no label field) built with
 `strict: true` returns `Err(BuildError::ValidationFailed)` where the diagnostics list
 contains at least one `Diagnostic { code: "E-A11-002", .. }` whose message includes
-"status" and "Project Beta". No output bytes are produced.
+"status" and "Project Beta". No output bytes are produced. Note: because `label` is
+absent, Stage 2b threading emits no `ContentBlock::Text(TextTag::ColorLabel)` block;
+the LabelCheckValidator (Stage 5, pre-Stage-2b) fires E-A11-002 from `Slide.fields`
+before the threading pass, so this AC remains unaffected by the threading mechanism.
 (traces to BC-1.17.001 postcondition 2 — E-A11-002 for missing label;
 BC-1.17.001 EC-001)
 
@@ -196,10 +218,14 @@ a valid co-encoding.
 (traces to BC-1.17.001 EC-004 — empty label equivalent to absent;
 BC-1.17.001 invariant 1 — label mandatory, no opt-out)
 
-#### AC-005 — status slide missing label + strict=false → Ok, warning emitted
+#### AC-005 — status slide missing label + strict=false → Ok, warning emitted; label frame is Empty
 A fixture with `slide status: title "Project Delta"` (no label) built with
 `strict: false` returns `Ok(BuildOutput)`. A `tracing::warn!` is emitted containing
 "E-A11-002" or "missing label". Output is produced but is non-conformant WCAG AA.
+Because `label` is absent, Stage 2b threading emits no `ContentBlock::Text(TextTag::ColorLabel)`,
+and the Body-role frame in the `LaidOutSlide` remains `FrameContent::Empty` (no content injected).
+This is the expected degraded-output state in warn-only mode — the threading mechanism correctly
+produces no phantom label content when the field is absent.
 (traces to BC-1.17.001 EC-006 — warn-only mode)
 
 #### AC-006 — LabelCheck for status reads Slide.fields, not Slide.blocks (Stage 2b independence)
@@ -218,12 +244,23 @@ parses without error. The keyword `"progress_bar"` is present in `SLIDE_TYPE_KEY
 (traces to BC-1.17.002 precondition 3 — keyword registered;
 BC-1.17.002 invariant 6 — keyword must be registered before pipeline runs)
 
-#### AC-008 — progress_bar with valid title + label + value(75) builds successfully
+#### AC-008 — progress_bar with valid title + label + value(75) builds with visible label and bar
 `slideforge::build(FIXTURE_PROGRESS_VALID, BuildOptions { strict: true, format: "pptx", .. })`
 returns `Ok(BuildOutput)`. The fixture contains `slide progress_bar: title "Sprint 4" label "75% complete" value 75`.
-The PPTX output contains the label text "75% complete" and a visual bar element. No
-E-A11-002 is emitted.
+BOTH of the following must be present in the `LaidOutSlide`:
+(a) The label text "75% complete" is in at least one `FrameContent::Body(...)` frame (produced by
+Stage 2b threading `label` as `ContentBlock::Text(TextTag::ColorLabel)`, routed to the Body-role slot).
+(b) At least one `FrameContent::ColorBar { filled_width_emu, .. }` frame exists with
+`filled_width_emu > Emu(0)` (produced by Stage 2b threading `value 75` as
+`ContentBlock::ColorBar(ColorBarSpec { percent: 75 })` and the ColorBar materialization pass in
+`layout::run` computing `filled_width_emu = total_width_emu * 75 / 100`).
+Enforcement: a `test_AC_008_progress_bar_label_and_bar_visible` build-level test inspects
+the laid-out deck for both assertions — not merely `Ok` return. No E-A11-002 is emitted.
+NOTE (SID-1): if the weighted_composite `components:` DSL list-of-map syntax is not yet parsed
+end-to-end (pending STORY-088), the parallel test for AC-015 may use a unit-level fixture that
+pre-populates `Slide.fields["components"]` directly (bypassing the parser per SID-1).
 (traces to BC-1.17.002 postcondition 4 — valid fields → Ok;
+BC-1.17.002 postcondition 9 — label threaded via Stage 2b; ColorBar materialized at layout time;
 BC-1.17.002 canonical test vector — happy path)
 
 #### AC-009 — progress_bar missing label → E-A11-002
@@ -269,7 +306,7 @@ The keyword `"weighted_composite"` is present in `SLIDE_TYPE_KEYWORDS`.
 (traces to BC-1.17.003 precondition 3 — keyword registered;
 BC-1.17.003 invariant 2 — title mandatory)
 
-#### AC-015 — weighted_composite with valid fields builds successfully
+#### AC-015 — weighted_composite with valid fields builds with all labels visible
 A fixture with:
 ```
 slide weighted_composite:
@@ -279,9 +316,22 @@ slide weighted_composite:
     - name "Quality" weight 0.4 score 85 label "Excellent"
     - name "Price" weight 0.6 score 72 label "Acceptable"
 ```
-returns `Ok(BuildOutput)`. The PPTX output contains the aggregate label "Overall: Good (78/100)"
-and per-component labels "Excellent" and "Acceptable" in accessible OOXML elements.
+returns `Ok(BuildOutput)`. ALL of the following must be present in the `LaidOutSlide`:
+(a) The aggregate label "Overall: Good (78/100)" in at least one `FrameContent::Body(...)` frame
+(produced by Stage 2b threading `label` as `ContentBlock::Text(TextTag::ColorLabel)`, routed to the Body-role slot).
+(b) Exactly 2 Generic-role frames carrying `FrameContent::Body(...)` containing component text
+that includes "Quality", "85", "Excellent" and "Price", "72", "Acceptable" respectively
+(produced by Stage 2b threading each component as `ContentBlock::Text(TextTag::Body)` with
+composed text `"<name>: <score>/100 (wt: <weight>) — <label>"`).
+Enforcement: a `test_AC_015_weighted_composite_labels_visible` build-level test inspects
+the laid-out deck for all label assertions — not merely `Ok` return.
+NOTE (SID-1): if the DSL list-of-map parser for `components:` is not yet landed (STORY-088),
+the test MUST use a unit-level fixture that pre-populates `Slide.fields["components"]` with
+`Value::List([Value::Map({...}), ...])` directly (bypassing the parser per SID-1). The unit
+test must exercise the actual Stage 2b threading + layout pipeline code path.
 (traces to BC-1.17.003 postcondition 6 — valid fields → visual output with all labels;
+BC-1.17.003 postcondition 9 — label + components threaded via Stage 2b; each component row
+text includes name/score/weight/label;
 BC-1.17.003 canonical test vector — happy path)
 
 #### AC-016 — weighted_composite missing top-level label → E-A11-002
@@ -308,11 +358,19 @@ BC-1.17.003 EC-003)
 #### AC-019 — weighted_composite empty components list → BuildError::ValidationFailed with E-VAL-011
 A call to `slideforge::build()` with a fixture containing `components: []` (empty list) returns
 `Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
-`Diagnostic { code: "E-VAL-011", .. }` with message indicating "weighted_composite requires at least one component".
+`Diagnostic { code: "E-VAL-011", .. }` with message
+`"weighted_composite requires at least one component; got empty list."`.
 The error is emitted by `ValueRangeValidator` at Stage 5.
+**NOTE (F-087-P2-001 / architect pass-2 adjudication §7):** The existing code had a
+`// Empty-components validation is a separate concern` deferral comment in
+`validate_weighted_composite_components`. That deferral was unauthorized and must be removed.
+The empty-list arm must be added to `ValueRangeValidator::validate_weighted_composite_components`
+per the exact implementation in adjudication §7. `Value::List([])` is a valid DSL value that
+passes eval but violates BC-1.17.003 postcondition 3. The fix is in `value_range.rs`, not in
+`lay_out()` (F-087-P1-001 still applies).
 **NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
 (traces to BC-1.17.003 postcondition 3 — components list required and non-empty, enforced by ValueRangeValidator at Stage 5;
-BC-1.17.003 EC-004)
+BC-1.17.003 EC-004; F-087-P2-001 — empty-components check added to ValueRangeValidator)
 
 #### AC-020 — weighted_composite component score=101 → BuildError::ValidationFailed with E-VAL-011
 A call to `slideforge::build()` with a fixture containing a component with `score 101` returns
@@ -363,6 +421,8 @@ D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 
 ## Architecture Mapping
 
+### Registration and Validation (Pass-1 scope)
+
 | Component | Crate | File | Change Type | Pure/Effectful |
 |-----------|-------|------|-------------|---------------|
 | `StatusSlideType` | `slideforge-plugin-api` | `src/slide_types/status.rs` (NEW) | New SlideType impl | Pure |
@@ -370,11 +430,29 @@ D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 | `WeightedCompositeSlideType` | `slideforge-plugin-api` | `src/slide_types/weighted_composite.rs` (NEW) | New SlideType impl | Pure |
 | `slide_types/mod.rs` export | `slideforge-plugin-api` | `src/slide_types/mod.rs` | Add 3 pub mod + re-exports | Pure |
 | PHF keyword registration | `slideforge-syntax` | `src/keywords.rs` | Add 3 keywords to `SLIDE_TYPE_KEYWORDS` phf_set! | Pure |
-| Region frame skeletons | `slideforge-layout` | `src/regions.rs` | Add 4 match arms to `region_frames_for()`: `"status"`, `"progress_bar"`, `"weighted_composite"`, and `"severity_cards"` (existing keyword gap, D4) | Pure |
-| `lay_out()` implementations | `slideforge-plugin-api` | `src/slide_types/status.rs`, `progress_bar.rs`, `weighted_composite.rs` | Geometry-only frame production. Value-range validation is NOT here (F-087-P1-001: moved to ValueRangeValidator). `lay_out()` returns frame skeleton; does NOT return FieldTypeMismatch for value-range violations. | Pure |
-| `ValueRangeValidator` | `slideforge-validate` | `src/value_range.rs` (NEW) | Stage 5 pre-layout validator: checks progress_bar value∈[0,100] and weighted_composite weight>0/score∈[0,100]; emits E-VAL-011; accumulates all errors (DI-018). Registered in `slideforge::registry.rs` after LabelCheckValidator. | Pure |
+| Region frame skeletons | `slideforge-layout` | `src/regions.rs` | Add 4 match arms to `region_frames_for()`: `"status"`, `"progress_bar"`, `"weighted_composite"`, and `"severity_cards"` (existing keyword gap, D4). Geometry-only static frames; NO dynamic value-proportional geometry here. | Pure |
+| `lay_out()` implementations | `slideforge-plugin-api` | `src/slide_types/status.rs`, `progress_bar.rs`, `weighted_composite.rs` | Geometry-only frame production. Value-range validation is NOT here (F-087-P1-001). lay_out() is NEVER called by layout::run; content rendering is NOT via lay_out(). | Pure |
+| `ValueRangeValidator` | `slideforge-validate` | `src/value_range.rs` (NEW) | Stage 5 pre-layout validator: checks progress_bar value∈[0,100], weighted_composite weight>0/score∈[0,100], and empty-components list (F-087-P2-001); emits E-VAL-011; accumulates all errors (DI-018). Registered in `slideforge::registry.rs` after LabelCheckValidator. | Pure |
 | LabelCheck `COLOR_CODED_TYPES` verification | `slideforge-validate` | `src/label_check.rs` | Verify consistency (no code change expected if guard is already present; add assertions) | Pure |
 | Plugin registry registration | `slideforge-plugin-api` | `src/slide_types/registry.rs` | Add `r.register(Box::new(StatusSlideType::new()))` etc. in `Default::default()` | Effectful (registry assembly) |
+
+### Content Rendering via Stage-2b Threading (Pass-2 scope — Option T adjudication)
+
+**Rendering mechanism:** Content reaches visible output via Stage-2b THREADING (Option T selected
+in architect pass-2 adjudication). `lay_out()` is geometry-only and is never called by `layout::run`.
+The threading path: `thread_fields_to_blocks` (Stage 2b) → `ContentBlock` entries in `Slide.blocks`
+→ `fill_region_slot_or_append` in `layout::run` → `FrameContent` variants in `LaidOutSlide`.
+
+| Component | Crate | File | Change Type | Pure/Effectful |
+|-----------|-------|------|-------------|---------------|
+| `TextTag::ColorLabel` variant | `slideforge-types` | `src/` (TextTag enum location) | NEW variant. Semantically distinct from `TextTag::Body`. Maps to `RegionRole::Body` in `fill_region_slot_or_append`. Enables exporters to apply label-specific styling. Derive nothing new — additive to existing enum. | Pure |
+| `ContentBlock::ColorBar(ColorBarSpec)` variant + `ColorBarSpec` struct | `slideforge-types` | `src/` (ContentBlock enum location) | NEW variant + NEW struct. `ColorBarSpec { percent: u8 }` carries proportional fill value. Derives `Hash + Eq + Clone + Debug`. | Pure |
+| `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }` variant | `slideforge-layout` | `src/types.rs` | NEW variant. Produced by the ColorBar materialization pass in `layout::run`. Carries computed EMU geometry + brand color. All fields use `Emu(i64)` and `Rgb` (no `f64`). | Pure |
+| `thread_fields_to_blocks` extension | `slideforge-eval` | `src/field_to_block.rs` | MODIFY: add dispatch arms for `"status"`, `"progress_bar"`, `"weighted_composite"`, `"stat_callout"`. For status: threads `label` → `ContentBlock::Text(TextTag::ColorLabel)`. For progress_bar: threads `label` → ColorLabel, `value` → `ContentBlock::ColorBar(ColorBarSpec { percent })`. For weighted_composite: threads `label` → ColorLabel, each component → `ContentBlock::Text(TextTag::Body)` with composed text `"<name>: <score>/100 (wt: <weight>) — <label>"`. For stat_callout: threads `stat_1/label_1/stat_2/label_2/stat_3/label_3` → `TextTag::Body`. | Pure |
+| `fill_region_slot_or_append` — `TextTag::ColorLabel` arm | `slideforge-layout` | `src/layout.rs` | MODIFY: add `TextTag::ColorLabel => RegionRole::Body` mapping. Routes ColorLabel blocks into Body-role slots. Uses `FrameContent::Body` as the content variant (exporter reads the TextTag inside for styling). | Pure |
+| ColorBar materialization pass | `slideforge-layout` | `src/layout.rs` (in `layout::run`, after `fill_region_slot_or_append` loop) | NEW PASS in `layout::run`. For slides containing `ContentBlock::ColorBar`, finds the first `FrameContent::Empty` Generic-role frame and replaces it with `FrameContent::ColorBar { filled_width_emu: Emu(percent * total_width / 100), total_width_emu, color }`. Brand color wired (default #0070C0). At most one ColorBar per slide. | Pure |
+| Exporter `FrameContent::ColorBar` stubs | `slideforge-pptx`, `slideforge-pdf`, `slideforge-html`, `slideforge-docx` | exporter frame-dispatch match arms | NEW ARMS: each exporter must handle `FrameContent::ColorBar`. PPTX: `<p:sp>` solid-fill rectangle. PDF/HTML: filled rectangle. DOCX: percentage text fallback. MUST NOT silently skip — emit `tracing::warn!` at minimum if variant is skipped. | Effectful (I/O) |
+| `ValueRangeValidator` empty-list check (F-087-P2-001) | `slideforge-validate` | `src/value_range.rs` | MODIFY `validate_weighted_composite_components`: add arm for `Value::List([])` → E-VAL-011 with message `"weighted_composite requires at least one component; got empty list."`. Removes the unauthorized deferral comment. | Pure |
 
 **Forbidden Dependencies:**
 - `slideforge-plugin-api::slide_types::status/progress_bar/weighted_composite` MUST NOT
@@ -388,25 +466,33 @@ D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 
 | Context Source | Estimated Tokens |
 |---------------|-----------------|
-| This story spec | ~5,000 |
-| BC-1.17.001 full text | ~2,500 |
-| BC-1.17.002 full text | ~2,500 |
-| BC-1.17.003 full text | ~2,500 |
+| This story spec (v1.4) | ~6,500 |
+| BC-1.17.001 full text (v1.2) | ~2,800 |
+| BC-1.17.002 full text (v1.2) | ~2,800 |
+| BC-1.17.003 full text (v1.2) | ~2,800 |
+| Architect pass-2 adjudication (cycles/STORY-087/) | ~3,500 |
 | wave4-content-threading-assessment §4 (F-G3-HIGH-003 analysis) | ~1,000 |
 | STORY-003 (31 SlideType impl pattern) excerpts | ~2,000 |
 | STORY-017 (LabelCheckValidator) excerpts | ~1,500 |
 | `slideforge-plugin-api/src/slide_types/` existing files (pattern reference) | ~2,000 |
 | `slideforge-syntax/src/keywords.rs` (PHF set, current) | ~1,000 |
 | `slideforge-layout/src/regions.rs` (region map structure) | ~2,000 |
+| `slideforge-layout/src/layout.rs` (fill_region_slot_or_append + layout::run) | ~2,500 |
+| `slideforge-layout/src/types.rs` (FrameContent enum — for new ColorBar variant) | ~1,000 |
+| `slideforge-eval/src/field_to_block.rs` (thread_fields_to_blocks — Stage 2b extension) | ~2,000 |
+| `slideforge-types/src/` (TextTag + ContentBlock enums) | ~1,500 |
 | `slideforge-validate/src/label_check.rs` (COLOR_CODED_TYPES + validate logic) | ~1,500 |
 | `slideforge-validate/src/value_range.rs` (NEW — ValueRangeValidator) | ~1,000 |
 | `slideforge/src/registry.rs` (validator registration site) | ~500 |
-| Unit test files (new) | ~4,500 |
-| E2E fixture files (new) | ~2,000 |
+| Exporter match arm stubs (pptx/pdf/html/docx, FrameContent::ColorBar) | ~2,000 |
+| Unit test files (new — including Stage 2b threading tests §10.1 + layout routing §10.2 + empty-components §10.3) | ~6,000 |
+| E2E / build-level fixture files (new — §10.4 visible-output gate tests) | ~2,500 |
 | Tool outputs (compiler messages, test results) | ~3,000 |
-| **TOTAL ESTIMATED** | **~35,000 tokens** |
+| **TOTAL ESTIMATED** | **~48,900 tokens** |
 
-35,000 tokens is ~17.5% of a 200k context window — well within the 20-30% per-story budget.
+~49,000 tokens is ~24.5% of a 200k context window — within the 20-30% per-story budget ceiling.
+If context pressure is high, drop the architecture adjudication to excerpts (~1,500 tokens saved)
+and load exporter stubs on demand per crate (~1,000 tokens saved per unneeded exporter).
 
 ## Previous Story Intelligence
 
@@ -433,7 +519,10 @@ From STORY-003 and STORY-083/084/085 cascades:
   `regions.rs`. New match arms return `Some(vec![...])` with static `FrameContent::Empty`
   frames (the geometry skeleton). An arm missing here causes `LayoutError::UnknownSlideType`.
   Value-proportional geometry (e.g., progress_bar fill width proportional to `value` field)
-  is computed in `lay_out()`, NOT in `region_frames_for()` (which has no field access).
+  is computed NOT in `region_frames_for()` and NOT in `lay_out()` (architect pass-2
+  adjudication). It is produced by the ColorBar materialization pass added to `layout::run`
+  after the `fill_region_slot_or_append` loop. `lay_out()` is geometry-only and is never
+  called by `layout::run`. See Architecture Mapping (pass-2 scope) for the threading path.
 - Registration: `r.register(Box::new(TypeImpl::new()))` in `registry.rs::Default::default()`.
 - LabelCheck reads `Slide.fields["label"]` directly (Stage 5 pre-layout). It does NOT
   read `Slide.blocks`. Do not add any Stage 2b dependency to LabelCheck — it must work
@@ -478,6 +567,26 @@ From LESSON-13 (STORY-049):
     dead code and constitutes a TD-VSDD-059 paper-fix pattern. Any `lay_out()` method
     that returns `Err(LayoutError::FieldTypeMismatch)` for value-range reasons is
     WRONG and must not be written. `lay_out()` is geometry-only.
+
+3b. **F-087-P2-001 / canonical principle no-MVP rule:** The deferral comment
+    `// Empty-components validation is a separate concern` in `validate_weighted_composite_components`
+    was unauthorized. The empty-list arm (`Value::List([])` → E-VAL-011) MUST be implemented in
+    `ValueRangeValidator` per the architect pass-2 adjudication §7. Exact error message:
+    `"weighted_composite requires at least one component; got empty list."`. Error code: E-VAL-011.
+
+3c. **Option T threading — content rendering mechanism (architect pass-2 adjudication):**
+    Visible content for `status`, `progress_bar`, `weighted_composite`, and `stat_callout` reaches
+    output via Stage-2b threading ONLY. The content path is:
+    1. `thread_fields_to_blocks` (Stage 2b, `slideforge-eval/src/field_to_block.rs`) threads
+       `label` → `ContentBlock::Text(TextTag::ColorLabel)`, `value` → `ContentBlock::ColorBar(ColorBarSpec)`,
+       and component rows → `ContentBlock::Text(TextTag::Body)`.
+    2. `fill_region_slot_or_append` in `layout::run` routes ColorLabel-tagged blocks into
+       Body-role slots using `FrameContent::Body`.
+    3. The ColorBar materialization pass in `layout::run` (after the fill loop) produces
+       `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }` for progress_bar.
+    4. Exporters render `FrameContent::ColorBar` as filled rectangles (MUST NOT silently skip).
+    Options A and L (routing through `lay_out()`) are REJECTED per the adjudication.
+    `lay_out()` in status.rs/progress_bar.rs/weighted_composite.rs is and remains geometry-only.
 
 3. **DI-018 (error accumulation):** For `weighted_composite`, missing labels on N components
    must produce N separate E-A11-002 diagnostics. The validator MUST NOT bail on the first
@@ -539,12 +648,44 @@ crates/slideforge-syntax/src/keywords.rs                         [add "status", 
                                                                    to phf_set! in SLIDE_TYPE_KEYWORDS;
                                                                    update test_bc_1_09_008_is_slide_type_keyword_all_31_types to include severity_cards]
 crates/slideforge-layout/src/regions.rs                          [add 4 match arms to region_frames_for(): "status", "progress_bar", "weighted_composite",
-                                                                   "severity_cards" (already in registry/regions but absent from PHF — verify/add)]
+                                                                   "severity_cards" (already in registry/regions but absent from PHF — verify/add);
+                                                                   ALL frames are FrameContent::Empty (static geometry skeleton only)]
 crates/slideforge-validate/src/lib.rs                            [add pub mod value_range; re-export ValueRangeValidator (F-087-P1-001)]
 crates/slideforge-validate/src/label_check.rs                    [extend validate() to iterate weighted_composite components; add AC-022, AC-024 consistency assertion unit tests]
 crates/slideforge/src/registry.rs                                [register ValueRangeValidator after LabelCheckValidator:
                                                                    builder.register_validator(Box::new(ValueRangeValidator));
                                                                    (F-087-P1-001 — this is the wiring point that makes value-range reachable from build())]
+
+--- Stage-2b threading additions (architect pass-2 adjudication, Option T) ---
+
+crates/slideforge-types/src/[text.rs or lib.rs — TextTag enum file]
+                                                                  [add TextTag::ColorLabel variant with doc comment; update all exhaustive match arms
+                                                                   in slideforge-types that pattern-match TextTag]
+crates/slideforge-types/src/[lib.rs or blocks.rs — ContentBlock enum file]
+                                                                  [add ContentBlock::ColorBar(ColorBarSpec) variant + ColorBarSpec struct
+                                                                   {percent: u8}; derives Hash+Eq+Clone+Debug; update exhaustive match arms]
+crates/slideforge-layout/src/types.rs                            [add FrameContent::ColorBar { filled_width_emu: Emu, total_width_emu: Emu, color: Rgb }
+                                                                   variant; all fields use integer EMU (no f64); derives Hash+Eq+Clone+Debug;
+                                                                   update exhaustive match arms in layout crate]
+crates/slideforge-eval/src/field_to_block.rs                     [extend thread_fields_to_blocks: add dispatch arms for
+                                                                   "status" | "progress_bar" | "weighted_composite" | "stat_callout";
+                                                                   add compose_component_row_text pure private helper;
+                                                                   existing arms and existing types are UNCHANGED (zero blast radius)]
+crates/slideforge-layout/src/layout.rs                           [extend fill_region_slot_or_append: add TextTag::ColorLabel => RegionRole::Body arm
+                                                                   and ContentBlock::Text(TextTag::ColorLabel) handling analogous to TextTag::Body;
+                                                                   add ColorBar materialization pass AFTER fill_region_slot_or_append loop in layout::run;
+                                                                   existing layout::run structure is UNCHANGED — additions only]
+crates/slideforge-pptx/src/[frame dispatch file]                 [add FrameContent::ColorBar arm: render <p:sp> solid-fill rectangle at
+                                                                   filled_width_emu × frame.bbox.height; MUST NOT silently skip]
+crates/slideforge-pdf/src/[frame dispatch file]                  [add FrameContent::ColorBar arm: render filled rectangle; MUST NOT silently skip]
+crates/slideforge-html/src/[frame dispatch file]                 [add FrameContent::ColorBar arm: render filled rectangle; MUST NOT silently skip]
+crates/slideforge-docx/src/[frame dispatch file]                 [add FrameContent::ColorBar arm: render percentage text fallback; MUST NOT silently skip]
+crates/slideforge/tests/e2e/story_087_content_rendering.rs (NEW) [build-level visible-output gate tests per §10.4:
+                                                                   test_AC_002_status_label_visible_in_output,
+                                                                   test_AC_008_progress_bar_label_and_bar_visible,
+                                                                   test_AC_015_weighted_composite_labels_visible;
+                                                                   use #[ignore] + unit-level SID-1 equivalent for weighted_composite
+                                                                   if STORY-088 DSL list parser not yet landed]
 ```
 
 **CRITICAL (F-087-P1-001): lay_out() in progress_bar.rs and weighted_composite.rs is geometry-only.**
@@ -556,20 +697,26 @@ crates/slideforge/src/registry.rs                                [register Value
   geometry-only `lay_out()` returns `Ok` for any field values.
 
 **Region frame skeleton guidance for `region_frames_for()` (static geometry only — no field access):**
-- `status`: two `FrameContent::Empty` frames — a color indicator frame (left/top strip EMUs)
-  and a label+title text frame (main body). Follow the two-frame pattern used by `severity_cards`
-  already in `regions.rs`.
-- `progress_bar`: three `FrameContent::Empty` frames — title frame (top), bar background frame
-  (full-width fixed height), and label text frame (below bar). The bar fill frame with
-  value-proportional width is constructed in `ProgressBarSlideType::lay_out()`, NOT here.
-  `region_frames_for` returns the STATIC skeleton; `lay_out()` adds the dynamic bar fill frame.
-- `weighted_composite`: title frame + aggregate label frame at top; N fixed-height component
-  row frames. Since N is not known at region-skeleton time, return a reasonable fixed set
-  (e.g., title + label + 5 component row slots as Empty frames). `lay_out()` constructs the
-  actual per-component geometry from the resolved `components` field.
+- `status`: two `FrameContent::Empty` frames — a color indicator frame (left/top strip EMUs,
+  `RegionRole::Generic`) and a label+title text frame (main body, `RegionRole::Body`). Follow
+  the two-frame pattern used by `severity_cards` already in `regions.rs`.
+- `progress_bar`: three `FrameContent::Empty` frames — title frame (`RegionRole::Title`),
+  bar background frame (`RegionRole::Generic`, full-width fixed height), and label text frame
+  (`RegionRole::Body`, below bar). The bar fill geometry with value-proportional width is NOT
+  here and NOT in `lay_out()`. It is produced by the ColorBar materialization pass in
+  `layout::run` after `fill_region_slot_or_append`, which replaces the Generic-role frame's
+  `FrameContent::Empty` with `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }`
+  computed from `ColorBarSpec.percent`. `region_frames_for` returns the STATIC skeleton only.
+- `weighted_composite`: title frame (`RegionRole::Title`) + aggregate label frame at top
+  (`RegionRole::Body`) + 5 fixed-height component row slots (`RegionRole::Generic` × 5).
+  Since N is not known at region-skeleton time, return a fixed set of 7 frames total.
+  The Stage-2b threading pass and `fill_region_slot_or_append` fill the Generic slots from
+  the `components` field data; `lay_out()` is geometry-only and does NOT construct dynamic
+  per-component geometry.
 
-All frames returned by `region_frames_for` have `FrameContent::Empty`; `lay_out()` overrides
-them with actual content and may add additional frames.
+All frames returned by `region_frames_for` have `FrameContent::Empty`. Content is injected
+by `fill_region_slot_or_append` and the ColorBar materialization pass in `layout::run`, NOT
+by `lay_out()`.
 
 ## Tasks
 
@@ -629,10 +776,12 @@ them with actual content and may add additional frames.
     `r.register(Box::new(ProgressBarSlideType::new()))`,
     `r.register(Box::new(WeightedCompositeSlideType::new()))`.
   - [ ] T4.6: Create `value_range.rs` in `slideforge-validate` — implement `ValueRangeValidator`
-    (F-087-P1-001): Validator trait impl, validator_id = "value-range".
+    (F-087-P1-001 + F-087-P2-001): Validator trait impl, validator_id = "value-range".
     For `progress_bar`: read `Slide.fields["value"]`; emit E-VAL-011 if absent, wrong type, or outside [0,100].
-    For `weighted_composite`: read `Slide.fields["components"]`; emit E-VAL-011 if list absent or empty;
+    For `weighted_composite`: read `Slide.fields["components"]`; emit E-VAL-011 if list absent OR EMPTY
+    (F-087-P2-001: exact message `"weighted_composite requires at least one component; got empty list."`);
     for each component, check weight>0 and score∈[0,100]; accumulate ALL errors (DI-018).
+    Remove the unauthorized `// Empty-components validation is a separate concern` deferral comment.
     Wire `pub mod value_range;` and re-export `ValueRangeValidator` in `slideforge-validate/src/lib.rs`.
     Register in `slideforge::registry.rs` with `builder.register_validator(Box::new(ValueRangeValidator));`
     after `LabelCheckValidator` registration. Rustdoc all public items.
@@ -643,11 +792,51 @@ them with actual content and may add additional frames.
   - [ ] T5.3: Add consistency assertion unit test (AC-024): assert COLOR_CODED_TYPES and SLIDE_TYPE_KEYWORDS both contain all three types.
   - [ ] T5.4: Run AC-018, AC-022 — must now pass.
 
-- [ ] **T6 — Green pass: all ACs passing**
+- [ ] **T6 — Partial green pass: registration + validation ACs passing**
   - [ ] T6.1: Run `cargo nextest run -p slideforge-plugin-api --no-fail-fast`.
   - [ ] T6.2: Run `cargo nextest run -p slideforge-validate --no-fail-fast`.
   - [ ] T6.3: Run `cargo nextest run -p slideforge --no-fail-fast` (E2E tests with full pipeline).
-  - [ ] T6.4: Run `just check` (full workspace gate: fmt + clippy pedantic + nextest + doctests).
+
+- [ ] **T7 — Stage-2b threading for visible content (architect pass-2 adjudication, Option T)**
+  Read adjudication file `.factory/cycles/STORY-087/architect-pass-2-adjudication.md` §4.1–4.6
+  before starting this task block.
+  - [ ] T7.1: Add `TextTag::ColorLabel` variant to `slideforge-types` (TextTag enum). Add doc comment.
+    Update ALL exhaustive match arms in slideforge-types and any other crate that matches on TextTag
+    exhaustively (TD-VSDD-060 sibling-site sweep: grep `TextTag` across workspace before committing).
+  - [ ] T7.2: Add `ContentBlock::ColorBar(ColorBarSpec)` variant + `ColorBarSpec { percent: u8 }` struct
+    to `slideforge-types`. Derive `Hash + Eq + Clone + Debug`. Update exhaustive match arms (TD-VSDD-060).
+  - [ ] T7.3: Add `FrameContent::ColorBar { filled_width_emu: Emu, total_width_emu: Emu, color: Rgb }` variant
+    to `slideforge-layout/src/types.rs`. Integer EMU only (no f64). Update exhaustive match arms.
+  - [ ] T7.4: Extend `thread_fields_to_blocks` in `slideforge-eval/src/field_to_block.rs`:
+    add dispatch arms for `"status" | "progress_bar" | "weighted_composite" | "stat_callout"`.
+    Add `compose_component_row_text` pure private helper (format: `"<name>: <score>/100 (wt: <weight>) — <label>"`).
+    Existing arms for other slide types MUST remain unchanged.
+  - [ ] T7.5: Add `TextTag::ColorLabel => RegionRole::Body` arm in `fill_region_slot_or_append` in
+    `slideforge-layout/src/layout.rs`. Add `ContentBlock::Text(TextTag::ColorLabel)` handling
+    in the `layout::run` ContentBlock dispatch (analogous to TextTag::Body path).
+  - [ ] T7.6: Add ColorBar materialization pass AFTER the `fill_region_slot_or_append` loop in
+    `layout::run`. The pass finds the first Generic-role Empty frame in slides with
+    `ContentBlock::ColorBar` and replaces it with `FrameContent::ColorBar { filled_width_emu, total_width_emu, color }`.
+    Brand primary color sourced from brand config; fallback #0070C0 (Rgb { r: 0, g: 112, b: 192 }).
+  - [ ] T7.7: Add `FrameContent::ColorBar` arms to exporter frame-dispatch in slideforge-pptx,
+    slideforge-pdf, slideforge-html, slideforge-docx. Each arm MUST NOT silently skip —
+    at minimum emit `tracing::warn!` and fallback; preferred: real filled-rectangle render
+    per adjudication §6.
+  - [ ] T7.8: Write Stage-2b threading unit tests (§10.1, 10 tests) in `slideforge-eval/src/field_to_block.rs`.
+    Write layout routing unit tests (§10.2, 8 tests) in `slideforge-layout`.
+    Write empty-components test `test_BC_1_17_003_empty_components_is_error` (§10.3) in `slideforge-validate/src/value_range.rs`.
+    Write build-level visible-output gate tests (§10.4, 3 tests) in `crates/slideforge/tests/e2e/story_087_content_rendering.rs`.
+    For weighted_composite: if STORY-088 DSL list-of-map parser is not yet landed, use
+    `#[ignore]` + SID-1 unit-level equivalent (pre-populated `Slide.fields["components"]`).
+  - [ ] T7.9: Run `cargo nextest run -p slideforge-eval --no-fail-fast` — Stage 2b threading tests green.
+  - [ ] T7.10: Run `cargo nextest run -p slideforge-layout --no-fail-fast` — layout routing tests green.
+  - [ ] T7.11: Run AC-002, AC-008, AC-015 build-level visible-output tests — all green.
+
+- [ ] **T8 — Final green pass: all ACs and workspace gate**
+  - [ ] T8.1: Run `cargo nextest run --workspace --no-fail-fast`.
+  - [ ] T8.2: Run `just check` (full workspace gate: fmt + clippy pedantic + nextest + doctests).
+  - [ ] T8.3: Verify TD-VSDD-060 sibling-site sweep complete: grep `TextTag` and `ContentBlock` and
+    `FrameContent` match arms across all crates; no exhaustive arm is missing the new variants.
 
 ## Edge Cases
 
