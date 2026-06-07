@@ -1078,3 +1078,153 @@ fn test_BC_4_01_004_ec007_diagram_decorative_variant_descr_empty() {
          Found descr values: {descr_values:?}"
     );
 }
+
+// ─── SEC-002: AltText::Unspecified must emit tracing::warn! (not silently decorative) ──
+
+/// Build a `LaidOutSlide` with one `FrameContent::Image { alt: AltText::Unspecified }` frame.
+///
+/// SEC-002: `AltText::Unspecified` is a pipeline placeholder meaning the author supplied NO
+/// alt text. Unlike `AltText::Decorative` (an intentional author opt-out), `Unspecified`
+/// must emit a `tracing::warn!` when the alt-decision function collapses it to the decorative
+/// path — otherwise it silently defeats WCAG alt-text intent with zero log trace.
+fn make_slide_with_unspecified_alt(index: usize) -> LaidOutSlide {
+    use slideforge_types::AltText;
+    LaidOutSlide {
+        source_index: index,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Image {
+                alt: AltText::Unspecified,
+            },
+            text_flow: None,
+            region_role: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    }
+}
+
+/// SEC-002 TEST 1 (RED GATE): `AltText::Unspecified` collapsed to decorative MUST emit a
+/// `tracing::warn!`.
+///
+/// ## What this tests
+///
+/// `AltTextEmbedder::decisions_for_slide` currently has a combined match arm:
+/// ```
+///     AltText::Decorative | AltText::Unspecified => Some(AltDecision::Decorative)
+/// ```
+/// `Decorative` is a legitimate author opt-out (correct, stays silent).
+/// `Unspecified` is a pipeline placeholder — the author supplied NO alt text.
+/// When `Unspecified` reaches the exporter in warn-only mode, collapsing it to
+/// `Decorative` silently emits `descr=""` with zero observability, defeating WCAG intent.
+///
+/// ## Fix (implementer's job, NOT here)
+///
+/// Split the arm so `Unspecified` still maps to `AltDecision::Decorative` BUT
+/// emits a `tracing::warn!` containing "unspecified alt" identifying the frame.
+///
+/// ## Red Gate status
+///
+/// This test FAILS against the current code because the production function emits
+/// NO warn for `Unspecified`. It will pass once the implementer adds the warn.
+///
+/// ## Log substring
+///
+/// The implementer MUST include the substring `"unspecified alt"` in the warn message.
+/// Example: `tracing::warn!(frame_idx = frame_idx, "unspecified alt emitted as decorative")`
+#[tracing_test::traced_test]
+#[test]
+fn test_SEC_002_unspecified_alt_decision_emits_warn() {
+    let slide = make_slide_with_unspecified_alt(0);
+
+    // Exercise the production alt-decision code path directly.
+    // This is the function that currently collapses Unspecified → Decorative silently.
+    let decisions = crate::a11y::AltTextEmbedder::decisions_for_slide(&slide)
+        .expect("decisions_for_slide must not fail");
+
+    // Precondition: a decision was made (the frame was not skipped).
+    assert_eq!(
+        decisions.len(),
+        1,
+        "SEC-002 precondition: exactly one AltDecision must be returned for an \
+         Image {{ alt: AltText::Unspecified }} frame; got {} decisions",
+        decisions.len()
+    );
+
+    // Primary assertion (RED GATE): a warn-level event containing "unspecified alt"
+    // must have been emitted during the decision computation.
+    //
+    // Currently FAILS because the production code emits no warn for Unspecified.
+    // The implementer adds:
+    //   tracing::warn!(frame_idx = frame_idx, "unspecified alt emitted as decorative");
+    assert!(
+        logs_contain("unspecified alt"),
+        "SEC-002: AltTextEmbedder::decisions_for_slide must emit a tracing::warn! \
+         containing \"unspecified alt\" when it collapses AltText::Unspecified to \
+         AltDecision::Decorative. No such log was captured. \
+         This means a pipeline gap (missing author alt text) silently produces \
+         decorative output with zero observability, defeating WCAG intent."
+    );
+}
+
+/// SEC-002 TEST 2 (GUARD): `AltText::Decorative` MUST NOT emit the unspecified-alt warn.
+///
+/// ## What this tests
+///
+/// After the SEC-002 fix, the combined arm is split:
+/// - `AltText::Decorative` → `AltDecision::Decorative` (silent — intentional author opt-out)
+/// - `AltText::Unspecified` → `AltDecision::Decorative` + `tracing::warn!`
+///
+/// This guard confirms the warn fires ONLY for `Unspecified`, not for every decorative
+/// frame. Burning a false-positive warn on legitimate `decorative: true` opt-outs
+/// would produce log noise and break monitoring.
+///
+/// ## Current status
+///
+/// This test is expected to PASS against the current code (no warn is emitted for
+/// Decorative since no warn is emitted at all pre-fix). Post-fix it must still PASS.
+/// It is included to document the intended split and prevent regression.
+#[tracing_test::traced_test]
+#[test]
+fn test_SEC_002_decorative_alt_decision_does_not_emit_unspecified_warn() {
+    use slideforge_types::AltText;
+
+    // A frame with explicit AltText::Decorative (author opt-out — `decorative: true`).
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Image {
+                alt: AltText::Decorative,
+            },
+            text_flow: None,
+            region_role: None,
+        }],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let decisions = crate::a11y::AltTextEmbedder::decisions_for_slide(&slide)
+        .expect("decisions_for_slide must not fail");
+
+    // Precondition: a decision was made.
+    assert_eq!(
+        decisions.len(),
+        1,
+        "guard precondition: exactly one AltDecision must be returned for an \
+         Image {{ alt: AltText::Decorative }} frame; got {} decisions",
+        decisions.len()
+    );
+
+    // Guard assertion: the unspecified-alt warn must NOT fire for a legitimate Decorative frame.
+    assert!(
+        !logs_contain("unspecified alt"),
+        "SEC-002 guard: AltTextEmbedder::decisions_for_slide must NOT emit the \
+         \"unspecified alt\" warn when AltText::Decorative is used — that is a \
+         legitimate author opt-out. The warn must only fire for AltText::Unspecified."
+    );
+}
