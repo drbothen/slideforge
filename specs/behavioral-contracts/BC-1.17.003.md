@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.0"
+version: "1.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): PC3b added; Inv 6/7 amended to cite ValueRangeValidator Stage 5 + E-VAL-011 + DI-018 accumulation; Inv-9 added; enforcement point moved from lay_out() to ValueRangeValidator."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -60,6 +60,9 @@ are mandatory. `LabelCheck` enforces this at compile time.
    - `score` (required, number in [0, 100]): the component's raw score.
    - `label` (required, non-empty string): the per-component textual label co-encoding
      the score (e.g., `label "Good (85/100)"`).
+3b. Component `weight` and `score` range validation is performed by `ValueRangeValidator`
+    at Stage 5 (pre-layout). Error code: E-VAL-011. Severity: `DiagnosticSeverity::Error`.
+    `SlideType::lay_out()` is geometry-only and does NOT perform weight/score range validation.
 4. A missing per-component `label` on ANY component emits `E-A11-002` for that
    component. The error message identifies the component by its `name` field:
    `Missing label on color-coded element 'weighted_composite.component' '<component-name>' at <file>:<line>:<col>. Add label "..." to this component.`
@@ -88,10 +91,16 @@ are mandatory. `LabelCheck` enforces this at compile time.
    component label. (DI-018)
 6. **`weight` must be positive.** A zero or negative weight is a compile error. Weights
    do not need to sum to 1.0 or 100 — the rendering normalizes them automatically.
+   Enforced by `ValueRangeValidator` at Stage 5. Error code: E-VAL-011.
 7. **`score` must be in [0, 100] inclusive.** Out-of-range values are a compile error
-   with source span.
+   with source span. Enforced by `ValueRangeValidator` at Stage 5. Error code: E-VAL-011.
+   Error accumulation: all components' errors are collected before returning (DI-018).
 8. **LabelCheck is a Stage 5 (pre-layout) check.** It reads `Slide.fields` directly.
    It does not require or interact with Stage 2b.
+9. **`ValueRangeValidator` is registered at Stage 5. No weight/score range validation
+   occurs in `SlideType::lay_out()`.** The `lay_out()` method in `weighted_composite.rs`
+   is geometry-only after architect adjudication F-087-P1-001. Tests calling `lay_out()`
+   directly do NOT exercise the value-range enforcement.
 
 ## Edge Cases
 

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.0"
+version: "1.1"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-14
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["2026-06-06 v1.1 (architect adjudication F-087-P1-001): enforcement point moved from lay_out() to ValueRangeValidator Stage 5; error code E-VAL-011 allocated."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -55,6 +55,8 @@ strict mode.
    - If absent: compile error (required-field error).
    - If present but outside [0, 100]: compile error with message:
      `progress_bar value must be between 0 and 100; got <value>.`
+   - This check is performed by `ValueRangeValidator` at Stage 5 (pre-layout), not by
+     `SlideType::lay_out()`. Error code: E-VAL-011.
 4. When `title`, `label`, and `value` are all valid:
    - The slide renders a visual progress bar filled to `value`% of its total width.
    - The `label` text is rendered visibly, providing the accessible text co-encoding
@@ -64,9 +66,11 @@ strict mode.
    - HTML: label text in DOM.
 5. `LabelCheck.validate()` (Stage 5) reads `Slide.fields["label"]` directly.
    LabelCheck does NOT require Stage 2b to have run.
-6. The `value` field validation is performed either by the `SlideType` trait implementation
-   (at type-registration time) or by a dedicated pre-layout validator. The exact
-   enforcement point is the SlideType trait's `validate_fields(&Slide.fields)` method.
+6. The `value` field validation is performed by `ValueRangeValidator` — a `Validator` plugin
+   registered at Stage 5 (pre-layout) in `slideforge::registry::register_bundled_plugins`. It
+   reads `Slide.fields["value"]` directly, before layout. Error code: E-VAL-011. Severity:
+   `DiagnosticSeverity::Error` (strict-mode fatal). `SlideType::lay_out()` is geometry-only
+   and does NOT perform value-range validation.
 
 ## Invariants
 
@@ -84,6 +88,9 @@ strict mode.
 5. **E-A11-002 for missing label.** Same error code and severity as BC-1.17.001.
 6. **The keyword `"progress_bar"` must be registered before the pipeline runs.**
    An unregistered keyword causes `LayoutError::UnknownSlideType` before label validation.
+7. **`ValueRangeValidator` is registered at Stage 5. No validation of `value` occurs in
+   `SlideType::lay_out()`.** Tests calling `lay_out()` directly do NOT exercise the
+   value-range enforcement; only `slideforge::build()` or `build_inner()`-level tests do.
 
 ## Edge Cases
 

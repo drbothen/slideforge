@@ -9,9 +9,12 @@ points: 13
 priority: P1
 tdd_mode: strict
 status: in-progress
-spec_version: "1.2"
+spec_version: "1.3"
 last_updated: "2026-06-06"
 changelog:
+  - version: "1.3"
+    date: "2026-06-06"
+    note: "F-087-P1-001 architect adjudication: value-range validation moves from SlideType::lay_out() to dedicated ValueRangeValidator (Stage 5, slideforge-validate/src/value_range.rs), wired after LabelCheckValidator in slideforge::registry.rs; lay_out() in progress_bar.rs and weighted_composite.rs is now geometry-only; ACs re-targeted to BuildError::ValidationFailed with E-VAL-011; File Structure Requirements updated; Tasks T4.2/T4.3 updated."
   - version: "1.2"
     date: "2026-06-06"
     note: "Wave 5→4 pull-in (human-authorized) to close F-G3-HIGH-003 within Wave 4."
@@ -41,7 +44,9 @@ Key corrections applied:
   `id()`, `required_fields()`, `optional_fields()`, `layout_name()`, `lay_out()`.
   There is NO `keyword()`, `region_spec()`, or `validate_fields()` method on the trait.
 - **Custom value-range validation** (progress_bar [0,100]; weighted_composite weight>0/score[0,100])
-  goes in `lay_out()` returning `Err(LayoutError::FieldTypeMismatch)`, NOT in a trait method.
+  is performed by `ValueRangeValidator` at Stage 5 (pre-layout) in `slideforge-validate`, NOT in
+  `lay_out()`. `lay_out()` in `progress_bar.rs` and `weighted_composite.rs` is geometry-only
+  (F-087-P1-001: value-range in lay_out() is dead code — lay_out() is never called by build_inner).
 - **Region registration function** is `region_frames_for(keyword, w, h) -> Option<Vec<Frame>>`
   in `crates/slideforge-layout/src/regions.rs`, NOT `slide_type_regions()` / `RegionSpec`.
 - **`severity_cards` keyword gap:** present in `COLOR_CODED_TYPES` and `regions.rs` but
@@ -132,9 +137,10 @@ keyword set (D4 gap). The AC-024 consistency assertion will fail without this fi
 **Combined story justification:** The three types share the same implementation pattern.
 Splitting into three stories would require three identical scaffolding steps. The 13-point
 estimate reflects non-trivial scope: `weighted_composite` adds per-component label iteration
-to LabelCheck, `progress_bar` adds value range validation (0–100) in `lay_out()` via
-`LayoutError::FieldTypeMismatch`, and all three require region frame skeletons and
-`lay_out()` implementations.
+to LabelCheck, `progress_bar` and `weighted_composite` value-range validation (0–100;
+weight>0/score[0,100]) is enforced by the new `ValueRangeValidator` at Stage 5 via
+`E-VAL-011` (F-087-P1-001: moved from lay_out() which is never called by build_inner),
+and all three require region frame skeletons and geometry-only `lay_out()` implementations.
 
 ## Narrative
 
@@ -238,16 +244,22 @@ A fixture with `slide progress_bar: title "Done" label "100% complete" value 100
 returns `Ok(BuildOutput)`. The value 100 is within the valid range.
 (traces to BC-1.17.002 EC-006 — value 100 is valid boundary)
 
-#### AC-012 — progress_bar value=101 → compile error (out of range)
-A fixture with `slide progress_bar: title "Over" label "Done" value 101` returns
-a compile error with message indicating "value must be between 0 and 100; got 101".
-(traces to BC-1.17.002 postcondition 3 — value outside [0,100] is compile error;
+#### AC-012 — progress_bar value=101 → BuildError::ValidationFailed with E-VAL-011
+A call to `slideforge::build()` with a fixture containing `slide progress_bar: title "Over" label "Done" value 101`
+returns `Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
+`Diagnostic { code: "E-VAL-011", .. }` with message `"progress_bar value must be between 0 and 100; got 101."`.
+The error is emitted by `ValueRangeValidator` at Stage 5 (pre-layout). No output bytes are produced.
+**NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
+(traces to BC-1.17.002 postcondition 3 — value outside [0,100] is compile error, enforced by ValueRangeValidator at Stage 5;
 BC-1.17.002 EC-003)
 
-#### AC-013 — progress_bar value=-1 → compile error (under range)
-A fixture with `slide progress_bar: title "Negative" label "Done" value -1` returns
-a compile error with message indicating "value must be between 0 and 100; got -1".
-(traces to BC-1.17.002 EC-004 — negative value is out of range)
+#### AC-013 — progress_bar value=-1 → BuildError::ValidationFailed with E-VAL-011
+A call to `slideforge::build()` with a fixture containing `slide progress_bar: title "Negative" label "Done" value -1`
+returns `Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
+`Diagnostic { code: "E-VAL-011", .. }` with message `"progress_bar value must be between 0 and 100; got -1."`.
+The error is emitted by `ValueRangeValidator` at Stage 5.
+**NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
+(traces to BC-1.17.002 EC-004 — negative value is out of range, enforced by ValueRangeValidator at Stage 5)
 
 ### weighted_composite Slide Type
 
@@ -293,22 +305,31 @@ top-level missing label, one per component. Error accumulation does not bail on 
 BC-1.17.003 invariant 5 — error accumulation is total across all components;
 BC-1.17.003 EC-003)
 
-#### AC-019 — weighted_composite empty components list → compile error
-A fixture with `components: []` (empty list) returns a compile error indicating
-"weighted_composite requires at least one component".
-(traces to BC-1.17.003 postcondition 3 — components list required and non-empty;
+#### AC-019 — weighted_composite empty components list → BuildError::ValidationFailed with E-VAL-011
+A call to `slideforge::build()` with a fixture containing `components: []` (empty list) returns
+`Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
+`Diagnostic { code: "E-VAL-011", .. }` with message indicating "weighted_composite requires at least one component".
+The error is emitted by `ValueRangeValidator` at Stage 5.
+**NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
+(traces to BC-1.17.003 postcondition 3 — components list required and non-empty, enforced by ValueRangeValidator at Stage 5;
 BC-1.17.003 EC-004)
 
-#### AC-020 — weighted_composite component score=101 → compile error
-A fixture with a component having `score 101` returns a compile error indicating
-"score out of range [0, 100]".
-(traces to BC-1.17.003 EC-007 — score out of range;
+#### AC-020 — weighted_composite component score=101 → BuildError::ValidationFailed with E-VAL-011
+A call to `slideforge::build()` with a fixture containing a component with `score 101` returns
+`Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
+`Diagnostic { code: "E-VAL-011", .. }` with message `"weighted_composite components[<idx>].score must be between 0 and 100; got 101."`.
+The error is emitted by `ValueRangeValidator` at Stage 5.
+**NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
+(traces to BC-1.17.003 EC-007 — score out of range, enforced by ValueRangeValidator at Stage 5;
 BC-1.17.003 invariant 7 — score bounded 0-100)
 
-#### AC-021 — weighted_composite component weight=0 → compile error
-A fixture with a component having `weight 0` returns a compile error indicating
-"weight must be positive".
-(traces to BC-1.17.003 EC-006 — zero weight;
+#### AC-021 — weighted_composite component weight=0 → BuildError::ValidationFailed with E-VAL-011
+A call to `slideforge::build()` with a fixture containing a component with `weight 0` returns
+`Err(BuildError::ValidationFailed)` where the diagnostics list contains at least one
+`Diagnostic { code: "E-VAL-011", .. }` with message `"weighted_composite components[<idx>].weight must be positive; got 0."`.
+The error is emitted by `ValueRangeValidator` at Stage 5.
+**NOTE (F-087-P1-001):** Enforcement is NOT in `lay_out()` — it is in the pipeline-wired `ValueRangeValidator`.
+(traces to BC-1.17.003 EC-006 — zero weight, enforced by ValueRangeValidator at Stage 5;
 BC-1.17.003 invariant 6 — weight must be positive)
 
 #### AC-022 — LabelCheck for weighted_composite iterates component sub-fields without Stage 2b
@@ -350,7 +371,8 @@ D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 | `slide_types/mod.rs` export | `slideforge-plugin-api` | `src/slide_types/mod.rs` | Add 3 pub mod + re-exports | Pure |
 | PHF keyword registration | `slideforge-syntax` | `src/keywords.rs` | Add 3 keywords to `SLIDE_TYPE_KEYWORDS` phf_set! | Pure |
 | Region frame skeletons | `slideforge-layout` | `src/regions.rs` | Add 4 match arms to `region_frames_for()`: `"status"`, `"progress_bar"`, `"weighted_composite"`, and `"severity_cards"` (existing keyword gap, D4) | Pure |
-| `lay_out()` implementations | `slideforge-plugin-api` | `src/slide_types/status.rs`, `progress_bar.rs`, `weighted_composite.rs` | Value-range validation (progress_bar [0,100]; weighted_composite weight>0/score[0,100]) in `lay_out()` → `Err(LayoutError::FieldTypeMismatch)` | Pure |
+| `lay_out()` implementations | `slideforge-plugin-api` | `src/slide_types/status.rs`, `progress_bar.rs`, `weighted_composite.rs` | Geometry-only frame production. Value-range validation is NOT here (F-087-P1-001: moved to ValueRangeValidator). `lay_out()` returns frame skeleton; does NOT return FieldTypeMismatch for value-range violations. | Pure |
+| `ValueRangeValidator` | `slideforge-validate` | `src/value_range.rs` (NEW) | Stage 5 pre-layout validator: checks progress_bar value∈[0,100] and weighted_composite weight>0/score∈[0,100]; emits E-VAL-011; accumulates all errors (DI-018). Registered in `slideforge::registry.rs` after LabelCheckValidator. | Pure |
 | LabelCheck `COLOR_CODED_TYPES` verification | `slideforge-validate` | `src/label_check.rs` | Verify consistency (no code change expected if guard is already present; add assertions) | Pure |
 | Plugin registry registration | `slideforge-plugin-api` | `src/slide_types/registry.rs` | Add `r.register(Box::new(StatusSlideType::new()))` etc. in `Default::default()` | Effectful (registry assembly) |
 
@@ -377,12 +399,14 @@ D4 gap resolution — severity_cards added to SLIDE_TYPE_KEYWORDS)
 | `slideforge-syntax/src/keywords.rs` (PHF set, current) | ~1,000 |
 | `slideforge-layout/src/regions.rs` (region map structure) | ~2,000 |
 | `slideforge-validate/src/label_check.rs` (COLOR_CODED_TYPES + validate logic) | ~1,500 |
-| Unit test files (new) | ~3,500 |
+| `slideforge-validate/src/value_range.rs` (NEW — ValueRangeValidator) | ~1,000 |
+| `slideforge/src/registry.rs` (validator registration site) | ~500 |
+| Unit test files (new) | ~4,500 |
 | E2E fixture files (new) | ~2,000 |
 | Tool outputs (compiler messages, test results) | ~3,000 |
-| **TOTAL ESTIMATED** | **~32,000 tokens** |
+| **TOTAL ESTIMATED** | **~35,000 tokens** |
 
-32,000 tokens is ~16% of a 200k context window — well within the 20-30% per-story budget.
+35,000 tokens is ~17.5% of a 200k context window — well within the 20-30% per-story budget.
 
 ## Previous Story Intelligence
 
@@ -394,8 +418,11 @@ From STORY-003 and STORY-083/084/085 cascades:
   `layout_name() -> &'static str`, `lay_out(&self, slide, brand, canvas) -> Result<LaidOutSlide, LayoutError>`.
   There is NO `keyword()`, NO `region_spec()`, NO `validate_fields()` trait method.
   Template: `crates/slideforge-plugin-api/src/slide_types/stat_callout.rs`.
-- Custom validation (value ranges, non-empty checks) goes in `lay_out()` returning
-  `Err(LayoutError::FieldTypeMismatch)` or `Err(LayoutError::MissingRequiredField)`.
+- Custom value-range validation (progress_bar [0,100]; weighted_composite weight>0/score[0,100])
+  goes in `ValueRangeValidator` (Stage 5, `slideforge-validate/src/value_range.rs`), NOT in `lay_out()`.
+  **F-087-P1-001 finding:** `lay_out()` is never called by `build_inner` — it is only called directly
+  in unit tests, making any validation there dead code (TD-VSDD-059 paper-fix pattern).
+  `lay_out()` in `progress_bar.rs` and `weighted_composite.rs` is geometry-only.
   The `validate_fields` FREE FUNCTION in `registry.rs` checks required/optional field
   presence only — not value ranges.
 - PHF keyword registration uses the `phf_set!` macro in `keywords.rs`. Forgetting to
@@ -444,6 +471,14 @@ From LESSON-13 (STORY-049):
    field that resolves during eval. Implementing LabelCheck to depend on `Slide.blocks`
    populated by Stage 2b is an architectural violation.
 
+3a. **F-087-P1-001 / ADR-006 / TD-VSDD-059:** Value-range validation for `progress_bar`
+    and `weighted_composite` MUST live in `ValueRangeValidator` (Stage 5,
+    `slideforge-validate/src/value_range.rs`), NOT in `SlideType::lay_out()`.
+    `build_inner` does not call `lay_out()` — validation in `lay_out()` is unreachable
+    dead code and constitutes a TD-VSDD-059 paper-fix pattern. Any `lay_out()` method
+    that returns `Err(LayoutError::FieldTypeMismatch)` for value-range reasons is
+    WRONG and must not be written. `lay_out()` is geometry-only.
+
 3. **DI-018 (error accumulation):** For `weighted_composite`, missing labels on N components
    must produce N separate E-A11-002 diagnostics. The validator MUST NOT bail on the first
    missing component label. Use the accumulation pattern established in `slideforge-validate`
@@ -480,9 +515,16 @@ No new external dependencies required. All dependencies are already in the works
 
 Files to CREATE:
 ```
-crates/slideforge-plugin-api/src/slide_types/status.rs           [StatusSlideType impl]
-crates/slideforge-plugin-api/src/slide_types/progress_bar.rs     [ProgressBarSlideType impl]
-crates/slideforge-plugin-api/src/slide_types/weighted_composite.rs [WeightedCompositeSlideType impl + component validation]
+crates/slideforge-plugin-api/src/slide_types/status.rs           [StatusSlideType impl — geometry-only lay_out()]
+crates/slideforge-plugin-api/src/slide_types/progress_bar.rs     [ProgressBarSlideType impl — geometry-only lay_out();
+                                                                   NO value-range validation here (F-087-P1-001)]
+crates/slideforge-plugin-api/src/slide_types/weighted_composite.rs [WeightedCompositeSlideType impl — geometry-only lay_out();
+                                                                     NO weight/score/non-empty validation here (F-087-P1-001)]
+crates/slideforge-validate/src/value_range.rs                    [ValueRangeValidator impl — Stage 5 pre-layout validator;
+                                                                   checks progress_bar value∈[0,100] and
+                                                                   weighted_composite weight>0/score∈[0,100] and non-empty components;
+                                                                   emits E-VAL-011; accumulates all errors (DI-018);
+                                                                   validator_id = "value-range"]
 crates/slideforge-plugin-api/tests/color_coded_slide_types.rs    [integration tests for AC-001..AC-024]
 ```
 
@@ -498,8 +540,20 @@ crates/slideforge-syntax/src/keywords.rs                         [add "status", 
                                                                    update test_bc_1_09_008_is_slide_type_keyword_all_31_types to include severity_cards]
 crates/slideforge-layout/src/regions.rs                          [add 4 match arms to region_frames_for(): "status", "progress_bar", "weighted_composite",
                                                                    "severity_cards" (already in registry/regions but absent from PHF — verify/add)]
+crates/slideforge-validate/src/lib.rs                            [add pub mod value_range; re-export ValueRangeValidator (F-087-P1-001)]
 crates/slideforge-validate/src/label_check.rs                    [extend validate() to iterate weighted_composite components; add AC-022, AC-024 consistency assertion unit tests]
+crates/slideforge/src/registry.rs                                [register ValueRangeValidator after LabelCheckValidator:
+                                                                   builder.register_validator(Box::new(ValueRangeValidator));
+                                                                   (F-087-P1-001 — this is the wiring point that makes value-range reachable from build())]
 ```
+
+**CRITICAL (F-087-P1-001): lay_out() in progress_bar.rs and weighted_composite.rs is geometry-only.**
+- Do NOT add value-range checks (`!(0..=100).contains(&value_int)` etc.) in `lay_out()`.
+- `lay_out()` in these modules MUST NOT return `Err(LayoutError::FieldTypeMismatch)` for
+  value-range violations — that was dead code because `build_inner` never calls `lay_out()`.
+- All value-range enforcement lives in `ValueRangeValidator` at Stage 5.
+- The `lay_out()` test in `test_all_31_types_lay_out_returns_ok` MUST still pass — a
+  geometry-only `lay_out()` returns `Ok` for any field values.
 
 **Region frame skeleton guidance for `region_frames_for()` (static geometry only — no field access):**
 - `status`: two `FrameContent::Empty` frames — a color indicator frame (left/top strip EMUs)
@@ -557,21 +611,31 @@ them with actual content and may add additional frames.
     Value-range validation is not needed for status (label is a string). Rustdoc all public items.
   - [ ] T4.2: Create `progress_bar.rs` — implement `ProgressBarSlideType`:
     `id()` returns `"progress_bar"`, `required_fields()` includes "title", "label", "value".
-    `lay_out()` extracts `value` from `slide.fields`; returns
-    `Err(LayoutError::FieldTypeMismatch { field: "value", expected_type: "integer 0–100", actual_type: format!("{n} — out of range"), .. })` when value is outside [0,100].
-    Bar fill width = `bar_bg_width * value / 100` computed here and emitted as a Shape frame.
+    `lay_out()` is GEOMETRY-ONLY (F-087-P1-001): extract `value` from `slide.fields` to compute
+    bar fill width = `bar_bg_width * value / 100` and emit as a Shape frame. Do NOT validate
+    value range in `lay_out()` — range enforcement is in `ValueRangeValidator` at Stage 5.
+    `lay_out()` must return `Ok(LaidOutSlide { .. })` even when `value` is absent or invalid
+    (ValueRangeValidator fires before lay_out() is reached in a correct pipeline).
     Rustdoc all public items.
   - [ ] T4.3: Create `weighted_composite.rs` — implement `WeightedCompositeSlideType`:
     `id()` returns `"weighted_composite"`, `required_fields()` includes "title", "label", "components".
-    `lay_out()` extracts `components` as `Value::List` of `Value::Map` entries; iterates and validates:
-    each component must have `weight > 0` (else `LayoutError::FieldTypeMismatch`) and
-    `score ∈ [0,100]` (else `LayoutError::FieldTypeMismatch`). Accumulate ALL errors via
-    `Vec<LayoutError>` before returning. Rustdoc all public items.
+    `lay_out()` is GEOMETRY-ONLY (F-087-P1-001): extract `components` as `Value::List` of `Value::Map`
+    entries and construct per-component row frames (static 7-frame skeleton). Do NOT validate
+    weight positivity, score range, or non-empty check in `lay_out()` — all range enforcement is
+    in `ValueRangeValidator` at Stage 5. Rustdoc all public items.
   - [ ] T4.4: Export all three from `slide_types/mod.rs`.
   - [ ] T4.5: Register all three in `registry.rs::Default::default()`:
     `r.register(Box::new(StatusSlideType::new()))`,
     `r.register(Box::new(ProgressBarSlideType::new()))`,
     `r.register(Box::new(WeightedCompositeSlideType::new()))`.
+  - [ ] T4.6: Create `value_range.rs` in `slideforge-validate` — implement `ValueRangeValidator`
+    (F-087-P1-001): Validator trait impl, validator_id = "value-range".
+    For `progress_bar`: read `Slide.fields["value"]`; emit E-VAL-011 if absent, wrong type, or outside [0,100].
+    For `weighted_composite`: read `Slide.fields["components"]`; emit E-VAL-011 if list absent or empty;
+    for each component, check weight>0 and score∈[0,100]; accumulate ALL errors (DI-018).
+    Wire `pub mod value_range;` and re-export `ValueRangeValidator` in `slideforge-validate/src/lib.rs`.
+    Register in `slideforge::registry.rs` with `builder.register_validator(Box::new(ValueRangeValidator));`
+    after `LabelCheckValidator` registration. Rustdoc all public items.
 
 - [ ] **T5 — LabelCheck extension for weighted_composite component iteration**
   - [ ] T5.1: In `label_check.rs`, extend `validate()` to handle `slide_type == "weighted_composite"`: iterate `Slide.fields["components"]` (a resolved `Value::List` of `Value::Map` entries) and check each component's `"label"` sub-field. Emit E-A11-002 per component with missing label.
