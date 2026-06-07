@@ -1,15 +1,16 @@
 //! Image path traversal validator (SEC-001 / BC-1.16.001 EC-012 / CWE-22).
 //!
-//! [`ImagePathValidator`] rejects [`ImageSpec`] path values that escape the
-//! source root directory. Three classes of traversal are detected:
+//! [`ImagePathValidator`] rejects [`slideforge_types::specs::ImageSpec`] path
+//! values that escape the source root directory. Three classes of traversal are
+//! detected:
 //!
 //! 1. **Path-traversal segment** — path contains `..` as a segment.
 //! 2. **Absolute path** — path starts with `/` or `\`.
 //! 3. **Windows drive letter** — path starts with a drive letter prefix (e.g. `C:\`).
 //!
 //! Any violation produces exactly one [`E_VAL_012`] diagnostic with
-//! [`DiagnosticSeverity::Error`] severity, carrying the [`ImageSpec`]'s
-//! `source_span` as the diagnostic span.
+//! [`slideforge_plugin_api::DiagnosticSeverity::Error`] severity, carrying the
+//! `ImageSpec`'s `source_span` as the diagnostic span.
 //!
 //! ## Error taxonomy
 //!
@@ -32,14 +33,14 @@ use slideforge_types::{ContentBlock, Deck, SourceSpan};
 /// Traces to BC-1.16.001 EC-012, SEC-001, CWE-22.
 pub const E_VAL_012: &str = "E-VAL-012";
 
-/// Validates that all [`ImageSpec`] paths are safely contained within the
-/// source root directory.
+/// Validates that all [`slideforge_types::specs::ImageSpec`] paths are safely
+/// contained within the source root directory.
 ///
 /// Register with [`slideforge_plugin_api::PluginRegistry::register_validator`].
 pub struct ImagePathValidator;
 
 impl Validator for ImagePathValidator {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "image-path"
     }
 
@@ -143,11 +144,7 @@ fn is_drive_letter_path(path: &str) -> bool {
 
 /// Construct an `E-VAL-012` error diagnostic for an image path that escapes the
 /// source root.
-fn make_image_path_diagnostic(
-    _path: &str,
-    span: &SourceSpan,
-    message: &str,
-) -> Diagnostic {
+fn make_image_path_diagnostic(_path: &str, span: &SourceSpan, message: &str) -> Diagnostic {
     Diagnostic {
         severity: DiagnosticSeverity::Error,
         code: Arc::from(E_VAL_012),
@@ -165,6 +162,7 @@ fn make_image_path_diagnostic(
 #[cfg(test)]
 #[allow(non_snake_case)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::doc_markdown)]
 mod tests {
     use std::sync::Arc;
 
@@ -335,7 +333,11 @@ mod tests {
             span.clone(),
         )])]);
         let diags = ImagePathValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "must produce exactly 1 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "must produce exactly 1 diagnostic; got {diags:?}"
+        );
         let msg = diags[0].message.as_ref();
         assert!(
             msg.contains(path),
@@ -403,13 +405,26 @@ mod tests {
             span.clone(),
         )])]);
         let diags = ImagePathValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "must produce exactly 1 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "must produce exactly 1 diagnostic; got {diags:?}"
+        );
         let msg = diags[0].message.as_ref();
-        assert!(msg.contains(path), "message must contain the path; got: {msg}");
-        assert!(msg.contains("escapes the source root"), "must say 'escapes the source root'; got: {msg}");
+        assert!(
+            msg.contains(path),
+            "message must contain the path; got: {msg}"
+        );
+        assert!(
+            msg.contains("escapes the source root"),
+            "must say 'escapes the source root'; got: {msg}"
+        );
         assert!(msg.contains("absolute"), "must say 'absolute'; got: {msg}");
         assert!(msg.contains("'/'"), "must mention '/'; got: {msg}");
-        assert!(msg.contains("at "), "must include span location; got: {msg}");
+        assert!(
+            msg.contains("at "),
+            "must include span location; got: {msg}"
+        );
     }
 
     /// Absolute path starting with `\` (backslash) must also be rejected.
@@ -496,12 +511,28 @@ mod tests {
             span.clone(),
         )])]);
         let diags = ImagePathValidator.validate(&deck, &default_opts());
-        assert_eq!(diags.len(), 1, "must produce exactly 1 diagnostic; got {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "must produce exactly 1 diagnostic; got {diags:?}"
+        );
         let msg = diags[0].message.as_ref();
-        assert!(msg.contains(path), "message must contain the path; got: {msg}");
-        assert!(msg.contains("escapes the source root"), "must say 'escapes the source root'; got: {msg}");
-        assert!(msg.contains("drive letter"), "must say 'drive letter'; got: {msg}");
-        assert!(msg.contains("at "), "must include span location; got: {msg}");
+        assert!(
+            msg.contains(path),
+            "message must contain the path; got: {msg}"
+        );
+        assert!(
+            msg.contains("escapes the source root"),
+            "must say 'escapes the source root'; got: {msg}"
+        );
+        assert!(
+            msg.contains("drive letter"),
+            "must say 'drive letter'; got: {msg}"
+        );
+        assert!(
+            msg.contains("at "),
+            "must include span location; got: {msg}"
+        );
     }
 
     // ── Span identity ─────────────────────────────────────────────────────────
@@ -525,7 +556,11 @@ mod tests {
             span.clone(),
         )])]);
         let diags1 = ImagePathValidator.validate(&deck1, &default_opts());
-        assert_eq!(diags1.len(), 1, "traversal: must produce 1 diagnostic; got {diags1:?}");
+        assert_eq!(
+            diags1.len(),
+            1,
+            "traversal: must produce 1 diagnostic; got {diags1:?}"
+        );
         assert_eq!(
             diags1[0].span, span,
             "traversal: span must be ImageSpec.span; got {:?}",
@@ -538,7 +573,11 @@ mod tests {
             span.clone(),
         )])]);
         let diags2 = ImagePathValidator.validate(&deck2, &default_opts());
-        assert_eq!(diags2.len(), 1, "absolute: must produce 1 diagnostic; got {diags2:?}");
+        assert_eq!(
+            diags2.len(),
+            1,
+            "absolute: must produce 1 diagnostic; got {diags2:?}"
+        );
         assert_eq!(
             diags2[0].span, span,
             "absolute: span must be ImageSpec.span; got {:?}",
@@ -551,7 +590,11 @@ mod tests {
             span.clone(),
         )])]);
         let diags3 = ImagePathValidator.validate(&deck3, &default_opts());
-        assert_eq!(diags3.len(), 1, "drive letter: must produce 1 diagnostic; got {diags3:?}");
+        assert_eq!(
+            diags3.len(),
+            1,
+            "drive letter: must produce 1 diagnostic; got {diags3:?}"
+        );
         assert_eq!(
             diags3[0].span, span,
             "drive letter: span must be ImageSpec.span; got {:?}",
@@ -582,7 +625,11 @@ mod tests {
             diags.len()
         );
         for d in &diags {
-            assert_eq!(d.code.as_ref(), E_VAL_012, "all diagnostics must be E-VAL-012");
+            assert_eq!(
+                d.code.as_ref(),
+                E_VAL_012,
+                "all diagnostics must be E-VAL-012"
+            );
             assert_eq!(d.severity, DiagnosticSeverity::Error);
         }
     }

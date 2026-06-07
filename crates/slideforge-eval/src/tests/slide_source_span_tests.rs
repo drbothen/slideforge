@@ -39,6 +39,7 @@
 #[cfg(test)]
 #[allow(non_snake_case)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::doc_markdown)]
 mod tests {
     use std::sync::Arc;
 
