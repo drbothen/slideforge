@@ -234,10 +234,12 @@ unannotated paths. Removing it would weaken the defense-in-depth posture.
 - `FieldType::Format(FormatKind)` can be added in a future story for T3 format
   validation with zero risk of silent regression — exhaustive match arms enforce
   callsite updates.
-- Priority-1 annotations (9 field sites across 8 slide types — `progress_bar.value`,
-  `chart.chart_type`, `decorative` common optional, `weighted_composite.components`,
-  `kpi_dashboard.kpis`, `roadmap.phases`, `agenda.items`, `team.members`) produce real
-  E-VAL-104 signals in practice, closing the most realistic author type-error paths.
+- Priority-1 annotations (8 annotated FieldDef sites across 8 slide types
+  (per-component weight:Float is validated via nested Map, not a top-level FieldDef — T3 deferred per Decision 6) —
+  `progress_bar.value`, `chart.chart_type`, `decorative` common optional,
+  `weighted_composite.components`, `kpi_dashboard.kpis`, `roadmap.phases`,
+  `agenda.items`, `team.members`) produce real E-VAL-104 signals in practice,
+  closing the most realistic author type-error paths.
   `matrix.cells` is polymorphic (structure varies by dimension count — List or Map) and
   MUST use `expected_type: None` to avoid false positives. `toc` has no list field —
   TOC entries are auto-generated from `section_break` slides; the `TocSlideType` exposes
@@ -272,6 +274,13 @@ Decision accepted and pending implementation. BC-1.18.001 is active (committed
 def8bb74). E-VAL-104 is registered in error-taxonomy.md v2.20. STORY-089 is the
 implementing story (Wave 5, slot 1). No production code changes have been made yet —
 this is a spec-first ADR preceding implementation.
+
+**Count correction (2026-06-07, STORY-089 adversary LOW):** Priority-1 annotated
+FieldDef site count corrected from 9 to 8. The previously counted 9th site —
+`weighted_composite` per-component `weight: Float` — is a key inside `Value::Map`
+component entries (nested-field validation = T3, deferred per Decision 6), not a
+top-level `FieldDef` returned by `required_fields()` or `optional_fields()`. BC-1.18.001
+v1.3 and STORY-089 v1.4 carry the authoritative count of 8.
 
 ## Alternatives Considered
 
