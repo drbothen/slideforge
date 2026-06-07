@@ -25,5 +25,7 @@ pub use exporter::{ExportError, ExportOptions, Exporter};
 pub use inline_format::{InlineError, InlineFormat, InlineOutputFormat, InlineRenderContext};
 pub use math_renderer::{MathError, MathOutputFormat, MathRenderer};
 pub use section_type::{SectionBlock, SectionType};
-pub use slide_type::{Canvas, FieldDef, FieldType, LayoutError, SlideType, type_matches, value_type_name};
+pub use slide_type::{
+    Canvas, FieldDef, FieldType, LayoutError, SlideType, type_matches, value_type_name,
+};
 pub use validator::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};

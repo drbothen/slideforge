@@ -113,24 +113,26 @@ pub fn value_type_name(value: &Value) -> &'static str {
 ///   AND `s` is in the allowlist. For non-Str values, returns `false` (T1 fires).
 /// - All other variants match exactly by discriminant — no implicit coercion.
 ///   `Value::Int` on a `FieldType::Float` field returns `false` (BC-1.18.001 Invariant 3).
-///
-/// # STUB — STORY-089
-///
-/// STUB: STORY-089 — returns `true` unconditionally; implementer adds real type matching.
-///
-/// Deliberately returns `true` for all inputs so that the behavioural tests
-/// (which expect `false` for mismatched types) FAIL at the Red Gate.
-///
-/// Per LESSON-17: `todo!()` is forbidden here because it would panic during
-/// test execution, which could cause `#[should_panic]` tests to pass spuriously.
-/// A constant `true` return makes all "mismatch → false" tests fail (Red Gate held).
-/// Implementer: replace this body with the real match expression in T4.
 #[must_use]
-#[allow(unused_variables)] // STORY-089 stub: args unused until implementer fills body
 pub fn type_matches(value: &Value, expected: &FieldType) -> bool {
-    // STUB: STORY-089 — returns true unconditionally; implementer adds real type matching.
-    // This makes all "wrong type → should be false" tests fail RED as required.
-    true
+    match expected {
+        FieldType::Any => true,
+        FieldType::Str => matches!(value, Value::Str(_)),
+        FieldType::Int => matches!(value, Value::Int(_)),
+        FieldType::Float => matches!(value, Value::Float(_)),
+        FieldType::Bool => matches!(value, Value::Bool(_)),
+        FieldType::List => matches!(value, Value::List(_)),
+        FieldType::Map => matches!(value, Value::Map(_)),
+        FieldType::OneOf(allowed) => {
+            // T1 fires for non-Str values (return false without checking allowlist).
+            // T2 fires for Str values not in the allowlist.
+            if let Value::Str(s) = value {
+                allowed.iter().any(|a| a.as_ref() == s.as_ref())
+            } else {
+                false
+            }
+        },
+    }
 }
 
 /// Describes a content field accepted by a [`SlideType`].

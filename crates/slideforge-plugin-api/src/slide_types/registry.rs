@@ -27,7 +27,9 @@ use std::sync::Arc;
 
 use slideforge_types::Slide;
 
-use crate::traits::{Diagnostic, DiagnosticSeverity, FieldType, SlideType, type_matches, value_type_name};
+use crate::traits::{
+    Diagnostic, DiagnosticSeverity, FieldType, SlideType, type_matches, value_type_name,
+};
 use slideforge_types::{FieldValue, Value};
 
 use super::{
@@ -278,26 +280,18 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     }
 
     // ── E-VAL-104: type-mismatch / OneOf violation ───────────────────────────
-    // STORY-089 stub: structural hook is present; the arm is inert and emits
-    // nothing yet. Implementer: fill this body with the T1/T2 logic from
-    // BC-1.18.001 postconditions 2 and 3 in Task T4.
+    // BC-1.18.001 postconditions 2 and 3.
     //
-    // Required iteration order: check ALL fields across required + optional;
-    // accumulate ALL E-VAL-104 diagnostics before returning (DI-018 / BC-1.18.001
-    // invariant 7). Do NOT halt on the first mismatch.
+    // Iterates ALL fields (required + optional). Accumulates ALL E-VAL-104
+    // diagnostics without halting (DI-018 / BC-1.18.001 invariant 7).
     //
-    // Algorithm (to be implemented):
-    //   for field_def in required + optional:
-    //     if let Some(expected) = &field_def.expected_type:
-    //       if expected == FieldType::Any: continue
-    //       match slide.fields.get(field_def.name.as_ref()):
-    //         Some(FieldValue::Literal(v)):
-    //           if !type_matches(v, expected):
-    //             // T2: if expected is OneOf AND v is Str → disallowed-value message
-    //             // T1: otherwise → type-mismatch message
-    //             push E-VAL-104 Diagnostic
-    //         Some(FieldValue::Inlines(_)): skip (untypeable at Stage 5)
-    //         None: skip (E-VAL-101 arm handles absence)
+    // Two message branches:
+    //   T1 — value variant wrong for expected type (including non-Str on OneOf):
+    //     "Field '<name>' on <type> slide has wrong type: expected <expected>, got <actual>.
+    //      See the DSL reference for valid field types."
+    //   T2 — value IS Str but not in the OneOf allowlist:
+    //     "Field '<name>' on <type> slide has disallowed value \"<val>\":
+    //      allowed values are [<list>]."
     for field_def in slide_type
         .required_fields()
         .iter()
@@ -305,30 +299,60 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     {
         if let Some(expected) = &field_def.expected_type {
             // Skip FieldType::Any — no type constraint.
-            // The matches! guard below uses the discriminant.
-            // STORY-089 stub: only the structural skeleton; no diagnostic emitted.
-            // Implementer: add real T1/T2 logic here.
             if matches!(expected, FieldType::Any) {
                 continue;
             }
-            match slide.fields.get(field_def.name.as_ref()) {
-                Some(FieldValue::Literal(_v)) => {
-                    // STORY-089 stub — E-VAL-104 arm is inert.
-                    // type_matches(_v, expected) is deliberately NOT called here yet.
-                    // Implementer: call type_matches(_v, expected), inspect the
-                    // result, and push the appropriate T1 or T2 Diagnostic.
-                    // The _ prefix suppresses unused-variable warnings on stub imports.
-                    let _ = (expected, type_matches, value_type_name);
-                },
-                Some(
-                    FieldValue::Inlines(_) | FieldValue::Expr(_) | FieldValue::Interpolated(_),
-                )
-                | None => {
-                    // Inlines: untypeable at Stage 5 — skip (BC-1.18.001 postcondition 5).
-                    // Expr / Interpolated: pre-eval template variants — skip at Stage 5.
-                    // None: absence is the E-VAL-101 concern — skip here.
-                },
+            if let Some(FieldValue::Literal(v)) = slide.fields.get(field_def.name.as_ref())
+                && !type_matches(v, expected)
+            {
+                let field_name = &field_def.name;
+                let message: Arc<str> = if let FieldType::OneOf(allowed) = expected {
+                    if matches!(v, Value::Str(_)) {
+                        // T2: Str value not in the allowlist.
+                        let allowed_list: Vec<&str> =
+                            allowed.iter().map(std::convert::AsRef::as_ref).collect();
+                        let allowed_str = allowed_list.join(", ");
+                        let val_str = if let Value::Str(s) = v {
+                            s.as_ref().to_owned()
+                        } else {
+                            // Unreachable: we matched Value::Str above.
+                            String::new()
+                        };
+                        Arc::from(format!(
+                            "Field '{field_name}' on {type_id} slide has disallowed value \
+                             \"{val_str}\": allowed values are [{allowed_str}]."
+                        ))
+                    } else {
+                        // T1: non-Str value on a OneOf field.
+                        let expected_name = expected.display_name();
+                        let actual_name = value_type_name(v);
+                        Arc::from(format!(
+                            "Field '{field_name}' on {type_id} slide has wrong type: \
+                             expected {expected_name}, got {actual_name}. \
+                             See the DSL reference for valid field types."
+                        ))
+                    }
+                } else {
+                    // T1: value variant wrong for expected type.
+                    let expected_name = expected.display_name();
+                    let actual_name = value_type_name(v);
+                    Arc::from(format!(
+                        "Field '{field_name}' on {type_id} slide has wrong type: \
+                         expected {expected_name}, got {actual_name}. \
+                         See the DSL reference for valid field types."
+                    ))
+                };
+                diags.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    code: Arc::from("E-VAL-104"),
+                    message,
+                    span: slide.source_span.clone(),
+                    hint: None,
+                });
             }
+            // FieldValue::Inlines / Expr / Interpolated / absent: skip.
+            // Inlines are untypeable at Stage 5 (BC-1.18.001 postcondition 5).
+            // Absence is the E-VAL-101 concern.
         }
     }
 
