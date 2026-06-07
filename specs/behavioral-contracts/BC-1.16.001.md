@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: active
 producer: product-owner
 timestamp: 2026-06-05T00:00:00
@@ -19,6 +19,7 @@ modified:
   - "v1.2 — CORRUPTED (commit 608ec7b0): read types from develop-branch main checkout instead of STORY-086 worktree; erroneously stripped TextTag, TextBlock.tag, and AltText::Unspecified which all exist in the worktree. Superseded by v1.3."
   - "v1.3 — STORY-086 pass-7 recovery: revert erroneous v1.2 (608ec7b0) which stripped TextTag/TextBlock.tag/AltText::Unspecified after reading develop-branch types instead of the STORY-086 worktree. Reapply only the two legitimate fixes verified against worktree types: (1) PC-7 BulletItem struct shape corrected from nonexistent {text, level} fields to real {inlines: Vec<InlineNode>, children: Vec<BulletItem>, span: SourceSpan} per crates/slideforge-types/src/block.rs:84-91 (F-086-P7-MED-001 fix). (2) ImageSpec field corrected from src to path per crates/slideforge-types/src/specs.rs:324 — only the Rust struct field name changes; the DSL keyword the user writes remains src:. TextTag (block.rs:36-59), TextBlock.tag (block.rs:74), and AltText::Unspecified (specs.rs:162) are RETAINED as they exist in the worktree."
   - "v1.4 — F-086-P9-MED-001 fix: PC-9 ChartSpec produces-clause removed phantom `data_source: ...` field. Real ChartSpec struct (worktree crates/slideforge-types/src/specs.rs:170-191) has exactly four fields: chart_type, alt, decorative, span — no data_source. The postcondition now reflects the actual struct. Implementation in field_to_block.rs:184-189 already correctly omits data_source; this is a spec-to-code alignment (factual type correction). ImageSpec/DiagramSpec/BulletItem field shapes were already corrected in passes 6-7 and are confirmed correct."
+  - "v1.5 — SEC-001 image-path-traversal containment (Wave-4 follow-up, human-authorized 2026-06-07): EC-012 added — `ImageSpec.path` path-traversal containment guard. `ImagePathValidator` (Validator surface #5) emits E-VAL-012 (broken, exit 2 strict) for paths with `..` traversal segments, absolute paths (`/` or `\`), or Windows drive letter prefixes (`C:\`). CWE-22. Mirrors the logo path guard in BC-2.02.001 EC-006 (E-BRD-007). No disk I/O — string-level syntactic check at Stage 5 (pre-layout, post-eval) using `spec.span` for file:line:col."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -179,6 +180,7 @@ NOT populated by this threading pass.
 | EC-009 | Slide type not matching any known media type (e.g., `title`, `content`, `toc`) with no `fields["src"]`, `fields["chart_type"]`, or `fields["source"]` | Only text/bullet blocks are produced (per the slide's declared fields). No media block is produced. No warn emitted. |
 | EC-010 | `thread_fields_to_blocks` called on a deck with zero slides | Function is a no-op; `Deck.slides` remains empty. No error. |
 | EC-011 | Alt provided as `FieldValue::Inlines(...)` (rich-text alt field) | The threading pass reads only `FieldValue::Literal(Value::Str(_))` for alt resolution. A `FieldValue::Inlines` alt field is treated as absent; `alt = None`. Authors must supply plain-text alt strings. |
+| EC-012 | `ImageSpec.path` resolves to a path that traverses outside the source root — e.g., `src "../../../etc/shadow"` (traversal segment `..`), `src "/etc/passwd"` (absolute Unix path), or `src "C:\Windows\System32\config"` (Windows drive letter). Path may be expression-computed via `{{ expr }}`. | `ImagePathValidator` (Validator surface #5, validator ID `"image-path"`) emits `E-VAL-012` (broken, exit 2 in strict mode) at Stage 5 (pre-layout, post-eval). Three message variants by traversal kind: (1) `Image path '<path>' escapes the source root — contains a path-traversal segment ('..'). ...` (2) `Image path '<path>' escapes the source root — path is absolute (starts with '/' or '\'). ...` (3) `Image path '<path>' escapes the source root — uses a Windows drive letter prefix. ...` All include `at <file>:<line>:<col>` from `spec.span`. This is a pre-emptive string-level containment guard (CWE-22); no disk I/O occurs. This is a security containment invariant mirroring the logo path guard in BC-2.02.001 EC-006 (E-BRD-007), applied to user-authored image paths in the Deck. |
 
 ## Canonical Test Vectors
 

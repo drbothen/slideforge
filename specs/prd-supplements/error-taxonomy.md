@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.18"
+version: "2.19"
 status: active
 producer: product-owner
-timestamp: 2026-06-05T00:00:00
+timestamp: 2026-06-07T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -383,6 +383,7 @@ registered in this taxonomy; they will be formally registered in a future spec b
 | Code | Severity | Exit (strict) | Message Format | Traces To |
 |------|---------|--------------|---------------|-----------|
 | E-VAL-011 | broken | 2 | `<slide_type> <field_path> must be <constraint>; got <value>.` (See message variants in BC-1.17.002 PC3, BC-1.17.003 inv 6/7) | BC-1.17.002 PC3, BC-1.17.003 inv 6/7 |
+| E-VAL-012 | broken | 2 | Three message variants depending on traversal kind: (1) `Image path '<path>' escapes the source root — contains a path-traversal segment ('..'). Image paths must be relative and contained within the source file's directory tree.` (2) `Image path '<path>' escapes the source root — path is absolute (starts with '/' or '\'). Image paths must be relative and contained within the source file's directory tree.` (3) `Image path '<path>' escapes the source root — uses a Windows drive letter prefix. Image paths must be relative and contained within the source file's directory tree.` All three variants include `at <file>:<line>:<col>` span suffix (from `spec.span`). | BC-1.16.001 EC-012, CAP-022, CWE-22 |
 
 Note (E-VAL-011): Numeric field out-of-range violation for color-coded slide types. Emitted
 by `ValueRangeValidator` at Stage 5 (pre-layout) in `slideforge::registry::register_bundled_plugins`.
@@ -414,6 +415,30 @@ E-VAL-011 diagnostics before returning (DI-018). It does NOT bail on the first f
 
 Allocated per architect adjudication F-087-P1-001 (STORY-087 pass 1, 2026-06-06).
 Empty-components variant added per architect adjudication F-087-P2-001 (STORY-087 pass 2, 2026-06-06).
+
+Note (E-VAL-012): `ValidatorDiagnostic` emitted by `ImagePathValidator` (Validator surface #5, validator ID `"image-path"`) during the **pre-layout validation pass** (Stage 5) in `slideforge-validate`. The validator operates on the semantic `Deck` IR (specifically on `ContentBlock::Image(ImageSpec { path, .. })` entries in `Slide.blocks`) after `thread_fields_to_blocks` (Stage 2b, ADR-019) has populated `Slide.blocks` from resolved field values.
+
+**Containment rule (CWE-22):** An `ImageSpec.path` value is rejected if it meets ANY of the following conditions:
+1. Contains a path-traversal segment: the string `".."` appears as a complete path component (i.e., the path string contains `".."` separated by `/` or `\`, or starts with `".."`).
+2. Is absolute: starts with `/` (Unix-style) or `\` (Windows UNC-style).
+3. Uses a Windows drive letter prefix: matches the pattern `<letter>:` at the start (e.g., `C:\`, `D:/`).
+
+**Stage justification:** E-VAL-012 is allocated to the E-VAL namespace (Validator surface, pre-layout, exit 2) rather than E-PAR (parse stage) because `ImageSpec.path` is populated by Stage 2b (`thread_fields_to_blocks`) after expression evaluation — the raw DSL field is `src:` (user-written keyword), which may be an interpolated `{{ expr }}` resolving to an attacker-controlled path at eval time. A parse-stage guard (`E-PAR-NNN`) would fire on the literal token before interpolation, which is insufficient when the path is expression-computed. The validation stage (Stage 5) sees the post-eval path value, making E-VAL-012 the correct stage for this containment check. This mirrors the precedent established by E-PAR-021 vs. E-LAY-005 (same conceptual depth limit, two guards at the correct stages).
+
+**No disk I/O:** The validator checks the path string only (syntactic containment check). It does NOT open the file, resolve symlinks, or perform any filesystem access. Symlink escape (a deeper containment concern) is deferred to the export stage, which resolves to a canonical path before opening. This is the pre-emptive string-level guard only.
+
+**Severity:** broken. Exit 2 in strict mode. In `--warn-only` mode: error-slide placeholder rendered for the affected slide; build continues.
+
+**Message format (full, with span):**
+- Traversal segment: `Image path '<path>' escapes the source root — contains a path-traversal segment ('..'). Image paths must be relative and contained within the source file's directory tree. (at <file>:<line>:<col>)`
+- Absolute path: `Image path '<path>' escapes the source root — path is absolute (starts with '/' or '\'). Image paths must be relative and contained within the source file's directory tree. (at <file>:<line>:<col>)`
+- Drive letter: `Image path '<path>' escapes the source root — uses a Windows drive letter prefix. Image paths must be relative and contained within the source file's directory tree. (at <file>:<line>:<col>)`
+
+**Variant name:** `ValidatorDiagnostic` with `code: Arc::from("E-VAL-012")`. The three traversal-kind sub-cases are distinguished in the message text, not as separate Rust variants (same approach as E-BRD-001 and E-BRD-002, which share a single code across multiple `BrandError` variants).
+
+**Traceability:** SEC-001, BC-1.16.001 EC-012 (image path traversal / containment), CAP-022 ("Compile-Time Content Validation") per capabilities.md §CAP-022 — the `ImagePathValidator` is a compile-time content validator rejecting paths that violate the source-root containment invariant.
+
+**Pre-registration collision check (2026-06-07):** E-VAL-012 confirmed free — not present in error-taxonomy.md prior to this entry (the E-VAL namespace contained only E-VAL-011 plus the informally-used codes E-VAL-101/102/W-VAL-103), and confirmed absent from `grep -rE "E-VAL-012" crates/**/*.rs` (no output — zero matches in the codebase at time of registration).
 
 ---
 
@@ -473,3 +498,4 @@ Per DI-018 and BC-1.15.002:
 | 2.17 | 2026-06-06 | product-owner | STORY-086 pass-5 adjudication (F-086-P5-MED-002): **W-A11-002 registered** — new "Accessibility Warnings (W-A11)" section added. W-A11-002 was referenced in BC-3.04.001 v1.5.1+, BC-1.16.001 EC-004, and STORY-086 adjudication but had no taxonomy entry (the W-A11 warning namespace was empty prior to this version). Pre-registration collision check confirmed W-A11-002 free. Semantics: fires when both `decorative: true` and a non-empty `alt "..."` are set on the same element, flagging a likely authoring mistake. Two-context warning: (1) Stage-2b `resolve_alt` for charts/images/diagrams — decorative wins, W-A11-002 emitted via `tracing::warn!(code = "W-A11-002")` at resolution time; (2) shape DSL `slideforge-validate` — alt wins (BC-3.04.001 Inv-11), W-A11-002 emitted post-layout. W-A11-001 (deprecated predecessor) is NOT registered — it is retired. Taxonomy version 2.16 → 2.17. Note: changelog row 2.15 appears after 2.16 in the table due to authoring order — this is a documentation sequencing artifact, not a retcon; both v2.15 and v2.16 were produced on the same date (2026-06-05) in separate bursts. |
 | 2.18 | 2026-06-06 | product-owner | STORY-087 pass-1 adjudication (F-087-P1-001): **E-VAL-011 registered** — new "Validation Errors (E-VAL)" section added. E-VAL-011 is allocated for numeric field out-of-range violations emitted by `ValueRangeValidator` at Stage 5 (pre-layout). Covers `progress_bar` value out of [0, 100] (BC-1.17.002 PC3) and `weighted_composite` component `weight` non-positive / `score` out of [0, 100] (BC-1.17.003 inv 6/7). Severity: broken. Exit 2 (strict-mode fatal). Error accumulation per DI-018: all component errors collected before returning. Pre-registration collision check: E-VAL-011 confirmed free — no existing E-VAL-NNN entries in taxonomy prior to this version. The informally-used codes E-VAL-101, E-VAL-102, W-VAL-103 in `registry.rs::validate_fields` remain unregistered (future burst). |
 | 2.18-addendum | 2026-06-06 | product-owner | STORY-087 pass-2 adjudication (F-087-P2-001): **E-VAL-011 addendum** — empty-components message variant added to existing E-VAL-011 Note. No new code allocated (same error code, same severity/exit). `weighted_composite.components: []` (empty list) is now an explicitly documented E-VAL-011 trigger with exact message `"weighted_composite requires at least one component; got empty list."`. Implementation directive: `ValueRangeValidator::validate_weighted_composite_components` must add an early-return arm for `Value::List(list) if list.is_empty()` that emits the diagnostic before the per-component loop. No taxonomy version bump per adjudication directive. |
+| 2.19 | 2026-06-07 | product-owner | SEC-001 image-path-traversal containment (Wave-4 follow-up, human-authorized 2026-06-07): **E-VAL-012 registered** — new "Validation Errors (E-VAL)" row for `ImagePathValidator` (Validator surface #5, validator ID `"image-path"`). E-VAL-012 guards `ImageSpec.path` values that traverse outside the source-file root: (1) contains `".."` path-traversal segment, (2) is absolute (`/` or `\`), or (3) uses a Windows drive letter prefix (`C:\`, etc.). CWE-22. **Stage justification:** E-VAL (Validator/pre-layout, exit 2) is correct over E-PAR (parse/exit 1) because `ImageSpec.path` is post-eval — `src:` may be an interpolated `{{ expr }}`; a parse-stage guard would not catch expression-computed paths. Precedent: E-PAR-021 vs. E-LAY-005 (dual-stage guards for the same conceptual limit at correct stages). **Family justification:** E-VAL (not a new E-IMG family) because the existing E-VAL namespace covers all `Validator`-surface compile-time content diagnostics; no precedent for per-feature subsystem codes (E-BRD, E-DAT, E-PKG are subsystem families, not feature families). Three message variants distinguished in message text only (not separate codes): traversal-segment, absolute-path, drive-letter. Severity: broken. Exit: 2 (strict mode). `--warn-only`: error-slide placeholder, build continues. Traces to BC-1.16.001 EC-012, CAP-022. **Collision check (2026-06-07):** E-VAL-012 confirmed free in taxonomy (only E-VAL-011, E-VAL-101, E-VAL-102, W-VAL-103 existed) and confirmed absent from `grep -rE "E-VAL-012" crates/**/*.rs` (zero matches). BC-1.16.001 updated with EC-012 in same burst. |
