@@ -564,13 +564,12 @@ mod tests {
 
     /// BC-4.03.003 postcondition 1 — `HtmlExporter` implements the `Exporter`
     /// plugin trait: correct id/extension AND export produces valid output.
-    /// The export call hits todo!() — making this a failing Red Gate test.
     #[test]
     fn test_BC_4_03_003_html_exporter_implements_exporter_trait() {
         let exporter: Box<dyn Exporter> = Box::new(HtmlExporter::new());
         assert_eq!(exporter.id(), "html");
         assert_eq!(exporter.extension(), "html");
-        // AC-001: export must return Ok (calls todo!() in stub — Red Gate)
+        // AC-001: export must return Ok.
         let deck = make_deck("en-US");
         let slide = make_title_slide();
         let laid_out = make_laid_out_deck_single_slide(slide);

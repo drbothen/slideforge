@@ -3153,7 +3153,11 @@ mod tests {
         // <h1> must exist.
         let h1_sel = scraper::Selector::parse("h1").expect("valid selector");
         let h1_nodes: Vec<_> = doc.select(&h1_sel).collect();
-        assert_eq!(h1_nodes.len(), 1, "F-P9-001: exactly one <h1> must be present; got: {result}");
+        assert_eq!(
+            h1_nodes.len(),
+            1,
+            "F-P9-001: exactly one <h1> must be present; got: {result}"
+        );
 
         // <h1> must NOT contain <ul>.
         let ul_in_h1_sel = scraper::Selector::parse("h1 ul").expect("valid selector");
@@ -3176,7 +3180,7 @@ mod tests {
         assert_eq!(
             h1_text.trim(),
             bullet_text,
-            "F-P9-001: <h1> text must equal first bullet's text; got: {:?}", h1_text
+            "F-P9-001: <h1> text must equal first bullet's text; got: {h1_text:?}"
         );
     }
 
@@ -3213,7 +3217,11 @@ mod tests {
         // <h1> must exist.
         let h1_sel = scraper::Selector::parse("h1").expect("valid selector");
         let h1_nodes: Vec<_> = doc.select(&h1_sel).collect();
-        assert_eq!(h1_nodes.len(), 1, "F-P9-001: exactly one <h1> must be present; got: {result}");
+        assert_eq!(
+            h1_nodes.len(),
+            1,
+            "F-P9-001: exactly one <h1> must be present; got: {result}"
+        );
 
         // <h1> must NOT contain <p>.
         let p_in_h1_sel = scraper::Selector::parse("h1 p").expect("valid selector");
@@ -3228,7 +3236,7 @@ mod tests {
         assert_eq!(
             h1_text.trim(),
             paragraph_text,
-            "F-P9-001: <h1> text must equal first text block's text; got: {:?}", h1_text
+            "F-P9-001: <h1> text must equal first text block's text; got: {h1_text:?}"
         );
     }
 }
