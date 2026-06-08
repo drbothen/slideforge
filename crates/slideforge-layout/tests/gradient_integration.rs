@@ -25,13 +25,17 @@
 //! | `test_BC_3_04_001_ac003_gradient_with_no_alt_returns_missing_alt_error` | AC-005 | EC-001 |
 //! | `test_BC_3_04_001_ec006_gradient_decorative_shape_passthrough` | EC-006 | STORY-072 EC-006 |
 
-#![allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, non_snake_case)]
+#![allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case
+)]
 
 use std::sync::Arc;
 
 use slideforge_layout::{
-    FillSpec, FrameContent, PageSize, ShapeType,
-    shapes::{layout_shapes, DEFAULT_EM_IN_EMU},
+    FillSpec, FrameContent, PageSize,
+    shapes::{DEFAULT_EM_IN_EMU, layout_shapes},
 };
 use slideforge_types::{AltText, Rgb, ShapePosition, ShapeSpec, ShapeUnit, SourceSpan};
 
@@ -46,16 +50,16 @@ fn default_page() -> PageSize {
 
 fn default_position() -> ShapePosition {
     ShapePosition {
-        x: ShapeUnit::Inches(500),       // 0.5in
-        y: ShapeUnit::Inches(1_000),     // 1.0in
-        width: ShapeUnit::Inches(2_000), // 2.0in
-        height: ShapeUnit::Inches(1_000),// 1.0in
+        x: ShapeUnit::Inches(500),        // 0.5in
+        y: ShapeUnit::Inches(1_000),      // 1.0in
+        width: ShapeUnit::Inches(2_000),  // 2.0in
+        height: ShapeUnit::Inches(1_000), // 1.0in
     }
 }
 
 fn gradient_shape_spec(from: Rgb, to: Rgb, alt: &str) -> ShapeSpec {
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect must be a valid shape type");
+    let st =
+        slideforge_types::ShapeType::from_keyword("rect").expect("rect must be a valid shape type");
     ShapeSpec {
         shape_type: st,
         position: default_position(),
@@ -68,8 +72,8 @@ fn gradient_shape_spec(from: Rgb, to: Rgb, alt: &str) -> ShapeSpec {
 }
 
 fn gradient_shape_spec_decorative(from: Rgb, to: Rgb) -> ShapeSpec {
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect must be a valid shape type");
+    let st =
+        slideforge_types::ShapeType::from_keyword("rect").expect("rect must be a valid shape type");
     ShapeSpec {
         shape_type: st,
         position: default_position(),
@@ -82,8 +86,8 @@ fn gradient_shape_spec_decorative(from: Rgb, to: Rgb) -> ShapeSpec {
 }
 
 fn gradient_shape_spec_no_alt(from: Rgb, to: Rgb) -> ShapeSpec {
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect must be a valid shape type");
+    let st =
+        slideforge_types::ShapeType::from_keyword("rect").expect("rect must be a valid shape type");
     ShapeSpec {
         shape_type: st,
         position: default_position(),
@@ -135,7 +139,7 @@ fn test_BC_3_04_001_ac003_gradient_passthrough_fill_preserved() {
 #[test]
 fn test_BC_3_04_001_ac003_gradient_passthrough_from_to_colors_verbatim() {
     let from = Rgb { r: 255, g: 0, b: 0 }; // #FF0000
-    let to = Rgb { r: 0, g: 0, b: 255 };   // #0000FF
+    let to = Rgb { r: 0, g: 0, b: 255 }; // #0000FF
     let shapes = vec![gradient_shape_spec(from, to, "Red-to-blue gradient")];
     let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
         .expect("layout_shapes must succeed");
@@ -147,14 +151,12 @@ fn test_BC_3_04_001_ac003_gradient_passthrough_from_to_colors_verbatim() {
                 to: out_to,
             } => {
                 assert_eq!(
-                    *out_from,
-                    from,
+                    *out_from, from,
                     "FillSpec::Gradient.from must be preserved verbatim; \
                      expected Rgb {{r:255, g:0, b:0}}, got: {out_from:?}"
                 );
                 assert_eq!(
-                    *out_to,
-                    to,
+                    *out_to, to,
                     "FillSpec::Gradient.to must be preserved verbatim; \
                      expected Rgb {{r:0, g:0, b:255}}, got: {out_to:?}"
                 );
@@ -223,9 +225,7 @@ fn test_BC_3_04_001_ac003_gradient_with_no_alt_returns_missing_alt_error() {
                 "error must contain MissingAlt for gradient shape without alt; got: {inner:?}"
             );
         },
-        other => panic!(
-            "expected LayoutError::Multiple containing MissingAlt, got: {other:?}"
-        ),
+        other => panic!("expected LayoutError::Multiple containing MissingAlt, got: {other:?}"),
     }
 }
 
@@ -294,8 +294,7 @@ fn test_BC_3_04_001_ec005_gradient_layout_same_from_to_valid() {
 fn test_BC_3_04_001_ec004_gradient_multi_shape_errors_accumulated() {
     use slideforge_layout::LayoutError;
 
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect must be valid");
+    let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect must be valid");
     let gradient_ok = gradient_shape_spec(
         Rgb { r: 255, g: 0, b: 0 },
         Rgb { r: 0, g: 0, b: 255 },

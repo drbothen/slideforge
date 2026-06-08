@@ -38,8 +38,9 @@
 
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::a::{
-    Extents, FillRectangle, Offset, ParagraphChoice, PictureLocks, RgbColorModelHex, Run,
-    SolidFill, SolidFillChoice, Stretch, Transform2D,
+    Extents, FillRectangle, GradientFill, GradientFillChoice, GradientStop, GradientStopChoice,
+    GradientStopList, LinearGradientFill, Offset, ParagraphChoice, PictureLocks, RgbColorModelHex,
+    Run, SolidFill, SolidFillChoice, Stretch, Transform2D,
 };
 use ooxmlsdk::schemas::p::{
     ApplicationNonVisualDrawingProperties, BlipFill, BlipFillChoice, ColorMapOverride,
@@ -49,8 +50,8 @@ use ooxmlsdk::schemas::p::{
     ShapePropertiesChoice, ShapePropertiesChoice2, ShapeTree, ShapeTreeChoice, Slide, TextBody,
 };
 
-use slideforge_layout::{FrameContent, LaidOutSlide, LayoutWarning};
-use slideforge_types::{BulletItem, ContentBlock, InlineNode, Rgb};
+use slideforge_layout::{FillSpec, FrameContent, LaidOutSlide, LayoutWarning, ShapeFrame};
+use slideforge_types::{AltText, BulletItem, ContentBlock, InlineNode, Rgb};
 
 use crate::error::PptxError;
 use crate::xml_escape::strip_xml10_invalid_chars;
@@ -625,15 +626,40 @@ impl SlideSerializer {
                     shape_id += 1;
                 },
 
-                // Shape, ErrorSlidePlaceholder, Empty: no PPTX element emitted.
-                // Shape serialization is deferred to a future story.
-                FrameContent::Shape(_)
-                | FrameContent::ErrorSlidePlaceholder { .. }
-                | FrameContent::Empty => {
+                // Shape frames — STORY-072: FillSpec::Gradient and FillSpec::SolidColor
+                // emit <p:sp> with <a:gradFill> or <a:solidFill> respectively.
+                // FillSpec::None emits no element (transparent shape placeholder).
+                FrameContent::Shape(shape_frame) => {
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let sp_opt = build_shape_fill_sp(
+                        shape_id,
+                        frame_idx,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        shape_frame,
+                    );
+                    if let Some(sp) = sp_opt {
+                        shape_tree
+                            .shape_tree_choice
+                            .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                        shape_id += 1;
+                    } else {
+                        tracing::debug!(
+                            slide_index,
+                            frame_idx,
+                            "no PPTX element emitted for Shape with FillSpec::None"
+                        );
+                    }
+                },
+
+                // ErrorSlidePlaceholder, Empty: no PPTX element emitted.
+                FrameContent::ErrorSlidePlaceholder { .. } | FrameContent::Empty => {
                     tracing::debug!(
                         slide_index,
                         frame_idx,
-                        "no PPTX element emitted for Shape/ErrorSlidePlaceholder/Empty frame"
+                        "no PPTX element emitted for ErrorSlidePlaceholder/Empty frame"
                     );
                 },
 
@@ -1067,6 +1093,156 @@ fn build_color_bar_shape(shape_id: u32, x: i64, y: i64, cx: i64, cy: i64, color:
         text_body: None,
         extension_list_with_modification: None,
     }
+}
+
+/// Build a `<p:sp>` element for a `FrameContent::Shape` frame (STORY-072 AC-004).
+///
+/// Returns `None` when `fill` is `FillSpec::None` — transparent shapes emit no element.
+/// Returns `Some(Shape)` for `SolidColor` and `Gradient` fills.
+///
+/// ## OOXML element ordering (schema-significant)
+///
+/// `<p:nvSpPr>` → `<p:spPr>` → `<p:txBody>` (no txBody for fill-only shapes).
+///
+/// ## Alt text placement (BC-4.01.004 invariant 2)
+///
+/// Alt text goes on `<p:cNvPr descr="...">`, NOT on `<p:ph altText>`.
+/// `AltText::Provided` → `descr="<alt_text>"`.
+/// `AltText::Decorative | Unspecified` → `descr=""` (empty attribute present).
+fn build_shape_fill_sp(
+    shape_id: u32,
+    frame_idx: usize,
+    x: i64,
+    y: i64,
+    cx: i64,
+    cy: i64,
+    shape_frame: &ShapeFrame,
+) -> Option<Shape> {
+    // Determine the fill choice; return None for transparent shapes.
+    let fill_choice: ShapePropertiesChoice2 = match &shape_frame.fill {
+        FillSpec::None => return None,
+        FillSpec::SolidColor(rgb) => {
+            let hex_val = format!("{:02X}{:02X}{:02X}", rgb.r, rgb.g, rgb.b);
+            let srgb = RgbColorModelHex {
+                val: hex_val,
+                legacy_spreadsheet_color_index: None,
+                rgb_color_model_hex_choice: vec![],
+                xmlns: vec![],
+                xml_other_attrs: vec![],
+            };
+            ShapePropertiesChoice2::ASolidFill(Box::new(SolidFill {
+                solid_fill_choice: Some(SolidFillChoice::ASrgbClr(Box::new(srgb))),
+                xmlns: vec![],
+                xml_other_attrs: vec![],
+            }))
+        },
+        FillSpec::Gradient { from, to } => {
+            // AC-004 (STORY-072): emit <a:gradFill> with two stops and <a:lin ang="5400000">
+            // (90° = top-to-bottom, per OOXML 1/60000-degree units: 90 * 60000 = 5400000).
+            let make_stop = |pos: i32, rgb: &Rgb| GradientStop {
+                position: pos,
+                gradient_stop_choice: Some(GradientStopChoice::ASrgbClr(Box::new(
+                    RgbColorModelHex {
+                        val: format!("{:02X}{:02X}{:02X}", rgb.r, rgb.g, rgb.b),
+                        legacy_spreadsheet_color_index: None,
+                        rgb_color_model_hex_choice: vec![],
+                        xmlns: vec![],
+                        xml_other_attrs: vec![],
+                    },
+                ))),
+                xmlns: vec![],
+                xml_other_attrs: vec![],
+            };
+            let gs_lst = GradientStopList {
+                a_gs: vec![make_stop(0, from), make_stop(100_000, to)],
+            };
+            let lin = LinearGradientFill {
+                // 5400000 = 90 degrees (top-to-bottom) in 1/60000-degree OOXML units.
+                angle: Some(5_400_000_i32),
+                scaled: None,
+            };
+            ShapePropertiesChoice2::AGradFill(Box::new(GradientFill {
+                flip: None,
+                rotate_with_shape: None,
+                gradient_stop_list: Some(gs_lst),
+                gradient_fill_choice: Some(GradientFillChoice::ALin(Box::new(lin))),
+                a_tile_rect: None,
+            }))
+        },
+    };
+
+    // Alt text: BC-4.01.004 invariant 2 — descr on <p:cNvPr>.
+    let alt_text_value: Option<String> = match &shape_frame.alt {
+        AltText::Provided(text) => Some(text.to_string()),
+        AltText::Decorative | AltText::Unspecified => Some(String::new()),
+    };
+
+    let cnv_pr = NonVisualDrawingProperties {
+        id: shape_id,
+        name: format!("Shape {frame_idx}"),
+        description: alt_text_value,
+        hidden: None,
+        title: None,
+        hyperlink_on_click: None,
+        hyperlink_on_hover: None,
+        non_visual_drawing_properties_extension_list: None,
+        xmlns: vec![],
+    };
+
+    let cnv_sp_pr = NonVisualShapeDrawingProperties::default();
+
+    // No <p:ph> — free-standing shape, not a placeholder.
+    let nv_pr = ApplicationNonVisualDrawingProperties {
+        is_photo: None,
+        user_drawn: None,
+        placeholder_shape: None,
+        application_non_visual_drawing_properties_choice: None,
+        p_cust_data_lst: None,
+        p_ext_lst: None,
+    };
+
+    let nv_sp_pr = NonVisualShapeProperties {
+        non_visual_drawing_properties: Box::new(cnv_pr),
+        non_visual_shape_drawing_properties: Box::new(cnv_sp_pr),
+        application_non_visual_drawing_properties: Box::new(nv_pr),
+    };
+
+    let xfrm = Transform2D {
+        rotation: None,
+        horizontal_flip: None,
+        vertical_flip: None,
+        offset: Some(Offset { x, y }),
+        extents: Some(Extents { cx, cy }),
+        xmlns: vec![],
+    };
+
+    let sp_pr = ShapeProperties {
+        transform2_d: Some(Box::new(xfrm)),
+        shape_properties_choice1: Some(ShapePropertiesChoice::APrstGeom(Box::new(
+            ooxmlsdk::schemas::a::PresetGeometry {
+                preset: ooxmlsdk::schemas::a::ShapeTypeValues::Rectangle,
+                adjust_value_list: None,
+                xmlns: vec![],
+            },
+        ))),
+        shape_properties_choice2: Some(fill_choice),
+        shape_properties_choice3: None,
+        black_white_mode: None,
+        a_ln: None,
+        a_scene3d: None,
+        a_sp3d: None,
+        a_ext_lst: None,
+        xmlns: vec![],
+    };
+
+    Some(Shape {
+        use_background_fill: None,
+        non_visual_shape_properties: Box::new(nv_sp_pr),
+        shape_properties: Box::new(sp_pr),
+        shape_style: None,
+        text_body: None,
+        extension_list_with_modification: None,
+    })
 }
 
 /// Build a typed `<p:pic>` element for a media frame with accessibility metadata.

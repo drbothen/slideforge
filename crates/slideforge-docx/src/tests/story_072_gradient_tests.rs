@@ -22,14 +22,19 @@
 //! | `test_BC_3_04_001_ac004_docx_gradient_solid_fallback_uses_from_color` | AC-004 | STORY-072 AC-004 solid fallback |
 //! | `test_BC_3_04_001_ec003_docx_gradient_in_output_fallback_to_from_color` | EC-003 | STORY-072 EC-003 |
 
-#![allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, non_snake_case)]
+#![allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::doc_markdown,
+    non_snake_case
+)]
 
 use std::io::Read as IoRead;
 use std::sync::Arc;
 
 use slideforge_layout::types::{
-    BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, Rgb, ShapeFrame,
-    ShapeType,
+    BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, Rgb,
+    ShapeFrame, ShapeType,
 };
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, SourceSpan};
@@ -221,8 +226,16 @@ fn test_BC_3_04_001_ac004_docx_gradient_fallback_emits_warning() {
 fn test_BC_3_04_001_ac004_docx_gradient_solid_fallback_uses_from_color() {
     // from = #FF6F00 (orange), to = #003766 (dark blue).
     // The solid fallback must use from (#FF6F00), not to (#003766).
-    let from = Rgb { r: 255, g: 111, b: 0 }; // #FF6F00
-    let to = Rgb { r: 0, g: 55, b: 102 };    // #003766
+    let from = Rgb {
+        r: 255,
+        g: 111,
+        b: 0,
+    }; // #FF6F00
+    let to = Rgb {
+        r: 0,
+        g: 55,
+        b: 102,
+    }; // #003766
     let xml = export_gradient_docx_body_xml(
         from,
         to,
@@ -274,11 +287,8 @@ fn test_BC_3_04_001_ec003_docx_gradient_in_output_fallback_to_from_color() {
 #[test]
 fn test_BC_3_04_001_ec005_docx_same_from_to_gradient_valid() {
     let same = Rgb { r: 255, g: 0, b: 0 }; // #FF0000
-    let xml = export_gradient_docx_body_xml(
-        same,
-        same,
-        AltText::Provided(Arc::from("Flat gradient")),
-    );
+    let xml =
+        export_gradient_docx_body_xml(same, same, AltText::Provided(Arc::from("Flat gradient")));
 
     // Solid fallback must use the same color (#FF0000) — no error, no panic.
     assert!(

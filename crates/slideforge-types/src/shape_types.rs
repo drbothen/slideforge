@@ -282,7 +282,7 @@ pub enum LayoutWarning {
 }
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, non_snake_case)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -460,7 +460,11 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(g1.clone());
         set.insert(g1);
-        assert_eq!(set.len(), 1, "duplicate Gradient must deduplicate in HashSet");
+        assert_eq!(
+            set.len(),
+            1,
+            "duplicate Gradient must deduplicate in HashSet"
+        );
     }
 
     /// AC-002: Two `FillSpec::Gradient` with different colors are NOT equal.
@@ -474,7 +478,10 @@ mod tests {
             from: Rgb { r: 0, g: 255, b: 0 },
             to: Rgb { r: 0, g: 0, b: 255 },
         };
-        assert_ne!(g1, g2, "Gradients with different from-colors must not be equal");
+        assert_ne!(
+            g1, g2,
+            "Gradients with different from-colors must not be equal"
+        );
     }
 
     /// AC-002: `FillSpec::Gradient` is distinct from `FillSpec::SolidColor` and

@@ -451,6 +451,63 @@ pub fn render_text_frame(
     }
 }
 
+/// Emit an SVG fragment for a `FrameContent::Shape` frame.
+///
+/// Handles both gradient (`FillSpec::Gradient`) and non-gradient fills. Extracted
+/// to keep [`render_graphics_layer`] within the `clippy::too_many_lines` limit.
+///
+/// ## AC-004 (STORY-072)
+///
+/// `FillSpec::Gradient` → CSS `style="background: linear-gradient(to bottom, ...)"` on `<rect>`.
+/// `FillSpec::SolidColor` → SVG `fill="#RRGGBB"` attribute.
+/// `FillSpec::None` → SVG `fill="none"` attribute.
+/// Emit an SVG `<g>` fragment for a shape with the given alt/fill/bbox.
+///
+/// Called by [`render_graphics_layer`] for `FrameContent::Shape` frames.
+/// Extracted to keep the parent function within `clippy::too_many_lines`.
+fn render_shape_svg(
+    out: &mut String,
+    frame_idx: &mut u32,
+    slide_id: &str,
+    alt: &AltText,
+    fill: &slideforge_layout::FillSpec,
+    bbox: (i64, i64, i64, i64), // (x, y, w, h) in EMU
+) {
+    use std::fmt::Write as _;
+    let (x, y, w, h) = bbox;
+    let fill_attr = match fill {
+        slideforge_layout::FillSpec::Gradient { from, to } => {
+            format!(
+                "style=\"background: {}\"",
+                css_linear_gradient_background(*from, *to)
+            )
+        },
+        slideforge_layout::FillSpec::SolidColor(rgb) => {
+            format!("fill=\"#{:02X}{:02X}{:02X}\"", rgb.r, rgb.g, rgb.b)
+        },
+        slideforge_layout::FillSpec::None => "fill=\"none\"".to_owned(),
+    };
+    match alt {
+        AltText::Provided(text) => {
+            let idx = frame_idx.to_string();
+            *frame_idx += 1;
+            let label_id = format!("sf-{slide_id}-{idx}");
+            let eid = html_escape::encode_double_quoted_attribute(&label_id);
+            let ealt = html_escape::encode_text(text);
+            let _ = write!(
+                out,
+                r#"<g role="img" aria-labelledby="{eid}"><title id="{eid}">{ealt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" {fill_attr}/></g>"#
+            );
+        },
+        AltText::Decorative | AltText::Unspecified => {
+            let _ = write!(
+                out,
+                r#"<g aria-hidden="true"><rect x="{x}" y="{y}" width="{w}" height="{h}" {fill_attr}/></g>"#
+            );
+        },
+    }
+}
+
 /// Render the SVG graphics layer for a slide.
 ///
 /// Produces a single `<svg role="presentation" ...>` element containing wrapped
@@ -610,26 +667,14 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 }
             },
             FrameContent::Shape(shape_frame) => {
-                let alt = &shape_frame.alt;
-                match alt {
-                    AltText::Provided(text) => {
-                        let frame_id_str = frame_idx.to_string();
-                        frame_idx += 1;
-                        let label_id = format!("sf-{slide_id}-{frame_id_str}");
-                        let escaped_id = html_escape::encode_double_quoted_attribute(&label_id);
-                        let escaped_alt = html_escape::encode_text(text);
-                        let _ = write!(
-                            graphical_content,
-                            r#"<g role="img" aria-labelledby="{escaped_id}"><title id="{escaped_id}">{escaped_alt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
-                        );
-                    },
-                    AltText::Decorative | AltText::Unspecified => {
-                        let _ = write!(
-                            graphical_content,
-                            r#"<g aria-hidden="true"><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
-                        );
-                    },
-                }
+                render_shape_svg(
+                    &mut graphical_content,
+                    &mut frame_idx,
+                    slide_id,
+                    &shape_frame.alt,
+                    &shape_frame.fill,
+                    (x, y, w, h),
+                );
             },
             FrameContent::ColorBar {
                 filled_width_emu,
@@ -1786,24 +1831,25 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
 /// - Both hex values are uppercase 6-digit (`#RRGGBB`).
 /// - Used as the `style="background: ..."` attribute value on the shape `<div>`.
 ///
-/// # Panics
+/// ## Examples
 ///
-/// **RED GATE STUB — not yet implemented.** This function calls `todo!()`.
-/// All tests that invoke it will panic. The implementer must replace `todo!()`
-/// with:
-/// ```rust
-/// format!(
-///     "linear-gradient(to bottom, #{:02X}{:02X}{:02X}, #{:02X}{:02X}{:02X})",
-///     from.r, from.g, from.b, to.r, to.g, to.b
-/// )
 /// ```
+/// use slideforge_html::render::css_linear_gradient_background;
+/// use slideforge_types::Rgb;
+/// let css = css_linear_gradient_background(
+///     Rgb { r: 255, g: 0, b: 0 },
+///     Rgb { r: 0, g: 0, b: 255 },
+/// );
+/// assert_eq!(css, "linear-gradient(to bottom, #FF0000, #0000FF)");
+/// ```
+#[must_use]
 pub fn css_linear_gradient_background(
-    _from: slideforge_types::Rgb,
-    _to: slideforge_types::Rgb,
+    from: slideforge_types::Rgb,
+    to: slideforge_types::Rgb,
 ) -> String {
-    todo!(
-        "STORY-072: implement css_linear_gradient_background — \
-         return 'linear-gradient(to bottom, #RRGGBB, #RRGGBB)'"
+    format!(
+        "linear-gradient(to bottom, #{:02X}{:02X}{:02X}, #{:02X}{:02X}{:02X})",
+        from.r, from.g, from.b, to.r, to.g, to.b
     )
 }
 
@@ -4497,7 +4543,9 @@ mod tests {
 mod story_072_tests {
     use std::sync::Arc;
 
-    use slideforge_layout::{BoundingBox, FillSpec, Frame, FrameContent, PageSize, ShapeFrame, ShapeType};
+    use slideforge_layout::{
+        BoundingBox, FillSpec, Frame, FrameContent, PageSize, ShapeFrame, ShapeType,
+    };
     use slideforge_types::{AltText, Emu, Rgb};
 
     use super::{css_linear_gradient_background, render_graphics_layer};
@@ -4539,17 +4587,13 @@ mod story_072_tests {
     /// AC-004 (STORY-072) — `css_linear_gradient_background` returns the correct
     /// CSS format: `linear-gradient(to bottom, #FF0000, #0000FF)`.
     ///
-    /// RED GATE: panics with `todo!()` until implemented.
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
     #[test]
-    #[should_panic(expected = "STORY-072")]
     fn test_BC_3_04_001_ac004_html_css_linear_gradient_background_format() {
-        let result = css_linear_gradient_background(
-            Rgb { r: 255, g: 0, b: 0 },
-            Rgb { r: 0, g: 0, b: 255 },
-        );
+        let result =
+            css_linear_gradient_background(Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 0, b: 255 });
         assert_eq!(
-            result,
-            "linear-gradient(to bottom, #FF0000, #0000FF)",
+            result, "linear-gradient(to bottom, #FF0000, #0000FF)",
             "css_linear_gradient_background must return correct CSS format"
         );
     }
@@ -4557,14 +4601,11 @@ mod story_072_tests {
     /// AC-004 (STORY-072) — `css_linear_gradient_background` always uses
     /// `to bottom` direction (v1.0 fixed top-to-bottom).
     ///
-    /// RED GATE: panics with `todo!()` until implemented.
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
     #[test]
-    #[should_panic(expected = "STORY-072")]
     fn test_BC_3_04_001_ac004_html_css_linear_gradient_direction_to_bottom() {
-        let result = css_linear_gradient_background(
-            Rgb { r: 0, g: 255, b: 0 },
-            Rgb { r: 0, g: 0, b: 255 },
-        );
+        let result =
+            css_linear_gradient_background(Rgb { r: 0, g: 255, b: 0 }, Rgb { r: 0, g: 0, b: 255 });
         assert!(
             result.contains("to bottom"),
             "css_linear_gradient_background must use 'to bottom' direction; got: {result}"
@@ -4573,13 +4614,20 @@ mod story_072_tests {
 
     /// AC-004 (STORY-072) — `css_linear_gradient_background` uses uppercase hex.
     ///
-    /// RED GATE: panics with `todo!()` until implemented.
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
     #[test]
-    #[should_panic(expected = "STORY-072")]
     fn test_BC_3_04_001_ac004_html_css_gradient_stop_colors_uppercase_hex() {
         let result = css_linear_gradient_background(
-            Rgb { r: 255, g: 111, b: 0 },  // #FF6F00
-            Rgb { r: 0, g: 55, b: 102 },   // #003766
+            Rgb {
+                r: 255,
+                g: 111,
+                b: 0,
+            }, // #FF6F00
+            Rgb {
+                r: 0,
+                g: 55,
+                b: 102,
+            }, // #003766
         );
         // Both colors must appear as uppercase hex in the output.
         assert!(
@@ -4595,9 +4643,8 @@ mod story_072_tests {
     /// EC-005 (STORY-072) — `css_linear_gradient_background` with same from=to
     /// colors produces a valid CSS gradient string (no error, no panic).
     ///
-    /// RED GATE: panics with `todo!()` until implemented.
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
     #[test]
-    #[should_panic(expected = "STORY-072")]
     fn test_BC_3_04_001_ec005_html_same_from_to_css_gradient_valid() {
         let same = Rgb { r: 255, g: 0, b: 0 };
         let result = css_linear_gradient_background(same, same);
@@ -4643,8 +4690,16 @@ mod story_072_tests {
     /// RED GATE: assertion fails because no gradient CSS is currently emitted.
     #[test]
     fn test_BC_3_04_001_ac004_html_gradient_shape_from_to_colors_in_style() {
-        let from = Rgb { r: 255, g: 111, b: 0 }; // #FF6F00
-        let to = Rgb { r: 0, g: 55, b: 102 };    // #003766
+        let from = Rgb {
+            r: 255,
+            g: 111,
+            b: 0,
+        }; // #FF6F00
+        let to = Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        }; // #003766
         let frames = vec![gradient_shape_frame(
             from,
             to,

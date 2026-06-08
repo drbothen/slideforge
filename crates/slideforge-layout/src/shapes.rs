@@ -432,7 +432,8 @@ pub fn build_shape_frame(
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::doc_markdown
+    clippy::doc_markdown,
+    non_snake_case
 )]
 mod tests {
     use super::*;
@@ -2593,8 +2594,7 @@ mod tests {
         .expect("build_shape_frame must succeed for gradient fill with alt text");
 
         assert_eq!(
-            frame.fill,
-            fill,
+            frame.fill, fill,
             "ShapeFrame.fill must match the input FillSpec::Gradient exactly; got: {:?}",
             frame.fill
         );
@@ -2609,8 +2609,7 @@ mod tests {
     fn test_BC_3_04_001_ac003_story072_layout_shapes_gradient_passthrough() {
         let from = Rgb { r: 255, g: 0, b: 0 };
         let to = Rgb { r: 0, g: 0, b: 255 };
-        let st = ShapeType::from_keyword("rect")
-            .expect("rect must be valid");
+        let st = ShapeType::from_keyword("rect").expect("rect must be valid");
         let spec = ShapeSpec {
             shape_type: st,
             position: default_position(),
@@ -2723,7 +2722,10 @@ mod tests {
         let spec = ShapeSpec {
             shape_type: st,
             position: default_position(),
-            fill: FillSpec::Gradient { from: same, to: same },
+            fill: FillSpec::Gradient {
+                from: same,
+                to: same,
+            },
             text: None,
             alt: Some(AltText::Provided(Arc::from("Flat gradient"))),
             decorative: false,

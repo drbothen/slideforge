@@ -125,10 +125,35 @@ where
         .then_ignore(just(Token::Newline).or_not())
         .map(|(s, sp)| ShapeFieldItem::Position(s, sp));
 
-    let fill_field = kw("fill")
+    // AC-001 (STORY-072): `fill` accepts either:
+    //   fill "STRING"                       — solid color / none (existing)
+    //   fill gradient "STRING" to "STRING"  — gradient fill (new)
+    //
+    // The gradient syntax stores the combined value `gradient {from} to {to}`
+    // so that the downstream semantic stage (layout's fill-spec parser) can
+    // distinguish gradient from solid fills.
+    let gradient_kw = select! { Token::Ident(s) = e if s.as_ref() == "gradient" => e.span() };
+    let to_kw = select! { Token::Ident(s) = e if s.as_ref() == "to" => e.span() };
+
+    let fill_gradient = kw("fill")
+        .ignore_then(gradient_kw)
+        .ignore_then(string_field)
+        .then_ignore(to_kw)
+        .then(string_field)
+        .then_ignore(just(Token::Newline).or_not())
+        .map(|((from_s, from_sp), (to_s, _to_sp))| {
+            // Encode as "gradient {from} to {to}" — parseable by build_fill_spec.
+            let combined = format!("gradient {from_s} to {to_s}");
+            ShapeFieldItem::Fill(combined, from_sp)
+        });
+
+    let fill_solid = kw("fill")
         .ignore_then(string_field)
         .then_ignore(just(Token::Newline).or_not())
         .map(|(s, sp)| ShapeFieldItem::Fill(s, sp));
+
+    // Gradient tried first (more specific); solid as fallback.
+    let fill_field = fill_gradient.or(fill_solid);
 
     let text_field = kw("text")
         .ignore_then(template_val)
@@ -440,6 +465,96 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(fv);
         assert_eq!(set.len(), 1);
+    }
+
+    // ── AC-001 (STORY-072): `fill gradient STRING to STRING` → gradient fill ──
+
+    /// AC-001 (BC-3.04.001 STORY-072): `fill gradient "#RRGGBB" to "#RRGGBB"`
+    /// syntax is accepted by the parser and produces `ShapeNode.fill` containing
+    /// the gradient specification string.
+    #[test]
+    fn test_bc_3_04_001_ac001_story072_fill_gradient_syntax_accepted() {
+        let src = concat!(
+            "slide content:\n",
+            "  shape:\n",
+            "    type \"rect\"\n",
+            "    fill gradient \"#FF0000\" to \"#0000FF\"\n",
+            "    alt \"Gradient background\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_ok(),
+            "fill gradient syntax must parse without errors (AC-001 STORY-072); got: {result:?}"
+        );
+        let deck = result.unwrap();
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("expected Slide block item");
+        };
+        let shape_field = slide_s
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "shape")
+            .expect("shape field must exist");
+        let FieldValue::Shape(shape_node) = shape_field.value.value() else {
+            panic!("must be FieldValue::Shape");
+        };
+        let fill_val = shape_node
+            .fill
+            .as_ref()
+            .expect("fill must be Some after gradient syntax");
+        assert!(
+            fill_val.value().starts_with("gradient"),
+            "fill value must start with 'gradient'; got: {}",
+            fill_val.value()
+        );
+        assert!(
+            fill_val.value().contains("FF0000"),
+            "fill value must contain from-color 'FF0000'; got: {}",
+            fill_val.value()
+        );
+        assert!(
+            fill_val.value().contains("0000FF"),
+            "fill value must contain to-color '0000FF'; got: {}",
+            fill_val.value()
+        );
+    }
+
+    /// AC-001 (STORY-072): `fill gradient` with case-insensitive hex is accepted.
+    #[test]
+    fn test_bc_3_04_001_ac001_story072_fill_gradient_lowercase_hex_accepted() {
+        let src = concat!(
+            "slide content:\n",
+            "  shape:\n",
+            "    type \"rect\"\n",
+            "    fill gradient \"#ff0000\" to \"#0000ff\"\n",
+            "    alt \"Gradient background\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_ok(),
+            "fill gradient with lowercase hex must parse without errors; got: {result:?}"
+        );
+        let deck = result.unwrap();
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("expected Slide");
+        };
+        let shape_field = slide_s
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "shape")
+            .expect("shape field");
+        let FieldValue::Shape(shape_node) = shape_field.value.value() else {
+            panic!("must be FieldValue::Shape");
+        };
+        // Fill string must contain the lowercase hex values as provided.
+        let fill_val = shape_node.fill.as_ref().expect("fill must be Some");
+        assert!(
+            fill_val.value().starts_with("gradient"),
+            "fill value must start with 'gradient'; got: {}",
+            fill_val.value()
+        );
     }
 
     // ── EC-005: `raw` field inside shape: block → E-PAR-009 ──────────────────

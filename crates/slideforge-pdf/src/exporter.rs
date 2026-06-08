@@ -61,15 +61,15 @@
 use krilla::Document;
 use krilla::color::rgb;
 use krilla::configure::{Configuration, Validator};
-use krilla::geom::{PathBuilder, Point, Rect};
+use krilla::geom::{PathBuilder, Point, Rect, Transform};
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, FillRule};
+use krilla::paint::{Fill, FillRule, LinearGradient, SpreadMethod, Stop};
 use krilla::tagging::{ArtifactType, ContentTag};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
-use slideforge_layout::types::{BoundingBox, FrameContent, Rgb};
+use slideforge_layout::types::{BoundingBox, FillSpec, FrameContent, Rgb};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
@@ -758,12 +758,23 @@ fn draw_frame(
             )?;
         },
         // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
-        // Image, Shape, Empty: no drawing in this story.
+        // Image, Empty: no drawing in this story.
         // STORY-039: Chart now carries `alt` field; drawing stub unchanged.
-        FrameContent::Chart { .. }
-        | FrameContent::Image { .. }
-        | FrameContent::Shape(_)
-        | FrameContent::Empty => {},
+        FrameContent::Chart { .. } | FrameContent::Image { .. } | FrameContent::Empty => {},
+
+        // Shape — STORY-072: emit gradient-filled rect for FillSpec::Gradient.
+        // FillSpec::SolidColor and FillSpec::None are not yet drawn (stubbed).
+        FrameContent::Shape(shape_frame) => {
+            match &shape_frame.fill {
+                FillSpec::Gradient { from, to } => {
+                    draw_gradient_rect(surface, bbox, *from, *to);
+                },
+                FillSpec::SolidColor(_) | FillSpec::None => {
+                    // Solid / transparent shapes: no drawing yet (future story).
+                    tracing::debug!("Shape with SolidColor/None fill: no PDF drawing emitted");
+                },
+            }
+        },
 
         // ColorBar — PDF filled rectangle (BC-1.17.002 PC-9).
         //
@@ -1494,14 +1505,14 @@ impl Exporter for PdfExporter {
 /// ## Contract (STORY-072 AC-004)
 ///
 /// Calls (in order):
-/// 1. `surface.set_fill(Some(Fill { paint: paint::LinearGradient { ... }.into(), ... }))`
+/// 1. `surface.set_fill(Some(Fill { paint: LinearGradient { ... }.into(), ... }))`
 /// 2. `surface.draw_path(rect_path)` to stroke/fill the rectangle.
 ///
 /// The gradient is top-to-bottom (v1.0 fixed direction):
-/// - `x1 = bbox.x, y1 = bbox.y` (top)
-/// - `x2 = bbox.x, y2 = bbox.y + bbox.height` (bottom)
+/// - `x1 = bbox.x_pt, y1 = bbox.y_pt` (top-left)
+/// - `x2 = bbox.x_pt, y2 = (bbox.y + bbox.height)_pt` (bottom-left)
 /// - `spread_method = SpreadMethod::Pad`
-/// - Two `Stop` entries: `{ offset: 0.0, color: from }` and `{ offset: 1.0, color: to }`
+/// - Two `Stop` entries: offset=0 for `from`, offset=1 for `to`
 ///
 /// Uses `krilla = "=0.6.0"` API. `pdf-writer` MUST NOT be a direct dep of
 /// `slideforge-pdf` (per export-architecture v1.2 RISK-1).
@@ -1511,19 +1522,86 @@ impl Exporter for PdfExporter {
 /// krilla `Surface` uses top-left, Y-down. EMU values are converted to points
 /// via `coords::emu_to_pt` before passing to krilla.
 ///
-/// # Panics
+/// ## No-op on degenerate bounding box
 ///
-/// **RED GATE STUB — not yet implemented.** This function calls `todo!()`.
+/// When `bbox.width` or `bbox.height` is non-positive, no path is emitted.
 pub fn draw_gradient_rect(
-    _surface: &mut krilla::surface::Surface,
-    _bbox: &slideforge_layout::BoundingBox,
-    _from: slideforge_types::Rgb,
-    _to: slideforge_types::Rgb,
+    surface: &mut krilla::surface::Surface<'_>,
+    bbox: &slideforge_layout::BoundingBox,
+    from: slideforge_types::Rgb,
+    to: slideforge_types::Rgb,
 ) {
-    todo!(
-        "STORY-072: implement draw_gradient_rect — \
-         call surface.set_fill(LinearGradient) + surface.draw_path(rect) via krilla"
-    )
+    let x_pt = emu_to_pt(bbox.x);
+    let y_pt = emu_to_pt(bbox.y);
+    let w_pt = emu_to_pt(bbox.width);
+    let h_pt = emu_to_pt(bbox.height);
+
+    // Guard: degenerate dimensions produce no path.
+    let Some(rect) = Rect::from_xywh(x_pt, y_pt, w_pt, h_pt) else {
+        tracing::debug!(
+            x_pt,
+            y_pt,
+            w_pt,
+            h_pt,
+            "draw_gradient_rect: Rect::from_xywh returned None (degenerate dimensions); skipping"
+        );
+        return;
+    };
+
+    let mut pb = PathBuilder::new();
+    pb.push_rect(rect);
+    let Some(path) = pb.finish() else {
+        tracing::debug!("draw_gradient_rect: PathBuilder::finish() returned None; skipping");
+        return;
+    };
+
+    // Build the two color stops: offset=0 (from color, top) and offset=1 (to color, bottom).
+    // NormalizedF32::ZERO and ONE are always valid.
+    let stop_from = Stop {
+        offset: NormalizedF32::ZERO,
+        color: rgb::Color::new(from.r, from.g, from.b).into(),
+        opacity: NormalizedF32::ONE,
+    };
+    let stop_to = Stop {
+        offset: NormalizedF32::ONE,
+        color: rgb::Color::new(to.r, to.g, to.b).into(),
+        opacity: NormalizedF32::ONE,
+    };
+
+    // Top-to-bottom linear gradient:
+    // (x1, y1) = top-left of bbox; (x2, y2) = bottom-left of bbox.
+    let gradient = LinearGradient {
+        x1: x_pt,
+        y1: y_pt,
+        x2: x_pt,
+        y2: y_pt + h_pt,
+        transform: Transform::identity(),
+        spread_method: SpreadMethod::Pad,
+        stops: vec![stop_from, stop_to],
+        anti_alias: false,
+    };
+
+    surface.set_fill(Some(Fill {
+        paint: gradient.into(),
+        opacity: NormalizedF32::ONE,
+        rule: FillRule::NonZero,
+    }));
+    surface.set_stroke(None);
+    surface.draw_path(&path);
+
+    tracing::debug!(
+        x_pt,
+        y_pt,
+        w_pt,
+        h_pt,
+        from_r = from.r,
+        from_g = from.g,
+        from_b = from.b,
+        to_r = to.r,
+        to_g = to.g,
+        to_b = to.b,
+        "draw_gradient_rect: linear gradient rectangle drawn"
+    );
 }
 
 #[cfg(test)]
@@ -3045,17 +3123,21 @@ mod tests {
 // | test_BC_3_04_001_ec005_pdf_same_from_to_gradient_valid | EC-005 | STORY-072 EC-005 |
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used, non_snake_case)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case
+)]
 mod story_072_tests {
     use std::sync::Arc;
 
     use slideforge_layout::types::{
-        BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, ShapeFrame,
-        ShapeType,
+        BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        ShapeFrame, ShapeType,
     };
     use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, Rgb, SourceSpan};
 
-    use super::{draw_gradient_rect, PdfExporter};
+    use super::{PdfExporter, draw_gradient_rect};
     use slideforge_plugin_api::{ExportOptions, Exporter};
 
     // ─── Fixture builders ────────────────────────────────────────────────────
@@ -3193,7 +3275,9 @@ mod story_072_tests {
         // The load-bearing Red Gate for PDF is:
         // test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes (below).
         //
-        // Verify the stub function's type signature is correct (compile-time proof):
+        // Verify the function's type signature is correct (compile-time proof):
+        // ALLOW: `fn_ptr` is a type-assertion binding with no runtime side-effect.
+        #[allow(clippy::no_effect_underscore_binding)]
         let _fn_ptr: fn(
             &mut krilla::surface::Surface,
             &slideforge_layout::BoundingBox,
@@ -3241,11 +3325,8 @@ mod story_072_tests {
     #[test]
     fn test_BC_3_04_001_ec005_pdf_same_from_to_gradient_valid() {
         let same = Rgb { r: 255, g: 0, b: 0 };
-        let laid_out = make_gradient_deck(
-            same,
-            same,
-            AltText::Provided(Arc::from("Flat gradient")),
-        );
+        let laid_out =
+            make_gradient_deck(same, same, AltText::Provided(Arc::from("Flat gradient")));
         let deck = make_deck_one_slide();
         let brand = make_brand();
         let opts = ExportOptions::default();

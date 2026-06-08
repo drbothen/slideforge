@@ -20,7 +20,11 @@
 //! | `test_BC_3_04_001_ec005_pptx_same_from_to_colors_valid` | EC-005 | STORY-072 EC-005 |
 //! | `test_BC_3_04_001_ac004_pptx_full_slide_with_gradient_shape_builds` | AC-004 | end-to-end |
 
-#![allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#![allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case
+)]
 
 use std::sync::Arc;
 
@@ -29,7 +33,7 @@ use slideforge_layout::{
     ShapeType,
 };
 use slideforge_plugin_api::{ExportOptions, Exporter};
-use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, Rgb, SourceSpan};
+use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, Rgb};
 
 use crate::PptxExporter;
 
@@ -161,7 +165,11 @@ fn build_pptx_slide1_xml(laid_out: &LaidOutDeck) -> String {
 fn test_BC_3_04_001_ac004_pptx_shape_gradient_frame_emits_grad_fill_element() {
     let from = Rgb { r: 255, g: 0, b: 0 };
     let to = Rgb { r: 0, g: 0, b: 255 };
-    let laid_out = gradient_slide_deck(from, to, AltText::Provided(Arc::from("Gradient background")));
+    let laid_out = gradient_slide_deck(
+        from,
+        to,
+        AltText::Provided(Arc::from("Gradient background")),
+    );
     let xml = build_pptx_slide1_xml(&laid_out);
 
     // RED GATE: currently the Shape frame is skipped — no <a:gradFill> in output.
@@ -233,8 +241,8 @@ fn test_BC_3_04_001_ac004_pptx_gradient_direction_is_top_to_bottom() {
 /// RED GATE: fails because gradient fill is not emitted.
 #[test]
 fn test_BC_3_04_001_ac004_pptx_gradient_stop_colors_match_from_to() {
-    let from = Rgb { r: 255, g: 0, b: 0 };  // #FF0000
-    let to = Rgb { r: 0, g: 0, b: 255 };    // #0000FF
+    let from = Rgb { r: 255, g: 0, b: 0 }; // #FF0000
+    let to = Rgb { r: 0, g: 0, b: 255 }; // #0000FF
     let laid_out = gradient_slide_deck(
         from,
         to,
