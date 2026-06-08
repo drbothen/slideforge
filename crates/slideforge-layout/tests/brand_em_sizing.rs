@@ -286,7 +286,7 @@ fn test_bc_3_04_001_ac001_different_brands_produce_different_em_resolution() {
 /// tests the wiring from `layout::run` → `layout_shapes`.
 #[test]
 fn test_bc_3_04_001_ac001_layout_shapes_direct_48pt_em1_resolves_to_609600() {
-    use slideforge_layout::{PageSize, shapes::DEFAULT_EM_IN_EMU};
+    use slideforge_layout::PageSize;
     use slideforge_types::Emu as TypesEmu;
 
     let page = PageSize {
@@ -320,12 +320,13 @@ fn test_bc_3_04_001_ac001_layout_shapes_direct_48pt_em1_resolves_to_609600() {
         "layout_shapes with em_in_emu=609_600 must produce BoundingBox.x=Emu(609_600)"
     );
 
-    // Also assert the DEFAULT_EM_IN_EMU constant is still 457_200 (backward compat guard)
-    assert_eq!(
-        DEFAULT_EM_IN_EMU, 457_200_i64,
-        "DEFAULT_EM_IN_EMU must remain 457_200 (backward compat)"
-    );
-    let _ = DEFAULT_EM_IN_EMU; // suppress dead_code before AC-002 is implemented
+    // Backward-compat guard for DEFAULT_EM_IN_EMU was previously here but
+    // DEFAULT_EM_IN_EMU is no longer pub (AC-002 / STORY-074 adversary P1 MED-001).
+    // The same invariant — that the historical default is 457_200 — is enforced
+    // by `test_bc_3_04_001_ac002_default_em_in_emu_is_457200` in
+    // `slideforge-layout/src/shapes.rs` (in-crate test module) where the private
+    // const is visible, and by `test_bc_3_04_001_ac003_*` tests in this file
+    // which confirm `BrandFonts::default().font_size_emu == 457_200`.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

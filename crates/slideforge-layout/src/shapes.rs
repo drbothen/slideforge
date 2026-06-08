@@ -44,8 +44,15 @@ pub const EMU_PER_INCH: i64 = 914_400;
 
 /// Default em-to-EMU conversion: 457,200 EMU = 0.5 inch at 36pt brand default.
 ///
-/// Used when `brand.font_size_emu` is not overridden.
-pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
+/// # Test-only constant (AC-002 / STORY-074)
+///
+/// This constant is **not part of the public API** and is only compiled in test
+/// builds. Production code uses `BrandFonts::default().font_size_emu` (which
+/// carries this same value for backward compatibility — AC-003). This constant
+/// is retained solely for in-crate unit tests that need to call low-level helpers
+/// (`from_em`, `unit_to_emu`, `layout_shapes`) with the historical default value.
+#[cfg(test)]
+const DEFAULT_EM_IN_EMU: i64 = 457_200;
 
 /// Convert a [`slideforge_types::ShapeUnit`] measurement to integer EMU.
 ///
@@ -55,7 +62,7 @@ pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
 /// # Arguments
 ///
 /// * `unit` — the measurement in user units.
-/// * `em_in_emu` — the brand's em-to-EMU resolution (default [`DEFAULT_EM_IN_EMU`]).
+/// * `em_in_emu` — the brand's em-to-EMU resolution (default: `457_200` EMU = 0.5 inch at 36pt).
 ///
 /// # Returns
 ///
@@ -92,8 +99,8 @@ pub fn from_inches(milliinches: i64) -> Option<Emu> {
 
 /// Convert em units (as a rational `numerator/1000`) to EMU.
 ///
-/// For example, `from_em(1000, DEFAULT_EM_IN_EMU)` converts `1em` →
-/// `Some(Emu(457_200))`.
+/// For example, `from_em(1000, 457_200)` converts `1em` →
+/// `Some(Emu(457_200))` (using the default brand em size of 457,200 EMU).
 ///
 /// Returns `None` when `milliem * em_in_emu` overflows `i64`
 /// (VP-048 / BC-3.04.001 Invariant 8 / interface-definitions.md §9.4).
@@ -2538,6 +2545,29 @@ mod tests {
             ShapeUnit::Em(1000),
             ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
             "height",
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-002 — DEFAULT_EM_IN_EMU backward-compat guard (STORY-074)
+    //
+    // DEFAULT_EM_IN_EMU is no longer pub (AC-002 / adversary P1 MED-001).
+    // This in-crate test is the only place that can assert its value, since
+    // the external integration test can no longer import it.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-002 / STORY-074 — `DEFAULT_EM_IN_EMU` must remain `457_200`.
+    ///
+    /// This const is test-private (AC-002: "not pub or referenced by production code").
+    /// The value must never change — it is the historical default that `BrandFonts::default()`
+    /// mirrors for backward compatibility (AC-003).
+    ///
+    /// Load-bearing: changing the value to anything other than 457_200 MUST fail this test.
+    #[test]
+    fn test_bc_3_04_001_ac002_default_em_in_emu_is_457200() {
+        assert_eq!(
+            DEFAULT_EM_IN_EMU, 457_200_i64,
+            "DEFAULT_EM_IN_EMU must remain 457_200 (AC-002 backward compat guard)"
         );
     }
 }
