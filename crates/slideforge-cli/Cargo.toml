@@ -48,3 +48,17 @@ opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+
+[dev-dependencies]
+## tracing-test: capture tracing spans/events in tests for AC-011 assertions.
+## no-env-filter: required so the subscriber captures INFO events from the
+## production code path without filtering by test crate target name.
+tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
+## tempfile: create temporary directories for integration test fixtures.
+tempfile = { workspace = true }
+## slideforge-plugin-api: for Diagnostic, DiagnosticSeverity, ExportError in unit tests.
+## Required for unit tests in commands/build.rs that construct BuildError::ValidationFailed
+## and BuildError::Export — these variants hold plugin-api types.
+slideforge-plugin-api = { workspace = true }
+## slideforge-types: for SourceSpan used in Diagnostic construction in unit tests.
+slideforge-types = { workspace = true }

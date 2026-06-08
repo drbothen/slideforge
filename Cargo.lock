@@ -3152,10 +3152,14 @@ dependencies = [
  "opentelemetry_sdk",
  "serde_json",
  "slideforge",
+ "slideforge-plugin-api",
+ "slideforge-types",
+ "tempfile",
  "thiserror",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "tracing-test",
 ]
 
 [[package]]
