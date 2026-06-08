@@ -72,6 +72,11 @@ tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
 name = "field_to_block_unit"
 
 [[test]]
+# story_088_list_literal_eval.rs — STORY-088 Red Gate tests for FieldValue::List
+# → Value::List eval dispatch. No feature gates; runs in the default nextest invocation.
+name = "story_088_list_literal_eval"
+
+[[test]]
 # bleed_tests.rs uses `slideforge_eval::BleedChecker`, which is gated behind the
 # `test-utils` feature.  Without `required-features`, `cargo nextest run -p
 # slideforge-eval` (no --features flag) would fail to compile this test binary

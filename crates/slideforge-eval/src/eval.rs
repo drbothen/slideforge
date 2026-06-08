@@ -778,6 +778,12 @@ fn eval_section_nodes(
                 // double-reporting (the SyntaxError is already in the DiagnosticSink).
                 continue;
             },
+            slideforge_syntax::FieldValue::List(_) => {
+                // STORY-088: List-literal field values in section register keys are
+                // not supported — register fields are text-only (BC-1.14.001/002/003).
+                // Drop silently (same pattern as FieldValue::Shape for unreachable paths).
+                continue;
+            },
         };
 
         body.insert(Arc::from(key), resolved);
@@ -846,6 +852,11 @@ fn eval_field_value_to_value(
             }
         },
         FieldValue::Shape(_) | FieldValue::Error => None,
+        // STORY-088: FieldValue::List is evaluated to Value::List by evaluating each
+        // item. This stub returns None until STORY-088 implementation is complete.
+        // The real implementation maps items through eval_field_value_to_value and
+        // collects to Value::List(vals).
+        FieldValue::List(_) => None,
     }
 }
 

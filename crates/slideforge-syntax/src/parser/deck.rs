@@ -976,4 +976,531 @@ mod tests {
             "tab indentation must produce a lex error"
         );
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // STORY-088 RED GATE TESTS
+    // Traces to BC-1.01.002 (field-value parser — list-literal extension).
+    // All tests below MUST FAIL before implementation starts.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── AC-001: bullets: ["A","B","C"] parses to FieldValue::List ────────────
+
+    /// BC-1.01.002 AC-001 — `bullets: ["Item A", "Item B", "Item C"]` parses
+    /// without error and the field value is `FieldValue::List(Vec<FieldValue>)`
+    /// where each inner item is a `FieldValue::Template`.
+    ///
+    /// RED GATE: `value_parser()` has no `[...]` arm → parser emits error(s) and
+    /// produces `FieldValue::Error` instead of `FieldValue::List` → assertion FAILS.
+    #[test]
+    fn test_bc_1_01_002_ac001_bullets_field_list_literal_parses_to_field_value_list() {
+        // Slide body syntax: `name value` without colon (same as `title "My Slide"`).
+        let src = concat!(
+            "slide content:\n",
+            "  title \"My Slide\"\n",
+            "  bullets [\"Item A\", \"Item B\", \"Item C\"]\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(
+            lex_errs.is_empty(),
+            "AC-001: no lex errors expected; got: {lex_errs:?}"
+        );
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-001: no parse errors expected for valid list literal; got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("AC-001: deck must parse successfully");
+        assert_eq!(deck.items.len(), 1, "AC-001: deck must have 1 slide");
+
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("AC-001: expected BlockItem::Slide");
+        };
+        let slide = slide_spanned.value();
+
+        let bullets_field = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("AC-001: 'bullets' field must be present");
+
+        // The value MUST be FieldValue::List with 3 items.
+        // RED GATE: without FieldValue::List parser arm this will be FieldValue::Error.
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "AC-001 RED GATE: bullets field must be FieldValue::List; got: {:?}. \
+                 value_parser() has no [...]  arm yet — implement FieldValue::List arm \
+                 in deck.rs to pass this test.",
+                bullets_field.value.value()
+            );
+        };
+        assert_eq!(items.len(), 3, "AC-001: list must have 3 items");
+
+        // Each item must be a FieldValue::Template wrapping a single Literal chunk.
+        for (i, item) in items.iter().enumerate() {
+            let FieldValue::Template(chunks) = item else {
+                panic!("AC-001: list item[{i}] must be FieldValue::Template; got: {item:?}");
+            };
+            assert_eq!(chunks.len(), 1, "AC-001: each item must have 1 chunk");
+        }
+    }
+
+    // ── AC-002: empty list `bullets: []` parses to FieldValue::List([]) ──────
+
+    /// BC-1.01.002 AC-002 — `bullets: []` (empty list) parses to
+    /// `FieldValue::List(vec![])` without error.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error, no List produced.
+    #[test]
+    fn test_bc_1_01_002_ac002_empty_list_literal_parses_to_field_value_list_empty() {
+        let src = concat!("slide content:\n", "  bullets []\n",);
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "AC-002: no lex errors expected");
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-002: empty list literal must parse without error; got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("AC-002: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("AC-002: expected Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("AC-002: 'bullets' field must exist");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "AC-002 RED GATE: empty [] must produce FieldValue::List([]); got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+        assert!(
+            items.is_empty(),
+            "AC-002: FieldValue::List from [] must be empty; got {items:?}"
+        );
+    }
+
+    // ── AC-003: single-item list `bullets: ["Only"]` ──────────────────────────
+
+    /// BC-1.01.002 AC-003 — `bullets: ["Only"]` parses to
+    /// `FieldValue::List(vec![FieldValue::Template(...)])`.
+    /// A single-item list must NOT be treated as a bare string.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error, no List produced.
+    #[test]
+    fn test_bc_1_01_002_ac003_single_item_list_parses_as_list_not_bare_string() {
+        let src = concat!("slide content:\n", "  bullets [\"Only\"]\n",);
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "AC-003: no lex errors expected");
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-003: single-item list must parse without error; got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("AC-003: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("AC-003: expected Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("AC-003: 'bullets' field must exist");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "AC-003 RED GATE: single-item [\"Only\"] must produce FieldValue::List; \
+                 NOT FieldValue::Ident(\"Only\") or FieldValue::Template. Got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            1,
+            "AC-003: single-item list must have exactly 1 item"
+        );
+    }
+
+    // ── AC-004: list-literal in full slide block (indentation integration) ────
+
+    /// BC-1.01.002 AC-004 — list-literal parses inside a standard slide block
+    /// with multiple fields; no off-by-one indentation errors.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → the `bullets:` field fails to
+    /// parse and may corrupt subsequent field parsing.
+    #[test]
+    fn test_bc_1_01_002_ac004_list_literal_in_full_slide_block_with_multiple_fields() {
+        let src = concat!(
+            "slide content:\n",
+            "  title \"Agenda\"\n",
+            "  bullets [\"Step 1\", \"Step 2\", \"Step 3\"]\n",
+            "  body \"See notes.\"\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "AC-004: no lex errors expected");
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-004: all 4 fields must parse without error; got {parse_err_count} errors. \
+             Check that the list-literal arm does not break indentation tracking or corrupt \
+             subsequent field parsing."
+        );
+
+        let deck = deck.expect("AC-004: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("AC-004: expected Slide");
+        };
+        let slide = slide_spanned.value();
+
+        assert_eq!(slide.fields.len(), 3, "AC-004: slide must have 3 fields");
+
+        let bullets_field = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("AC-004: 'bullets' field must exist");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "AC-004 RED GATE: bullets field must be FieldValue::List; got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+        assert_eq!(items.len(), 3, "AC-004: list must have 3 items");
+
+        // Verify the other fields parsed correctly (no partial-parse contamination).
+        let title_field = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "title")
+            .expect("AC-004: 'title' field must be present after list-literal field");
+        assert!(
+            matches!(title_field.value.value(), FieldValue::Template(_)),
+            "AC-004: title field must be FieldValue::Template, not contaminated; \
+             got: {:?}",
+            title_field.value.value()
+        );
+    }
+
+    // ── AC-005: non-string list items produce E-PAR diagnostic, not panic ─────
+
+    /// BC-1.01.002 AC-005 / BC-1.15.001 (error accumulation) — `bullets: [42, true]`
+    /// produces a parser diagnostic, NOT a panic. Error accumulation: the parser
+    /// continues and reports all errors in the file.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm at all → the error we get may be
+    /// different (the `[` token is unexpected) but the test still requires that:
+    /// (a) no panic occurs, and (b) parse errors are non-zero.
+    ///
+    /// POST-IMPLEMENTATION expectation: specific E-PAR diagnostic for non-string items.
+    #[test]
+    fn test_bc_1_01_002_ac005_non_string_list_items_produce_epar_not_panic() {
+        // This must NOT panic — error accumulation must continue after the bad items.
+        let src = concat!("slide content:\n", "  bullets [42, true]\n",);
+        let (_deck, lex_errs, parse_err_count) = parse_src(src);
+        // No lex errors (the tokens are valid; the semantic error is at parse level).
+        assert!(
+            lex_errs.is_empty(),
+            "AC-005: [42, true] must not produce lex errors (tokens are valid)"
+        );
+        // Parser MUST emit at least one error (non-string items in bullet list).
+        // This also guards against the "list parsed silently as string" regression.
+        assert!(
+            parse_err_count > 0,
+            "AC-005 RED GATE: non-string list items [42, true] must produce ≥1 parser \
+             diagnostic. Got 0 errors — this means the items were silently accepted, \
+             which violates the type-validation rule."
+        );
+        // No panic occurred (test reaches this point without unwinding).
+    }
+
+    // ── AC-006: vars-block list assignment form ───────────────────────────────
+
+    /// BC-1.01.002 AC-006 — `vars: items: ["A","B","C"]` (vars-block list assignment)
+    /// parses without error. The vars-block value parser must accept `[...]` tokens.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error; the vars-block
+    /// entry fails to parse → deck.vars[0].entries[0].1 is NOT FieldValue::List.
+    ///
+    /// Note: This tests the `vars:` block form (with `:` separator and indented
+    /// block body). The `@var ident = [...]` form (at deck-level) is tested
+    /// separately in the E2E tests (AC-007 fixture).
+    #[test]
+    fn test_bc_1_01_002_ac006_vars_block_list_assignment_parses_to_fieldvalue_list() {
+        let src = concat!(
+            "vars:\n",
+            "  items: [\"Item A\", \"Item B\", \"Item C\"]\n",
+            "slide content:\n",
+            "  title \"My Slide\"\n",
+            "  bullets: items\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "AC-006: no lex errors expected");
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-006: vars-block list assignment must parse without error; got {parse_err_count}"
+        );
+
+        let deck = deck.expect("AC-006: deck must parse");
+        assert_eq!(
+            deck.vars.len(),
+            1,
+            "AC-006: must have 1 vars block"
+        );
+        let vb = &deck.vars[0];
+        assert_eq!(vb.entries.len(), 1, "AC-006: vars block must have 1 entry");
+
+        let (_name, value_spanned) = &vb.entries[0];
+        let FieldValue::List(items) = value_spanned.value() else {
+            panic!(
+                "AC-006 RED GATE: vars-block list value must be FieldValue::List; got: {:?}. \
+                 value_parser() (used in vars_block_parser) has no [...]  arm yet.",
+                value_spanned.value()
+            );
+        };
+        assert_eq!(items.len(), 3, "AC-006: list must have 3 items");
+    }
+
+    /// BC-1.01.002 AC-006 regression guard — `bullets items` (ident reference,
+    /// NO colon) continues to parse correctly after the list-literal arm is added.
+    ///
+    /// Note: the slide body field syntax uses `name value` without colon (e.g.
+    /// `title "My Slide"`). The vars-block syntax uses `name: value` with colon.
+    /// This test exercises the slide-body `bullets items` (ident reference)
+    /// path that currently works (FieldValue::Ident) to guard against
+    /// regressions introduced by the list-literal arm addition.
+    ///
+    /// GREEN GATE: This test SHOULD PASS today (the ident path already works).
+    /// After implementation it must also pass (regression guard).
+    #[test]
+    fn test_bc_1_01_002_ac006_regression_bullets_ident_reference_still_parses() {
+        // Slide body syntax: `name value` without colon.
+        let src = concat!(
+            "vars:\n",
+            "  items: \"placeholder\"\n",
+            "slide content:\n",
+            "  title \"Agenda\"\n",
+            "  bullets items\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "AC-006 regression: no lex errors");
+        assert_eq!(
+            parse_err_count, 0,
+            "AC-006 regression: 'bullets items' (ident reference, no colon) must still parse; \
+             got {parse_err_count} errors. Adding the list-literal arm must NOT break the \
+             existing FieldValue::Ident path for slide body fields."
+        );
+
+        let deck = deck.expect("AC-006 regression: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("AC-006 regression: expected Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("AC-006 regression: 'bullets' field must exist");
+
+        assert!(
+            matches!(bullets_field.value.value(), FieldValue::Ident(_)),
+            "AC-006 regression: 'bullets items' must produce FieldValue::Ident; \
+             got: {:?}",
+            bullets_field.value.value()
+        );
+    }
+
+    // ── EC-001: empty list ────────────────────────────────────────────────────
+
+    /// BC-1.01.002 EC-001 — `bullets: []` edge case: empty list is valid.
+    /// Covered by AC-002 above; this explicit edge-case test verifies the
+    /// empty-list → `FieldValue::List(vec![])` path directly.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error.
+    #[test]
+    fn test_bc_1_01_002_ec001_empty_list_produces_field_value_list_empty() {
+        let src = concat!("slide content:\n", "  bullets []\n");
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "EC-001: no lex errors");
+        assert_eq!(
+            parse_err_count, 0,
+            "EC-001: empty list [] is valid; must produce 0 parse errors"
+        );
+        let deck = deck.expect("EC-001: must parse");
+        let crate::ast::BlockItem::Slide(s) = &deck.items[0] else {
+            panic!("EC-001: expected Slide");
+        };
+        let f = s
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("EC-001: bullets field");
+        let FieldValue::List(items) = f.value.value() else {
+            panic!("EC-001 RED GATE: [] must be FieldValue::List([]); got: {:?}", f.value.value());
+        };
+        assert!(items.is_empty(), "EC-001: FieldValue::List from [] must be empty");
+    }
+
+    // ── EC-003: trailing comma ────────────────────────────────────────────────
+
+    /// BC-1.01.002 EC-003 — `bullets: ["A","B",]` trailing comma.
+    /// The parser must either accept the trailing comma (preferred via
+    /// `allow_trailing()`) or produce a useful diagnostic — NOT a silent wrong parse.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error (different error,
+    /// but test still verifies no panic and no silent wrong value).
+    #[test]
+    fn test_bc_1_01_002_ec003_trailing_comma_does_not_panic() {
+        let src = concat!("slide content:\n", "  bullets [\"A\", \"B\",]\n",);
+        // Must not panic regardless of parse result.
+        let (deck_opt, lex_errs, _parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "EC-003: no lex errors expected");
+
+        // If parse succeeds, the trailing comma must be silently accepted (allow_trailing).
+        if let Some(deck) = deck_opt {
+            let crate::ast::BlockItem::Slide(s) = &deck.items[0] else {
+                return; // parse recovered to empty slide — acceptable
+            };
+            if let Some(f) = s.value().fields.iter().find(|f| f.name.value() == "bullets") {
+                // If list parsed, must have 2 items (trailing comma consumed, not counted).
+                if let FieldValue::List(items) = f.value.value() {
+                    assert_eq!(
+                        items.len(),
+                        2,
+                        "EC-003: trailing comma must not add an extra empty item; \
+                         got {items:?}"
+                    );
+                }
+            }
+        }
+        // No panic = test passes (primary assertion for EC-003 at Red Gate).
+    }
+
+    // ── EC-004: empty-string item ─────────────────────────────────────────────
+
+    /// BC-1.01.002 EC-004 — `bullets: [""]` single empty-string item.
+    /// Must parse to `FieldValue::List(vec![FieldValue::Template(vec![])])`.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error.
+    #[test]
+    fn test_bc_1_01_002_ec004_empty_string_item_is_valid() {
+        let src = concat!("slide content:\n", "  bullets [\"\"]\n",);
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "EC-004: no lex errors");
+        assert_eq!(
+            parse_err_count, 0,
+            "EC-004: empty-string item [\"\"] must parse without error; \
+             got {parse_err_count} errors"
+        );
+        let deck = deck.expect("EC-004: must parse");
+        let crate::ast::BlockItem::Slide(s) = &deck.items[0] else {
+            panic!("EC-004: expected Slide");
+        };
+        let f = s
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("EC-004: bullets field");
+        let FieldValue::List(items) = f.value.value() else {
+            panic!(
+                "EC-004 RED GATE: [\"\"] must produce FieldValue::List; got: {:?}",
+                f.value.value()
+            );
+        };
+        assert_eq!(items.len(), 1, "EC-004: single-item list from [\"\"] must have 1 item");
+        assert!(
+            matches!(items[0], FieldValue::Template(_)),
+            "EC-004: empty-string item must be FieldValue::Template; got: {:?}",
+            items[0]
+        );
+    }
+
+    // ── EC-005: mixed types — all errors collected ────────────────────────────
+
+    /// BC-1.01.002 EC-005 / BC-1.15.001 (error accumulation) —
+    /// `bullets: ["A", 42, "C"]` (mixed types): all errors are collected.
+    /// The parser must NOT fail-on-first — it must report the error for `42` AND
+    /// continue to parse `"C"`.
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → parse error on the `[` token
+    /// itself, not specifically on the `42` item. The test verifies ≥1 parse error.
+    #[test]
+    fn test_bc_1_01_002_ec005_mixed_type_list_all_errors_collected() {
+        let src = concat!("slide content:\n", "  bullets [\"A\", 42, \"C\"]\n",);
+        let (_deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "EC-005: no lex errors");
+        // Must produce at least one parse error (for the `42` non-string item).
+        assert!(
+            parse_err_count > 0,
+            "EC-005 RED GATE: mixed-type list [\"A\", 42, \"C\"] must produce ≥1 parse error \
+             for the non-string item '42'. Got 0 errors — the item was silently accepted."
+        );
+        // The test does NOT assert the number of errors precisely because the
+        // exact error count depends on recovery strategy. The invariant is ≥1.
+    }
+
+    // ── Invariant: FieldValue::List content assertion ─────────────────────────
+
+    /// BC-1.01.002 invariant — a parsed `FieldValue::List` contains exactly
+    /// the string items written in the source (LESSON-14: assert content, not
+    /// mere presence).
+    ///
+    /// RED GATE: value_parser() has no `[...]` arm → FieldValue::List not produced.
+    #[test]
+    fn test_bc_1_01_002_invariant_parsed_list_contains_exact_string_content() {
+        let src = concat!(
+            "slide content:\n",
+            "  bullets [\"Alpha\", \"Beta\", \"Gamma\"]\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "invariant: no lex errors");
+        assert_eq!(
+            parse_err_count, 0,
+            "invariant: list with 3 strings must parse without error"
+        );
+
+        let deck = deck.expect("invariant: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("invariant: expected Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("invariant: bullets field");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "invariant RED GATE: bullets must be FieldValue::List; got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+
+        // LESSON-14: assert the CONTENT, not just the structure.
+        assert_eq!(items.len(), 3, "invariant: list must have exactly 3 items");
+
+        // Extract the literal text from each item's Template chunks.
+        let texts: Vec<String> = items
+            .iter()
+            .map(|item| {
+                let FieldValue::Template(chunks) = item else {
+                    panic!("invariant: each list item must be FieldValue::Template; got: {item:?}");
+                };
+                let crate::template::TemplateChunk::Literal(s) = &chunks[0] else {
+                    panic!("invariant: each item chunk must be Literal; got: {chunks:?}");
+                };
+                s.clone()
+            })
+            .collect();
+
+        assert_eq!(texts[0], "Alpha", "invariant: first item must be 'Alpha'");
+        assert_eq!(texts[1], "Beta", "invariant: second item must be 'Beta'");
+        assert_eq!(texts[2], "Gamma", "invariant: third item must be 'Gamma'");
+    }
 }

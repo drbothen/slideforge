@@ -231,6 +231,12 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                 // Error sentinel — already in sink, skip this field.
                 continue;
             },
+            FieldValue::List(_) => {
+                // STORY-088: FieldValue::List in @for slide body fields is not yet
+                // evaluated here. The implementation arm will evaluate each item and
+                // produce Value::List for bullets-type fields. Stub: skip the field.
+                continue;
+            },
         };
         fields.insert(field_name, field_value);
     }
