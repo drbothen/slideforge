@@ -18,6 +18,7 @@ nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
 depends_on: [STORY-028]
 blocks: []
 estimated_days: 1
+version: "1.6"
 ---
 
 # STORY-074: Brand-aware Em conversion (font_size_emu)
@@ -59,8 +60,8 @@ The constant satisfies the formula structurally but is not brand-aware. This
 story closes the structural gap:
 
 1. **Add `font_size_emu: i64` to `BrandFonts`** in `slideforge-types/src/brand.rs`
-   (or wherever `BrandFonts` is defined). Default: `457_200` (36pt body at 96dpi,
-   matching the current constant). Field must derive `Debug + Clone + PartialEq +
+   (or wherever `BrandFonts` is defined). Default: `457_200` (36pt body font =
+   0.5 inch at 914_400 EMU/inch, matching the current constant). Field must derive `Debug + Clone + PartialEq +
    Eq + Hash` (comemo compatibility per DI-010).
 
 2. **Thread `brand.fonts.font_size_emu` through `layout::run`** to `layout_shapes()`
@@ -183,3 +184,4 @@ passed before STORY-074 may fail after it.
 | 1.3 | 2026-06-08 | story-writer | Prose↔code coherence sweep per adversary Pass-5 F-074-P5-LOW-001 + proactive full-fixture reconciliation (LESSON-10). Fixed two type/field defects in the AC-001 illustrative fixture: (1) replaced `BrandConfig { fonts: BrandFonts { ... } }` with `BrandFonts { ... }` — `BrandConfig` is the slideforge-brand TOML-schema type (fields: `ColorConfig`, `FontConfig`); the IR type that owns `font_size_emu` is `slideforge_types::BrandFonts`; (2) replaced `frame.bounding_box.x` / `frame.bounding_box.width` with `frame.bbox.x` / `frame.bbox.width` — `Frame.bbox: BoundingBox` (field `bbox`); `bounding_box` belongs to `TextFlow`, not `Frame`. Also added inline annotations for two illustrative-only helpers (`PAGE_SIZE_EMU`, `minimal_shape()`) that have no real definition, with a cross-reference to `crates/slideforge-layout/tests/brand_em_sizing.rs`. No AC semantics, BC references, thresholds, or em-sizing contract changed. |
 | 1.4 | 2026-06-08 | story-writer | Comprehensive prose coherence sweep resolving adversary Pass-8 F-074-P8-LOW-001 (wave contradiction) plus all remaining frontmatter↔body drift, stale line citations, and hedging language: (1) Replaced "Wave TBD / pending / likely Wave 3 or 4" in Dependency Anchor Justifications with resolved Wave 5 statement matching frontmatter `wave: 5`; (2) Corrected three stale `layout.rs:205–211` citations — the STORY-028 deferral placeholder location — to accurately reflect that the STORY-074-CLOSED comment now lives at `layout.rs:262–266` in the delivered implementation; historical origin clearly labelled in each case; (3) Updated Summary tense from present-continuous ("is used as a safe placeholder") to past tense reflecting the delivered state ("was used… historically"). No AC semantics, BC references, thresholds, or em-sizing contract changed. |
 | 1.5 | 2026-06-08 | story-writer | BC version cell update per adversary Pass-9 F-074-P9-LOW-001: corrected BC-3.04.001 version in Behavioral Contracts table from v1.5.0 to v1.6 (source-of-truth: BC-3.04.001.md frontmatter `version: "1.6"`). Final exhaustive label/version audit confirmed: BC H1 title matches source-of-truth; all body AC traces cite BC clauses by name (no version numbers embedded in AC text); no other BC/ADR/spec version numbers cited in this story; no stale line citations, no hedging, no frontmatter↔body incoherence. No AC semantics, BC contracts, or thresholds changed. |
+| 1.6 | 2026-06-08 | story-writer | Final derivation-claim accuracy audit per adversary Pass-10 F-074-P10-LOW-001. Fixed Summary §1 line: removed category-error `96dpi` annotation from `457_200` default value — `96dpi` is a screen-pixel density, not a pt↔inch↔EMU conversion factor. Corrected phrasing to `457_200 (36pt body font = 0.5 inch at 914_400 EMU/inch)`. Full exhaustive audit of all derivation claims confirmed arithmetically correct: 457_200 = 36pt/72 × 914_400; 609_600 = 48pt/72 × 914_400; 1_219_200 = 2000 × 609_600 / 1_000; formula em_milliems × brand_font_size_emu / 1_000 is integer-exact; no other dpi claims, no stale line citations, no frontmatter↔body drift, BC v1.6 confirmed. No AC semantics, BC contracts, or thresholds changed. |
