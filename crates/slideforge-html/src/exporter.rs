@@ -1676,7 +1676,8 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2);
+        // has_title_frame=true: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2, true);
         assert!(
             result.is_none(),
             "B5: negative-width frame must return None from render_text_frame; got: {result:?}"
@@ -1701,7 +1702,8 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2);
+        // has_title_frame=false: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2, false);
         assert!(
             result.is_none(),
             "B5: negative-height frame must return None from render_text_frame; got: {result:?}"

@@ -11,7 +11,9 @@
 //!   (Previous Story Intelligence note)
 //!
 //! - [`render_text_frame`] — converts a text `LaidOutFrame` to the appropriate
-//!   absolutely-positioned HTML element.
+//!   absolutely-positioned HTML element. Subtitle without Title on same slide
+//!   renders as `<p class="sf-subtitle">` (not `<h3>`) to prevent heading-order
+//!   skips (MED-1 / BC-4.03.003 invariant 4 / WCAG heading-order).
 //!
 //! - [`render_graphics_layer`] — builds the `<svg role="presentation">` layer
 //!   for charts, diagrams, images, and decorative shapes.
@@ -316,16 +318,37 @@ impl HeadingLevel {
 ///
 /// P4 text layer rule:
 /// - `FrameContent::Title` → `<h{level}>` at the slide's heading level
-/// - `FrameContent::Subtitle` → `<h3>` (sub-heading below the slide heading)
+/// - `FrameContent::Subtitle` (with Title on same slide) → `<h3>` (sub-heading
+///   below the slide heading; h2/h1 precedes it so no heading-level skip)
+/// - `FrameContent::Subtitle` (WITHOUT Title on same slide) → `<p class="sf-subtitle">`
+///   (no anchoring heading: emitting `<h3>` here would create an h1→h3 skip when
+///   the document's only h1 lives on a different slide — BC-4.03.003 postcondition 2
+///   + invariant 4 / AC-007 / WCAG heading-order / MED-1 fix)
 /// - `FrameContent::Body` → `<div class="sf-body">` containing content blocks
 /// - `FrameContent::TextRun` → `<p class="sf-text">`
+///
+/// ## Heading-order invariant (MED-1)
+///
+/// The `has_title_frame` parameter carries whether the *same slide* (not the whole
+/// document) contains at least one `FrameContent::Title(_)` frame. It is computed
+/// by the caller (`render_slide_to_html`) before the frame iteration loop and
+/// threaded in here so `render_text_frame` can make the correct Subtitle decision
+/// without re-scanning frames.
+///
+/// Invariant: `h3` is only emitted when `has_title_frame == true`. When
+/// `has_title_frame == false`, Subtitle becomes `<p class="sf-subtitle">`, which
+/// introduces no heading level and therefore cannot create a heading skip.
 ///
 /// The returned HTML element is absolutely positioned using inline CSS derived
 /// from `frame.bbox` EMU coordinates converted to CSS pixels (MED-3).
 ///
 /// Returns `None` for non-text frames (graphical frames go to the SVG layer).
 #[must_use]
-pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<String> {
+pub fn render_text_frame(
+    frame: &Frame,
+    heading_level: HeadingLevel,
+    has_title_frame: bool,
+) -> Option<String> {
     let x = emu_to_css_px(frame.bbox.x);
     let y = emu_to_css_px(frame.bbox.y);
     let w = emu_to_css_px(frame.bbox.width);
@@ -362,14 +385,25 @@ pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<S
             ))
         },
         FrameContent::Subtitle(text) => {
-            // Subtitle is always h3 — it appears below the slide heading (h1 or h2).
-            // Never skip levels: h1 → h3 without h2 would violate heading-order.
-            // The slide heading (h1/h2) is emitted for the Title frame;
-            // Subtitle is always h3 (sub-section of the slide heading).
+            // MED-1 (BC-4.03.003 postcondition 2 + invariant 4 / AC-007 / WCAG heading-order):
+            //
+            // Subtitle is <h3> ONLY when the same slide has a Title frame (h2 or h1
+            // precedes it → no heading level skip). When there is NO Title frame on this
+            // slide, emitting <h3> would create an h1→h3 skip (the h1 lives on the title
+            // slide; there is no h2 on this slide or preceding h2 in this slide's context).
+            //
+            // Without Title → render as <p class="sf-subtitle"> (secondary prose, not a
+            // heading). This introduces no heading level and cannot cause a skip.
             let escaped = html_escape::encode_text(text);
-            Some(format!(
-                r#"<h3 class="sf-subtitle" style="{position_style}">{escaped}</h3>"#
-            ))
+            if has_title_frame {
+                Some(format!(
+                    r#"<h3 class="sf-subtitle" style="{position_style}">{escaped}</h3>"#
+                ))
+            } else {
+                Some(format!(
+                    r#"<p class="sf-subtitle" style="{position_style}">{escaped}</p>"#
+                ))
+            }
         },
         FrameContent::Body(blocks) => {
             let body_html: String = blocks.iter().map(render_content_block).collect();
@@ -771,7 +805,7 @@ pub fn render_slide_to_html(
             // Non-promotable frame: fall through to normal rendering below.
         }
 
-        if let Some(html) = render_text_frame(frame, heading_level) {
+        if let Some(html) = render_text_frame(frame, heading_level, has_title_frame) {
             text_layer.push_str(&html);
             text_layer.push('\n');
         }
@@ -2194,7 +2228,8 @@ mod tests {
             region_role: None,
         };
         // Must return None — no panic, no output for zero-bbox frame.
-        let result = render_text_frame(&frame, HeadingLevel::H1);
+        // has_title_frame=true: irrelevant (returns None before reaching Subtitle arm).
+        let result = render_text_frame(&frame, HeadingLevel::H1, true);
         assert!(
             result.is_none(),
             "MED-3: zero-bbox frame must return None from render_text_frame; got: {result:?}"
@@ -2216,7 +2251,8 @@ mod tests {
             region_role: None,
         };
         // Must return Some(html) — no panic.
-        let result = render_text_frame(&frame, HeadingLevel::H1);
+        // has_title_frame=true: Title frame; has_title_frame does not affect Title arm.
+        let result = render_text_frame(&frame, HeadingLevel::H1, true);
         assert!(
             result.is_some(),
             "MED-3: normal large bbox must produce Some(html); got: {result:?}"
@@ -2474,7 +2510,10 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2).expect("body frame must render");
+        // has_title_frame=false: testing Body frame in isolation; has_title_frame
+        // does not affect the Body arm.
+        let result =
+            render_text_frame(&frame, HeadingLevel::H2, false).expect("body frame must render");
         assert!(
             !result.contains("TextBlock"),
             "F-003: Body must NOT render debug output (TextBlock); got: {result}"
@@ -2514,7 +2553,10 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2).expect("body frame must render");
+        // has_title_frame=false: testing Body frame in isolation; has_title_frame
+        // does not affect the Body arm.
+        let result =
+            render_text_frame(&frame, HeadingLevel::H2, false).expect("body frame must render");
         assert!(
             !result.contains("BulletItem"),
             "F-003: Bullets must NOT render debug output; got: {result}"
@@ -2546,10 +2588,13 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2).expect("subtitle must render");
+        // has_title_frame=true: this test models the case where the slide has a Title
+        // frame; Subtitle with Title on same slide must render as <h3>.
+        let result =
+            render_text_frame(&frame, HeadingLevel::H2, true).expect("subtitle must render");
         assert!(
             result.contains("<h3"),
-            "F-004: Subtitle frame must render as <h3>; got: {result}"
+            "F-004: Subtitle frame with Title on same slide must render as <h3>; got: {result}"
         );
     }
 
@@ -2903,7 +2948,8 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2);
+        // has_title_frame=true: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, HeadingLevel::H2, true);
         assert!(
             result.is_none(),
             "B5: negative-width text frame must return None; got: {result:?}"
@@ -2924,7 +2970,8 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2);
+        // has_title_frame=false: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, HeadingLevel::H2, false);
         assert!(
             result.is_none(),
             "B5: negative-height text frame must return None; got: {result:?}"
@@ -2971,11 +3018,432 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_text_frame(&frame, HeadingLevel::H2);
+        // has_title_frame=true: Title frame; has_title_frame does not affect Title arm.
+        let result = render_text_frame(&frame, HeadingLevel::H2, true);
         // Negative x/y position: frame should still render (off-canvas frames are legal)
         assert!(
             result.is_some(),
             "B5: negative x/y position must not skip the frame (negative SIZE is degenerate, not negative position); got: {result:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-1 — heading-order: Subtitle without Title must NOT emit <h3>
+    // (BC-4.03.003 postcondition 2 + invariant 4 / AC-007 / WCAG heading-order)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-1: a slide with ONLY a Subtitle frame (no Title frame) must NOT emit
+    /// `<h3>` — that would create an h1→h3 heading skip (axe-core `heading-order`
+    /// violation). The Subtitle must render as `<p class="sf-subtitle">` when there
+    /// is no Title frame on the same slide.
+    #[test]
+    fn test_MED1_subtitle_without_title_renders_as_p_not_h3() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Subtitle(Arc::from("Standalone subtitle")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // H2 slide heading, no Title frame — heading level does NOT matter for this rule.
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+
+        // Must NOT contain <h3>.
+        let h3_sel = scraper::Selector::parse("h3").expect("valid selector");
+        assert_eq!(
+            doc.select(&h3_sel).count(),
+            0,
+            "MED-1: Subtitle without Title must NOT render as <h3>; got: {result}"
+        );
+
+        // Must contain <p class="sf-subtitle">.
+        let p_sel = scraper::Selector::parse("p.sf-subtitle").expect("valid selector");
+        assert_eq!(
+            doc.select(&p_sel).count(),
+            1,
+            "MED-1: Subtitle without Title must render as <p class=\"sf-subtitle\">; got: {result}"
+        );
+
+        // The <p class="sf-subtitle"> text must equal the subtitle text.
+        let p_node = doc.select(&p_sel).next().expect("p.sf-subtitle must exist");
+        let p_text: String = p_node.text().collect();
+        assert_eq!(
+            p_text.trim(),
+            "Standalone subtitle",
+            "MED-1: <p class=\"sf-subtitle\"> text must match subtitle content; got: {p_text:?}"
+        );
+    }
+
+    /// MED-1 (regression): Title + Subtitle slide must STILL render h2 → h3.
+    /// This is the existing correct behavior — must not regress.
+    #[test]
+    fn test_MED1_subtitle_with_title_still_renders_h3() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(1_000_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Section Title")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(1_000_000),
+                        width: Emu(9_144_000),
+                        height: Emu(4_143_500),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("Section subtitle")),
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+
+        // Must contain <h2> (Title).
+        let h2_sel = scraper::Selector::parse("h2").expect("valid selector");
+        assert_eq!(
+            doc.select(&h2_sel).count(),
+            1,
+            "MED-1 regression: Title must still render as <h2>; got: {result}"
+        );
+
+        // Must contain <h3> (Subtitle with Title present).
+        let h3_sel = scraper::Selector::parse("h3").expect("valid selector");
+        assert_eq!(
+            doc.select(&h3_sel).count(),
+            1,
+            "MED-1 regression: Subtitle after Title must still render as <h3>; got: {result}"
+        );
+
+        // Must NOT contain <p class="sf-subtitle">.
+        let p_sel = scraper::Selector::parse("p.sf-subtitle").expect("valid selector");
+        assert_eq!(
+            doc.select(&p_sel).count(),
+            0,
+            "MED-1 regression: Subtitle WITH Title must NOT render as <p class=\"sf-subtitle\">; got: {result}"
+        );
+
+        // h2 must precede h3 in document order.
+        let h2_pos = result.find("<h2").expect("<h2> must be present");
+        let h3_pos = result.find("<h3").expect("<h3> must be present");
+        assert!(
+            h2_pos < h3_pos,
+            "MED-1 regression: h2 must appear before h3 in document order; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-1 / heading-order invariant — no level skips in any representative deck
+    //
+    // Heading-order invariant (BC-4.03.003 invariant 4 / AC-007 / WCAG AA):
+    //
+    //   FOR ANY LaidOutDeck rendered to HTML:
+    //   1. Exactly one non-empty <h1> per document.
+    //   2. No heading level skip: an <hN> may not appear in document order unless
+    //      <h(N-1)> precedes it somewhere in the same document (WCAG heading-order).
+    //
+    // This invariant is proved by enumerating ALL heading-emitting code paths:
+    //   Path A: Title frame → <h{level}> where level ∈ {1, 2}
+    //           (pre-pass ensures exactly one H1 in the document)
+    //   Path B: Subtitle frame WITH Title on same slide → <h3>
+    //           (h2 or h1 from Path A precedes it on this slide → no skip)
+    //   Path C: Subtitle frame WITHOUT Title on same slide → <p class="sf-subtitle">
+    //           (no heading emitted → no skip possible: this is the MED-1 fix)
+    //   Path D: Body/TextRun H1-promoted → <h1>
+    //           (only when no Title exists in the entire deck → first heading is h1)
+    //   Path E: No other FrameContent types emit heading elements
+    //           (Body→<div>, TextRun→<p>, Image/Chart/Diagram/Shape/ColorBar→SVG layer)
+    //
+    // No h4/h5/h6 are ever emitted:
+    //   - HeadingLevel::H4 exists in the enum but the exporter pre-pass only assigns
+    //     H1 or H2 to Title frames.
+    //   - Subtitle always receives <h3> (Path B) or <p> (Path C); never h4+.
+    //   - Body promotion uses <h1> only.
+    //
+    // Therefore the only possible per-slide heading sequences are:
+    //   []       (no text frames; chart-only or image-only slide)
+    //   [1]      (title-type slide: Title → h1)
+    //   [1, 3]   (IMPOSSIBLE after MED-1 fix — was the bug: h1 slide + Subtitle-only)
+    //   [2]      (content slide: Title → h2 only)
+    //   [2, 3]   (content slide: Title → h2, Subtitle → h3)
+    //   [1]      (body-only deck: promoted Body/TextRun → h1)
+    //
+    // Per-slide, sequences [2] and [2, 3] both appear in documents where h1 exists
+    // on a different (earlier) slide — document-level no-skip is preserved because
+    // the pre-pass guarantees h1 precedes any h2 in the document.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: count all heading elements of the given level in HTML.
+    fn count_headings(html: &str, level: u8) -> usize {
+        let doc = scraper::Html::parse_document(html);
+        let sel = scraper::Selector::parse(&format!("h{level}")).expect("valid selector");
+        doc.select(&sel).count()
+    }
+
+    /// Helper: assert that within a rendered slide HTML, if h3 appears then h2
+    /// (or h1) must also appear on the same slide — otherwise it is a heading skip.
+    ///
+    /// This is the per-slide variant of the WCAG heading-order invariant:
+    ///   h3 without h2/h1 on the same slide → axe-core `heading-order` violation.
+    ///
+    /// The document-level invariant (h1 precedes all h2, which precede all h3) is
+    /// upheld by the exporter pre-pass (exactly one H1 per document; H1-level slide
+    /// precedes H2-level slides in document order). The per-slide test here proves
+    /// no slide can emit an orphan h3.
+    fn assert_no_orphan_h3(html: &str, context: &str) {
+        let h3_count = count_headings(html, 3);
+        if h3_count > 0 {
+            let h2_count = count_headings(html, 2);
+            let h1_count = count_headings(html, 1);
+            assert!(
+                h2_count > 0 || h1_count > 0,
+                "heading-order violation: h3 present but no h2/h1 on same slide (orphan h3 → level skip); {context}"
+            );
+        }
+    }
+
+    /// Heading-order invariant: title-only slide (h1). Exactly one h1, no orphan h3.
+    #[test]
+    fn test_heading_order_invariant_title_only_slide() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Document Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
+
+        assert_no_orphan_h3(&result, &format!("title-only slide; html={result}"));
+
+        assert_eq!(
+            count_headings(&result, 1),
+            1,
+            "title-only slide must have exactly one h1; html={result}"
+        );
+        assert_eq!(
+            count_headings(&result, 3),
+            0,
+            "title-only slide must have no h3; html={result}"
+        );
+    }
+
+    /// Heading-order invariant: subtitle-only slide (no Title) must emit <p>, not <h3>.
+    /// Before MED-1 fix: this would emit <h3> → h1→h3 skip (h1 on title slide, h3
+    /// here, no h2 anywhere on this slide).
+    /// After MED-1 fix: <p class="sf-subtitle"> — no heading skip possible.
+    #[test]
+    fn test_heading_order_invariant_subtitle_only_slide() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Subtitle(Arc::from("Only a subtitle")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // H2 level — even though the pre-pass might assign H2, Subtitle without Title → <p>.
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+
+        assert_no_orphan_h3(&result, &format!("subtitle-only slide; html={result}"));
+
+        // Specifically: no h3 (was the bug).
+        assert_eq!(
+            count_headings(&result, 3),
+            0,
+            "subtitle-only slide must have no <h3> (would be orphan h3); html={result}"
+        );
+        // Must have <p class="sf-subtitle"> instead.
+        let doc = scraper::Html::parse_document(&result);
+        let p_sel = scraper::Selector::parse("p.sf-subtitle").expect("valid selector");
+        assert_eq!(
+            doc.select(&p_sel).count(),
+            1,
+            "subtitle-only slide must have one <p class=\"sf-subtitle\">; html={result}"
+        );
+    }
+
+    /// Heading-order invariant: body-only slide with H1 promotion. No orphan h3.
+    #[test]
+    fn test_heading_order_invariant_body_only_slide() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Body text content"))],
+                    tag: TextTag::Untagged,
+                    span: SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
+
+        assert_no_orphan_h3(&result, &format!("body-only slide; html={result}"));
+
+        // Body-only H1 promotion: exactly one h1.
+        assert_eq!(
+            count_headings(&result, 1),
+            1,
+            "body-only slide (H1 promotion) must have exactly one h1; html={result}"
+        );
+        assert_eq!(
+            count_headings(&result, 3),
+            0,
+            "body-only slide must have no h3; html={result}"
+        );
+    }
+
+    /// Heading-order invariant: chart-only slide (no text). No headings at all.
+    #[test]
+    fn test_heading_order_invariant_chart_only_slide() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue chart")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // H2 level (not H1 so no body promotion triggered).
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+
+        assert_no_orphan_h3(&result, &format!("chart-only slide; html={result}"));
+        for level in 1u8..=6 {
+            assert_eq!(
+                count_headings(&result, level),
+                0,
+                "chart-only slide must have no h{level}; html={result}"
+            );
+        }
+    }
+
+    /// Heading-order invariant: mixed slide (Title h2 + Subtitle h3 + Body + Chart).
+    /// Subtitle has Title on the same slide → renders as h3. No orphan h3.
+    #[test]
+    fn test_heading_order_invariant_mixed_title_subtitle_body_slide() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+
+        let slide = make_title_slide_type(
+            "content",
+            vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(800_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Mixed Title")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(800_000),
+                        width: Emu(9_144_000),
+                        height: Emu(600_000),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("Mixed Subtitle")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(1_400_000),
+                        width: Emu(9_144_000),
+                        height: Emu(2_000_000),
+                    },
+                    content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                        inlines: vec![InlineNode::Plain(Arc::from("Body content"))],
+                        tag: TextTag::Untagged,
+                        span: SourceSpan::default(),
+                    })]),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(3_400_000),
+                        width: Emu(9_144_000),
+                        height: Emu(1_700_000),
+                    },
+                    content: FrameContent::Chart {
+                        alt: AltText::Provided(Arc::from("A chart")),
+                    },
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+
+        // Title present → Subtitle renders as h3. No orphan h3 (h2 is present).
+        assert_no_orphan_h3(&result, &format!("mixed slide; html={result}"));
+
+        // Must have exactly one h2 (Title) and one h3 (Subtitle).
+        assert_eq!(
+            count_headings(&result, 2),
+            1,
+            "mixed slide must have exactly one h2; html={result}"
+        );
+        assert_eq!(
+            count_headings(&result, 3),
+            1,
+            "mixed slide must have exactly one h3; html={result}"
+        );
+        // h2 must appear before h3 in document order.
+        let h2_pos = result.find("<h2").expect("<h2> must be present");
+        let h3_pos = result.find("<h3").expect("<h3> must be present");
+        assert!(
+            h2_pos < h3_pos,
+            "mixed slide: h2 must precede h3 in document order; html={result}"
         );
     }
 
