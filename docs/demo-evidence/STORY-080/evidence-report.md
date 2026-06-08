@@ -12,9 +12,24 @@
 
 | AC | Title | Status | Artifacts |
 |----|-------|--------|-----------|
-| AC-001 | `test_bc_1_03_002_http_4xx_not_retried` determinism — 5x consecutive passes | COVERED | `AC-001-http-4xx-determinism.gif`, `.webm`, `.tape` |
-| AC-002 | `cold_budget` deflake — catastrophic gate + correctness always-on; precision `#[ignore]`'d | COVERED | `AC-002-cold-budget-deflake.gif`, `.webm`, `.tape` |
-| AC-003 | Behavioral assertions not weakened (`connection_count == 1`; correctness assertion preserved) | COVERED | Both recordings above; see notes below |
+| AC-001 | `test_bc_1_03_002_http_4xx_not_retried` determinism — 5x consecutive passes | COVERED | `AC-001-http-4xx-determinism.gif`, `AC-001-http-4xx-determinism.webm`, `AC-001-http-4xx-determinism.tape` |
+| AC-002 | `cold_budget` deflake — catastrophic gate + correctness always-on; `test_cold_budget_under_200ms` `#[ignore]`'d | COVERED | `AC-002-cold-budget-deflake.gif`, `AC-002-cold-budget-deflake.webm`, `AC-002-cold-budget-deflake.tape` |
+| AC-003 | Behavioral assertions not weakened (`connection_count == 1`; correctness assertion preserved) | COVERED | Folded into AC-001 and AC-002 recordings above; see notes below |
+
+## Committed Artifact Inventory
+
+```
+docs/demo-evidence/STORY-080/
+├── evidence-report.md                   (this file)
+├── AC-001-http-4xx-determinism.gif
+├── AC-001-http-4xx-determinism.webm
+├── AC-001-http-4xx-determinism.tape
+├── AC-002-cold-budget-deflake.gif
+├── AC-002-cold-budget-deflake.webm
+└── AC-002-cold-budget-deflake.tape
+```
+
+AC-003 has no separate recording; its assertions are visible in both AC-001 and AC-002 recordings.
 
 ---
 
@@ -50,7 +65,7 @@ The original harness used `set_nonblocking(true)` + a polling loop that raced wi
    - `test_cold_render_correctness` — PASS (no timing assertion)
    - `test_cold_budget_under_200ms` — SKIPPED (correctly `#[ignore]`'d)
 
-2. **`--ignored` flag** shows the precision gate test exists and is listed — it is present as a named on-demand test, not deleted.
+2. **`--ignored` flag** shows `test_cold_budget_under_200ms` exists and is listed — it is present as a named on-demand test, not deleted.
 
 3. **`test_cold_render_correctness` explicitly** — PASS; confirms correctness contract is always-on (AC-003).
 
@@ -78,7 +93,7 @@ For a test-reliability story, "error path" means demonstrating that the PREVIOUS
 | Determinism proof (AC-001) | No single failure in 5 runs — no retry-count race | `AC-001-*.gif/.webm` |
 | Success path (AC-002 always-on) | Catastrophic gate PASS, correctness PASS | `AC-002-*.gif/.webm` |
 | Ignore-path proof (AC-002) | Precision gate present but `#[ignore]`'d — shown with `--ignored` flag | `AC-002-*.gif/.webm` |
-| AC-003 non-weakening | `connection_count == 1` assertion visible in test source (line 2175); correctness assertion in `test_cold_render_correctness` (line 199) | Both recordings |
+| AC-003 non-weakening | `assert_eq!(connection_count, 1, ...)` in `test_bc_1_03_002_http_4xx_not_retried`; correctness assertion (`result.is_ok()` + `!normalized.is_empty()`) in `test_cold_render_correctness` | Both recordings |
 
 ---
 
