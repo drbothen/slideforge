@@ -23,15 +23,7 @@ pub enum PreviewError {
         port: u16,
     },
 
-    /// The axum server task panicked or terminated unexpectedly.
-    #[error("Preview server task failed: {0}")]
-    ServerTaskFailed(String),
-
     /// An I/O error occurred while binding the TCP listener.
     #[error("I/O error binding preview server: {0}")]
     Io(#[from] std::io::Error),
-
-    /// A WebSocket send error occurred.
-    #[error("WebSocket send error: {0}")]
-    WsSend(String),
 }

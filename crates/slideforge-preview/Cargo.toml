@@ -46,9 +46,6 @@ slideforge-layout = { workspace = true }
 # Core domain types: Brand, Emu, etc.
 slideforge-types = { workspace = true }
 
-# Plugin API: Diagnostic type for error messages.
-slideforge-plugin-api = { workspace = true }
-
 # Structured logging (CLAUDE.md: no println! in library crates).
 tracing = { workspace = true }
 
@@ -59,10 +56,11 @@ tracing = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
 # reqwest for HTTP integration tests (AC-001: GET / → 200 OK).
-# NOTE: The workspace reqwest entry previously used `features = ["rustls-tls", ...]` but
-# reqwest 0.13.4 renamed this feature to `rustls`. The workspace Cargo.toml was corrected
-# from "rustls-tls" → "rustls" at implementation time (in-scope fix per production-grade
-# default principle). Now using the workspace entry directly.
+# NOTE: reqwest 0.13.x renamed the TLS feature from `rustls-tls` (0.11/0.12) to `rustls`.
+# The workspace Cargo.toml uses `features = ["rustls", ...]` which is the correct name for
+# 0.13.4. Using an unknown feature name causes a hard build error in Cargo — it does NOT
+# silently resolve to an empty feature set. Verified: `cargo tree -e features -p reqwest`
+# confirms the `rustls` feature activates `hyper-rustls` and the full TLS stack.
 reqwest = { workspace = true }
 
 # Async test support (feature flags already included in runtime dep; repeated for clarity).

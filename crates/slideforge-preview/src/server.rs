@@ -6,17 +6,25 @@
 //! file-watcher or evaluation pipeline. Communication with the server uses a
 //! `tokio::sync::broadcast::Sender<String>` (JSON-encoded `WebSocketMessage`).
 //!
-//! ## Graceful shutdown (AC-005)
+//! ## Graceful shutdown (AC-005 / H-1 / H-2)
 //!
-//! Shutdown is handled via `axum::serve(...).with_graceful_shutdown(shutdown_signal())`.
-//! `shutdown_signal()` awaits `tokio::signal::ctrl_c()` and on Unix also
+//! Shutdown is injectable via `start_with_shutdown(port, deck, shutdown_fut)`.
+//! `start(port, deck)` passes a `shutdown_signal()` future that awaits
+//! `tokio::signal::ctrl_c()` and on Unix also
 //! `tokio::signal::unix::signal(SignalKind::terminate())`.
+//!
+//! Connected WebSocket clients are notified via a `tokio::sync::watch::Sender<bool>`.
+//! When the shutdown future resolves, the watch is set to `true`, which causes
+//! every `handle_ws_connection` to `tokio::select!` into the cooperative shutdown
+//! branch, send `Close(1001 Going Away)`, and return — allowing
+//! `with_graceful_shutdown` to drain within 2 seconds (AC-005).
 //!
 //! ## No output files (BC-4.03.004 invariant 3)
 //!
 //! `PreviewServer` has no filesystem write calls. It receives pre-rendered
 //! `SlideHtml` strings from the evaluation pipeline and forwards them over WebSocket.
 
+use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,7 +36,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
 use crate::error::PreviewError;
@@ -44,13 +52,16 @@ const BROADCAST_CAPACITY: usize = 16;
 /// Shared application state for axum route handlers.
 ///
 /// Holds the broadcast sender so that WebSocket handlers can subscribe to it,
-/// and the initial HTML to serve at `GET /`.
+/// the initial HTML to serve at `GET /`, and the shutdown watch receiver so
+/// every WS connection can cooperatively close on server shutdown.
 #[derive(Clone)]
 struct AppState {
     /// Broadcast sender; WebSocket handlers call `.subscribe()` to receive messages.
     tx: broadcast::Sender<String>,
     /// Initial HTML page served at `GET /`.
     initial_html: Arc<String>,
+    /// Shutdown watch receiver; when value becomes `true` WS handlers close with 1001.
+    shutdown_rx: watch::Receiver<bool>,
 }
 
 /// Handle returned by [`PreviewServer::start`] for lifecycle management.
@@ -119,30 +130,47 @@ impl PreviewServer {
         Self { tx }
     }
 
-    /// Start the axum server on `localhost:<port>`.
+    /// Start the axum server on `localhost:<port>` with OS-signal shutdown.
     ///
-    /// Binds the TCP listener synchronously (via `tokio::net::TcpListener`) so that
-    /// port-in-use errors are detected before the server task is spawned.
+    /// Uses `shutdown_signal()` which awaits `Ctrl+C` / `SIGTERM`.
+    /// For testable shutdown, use [`start_with_shutdown`][PreviewServer::start_with_shutdown].
     ///
     /// # Errors
     ///
     /// - [`PreviewError::PortInUse`] if the port is already bound.
     /// - [`PreviewError::Io`] for other I/O errors.
-    ///
-    /// # AC-001 / AC-009 / BC-4.03.004 postcondition 1
-    ///
-    /// Returns `Ok(PreviewHandle)` on success. The handle wraps the axum task's
-    /// `JoinHandle<()>`. The server is ready to accept connections immediately.
     pub fn start(
         &self,
         port: u16,
         initial_deck: &slideforge_layout::LaidOutDeck,
     ) -> Result<PreviewHandle, PreviewError> {
+        self.start_with_shutdown(port, initial_deck, shutdown_signal())
+    }
+
+    /// Start the axum server with an injectable shutdown future (testable).
+    ///
+    /// # AC-005 / H-2
+    ///
+    /// Accepts any `Future<Output = ()>` as the shutdown signal. Tests inject
+    /// a `tokio::sync::oneshot` receiver; production code passes `shutdown_signal()`.
+    ///
+    /// On shutdown:
+    /// 1. The shutdown future resolves.
+    /// 2. The `watch::Sender<bool>` is set to `true`.
+    /// 3. Every connected WS handler receives the watch change, sends `Close(1001)`,
+    ///    and returns — allowing `with_graceful_shutdown` to drain within 2 seconds.
+    ///
+    /// # Errors
+    ///
+    /// - [`PreviewError::PortInUse`] if the port is already bound.
+    /// - [`PreviewError::Io`] for other I/O errors.
+    pub fn start_with_shutdown(
+        &self,
+        port: u16,
+        initial_deck: &slideforge_layout::LaidOutDeck,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<PreviewHandle, PreviewError> {
         // Bind the TCP listener first to detect port-in-use before spawning the task.
-        // Use std::net::TcpListener first (synchronous) then convert to tokio listener
-        // inside the spawned task. Alternatively, bind via tokio inside a block_in_place.
-        // Since this is called from an async context, we use std::net::TcpListener
-        // with SO_REUSEADDR=false to get a synchronous bind error.
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let std_listener = std::net::TcpListener::bind(addr).map_err(|e| {
             if e.kind() == ErrorKind::AddrInUse {
@@ -163,9 +191,13 @@ impl PreviewServer {
         // Render the initial HTML page.
         let initial_html = build_initial_html(initial_deck);
 
+        // Shutdown watch: WS handlers select! on this to send Close(1001) on shutdown.
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
         let state = AppState {
             tx: self.tx.clone(),
             initial_html: Arc::new(initial_html),
+            shutdown_rx,
         };
 
         let join_handle = tokio::spawn(async move {
@@ -182,8 +214,17 @@ impl PreviewServer {
 
             tracing::info!("Preview server listening on http://127.0.0.1:{actual_port}");
 
+            // Wrap the shutdown future so we notify WS handlers before axum drains.
+            let graceful_fut = async move {
+                shutdown.await;
+                tracing::info!("Preview server shutdown signal received");
+                // Notify all WS handlers to send Close(1001) and return.
+                // Ignore errors — if all receivers dropped, no clients are connected.
+                let _ = shutdown_tx.send(true);
+            };
+
             if let Err(e) = axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown_signal())
+                .with_graceful_shutdown(graceful_fut)
                 .await
             {
                 tracing::error!("Preview server error: {e}");
@@ -207,9 +248,15 @@ impl PreviewServer {
     /// that is silently ignored — fire-and-forget semantics).
     pub fn push_update(&self, slides: Vec<SlideHtml>) {
         let msg = WebSocketMessage::Reload { slides };
-        let json = msg.to_json();
-        // Ignore Err — means no receivers currently subscribed, which is fine.
-        let _ = self.tx.send(json);
+        match msg.to_json() {
+            Ok(json) => {
+                // Ignore Err — means no receivers currently subscribed, which is fine.
+                let _ = self.tx.send(json);
+            },
+            Err(e) => {
+                tracing::error!("Failed to serialize reload message: {e}");
+            },
+        }
     }
 
     /// Push an evaluation error to all connected WebSocket clients.
@@ -223,9 +270,15 @@ impl PreviewServer {
     /// how to display it (error overlay).
     pub fn push_error(&self, errors: Vec<DiagnosticMessage>) {
         let msg = WebSocketMessage::Error { errors };
-        let json = msg.to_json();
-        // Ignore Err — means no receivers currently subscribed, which is fine.
-        let _ = self.tx.send(json);
+        match msg.to_json() {
+            Ok(json) => {
+                // Ignore Err — means no receivers currently subscribed, which is fine.
+                let _ = self.tx.send(json);
+            },
+            Err(e) => {
+                tracing::error!("Failed to serialize error message: {e}");
+            },
+        }
     }
 
     /// Subscribe to the broadcast channel.
@@ -271,7 +324,7 @@ async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
 /// # AC-002 / BC-4.03.004 postcondition 2
 async fn live_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let rx = state.tx.subscribe();
-    ws_upgrade_handler(ws, rx).await
+    ws_upgrade_handler(ws, rx, state.shutdown_rx).await
 }
 
 /// Build a minimal [`slideforge_types::Brand`] for use when rendering preview HTML.
@@ -370,12 +423,24 @@ fn build_initial_html(deck: &slideforge_layout::LaidOutDeck) -> String {
 
 /// Graceful shutdown signal — awaits Ctrl+C (SIGINT) and on Unix also SIGTERM.
 ///
-/// # AC-005 / BC-4.03.004 postcondition 4
+/// # AC-005 / BC-4.03.004 postcondition 4 / H-3
+///
+/// On signal registration failure (e.g., inside a sandbox), logs the error and
+/// falls back to a never-resolving future so the server keeps running rather than
+/// panicking. This is correct: a preview server that cannot register signals
+/// should continue serving — it can be stopped by other means (process kill).
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {},
+            Err(e) => {
+                tracing::error!(
+                    "Failed to install Ctrl+C handler: {e} — server will not respond to Ctrl+C"
+                );
+                // Fall back to never resolving — keeps server alive.
+                std::future::pending::<()>().await;
+            },
+        }
     };
 
     #[cfg(unix)]
@@ -383,10 +448,18 @@ async fn shutdown_signal() {
         use tokio::signal::unix::{SignalKind, signal};
 
         let terminate = async {
-            signal(SignalKind::terminate())
-                .expect("failed to install SIGTERM handler")
-                .recv()
-                .await;
+            match signal(SignalKind::terminate()) {
+                Ok(mut sig) => {
+                    sig.recv().await;
+                },
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to install SIGTERM handler: {e} — server will not respond to SIGTERM"
+                    );
+                    // Fall back to never resolving — keeps server alive.
+                    std::future::pending::<()>().await;
+                },
+            }
         };
 
         tokio::select! {
@@ -530,5 +603,89 @@ mod tests {
         // If start() returned, it spawned a task (non-blocking).
         assert!(handle.port > 0, "OS should have assigned a valid port");
         handle.abort();
+    }
+
+    /// AC-005 / BC-4.03.004 postcondition 4 — graceful shutdown with connected WS client
+    /// completes within 2 seconds and client receives Close(1001 Going Away).
+    ///
+    /// This is the load-bearing test for AC-005 (H-2). Uses `start_with_shutdown`
+    /// with an injected oneshot so we can trigger shutdown programmatically without
+    /// sending an OS signal.
+    #[tokio::test]
+    async fn test_BC_4_03_004_ac005_graceful_shutdown_with_connected_client_completes_within_2s() {
+        use futures_util::StreamExt;
+        use tokio::sync::oneshot;
+        use tokio_tungstenite::connect_async;
+
+        let server = PreviewServer::new();
+        let deck = slideforge_layout::LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![],
+            sections: vec![],
+            warnings: vec![],
+        };
+
+        // Inject a oneshot as the shutdown signal so tests control timing.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let shutdown_fut = async move {
+            // Ignore error — if receiver dropped, that's fine.
+            let _ = shutdown_rx.await;
+        };
+
+        let handle = server
+            .start_with_shutdown(0, &deck, shutdown_fut)
+            .expect("start should succeed on port 0");
+
+        let port = handle.port;
+
+        // Connect a WebSocket client and wait until connected.
+        let url = format!("ws://127.0.0.1:{port}/live");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        let (mut ws, _) = loop {
+            if let Ok(pair) = connect_async(&url).await {
+                break pair;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "Could not connect WS client within 1s"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        };
+
+        // Trigger graceful shutdown.
+        let shutdown_start = std::time::Instant::now();
+        let _ = shutdown_tx.send(());
+
+        // Assert (a): server task completes within 2 seconds.
+        let join_result =
+            tokio::time::timeout(std::time::Duration::from_secs(2), handle.join_handle).await;
+        let elapsed = shutdown_start.elapsed();
+
+        assert!(
+            join_result.is_ok(),
+            "server task should complete within 2 seconds of graceful shutdown (took >{elapsed:?})"
+        );
+
+        // Assert (b): client received Close(1001 Going Away) as the last message.
+        // Read from the WebSocket until we get a Close frame or the stream ends.
+        // The server sends Close(1001) then closes the connection.
+        let mut got_close_1001 = false;
+        // Drain any pending messages; we expect a Close frame.
+        while let Ok(Some(Ok(msg))) =
+            tokio::time::timeout(std::time::Duration::from_millis(500), ws.next()).await
+        {
+            if let tokio_tungstenite::tungstenite::Message::Close(Some(frame)) = msg
+                && frame.code
+                    == tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Away
+            {
+                got_close_1001 = true;
+                break;
+            }
+        }
+
+        assert!(
+            got_close_1001,
+            "WebSocket client should receive Close(1001 Going Away) on graceful shutdown"
+        );
     }
 }

@@ -70,14 +70,12 @@ pub enum WebSocketMessage {
 impl WebSocketMessage {
     /// Serialize this message to a JSON string for transmission over WebSocket.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics only if the message contains non-serializable data — which is
-    /// impossible given the field types. `serde_json::to_string` on this type
-    /// never fails in practice.
-    #[must_use]
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("WebSocketMessage is always serializable")
+    /// Returns `Err` if serialization fails — extremely unlikely given the field
+    /// types are all JSON-safe, but the error is propagated rather than panicking.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -92,7 +90,7 @@ mod tests {
         let msg = WebSocketMessage::Reload {
             slides: vec!["<article>slide1</article>".to_string()],
         };
-        let json = msg.to_json();
+        let json = msg.to_json().expect("serialization should succeed");
         let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert_eq!(v["type"], "reload");
         assert!(v["slides"].is_array());
@@ -110,7 +108,7 @@ mod tests {
                 message: "E-PAR-001".to_string(),
             }],
         };
-        let json = msg.to_json();
+        let json = msg.to_json().expect("serialization should succeed");
         let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert_eq!(v["type"], "error");
         assert!(v["errors"].is_array());
@@ -123,9 +121,11 @@ mod tests {
         let reload = WebSocketMessage::Reload { slides: vec![] };
         let error = WebSocketMessage::Error { errors: vec![] };
         let reload_json: serde_json::Value =
-            serde_json::from_str(&reload.to_json()).expect("valid json");
+            serde_json::from_str(&reload.to_json().expect("reload serialization ok"))
+                .expect("valid json");
         let error_json: serde_json::Value =
-            serde_json::from_str(&error.to_json()).expect("valid json");
+            serde_json::from_str(&error.to_json().expect("error serialization ok"))
+                .expect("valid json");
         assert_eq!(reload_json["type"], "reload");
         assert_eq!(error_json["type"], "error");
     }
@@ -159,7 +159,7 @@ mod tests {
                 "<article>slide2</article>".to_string(),
             ],
         };
-        let json = original.to_json();
+        let json = original.to_json().expect("serialization should succeed");
         let deserialized: WebSocketMessage = serde_json::from_str(&json).expect("valid json");
         assert_eq!(original, deserialized);
     }
@@ -175,7 +175,7 @@ mod tests {
                 message: "E-PAR-001: syntax error".to_string(),
             }],
         };
-        let json = original.to_json();
+        let json = original.to_json().expect("serialization should succeed");
         let deserialized: WebSocketMessage = serde_json::from_str(&json).expect("valid json");
         assert_eq!(original, deserialized);
     }

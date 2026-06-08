@@ -140,9 +140,9 @@ mod tests {
         time::sleep(Duration::from_millis(200)).await;
 
         let count = counter.load(Ordering::Relaxed);
-        assert!(
-            count <= 1,
-            "expected at most 1 callback invocation, got {count}"
+        assert_eq!(
+            count, 1,
+            "expected exactly 1 callback invocation (burst must coalesce AND fire), got {count}"
         );
     }
 

@@ -3766,7 +3766,6 @@ dependencies = [
  "serde_json",
  "slideforge-html",
  "slideforge-layout",
- "slideforge-plugin-api",
  "slideforge-types",
  "tempfile",
  "thiserror",
