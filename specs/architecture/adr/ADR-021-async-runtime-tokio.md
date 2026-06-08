@@ -97,7 +97,8 @@ axum = { version = "=0.8.9", features = ["ws"] }
 
 # HTTP client — no native-tls, no OpenSSL (musl + Windows compatible)
 reqwest = { version = "=0.13.4", default-features = false, features = [
-    "rustls-tls",   # TLS backend: rustls (pure Rust, works on musl + Windows)
+    "rustls",       # TLS backend: rustls (pure Rust, works on musl + Windows)
+                    # NOTE: renamed from "rustls-tls" (reqwest 0.11/0.12) to "rustls" in reqwest 0.13.x
     "charset",      # charset detection for text/html responses
     "http2",        # HTTP/2 support
 ] }
@@ -218,9 +219,10 @@ flags. Curated features avoid this class of spurious advisory.
 **Why reqwest over ureq for async HTTP?** `ureq` is a synchronous HTTP client. It works
 correctly for the initial data-source fetch at build time, but STORY-056 watch-mode
 re-polling requires non-blocking HTTP on the async runtime. `reqwest` with
-`default-features = false, features = ["rustls-tls", ...]` is the idiomatic async HTTP
+`default-features = false, features = ["rustls", ...]` is the idiomatic async HTTP
 client in the tokio ecosystem, with zero native-tls / OpenSSL linkage — critical for
 musl static binaries and Windows builds where OpenSSL is not available.
+(Note: reqwest 0.13.x renamed the TLS feature from `rustls-tls` to `rustls`.)
 
 **Why no tokio-tungstenite in production?** axum 0.8 provides `axum::extract::ws::WebSocketUpgrade`
 with a built-in WebSocket implementation backed by tungstenite internally. There is no
@@ -249,7 +251,7 @@ production Rust services, and have no known critical advisories as of 2026-06-07
 
 - Watch-mode and preview become first-class async services without blocking threads.
 - axum 0.8 WebSocket handling is idiomatic and well-tested.
-- reqwest with rustls-tls enables cross-platform HTTP (no OpenSSL on musl/Windows).
+- reqwest with `rustls` feature enables cross-platform HTTP (no OpenSSL on musl/Windows).
 - OTLP export unlocks structured distributed tracing for CI pipeline performance
   analysis when the `otel` feature is enabled.
 - crossterm `event-stream` makes interactive keypress handling non-blocking.
