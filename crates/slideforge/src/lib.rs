@@ -215,7 +215,7 @@ pub use slideforge_plugin_api::Diagnostic as ValidationDiagnostic;
 
 /// Re-export of [`slideforge_types::SourceSpan`].
 ///
-/// The CLI uses this when rendering file:line:col span information from
+/// The CLI uses this when rendering `file:line:col` span information from
 /// [`ValidationDiagnostic::span`].
 pub use slideforge_types::SourceSpan;
 
@@ -346,10 +346,7 @@ pub struct CompiledDeck {
 /// ## Errors
 ///
 /// Returns [`error::BuildError`] if any pipeline stage fails.
-pub fn compile(
-    source: &str,
-    options: &CompileOptions,
-) -> Result<CompiledDeck, error::BuildError> {
+pub fn compile(source: &str, options: &CompileOptions) -> Result<CompiledDeck, error::BuildError> {
     let registry = registry::default_registry()?;
     compile_inner(source, options, registry)
 }
@@ -381,7 +378,12 @@ pub fn export_format(
     let file_extension = exporter.extension().to_owned();
     let export_opts = ExportOptions::default();
     let bytes = dispatch::dispatch_plugin(&exporter_id, || {
-        exporter.export(&compiled.deck, &compiled.laid_out, &compiled.brand, &export_opts)
+        exporter.export(
+            &compiled.deck,
+            &compiled.laid_out,
+            &compiled.brand,
+            &export_opts,
+        )
     })
     .map_err(error::BuildError::Plugin)?
     .map_err(error::BuildError::Export)?;

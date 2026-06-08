@@ -157,9 +157,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     let writers: Vec<OutputWriter> = args
         .format
         .iter()
-        .map(|fmt| {
-            OutputWriter::new(&args.output_dir, &stem, format_to_str(*fmt))
-        })
+        .map(|fmt| OutputWriter::new(&args.output_dir, &stem, format_to_str(*fmt)))
         .collect();
 
     // Phase 1: export all formats to tmp paths.
@@ -306,7 +304,7 @@ fn discover_brand_toml(args: &BuildArgs) -> Result<String, String> {
 /// Render a build error's diagnostics to stderr.
 ///
 /// Uses miette's handlers for structured diagnostics (parse or eval failures)
-/// and includes file:line:col span for validation failures (HIGH-001 fix).
+/// and includes `file:line:col` span for validation failures (HIGH-001 fix).
 fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
     if global.json {
         render_build_error_json(err);
@@ -328,8 +326,8 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
         },
         BuildError::ValidationFailed { diagnostics, .. } => {
             // HIGH-001 fix: ValidationFailed holds plugin-api Diagnostics.
-            // Render them through miette (or with file:line:col from diag.span)
-            // so EVERY emitted diagnostic carries file:line:col.
+            // Render them with `file:line:col` from diag.span so EVERY
+            // emitted diagnostic carries source location information.
             for diag in diagnostics {
                 render_validation_diagnostic(diag, use_color);
             }
@@ -354,8 +352,8 @@ fn render_box_diagnostic(diag: &dyn miette::Diagnostic, use_color: bool) -> Stri
     buf
 }
 
-/// Render a single [`slideforge_plugin_api::Diagnostic`] (from ValidationFailed)
-/// with file:line:col span information (HIGH-001 fix).
+/// Render a single [`slideforge_plugin_api::Diagnostic`] (from `ValidationFailed`)
+/// with `file:line:col` span information (HIGH-001 fix).
 ///
 /// Format: `[severity] code: message (file:line:col)\n  hint: <hint>`
 fn render_validation_diagnostic(diag: &slideforge::ValidationDiagnostic, _use_color: bool) {
@@ -378,7 +376,7 @@ fn render_validation_diagnostic(diag: &slideforge::ValidationDiagnostic, _use_co
 /// Render build error as JSON to stderr (for `--json` mode).
 ///
 /// HIGH-003 fix: iterates all diagnostics (not just the first), sets `total`
-/// to the real count, and includes span fields (file:line:col) where available.
+/// to the real count, and includes span fields (`file:line:col`) where available.
 fn render_build_error_json(err: &BuildError) {
     let exit_code_val = exit_code_for_build_error_u8(err);
     let has_fatal = exit_code_val == EXIT_PARSE_ERROR || exit_code_val == EXIT_EXPORT_ERROR;
