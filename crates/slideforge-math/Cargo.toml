@@ -32,8 +32,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 insta = { version = "=1.47.2", features = ["yaml"] }
 # sha2: SHA-256 digest for bundled font asset audit (test_bundled_font_sha256_matches_manifest).
-sha2 = "=0.11.0"
+sha2 = { workspace = true }
 # toml: parse MANIFEST.toml in font asset audit test.
-toml = "=0.8.23"
+toml = { workspace = true }
 # tracing-test: verify spans/events fire during render (OBS-1, STORY-030).
 tracing-test = "=0.2.5"

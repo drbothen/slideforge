@@ -13,18 +13,18 @@ readme = "../../README.md"
 [dependencies]
 quick-xml = { workspace = true }
 zip = "=2.3.0"
-dirs = "=5.0.1"
+dirs = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { version = "=1.0.228", features = ["derive"] }
-toml = "=0.8.23"
+toml = { workspace = true }
 slideforge-types = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 proptest = "=1.5.0"
-tempfile = "=3.27.0"
+tempfile = { workspace = true }
 zip = "=2.3.0"
 tracing-subscriber = { workspace = true }
 tracing-test = "=0.2.5"

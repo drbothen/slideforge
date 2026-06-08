@@ -53,12 +53,12 @@ serde_json = "=1.0.150"
 miette = { version = "=7.6.0", features = ["fancy"] }
 clap = { version = "=4.6.1", features = ["derive"] }
 walkdir = "=2.5.0"
-notify = "=6.1.1"
+notify = "=8.2.0"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 thiserror = "=2.0.18"
 ordered-float = "=4.6.0"
-indexmap = { version = "=2.10.0", features = ["std"] }
+indexmap = { version = "=2.14.0", features = ["std"] }
 anyhow = "=1.0.102"
 phf = { version = "=0.11.3", features = ["macros"] }
 strsim = "=0.11.1"
@@ -67,10 +67,46 @@ quick-xml = "=0.36.0"
 mermaid-rs-renderer = { version = "=0.2.2", default-features = false }
 usvg = "=0.47.0"
 
+# Serialization / config
+sha2 = "=0.11.0"
+toml = { version = "=1.1.2", features = ["preserve_order"] }
+toml_edit = "=0.25.12"
+
+# Filesystem / paths
+dirs = "=6.0.0"
+globset = "=0.4.18"
+
+# Archive / compression
+flate2 = "=1.1.9"
+tar = "=0.4.46"
+
+# Networking / async runtime (inert until a member consumes them)
+axum = { version = "=0.8.9", features = ["ws"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls-tls", "charset", "http2"] }
+tokio = { version = "=1.52.3", default-features = false }
+tokio-tungstenite = "=0.29.0"
+
+# Terminal / UI
+crossterm = "=0.29.0"
+
+# Observability / OpenTelemetry
+opentelemetry = "=0.32.0"
+opentelemetry_sdk = { version = "=0.32.0", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "=0.32.0", features = ["trace", "grpc-tonic"] }
+tracing-opentelemetry = "=0.33.0"
+
+# SCM / packages
+git2 = { version = "=0.21.0", default-features = false, features = ["vendored-libgit2", "https"] }
+
+# Miscellaneous utilities
+hex = "=0.4.3"
+notify-debouncer-full = "=0.7.0"
+
 # Testing (dev-only — exempt from pinning-audit per DEV_ONLY allowlist)
 insta = "1"
 pretty_assertions = "1"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "=0.8.2", features = ["html_reports"] }
+tempfile = "=3.27.0"
 
 # Internal workspace crates (referenced as path dependencies from each crate).
 slideforge-types = { path = "crates/slideforge-types", version = "0.1.0" }
