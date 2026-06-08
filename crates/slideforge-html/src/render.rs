@@ -647,9 +647,13 @@ pub fn render_slide_to_html(
     // Build the HTML text layer (all text frames in reading order).
     // heading_level is pre-computed by the exporter pre-pass — NOT derived here.
     //
-    // Body-only promotion (CRITICAL-B1 / BC-4.03.003 postcondition 6):
-    // If heading_level == H1 and there is no Title frame on this slide, the first
-    // Body/TextRun frame is wrapped in <h1> to satisfy page-has-heading-one.
+    // Body-only promotion (CRITICAL-B1 / HIGH-1 / LOW-1 / BC-4.03.003 postcondition 6):
+    // If heading_level == H1 and there is no Title frame on this slide, the FIRST
+    // PROMOTABLE Body/TextRun frame is wrapped in <h1> to satisfy page-has-heading-one.
+    //
+    // LOW-1: Only Text/Bullets/Math blocks with non-empty content are promotable.
+    // Table / ColorBar / Shape / empty-Body are NOT promotable and must never be
+    // wrapped in <h1>. Non-promotable frames are rendered normally (not skipped).
     let has_title_frame = slide
         .frames
         .iter()
@@ -659,37 +663,56 @@ pub fn render_slide_to_html(
 
     let mut text_layer = String::new();
     for frame in &slide.frames {
-        // Body-only promotion: wrap the first body/textrun frame in <h1>.
-        if needs_body_h1_promotion
-            && !body_h1_promoted
-            && (matches!(frame.content, FrameContent::Body(_))
-                || matches!(frame.content, FrameContent::TextRun(_)))
-        {
-            // MED-B5: skip degenerate frames.
-            if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+        // Body-only promotion: wrap the FIRST PROMOTABLE body/textrun frame in <h1>.
+        // LOW-1: check promotability — only Body with Text/Bullets/Math content or
+        // a non-empty TextRun. Empty Body / Table / ColorBar / Shape are NOT promotable.
+        if needs_body_h1_promotion && !body_h1_promoted {
+            let is_promotable = match &frame.content {
+                FrameContent::TextRun(nodes) => !nodes.is_empty(),
+                FrameContent::Body(blocks) => blocks.iter().any(|b| match b {
+                    ContentBlock::Text(tb) => !tb.inlines.is_empty(),
+                    ContentBlock::Bullets(items) => !items.is_empty(),
+                    ContentBlock::Math(_) => true,
+                    // Table, ColorBar, Shape, Chart, Diagram, Image — NOT promotable
+                    ContentBlock::Table(_)
+                    | ContentBlock::ColorBar(_)
+                    | ContentBlock::Shape(_)
+                    | ContentBlock::Chart(_)
+                    | ContentBlock::Diagram(_)
+                    | ContentBlock::Image(_) => false,
+                }),
+                _ => false,
+            };
+
+            if is_promotable {
+                // MED-B5: skip degenerate frames (cannot promote zero/negative bbox).
+                if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+                    // Degenerate promotable frame: skip and keep looking for next.
+                    continue;
+                }
+                let x = emu_to_css_px(frame.bbox.x);
+                let y = emu_to_css_px(frame.bbox.y);
+                let w = emu_to_css_px(frame.bbox.width);
+                let h = emu_to_css_px(frame.bbox.height);
+                let position_style = format!(
+                    "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; overflow:hidden;"
+                );
+                let inner = match &frame.content {
+                    FrameContent::Body(blocks) => {
+                        blocks.iter().map(render_content_block).collect::<String>()
+                    },
+                    FrameContent::TextRun(nodes) => render_inline_nodes(nodes),
+                    _ => unreachable!("is_promotable guard above"),
+                };
+                text_layer.push_str("<h1 class=\"sf-body-promoted\" style=\"");
+                text_layer.push_str(&position_style);
+                text_layer.push_str("\">");
+                text_layer.push_str(&inner);
+                text_layer.push_str("</h1>\n");
+                body_h1_promoted = true;
                 continue;
             }
-            let x = emu_to_css_px(frame.bbox.x);
-            let y = emu_to_css_px(frame.bbox.y);
-            let w = emu_to_css_px(frame.bbox.width);
-            let h = emu_to_css_px(frame.bbox.height);
-            let position_style = format!(
-                "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; overflow:hidden;"
-            );
-            let inner = match &frame.content {
-                FrameContent::Body(blocks) => {
-                    blocks.iter().map(render_content_block).collect::<String>()
-                },
-                FrameContent::TextRun(nodes) => render_inline_nodes(nodes),
-                _ => unreachable!("guarded above"),
-            };
-            text_layer.push_str("<h1 class=\"sf-body-promoted\" style=\"");
-            text_layer.push_str(&position_style);
-            text_layer.push_str("\">");
-            text_layer.push_str(&inner);
-            text_layer.push_str("</h1>\n");
-            body_h1_promoted = true;
-            continue;
+            // Non-promotable frame: fall through to normal rendering below.
         }
 
         if let Some(html) = render_text_frame(frame, heading_level) {

@@ -13,77 +13,162 @@
 
 use slideforge_layout::{FrameContent, LaidOutDeck, LaidOutSlide};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck};
+use slideforge_types::{Brand, ContentBlock, Deck};
 
 use crate::render::{HeadingLevel, render_slide_to_html};
 
+/// Result of the heading-level pre-pass.
+///
+/// The `levels` vec is parallel to the slides slice. `needs_synthetic_h1` is
+/// `true` when no slide has a Title frame AND no slide has a promotable text
+/// frame (step 4 path): the exporter must synthesize a visually-hidden `<h1>`
+/// at the document level from `deck.metadata.title`.
+struct HeadingAssignment {
+    /// Heading level per slide, parallel to the slides slice.
+    levels: Vec<HeadingLevel>,
+    /// `true` iff step 4 fired: no Title frame and no promotable text frame.
+    needs_synthetic_h1: bool,
+}
+
+/// Returns `true` if a `FrameContent::Body` contains at least one promotable
+/// content block.
+///
+/// Promotable blocks (LOW-1 / HIGH-1): `Text` (with `>=1` inline node), `Bullets`
+/// (with `>=1` item), or `Math`. `Table` / `ColorBar` / `Shape` / `Chart` / `Diagram` /
+/// `Image` are NOT promotable — they should not be wrapped in a heading element.
+fn body_has_promotable_content(blocks: &[ContentBlock]) -> bool {
+    blocks.iter().any(|block| match block {
+        ContentBlock::Text(tb) => !tb.inlines.is_empty(),
+        ContentBlock::Bullets(items) => !items.is_empty(),
+        ContentBlock::Math(_) => true,
+        // Table, ColorBar, Shape, Chart, Diagram, Image — NOT promotable (LOW-1)
+        ContentBlock::Table(_)
+        | ContentBlock::ColorBar(_)
+        | ContentBlock::Shape(_)
+        | ContentBlock::Chart(_)
+        | ContentBlock::Diagram(_)
+        | ContentBlock::Image(_) => false,
+    })
+}
+
+/// Returns `true` if the slide has at least one promotable text frame.
+///
+/// Promotable text frames (HIGH-1 / LOW-1):
+/// - `FrameContent::Body` whose blocks contain at least one `Text`/`Bullets`/`Math`
+///   block with non-empty content.
+/// - `FrameContent::TextRun` (always promotable).
+///
+/// Non-promotable: `Title` (handled in step 1/2), `Subtitle`, `Image`, `Chart`,
+/// `Diagram`, `Shape`, `ColorBar`, `ErrorSlidePlaceholder`, `Empty`.
+fn slide_has_promotable_text_frame(slide: &LaidOutSlide) -> bool {
+    slide.frames.iter().any(|f| match &f.content {
+        FrameContent::TextRun(nodes) => !nodes.is_empty(),
+        FrameContent::Body(blocks) => body_has_promotable_content(blocks),
+        _ => false,
+    })
+}
+
 /// Determine the [`HeadingLevel`] for each slide in the deck.
 ///
-/// Implements the exporter-level pre-pass (CRITICAL-B1 / BC-4.03.003 postcondition 6):
+/// Implements the canonical heading-assignment algorithm
+/// (CRITICAL-B1 / HIGH-1 / MED-1 / LOW-1 / BC-4.03.003 postcondition 6):
 ///
 /// 1. Find the first slide with `slide_type_keyword == "title"` that also has a
 ///    `FrameContent::Title` frame → that slide's Title frame emits `<h1>`.
 /// 2. If no title-type slide: find the first slide with any `FrameContent::Title`
 ///    frame → that frame gets `<h1>`.
-/// 3. If no Title frame anywhere (body-only deck): promote the first slide that
-///    has a `FrameContent::Body` frame → that frame gets `<h1>`. Emits
-///    `tracing::warn!` because a page-has-heading-one invariant requires an h1
-///    but the deck has no semantic Title frames.
+/// 3. If no Title frame anywhere (body/graphical deck): find the FIRST slide
+///    that has a PROMOTABLE text frame (`Body` with non-empty `Text`/`Bullets`/`Math`
+///    content, or a `TextRun`). That slide's first promotable frame gets `<h1>`.
+///    Only text-bearing blocks are promotable — Table/ColorBar/Shape are NOT.
+///    Emits `tracing::warn!` for this promotion path.
+/// 4. If no Title frame AND no promotable text frame (e.g., chart-only or
+///    image-only deck): returns `needs_synthetic_h1 = true`. The exporter
+///    injects a visually-hidden `<h1>` at the document level from
+///    `deck.metadata.title`. Emits `tracing::warn!` about this synthesis.
 ///
-/// All other slides receive `HeadingLevel::H2`.
+/// Empty deck (0 slides): returns all-H2 vec + `needs_synthetic_h1 = false`.
+/// No warn is emitted (nothing to promote from an empty deck).
 ///
-/// Returns a `Vec<HeadingLevel>` parallel to `slides`.
-#[allow(clippy::match_same_arms)] // branches are semantically distinct even if code is similar
-fn compute_heading_levels(slides: &[LaidOutSlide]) -> Vec<HeadingLevel> {
+/// All non-H1 slides receive `HeadingLevel::H2`.
+///
+/// Returns a [`HeadingAssignment`] containing the per-slide levels and the
+/// `needs_synthetic_h1` flag.
+fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
     let len = slides.len();
     let mut levels = vec![HeadingLevel::H2; len];
 
-    // Pass 1: first slide with slide_type == "title" AND a Title frame.
+    // Step 1: first slide with slide_type == "title" AND a Title frame.
     let h1_idx = slides.iter().position(|s| {
         s.slide_type_keyword.as_ref() == "title"
             && s.frames
                 .iter()
                 .any(|f| matches!(f.content, FrameContent::Title(_)))
     });
-
     if let Some(idx) = h1_idx {
         levels[idx] = HeadingLevel::H1;
-        return levels;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
     }
 
-    // Pass 2: first slide with any Title frame (regardless of slide_type).
+    // Step 2: first slide with any Title frame (regardless of slide_type).
     let h1_idx = slides.iter().position(|s| {
         s.frames
             .iter()
             .any(|f| matches!(f.content, FrameContent::Title(_)))
     });
-
     if let Some(idx) = h1_idx {
         levels[idx] = HeadingLevel::H1;
-        return levels;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
     }
 
-    // Pass 3: no Title frames anywhere — body-only deck.
-    // Promote the first slide's first body frame to h1 by giving that slide H1 level.
-    // The per-slide render logic will emit the first body block as h1 when level is H1
-    // BUT render_text_frame only uses heading_level for FrameContent::Title.
-    // For a body-only deck we need special handling: mark level H1 on first slide,
-    // and the body frame will be wrapped in a special h1 wrapper.
-    // Since render_text_frame Body renders as <div class="sf-body">, we must use
-    // the BodyH1 sentinel. We encode this as a special variant that is handled in
-    // render_slide_to_html: when heading_level==H1 and there's no Title frame,
-    // the first Body frame is wrapped in <h1>.
-    // For simplicity in this implementation, we use HeadingLevel::H1 on the first slide
-    // and handle the body-h1 promotion inside render_slide_to_html.
-    tracing::warn!(
-        "HtmlExporter: no Title frame found in any slide — \
-         promoting first body frame to <h1> to satisfy page-has-heading-one (axe-core). \
-         Add a slide with slide_type=\"title\" or a Title frame to fix this."
-    );
-    if !slides.is_empty() {
-        levels[0] = HeadingLevel::H1;
+    // Step 3: no Title frames anywhere.
+    // Find the FIRST slide with a promotable text frame (Body with non-empty
+    // Text/Bullets/Math blocks, or a TextRun).
+    // Table/ColorBar/Shape/empty-Body are NOT promotable (LOW-1).
+    let h1_idx = slides
+        .iter()
+        .position(slide_has_promotable_text_frame);
+    if let Some(idx) = h1_idx {
+        tracing::warn!(
+            slide_index = idx,
+            "HtmlExporter: no Title frame found in any slide — \
+             promoting first promotable text frame on slide {idx} to <h1> to satisfy \
+             page-has-heading-one (axe-core). \
+             Add a slide with slide_type=\"title\" or a Title frame to fix this."
+        );
+        levels[idx] = HeadingLevel::H1;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
     }
-    levels
+
+    // Step 4: no Title frame AND no promotable text frame (chart/image-only deck).
+    // The exporter must synthesize a visually-hidden <h1> at the document level.
+    // We only do this for non-empty decks — empty decks get no h1 at all.
+    if !slides.is_empty() {
+        tracing::warn!(
+            "HtmlExporter: no Title or text frame found; synthesizing visually-hidden \
+             <h1> from deck title to satisfy page-has-heading-one (axe-core). \
+             Add a slide with a Title frame or text content to fix this."
+        );
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: true,
+        };
+    }
+
+    // Empty deck — no slides, no h1, no warn.
+    HeadingAssignment {
+        levels,
+        needs_synthetic_h1: false,
+    }
 }
 
 /// Allowlist of URL schemes permitted in rendered `<a href="...">` attributes.
@@ -228,13 +313,14 @@ impl Exporter for HtmlExporter {
             .map_or("Presentation", |t| t.as_ref());
 
         // CRITICAL-B1: exporter-level pre-pass to assign exactly one <h1> per document.
-        // compute_heading_levels returns a Vec<HeadingLevel> parallel to slides.
-        let heading_levels = compute_heading_levels(&laid_out.slides);
+        // compute_heading_levels returns a HeadingAssignment with per-slide levels
+        // and a flag indicating whether a synthetic visually-hidden <h1> is needed.
+        let assignment = compute_heading_levels(&laid_out.slides);
 
         // Render all slides (MED-3: thread page_size; B1: thread pre-computed heading_level).
         let page_size = &laid_out.page_size;
         let mut slides_html = String::new();
-        for (slide, &heading_level) in laid_out.slides.iter().zip(heading_levels.iter()) {
+        for (slide, &heading_level) in laid_out.slides.iter().zip(assignment.levels.iter()) {
             slides_html.push_str(&render_slide_to_html(
                 slide,
                 brand,
@@ -244,8 +330,24 @@ impl Exporter for HtmlExporter {
             slides_html.push('\n');
         }
 
+        // Step 4 (HIGH-1): if no Title frame and no promotable text frame, the
+        // exporter synthesizes a visually-hidden <h1> from deck.metadata.title.
+        // The synthetic_h1 text is guaranteed non-empty (fallback to "Presentation").
+        let synthetic_h1: Option<String> = if assignment.needs_synthetic_h1 {
+            let raw = deck
+                .metadata
+                .title
+                .as_ref()
+                .map_or("", std::convert::AsRef::as_ref)
+                .trim();
+            let text = if raw.is_empty() { "Presentation" } else { raw };
+            Some(html_escape::encode_text(text).into_owned())
+        } else {
+            None
+        };
+
         // Render via minijinja template.
-        let page_html = render_page_template(lang, title, &slides_html)?;
+        let page_html = render_page_template(lang, title, &slides_html, synthetic_h1.as_deref())?;
 
         Ok(page_html.into_bytes())
     }
@@ -255,8 +357,18 @@ impl Exporter for HtmlExporter {
 ///
 /// Uses `minijinja` for Jinja2-compatible HTML templating. The `.html` suffix
 /// on the template name enables HTML autoescape automatically (ADR-022).
-fn render_page_template(lang: &str, title: &str, slides_html: &str) -> Result<String, ExportError> {
-    use minijinja::{Environment, context};
+///
+/// `synthetic_h1` is `Some(text)` when the heading pre-pass determines that
+/// no Title frame and no promotable text frame exists (step 4 / HIGH-1). The
+/// template emits a visually-hidden `<h1 class="sf-visually-hidden">` with the
+/// given text before the slide list. The text is pre-escaped HTML-safe.
+fn render_page_template(
+    lang: &str,
+    title: &str,
+    slides_html: &str,
+    synthetic_h1: Option<&str>,
+) -> Result<String, ExportError> {
+    use minijinja::{Environment, Value, context};
 
     let mut env = Environment::new();
 
@@ -286,11 +398,19 @@ fn render_page_template(lang: &str, title: &str, slides_html: &str) -> Result<St
     // The template loop `{% for slide_html in slides %}` iterates over Vec<String>.
     let slides_vec: Vec<&str> = vec![slides_html.trim_end()];
 
+    // synthetic_h1 is Some(escaped_text) when step 4 fires, None otherwise.
+    // Pass as a string value or empty string; template checks `{% if synthetic_h1 %}`.
+    let synthetic_h1_val: Value = match synthetic_h1 {
+        Some(text) => Value::from(text),
+        None => Value::from(""),
+    };
+
     let output = tmpl
         .render(context! {
             lang => lang,
             title => title,
             slides => slides_vec,
+            synthetic_h1 => synthetic_h1_val,
         })
         .map_err(|e| ExportError::RenderError {
             message: format!("template rendering failed: {e}"),
@@ -1583,6 +1703,347 @@ mod tests {
         assert!(
             result.is_empty(),
             "B5: negative-width graphics frame must be skipped; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-1 / MED-1 / LOW-1 — P4 heading-assignment tail-case fixes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Makes a chart-only slide (single Chart frame, no Title, no Body text).
+    fn make_chart_only_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue chart")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// Makes a slide with an empty Body (Body(vec![]) — no ContentBlocks).
+    fn make_empty_body_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// Makes a slide with a Table body block (non-promotable).
+    fn make_table_body_slide() -> LaidOutSlide {
+        use slideforge_types::{ContentBlock, TableSpec};
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Table(TableSpec {
+                    headers: vec![],
+                    rows: vec![],
+                    alt: None,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// HIGH-1: chart-only single-slide deck → step 4 path: exactly one NON-EMPTY
+    /// `<h1>` synthesized from deck.metadata.title, with `.sf-visually-hidden` class.
+    /// The honest `tracing::warn!` must be emitted about synthesizing a visually-hidden h1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_HIGH1_chart_only_deck_synthesizes_visually_hidden_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US"); // deck.metadata.title == "Test Deck"
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "HIGH-1: chart-only deck must produce exactly one <h1>; got: {html}"
+        );
+        // The h1 must be NON-EMPTY (must contain deck title text)
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "HIGH-1: synthesized <h1> must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+        // The h1 must have the sf-visually-hidden class
+        let h1_class = h1_elements[0].value().attr("class").unwrap_or_default();
+        assert!(
+            h1_class.contains("sf-visually-hidden"),
+            "HIGH-1: synthesized <h1> must have class 'sf-visually-hidden'; got class: {h1_class:?}, html: {html}"
+        );
+        // Must emit the honest warn about synthesizing
+        assert!(
+            logs_contain("synthesizing"),
+            "HIGH-1: must emit tracing::warn! mentioning 'synthesizing'; chart-only deck triggers step 4"
+        );
+    }
+
+    /// HIGH-1: graphical (chart) slide first, then body slide second →
+    /// h1 must land on the BODY slide (slide index 1), not slide 0.
+    #[test]
+    fn test_HIGH1_graphical_first_then_body_second_h1_on_body_slide() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let mut chart_slide = make_chart_only_slide();
+        chart_slide.source_index = 0;
+        let mut body_slide = make_body_only_slide("Body text on slide 1");
+        body_slide.source_index = 1;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![chart_slide, body_slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "HIGH-1: graphical+body deck must produce exactly one <h1>; got: {html}"
+        );
+
+        // The h1 must be INSIDE the second article (slide-2), not the first (slide-1).
+        // slide-2 is the body slide (source_index=1 → slide number 2).
+        let sel_article1_h1 =
+            scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
+        let sel_article2_h1 =
+            scraper::Selector::parse("article#slide-2 h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_article1_h1).count(),
+            0,
+            "HIGH-1: chart slide (slide-1) must NOT have h1; the body slide gets it; got: {html}"
+        );
+        assert_eq!(
+            doc.select(&sel_article2_h1).count(),
+            1,
+            "HIGH-1: body slide (slide-2) must have the h1; got: {html}"
+        );
+    }
+
+    /// HIGH-1 / LOW-1: empty-Body first frame (Body(vec![])) must NOT be promoted to
+    /// an empty <h1>. The h1 must land on the NEXT eligible slide or be synthetic.
+    #[test]
+    fn test_HIGH1_empty_body_not_promoted_h1_falls_to_next_eligible() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // Slide 0: empty Body (not promotable)
+        let mut empty_body = make_empty_body_slide();
+        empty_body.source_index = 0;
+        // Slide 1: body with text (promotable)
+        let mut text_body = make_body_only_slide("Actual content");
+        text_body.source_index = 1;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![empty_body, text_body],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        // Must have exactly one h1 and it must be non-empty
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "HIGH-1: exactly one <h1> must exist; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "HIGH-1 / LOW-1: <h1> from promotion must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+
+        // The h1 must NOT be inside slide-1 (the empty-body slide).
+        let sel_slide1_h1 =
+            scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_slide1_h1).count(),
+            0,
+            "HIGH-1: empty-Body slide (slide-1) must NOT get promoted to <h1>; got: {html}"
+        );
+    }
+
+    /// LOW-1: Table body block in the first frame must NOT be wrapped in <h1>.
+    /// A deck with only Table/ColorBar body content must fall through to step 4
+    /// and emit a synthetic visually-hidden h1 from deck metadata.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_LOW1_table_body_not_wrapped_in_h1_falls_through_to_synthetic() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US"); // deck title = "Test Deck"
+        let mut table_slide = make_table_body_slide();
+        table_slide.source_index = 0;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![table_slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+
+        // The h1 must NOT wrap a <table> element (table is not promotable).
+        // We check: no <h1> containing a <table> child.
+        let sel_h1_with_table = scraper::Selector::parse("h1 table").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1_with_table).count(),
+            0,
+            "LOW-1: Table body must NOT be wrapped in <h1>; got: {html}"
+        );
+
+        // The document must still have exactly one h1 (the synthetic visually-hidden one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "LOW-1: deck with table-only body must still have exactly one (synthetic) <h1>; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "LOW-1: synthetic <h1> must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+
+        // Must emit the synthesizing warn (not the body-promotion warn)
+        assert!(
+            logs_contain("synthesizing"),
+            "LOW-1: table-only body deck must emit 'synthesizing' warn for step 4 path; got logs"
+        );
+    }
+
+    /// MED-1: zero-slide deck must not emit promotion warn (no slides to promote).
+    /// Export must not panic.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_MED1_zero_slide_deck_no_promotion_warn_no_panic() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(result.is_ok(), "zero-slide deck must not panic on export");
+
+        // Must NOT emit a promotion warn (no slides = nothing to promote or synthesize)
+        assert!(
+            !logs_contain("promoting"),
+            "MED-1: zero-slide deck must NOT emit promoting warn; got logs"
+        );
+        assert!(
+            !logs_contain("synthesizing"),
+            "MED-1: zero-slide deck must NOT emit synthesizing warn; got logs"
+        );
+    }
+
+    /// HIGH-1 / SF-VISUALLY-HIDDEN: the page template must include the
+    /// `.sf-visually-hidden` CSS rule (position:absolute; width:1px; ...).
+    #[test]
+    fn test_HIGH1_page_template_includes_sf_visually_hidden_css() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // Use a chart-only deck to trigger step 4 (synthetic h1 with .sf-visually-hidden)
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The CSS must define .sf-visually-hidden
+        assert!(
+            html.contains("sf-visually-hidden"),
+            "HIGH-1: page template must include .sf-visually-hidden CSS rule; got snippet: {:?}",
+            &html[..html.len().min(2000)]
         );
     }
 
