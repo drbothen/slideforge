@@ -840,10 +840,16 @@ mod tests {
     }
 
     /// Construct a minimal `BuildArgs` pointing to a non-existent source path.
+    ///
+    /// `run_build` exits at the source-exists check (exit 1) before ever
+    /// touching the output directory, so the output dir path is never accessed.
+    /// Both paths are intentionally non-existent on every platform: the source
+    /// file is guaranteed absent, and `std::env::temp_dir()` resolves to a
+    /// platform-appropriate temp root (`/tmp` on Unix, `%TEMP%` on Windows).
     fn build_args_nonexistent(formats: Vec<OutputFormat>) -> BuildArgs {
         BuildArgs {
             source: PathBuf::from("/nonexistent/deck.sf"),
-            output_dir: PathBuf::from("/tmp/slideforge-test-out"),
+            output_dir: std::env::temp_dir().join("slideforge-test-out-nonexistent"),
             format: formats,
             variant: None,
         }

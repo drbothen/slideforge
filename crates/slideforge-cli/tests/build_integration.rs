@@ -377,8 +377,11 @@ fn test_BC_1_15_003_build_eval_error_warn_only_exits_0_output_written() {
 
 /// AC-005 / BC-1.15.003 postcondition 4: export error → exit 3, no output.
 ///
-/// This test simulates an export failure by making the output directory
-/// unwritable (under a non-existent deeply nested path).
+/// This test simulates an export/write failure using a portable blocker-file
+/// technique: a regular file is created inside a tempdir, then the output dir
+/// is set to a path whose parent component IS that regular file.
+/// `create_dir_all` reliably fails on Linux, macOS, AND Windows because no OS
+/// allows a directory to exist inside a regular file.
 #[test]
 fn test_BC_1_15_003_build_export_error_exits_3_no_output() {
     let tmp = tempfile::tempdir().expect("create tempdir");
@@ -387,8 +390,13 @@ fn test_BC_1_15_003_build_export_error_exits_3_no_output() {
     // Brand discovery: CLI looks for brand.toml next to the source file.
     write_brand_toml(tmp.path());
 
-    // Output dir that cannot be created (under a non-existent deeply nested path).
-    let out_dir = PathBuf::from("/nonexistent_root_dir_xyz/deeply/nested/dist");
+    // Portable failure injection: a regular file acts as a path-component
+    // blocker so `create_dir_all(out_dir)` fails on every OS.
+    let blocker_tmp = tempfile::tempdir().expect("create blocker tempdir");
+    let blocker = blocker_tmp.path().join("blocker_file");
+    std::fs::write(&blocker, b"x").expect("write blocker file");
+    // out_dir's immediate parent IS the regular file → create_dir_all fails everywhere.
+    let out_dir = blocker.join("dist");
 
     let args = BuildArgs {
         source: src_path,
@@ -1009,23 +1017,30 @@ fn test_BC_1_15_001_output_writer_write_atomic_produces_file_content() {
 }
 
 /// AC-009: write_atomic must clean up the .tmp file on failure.
+///
+/// Failure is injected using the portable blocker-file technique: a regular
+/// file is placed at the path that `write_atomic` would need to traverse as a
+/// directory component. `create_dir_all` therefore fails on Linux, macOS, AND
+/// Windows because no OS permits a sub-path to exist inside a regular file.
 #[test]
 fn test_BC_1_15_001_output_writer_write_atomic_cleans_up_tmp_on_failure() {
     use slideforge_cli::output::OutputWriter;
 
-    // Use a non-existent output directory to force a write failure.
-    let writer = OutputWriter::new(
-        &PathBuf::from("/nonexistent_dir_xyz_slideforge"),
-        "deck",
-        "pptx",
-    );
+    // Portable failure injection: regular file blocks directory creation.
+    let blocker_tmp = tempfile::tempdir().expect("create blocker tempdir");
+    let blocker = blocker_tmp.path().join("blocker_file");
+    std::fs::write(&blocker, b"x").expect("write blocker file");
+    // output_dir's parent IS the regular file → create_dir_all fails everywhere.
+    let output_dir = blocker.join("out");
+
+    let writer = OutputWriter::new(&output_dir, "deck", "pptx");
 
     let result = writer.write_atomic(b"fake bytes");
 
-    // Must return an error (directory does not exist).
+    // Must return an error (directory cannot be created through a regular file).
     assert!(
         result.is_err(),
-        "output.rs: write_atomic to non-existent dir must return Err"
+        "output.rs: write_atomic to uncreateable dir must return Err"
     );
     // Tmp file must not be left on disk.
     assert!(
@@ -1163,10 +1178,11 @@ fn test_BC_1_15_003_ac_011_init_tracing_idempotent_no_panic_on_second_call() {
 ///
 /// With the all-or-nothing refactor: when 2 formats are requested and export
 /// succeeds for both but the write to disk fails for the 2nd, NEITHER final
-/// file must exist. Tests this by targeting a non-writable output directory.
+/// file must exist. Tests this by targeting an uncreateable output directory.
 ///
-/// The real all-or-nothing scenario is: export pptx OK + write to unwritable dir
-/// → neither .pptx nor .html created.
+/// Failure injection uses the portable blocker-file technique: a regular file
+/// acts as a path-component ancestor, making `create_dir_all(out_dir)` fail on
+/// Linux, macOS, AND Windows.  Neither .pptx nor .html is created.
 #[test]
 fn test_BC_1_15_003_med_001_all_or_nothing_no_partial_output_on_export_failure() {
     let tmp = tempfile::tempdir().expect("create tempdir");
@@ -1174,8 +1190,12 @@ fn test_BC_1_15_003_med_001_all_or_nothing_no_partial_output_on_export_failure()
     write_valid_sf(&src_path);
     write_brand_toml(tmp.path());
 
-    // Use a non-existent output dir to force write failure.
-    let out_dir = PathBuf::from("/nonexistent_atomic_test_xyz/dist");
+    // Portable failure injection: regular file blocks directory creation.
+    let blocker_tmp = tempfile::tempdir().expect("create blocker tempdir");
+    let blocker = blocker_tmp.path().join("blocker_file");
+    std::fs::write(&blocker, b"x").expect("write blocker file");
+    // out_dir's parent IS the regular file → create_dir_all fails everywhere.
+    let out_dir = blocker.join("dist");
 
     let args = BuildArgs {
         source: src_path,
