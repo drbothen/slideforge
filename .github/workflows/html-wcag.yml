@@ -99,66 +99,71 @@ jobs:
           cargo test -p slideforge-html --test html_fixture -- --include-ignored 2>&1
           ls -la /tmp/slideforge-html-wcag-fixture.html
 
-      # Step 2: Install Playwright and @axe-core/playwright.
+      # Step 2: Install @playwright/test and @axe-core/playwright.
+      # @playwright/test provides the chromium browser launcher for Node scripts.
+      # @axe-core/playwright provides the AxeBuilder class (the correct API for
+      # this package — NOT injectAxe/checkA11y which belong to axe-playwright).
       - name: Install Playwright + axe-core
         run: |
           set -euo pipefail
           npm install --no-save @playwright/test @axe-core/playwright
           npx playwright install chromium --with-deps
 
-      # Step 3: Write the axe-core test script.
+      # Step 3: Write the axe-core test script using the AxeBuilder API.
+      #
+      # API reference: @axe-core/playwright exports AxeBuilder (class), not
+      # injectAxe/checkA11y (those belong to the separate axe-playwright package).
+      # Usage: new AxeBuilder({ page }).withTags([...]).analyze()
+      #
+      # Positive-coverage requirement (CI-as-Code): the success log MUST include
+      # a runtime-computed pass count so an inert/no-op run is greppably
+      # distinguishable from a real scan. A hardcoded "zero violations" string
+      # would pass even if axe-core never ran.
       - name: Write axe-core test script
         run: |
           cat > /tmp/axe-check.js << 'SCRIPT'
+          'use strict';
+          const { AxeBuilder } = require('@axe-core/playwright');
           const { chromium } = require('@playwright/test');
-          const { checkA11y, injectAxe } = require('@axe-core/playwright');
           const fs = require('fs');
-          const path = require('path');
 
           (async () => {
-            const fixtureHtml = fs.readFileSync('/tmp/slideforge-html-wcag-fixture.html', 'utf8');
-            const tempPath = path.join(require('os').tmpdir(), 'axe-fixture-' + Date.now() + '.html');
-            fs.writeFileSync(tempPath, fixtureHtml);
-
-            const browser = await chromium.launch();
-            const page = await browser.newPage();
-            await page.goto('file://' + tempPath);
-
-            await injectAxe(page);
-
-            let violations = [];
-            try {
-              await checkA11y(page, null, {
-                runOptions: {
-                  runOnly: {
-                    type: 'tag',
-                    values: ['wcag2a', 'wcag2aa'],
-                  },
-                },
-                violationCallback: (axeViolations) => {
-                  violations = axeViolations;
-                  if (axeViolations.length > 0) {
-                    console.error('WCAG AA violations found:');
-                    axeViolations.forEach((v) => {
-                      console.error(`  [${v.impact}] ${v.id}: ${v.description}`);
-                      v.nodes.forEach((n) => {
-                        console.error(`    - ${n.html}`);
-                      });
-                    });
-                  }
-                },
-              });
-            } catch (e) {
-              // checkA11y throws on violations — we handle via violationCallback.
+            const fixturePath = '/tmp/slideforge-html-wcag-fixture.html';
+            if (!fs.existsSync(fixturePath)) {
+              console.error('ERROR: fixture file not found: ' + fixturePath);
+              process.exitCode = 1;
+              return;
             }
 
+            const fileUrl = 'file://' + fixturePath;
+            const browser = await chromium.launch({ args: ['--no-sandbox'] });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await page.goto(fileUrl);
+
+            const results = await new AxeBuilder({ page })
+              .withTags(['wcag2a', 'wcag2aa'])
+              .analyze();
+
             await browser.close();
-            fs.unlinkSync(tempPath);
+
+            const violations = results.violations;
+            const passCount = results.passes.length;
 
             if (violations.length > 0) {
+              console.error('WCAG AA violations found (' + violations.length + '):');
+              violations.forEach((v) => {
+                console.error(
+                  '- [' + v.id + '] ' + v.help +
+                  ' (' + v.nodes.length + ' nodes): ' + v.helpUrl
+                );
+              });
               process.exitCode = 1;
             } else {
-              console.log('WCAG AA check passed: zero violations');
+              console.log(
+                'WCAG AA check passed: ' + passCount + ' rule(s) passed, ' +
+                violations.length + ' violations, 1 HTML file scanned'
+              );
             }
           })();
           SCRIPT
