@@ -1,0 +1,54 @@
+[package]
+name = "slideforge-html"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Static HTML exporter for slideforge — WCAG AA compliant output via axe-core (STORY-046)"
+
+[dependencies]
+# Jinja2-compatible HTML templating. `.html` suffix enables HTML autoescape
+# automatically (ADR-022, pinned =2.20.0).
+minijinja = { workspace = true }
+
+# SVG geometry/validation ONLY — does NOT round-trip role/aria attributes
+# (stripped by usvg). Use quick-xml for accessibility injection after usvg
+# processing. (ADR-022, pinned =0.47.0; AC-003/AC-005 export-architecture v1.2).
+usvg = { workspace = true }
+
+# HTML text/attribute escaping. Use `encode_text` for text nodes and
+# `encode_double_quoted_attribute` for attribute values when NOT using
+# quick-xml (which auto-escapes). (ADR-022, pinned =0.2.13).
+html-escape = { workspace = true }
+
+# Raw XML manipulation for role/title injection into SVG after usvg pass.
+# Used in `render_svg_chart` and `render_element_to_html` to inject
+# `role="img"` and `<title>` without going through the usvg tree API.
+quick-xml = { workspace = true }
+
+# Plugin API — Exporter trait (BC-5.02.002 dog-food guarantee).
+slideforge-plugin-api = { workspace = true }
+
+# Types — LaidOutDeck, LaidOutSlide, Brand, Deck, etc.
+slideforge-layout = { workspace = true }
+slideforge-types = { workspace = true }
+
+# Structured logging (required by CLAUDE.md: no println! in library crates).
+tracing = { workspace = true }
+
+[dev-dependencies]
+# HTML parsing for test assertions. Always use `Selector::parse("...")` then
+# `doc.select(&sel)` — never `.select("css-string")` directly (AC-006).
+scraper = { workspace = true }
+
+# For asserting tracing::warn! emissions in URL scheme rejection tests (AC-010).
+tracing-test = { workspace = true }
+
+insta = { workspace = true }

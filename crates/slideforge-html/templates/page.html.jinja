@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+</head>
+<body>
+  <header>
+    <nav aria-label="Slide navigation">
+      {# Slide navigation links will be generated here #}
+    </nav>
+  </header>
+  <main>
+    {% for slide_html in slides %}
+    {{ slide_html }}
+    {% endfor %}
+  </main>
+</body>
+</html>
