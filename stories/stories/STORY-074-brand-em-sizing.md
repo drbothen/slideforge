@@ -36,7 +36,7 @@ unit. The `BrandFonts.font_size_emu` field that carries this value lives in
 - Depends on STORY-028: `layout_shapes()`, `DEFAULT_EM_IN_EMU`, `ShapeUnit::Em`,
   and the deferred comment at `layout.rs:208` ("STORY-NNN-brand-em-sizing") are
   all established by STORY-028. This story closes that deferral by adding
-  `font_size_emu: Emu` to `BrandFonts` and threading the real value through
+  `font_size_emu: i64` to `BrandFonts` and threading the real value through
   `layout::run` → `layout_shapes`.
 - Wave TBD: Wave assignment pending orchestrator dispatch. Likely Wave 3 or 4,
   after STORY-028 merges and before exporter stories (STORY-037+) consume
@@ -55,7 +55,7 @@ BC-3.04.001 Postcondition 2 mandates brand-aware em resolution:
 The constant satisfies the formula structurally but is not brand-aware. This
 story closes the structural gap:
 
-1. **Add `font_size_emu: Emu` to `BrandFonts`** in `slideforge-types/src/brand.rs`
+1. **Add `font_size_emu: i64` to `BrandFonts`** in `slideforge-types/src/brand.rs`
    (or wherever `BrandFonts` is defined). Default: `457_200` (36pt body at 96dpi,
    matching the current constant). Field must derive `Debug + Clone + PartialEq +
    Eq + Hash` (comemo compatibility per DI-010).
@@ -157,3 +157,4 @@ passed before STORY-074 may fail after it.
 |---------|------|--------|-------|
 | 1.0 | 2026-05-29 | product-owner | Created — resolves STORY-NNN-brand-em-sizing placeholder at layout.rs:208 (F-P18-MED-001 from pass-18 report). Closes structural deferral from STORY-028. |
 | 1.1 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-1 F-074-P1-LOW-001: updated illustrative fixture to 5-arg `layout_shapes` call (added trailing `base_index` = 0) and updated Implementation Note to reflect `em_in_emu` (4th arg) + `base_index` (5th arg) per actual delivered signature. No AC semantics or contract thresholds changed. |
+| 1.2 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-2 F-074-P2-LOW-001: corrected `font_size_emu` field-type annotation from `Emu` to `i64` in Dependency Anchor Justifications and Summary §1, matching the delivered `DEFAULT_EM_IN_EMU: i64` constant and `em_in_emu: i64` parameter in `layout_shapes`. Implementation Notes §4 (`i64` authorization) and all AC semantics unchanged. |
