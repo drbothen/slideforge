@@ -13,7 +13,8 @@
 //! 4. Charts and diagrams embedded as `<svg>` with `role="img"` and `<title>`.
 //! 5. `<html lang="...">` derived from deck `lang` field (never hardcoded).
 //! 6. Heading hierarchy (h1 → h2 → ...) is correct and non-skipped.
-//! 7. ARIA landmarks: `<header>`, `<main>`, `<nav>` for slide navigation.
+//! 7. ARIA landmark: `<main>` wraps all slide articles. Per-slide `<nav>` navigation
+//!    is deferred to STORY-047 (preview); no empty `<nav>` is emitted in v1.
 //!
 //! ## Plugin trait boundary (BC-5.02.002)
 //!

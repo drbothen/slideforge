@@ -29,8 +29,9 @@ usvg = { workspace = true }
 html-escape = { workspace = true }
 
 # Raw XML manipulation for role/title injection into SVG after usvg pass.
-# Used in `render_svg_chart` and `render_element_to_html` to inject
-# `role="img"` and `<title>` without going through the usvg tree API.
+# Used in `render_chart_frame` and `render_svg_chart` to inject
+# `role="img"` and `<title>` without going through the usvg tree API
+# (usvg strips all non-presentation attributes including role/aria/title).
 quick-xml = { workspace = true }
 
 # Plugin API — Exporter trait (BC-5.02.002 dog-food guarantee).

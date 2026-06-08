@@ -6,11 +6,6 @@
   <title>{{ title }}</title>
 </head>
 <body>
-  <header>
-    <nav aria-label="Slide navigation">
-      {# Slide navigation links will be generated here #}
-    </nav>
-  </header>
   <main>
     {% for slide_html in slides %}
     {{ slide_html | safe }}

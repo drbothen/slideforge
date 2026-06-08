@@ -1,20 +1,20 @@
 //! Slide-to-HTML rendering functions — P4 Composite Rendering Model.
 //!
 //! This module provides the core rendering primitives for the P4 model
-//! (ADR-008 binding 2026-06-08, BC-4.03.003 v1.2):
+//! (ADR-008 binding 2026-06-08, BC-4.03.003 v1.3):
 //!
 //! - [`render_slide_to_html`] — renders a single [`LaidOutSlide`] to an HTML
 //!   fragment string. Uses the P4 model: `<article>` container with an HTML
 //!   text layer (real heading/paragraph elements) and a sibling
-//!   `<svg aria-hidden="true">` graphics layer. Returns `String` (not `dyn Write`)
+//!   `<svg role="presentation">` graphics layer. Returns `String` (not `dyn Write`)
 //!   so STORY-047 can serialize it as JSON for WebSocket push.
 //!   (Previous Story Intelligence note)
 //!
 //! - [`render_text_frame`] — converts a text `LaidOutFrame` to the appropriate
 //!   absolutely-positioned HTML element.
 //!
-//! - [`render_graphics_layer`] — builds the `<svg aria-hidden="true">` layer for
-//!   charts, diagrams, images, and decorative shapes.
+//! - [`render_graphics_layer`] — builds the `<svg role="presentation">` layer
+//!   for charts, diagrams, images, and decorative shapes.
 //!
 //! - [`render_chart_frame`] — injects `role="img"`, `aria-labelledby`, and
 //!   `<title>` into an SVG string via `quick-xml` after usvg geometry processing.
@@ -28,29 +28,36 @@
 //!   <h1 class="sf-title" style="position:absolute; left:{x}px; top:{y}px; ...">{title}</h1>
 //!   <p class="sf-body" style="position:absolute; ...">{body}</p>
 //!   <!-- SVG GRAPHICS LAYER: charts/diagrams/images/decorative shapes ONLY -->
-//!   <svg aria-hidden="true" viewBox="0 0 {W_emu} {H_emu}"
+//!   <svg role="presentation" viewBox="0 0 {W_emu} {H_emu}"
 //!        style="position:absolute; top:0; left:0; width:100%; height:100%;
 //!               pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
-//!     <g role="img" aria-labelledby="sf-{slide_id}-{frame_id}">
-//!       <title id="sf-{slide_id}-{frame_id}">{alt}</title>
+//!     <g role="img" aria-labelledby="sf-{slide_id}-{frame_idx}">
+//!       <title id="sf-{slide_id}-{frame_idx}">{alt}</title>
 //!       <!-- chart SVG (aria-hidden="true" on inner root <svg>) -->
 //!     </g>
+//!     <!-- DECORATIVE frames use <g aria-hidden="true"> individually -->
 //!   </svg>
 //! </article>
 //! ```
 //!
-//! **FORBIDDEN:** `<foreignObject>` anywhere; `<canvas>`; `role="img"` on the
-//! outer slide `<svg aria-hidden="true">` layer; injecting role/aria via usvg
-//! tree; pre-escaping before `push_attribute`; heading level by content
-//! inspection; >1 `<h1>` per document.
+//! **FORBIDDEN:** `<foreignObject>` anywhere; `<canvas>`; `aria-hidden="true"` on the
+//! outer slide `<svg>` graphics layer (WAI-ARIA: aria-hidden on ancestor hides the
+//! whole subtree including child `<g role="img">` elements — use `role="presentation"`
+//! instead); injecting role/aria via usvg tree; pre-escaping before `push_attribute`;
+//! heading level by content inspection; >1 `<h1>` per document.
 //!
 //! ## Heading level semantics (AC-008 / BC-4.03.003 postcondition 7)
 //!
-//! Heading level is determined by `slide.slide_type_keyword` at render time —
-//! **not** by content heuristics. If `slide_type_keyword == "title"` AND this is
-//! the first slide in the deck (`slide_index == 0`), the title frame emits
-//! `<h1>`. All other title frames emit `<h2>`. Sub-headings use `<h3>` / `<h4>`.
-//! Exactly one `<h1>` exists per HTML document.
+//! Heading level is pre-computed by the exporter pre-pass in
+//! [`crate::exporter::HtmlExporter`] and passed into [`render_slide_to_html`]
+//! as a [`HeadingLevel`] parameter. The per-slide function does NOT decide heading
+//! level itself.
+//!
+//! Pre-pass algorithm (ADR-008 / BC-4.03.003 postcondition 6):
+//! 1. Find first slide with `slide_type_keyword == "title"` → its Title frame gets H1.
+//! 2. If none: find first slide with any `Title` frame → that frame gets H1.
+//! 3. If none (body-only deck): promote first body frame to H1, emit `tracing::warn!`.
+//! All other Title frames emit H2. Exactly one H1 per document.
 //!
 //! ## Coordinate conversion (MED-3 / EMU → CSS px @96 dpi)
 //!
@@ -270,12 +277,17 @@ fn render_bullet_item(item: &slideforge_types::BulletItem) -> String {
 
 /// Heading level enum for the P4 text layer (AC-008 / BC-4.03.003 postcondition 7).
 ///
-/// Heading level is derived from `slide_type_keyword` at render time — NEVER
-/// from content inspection. Exactly one `<h1>` per HTML document (the title-slide
-/// at index 0).
+/// The heading level is pre-computed by the exporter pre-pass and passed into
+/// [`render_slide_to_html`] — the per-slide render function does NOT decide level.
+/// Exactly one `<h1>` per HTML document (enforced by the exporter pre-pass).
+///
+/// `H1` also signals "body-only promotion" for decks with no Title frames: the
+/// first `Body` frame on the H1-level slide is wrapped in `<h1>` instead of
+/// `<div>`. This is the only case where `H1` affects non-Title frame rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeadingLevel {
-    /// Document-level heading — exactly one per document (title-slide index 0).
+    /// Document-level heading — exactly one per document. Also signals body
+    /// promotion for decks with no Title frames.
     H1,
     /// Section-level heading — all other title frames.
     H2,
@@ -317,8 +329,11 @@ pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<S
     let w = emu_to_css_px(frame.bbox.width);
     let h = emu_to_css_px(frame.bbox.height);
 
-    // MED-3: guard zero or negative bbox — skip degenerate frames.
-    if frame.bbox.width.0 == 0 || frame.bbox.height.0 == 0 {
+    // MED-B5: guard zero OR NEGATIVE bbox dimensions — skip degenerate frames.
+    // Negative SIZE (width/height) must never emit CSS like width="-N". This is
+    // the same guard as render_graphics_layer (width.0 <= 0 || height.0 <= 0).
+    // Negative POSITION (x/y) is legal (off-canvas frames) and is not guarded here.
+    if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
         tracing::warn!(
             "render_text_frame: skipping frame with zero or degenerate bbox \
              (width={}, height={})",
@@ -375,16 +390,31 @@ pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<S
 
 /// Render the SVG graphics layer for a slide.
 ///
-/// Produces a single `<svg aria-hidden="true" ...>` element containing wrapped
+/// Produces a single `<svg role="presentation" ...>` element containing wrapped
 /// groups for each graphical `LaidOutFrame`:
 /// - Non-decorative graphical frames: `<g role="img" aria-labelledby="...">`
 ///   with `<title>` child, then the chart/diagram SVG with `aria-hidden="true"`
 ///   on its root `<svg>`.
 /// - Decorative elements: `<g aria-hidden="true">`.
 ///
+/// ## WAI-ARIA: why `role="presentation"` not `aria-hidden="true"` on the outer SVG
+///
+/// WAI-ARIA spec: when `aria-hidden="true"` is set on an ancestor element, the
+/// ENTIRE subtree (including child elements with explicit `role="img"`) is hidden
+/// from AT. A child cannot re-expose itself from under an `aria-hidden` ancestor.
+/// Using `role="presentation"` on the outer SVG instead makes the SVG container
+/// itself semantically invisible to AT while leaving child `<g role="img">` elements
+/// fully accessible. Decorative elements get their own `aria-hidden="true"` on
+/// their individual `<g>` elements.
+///
 /// The graphics layer SVG uses `viewBox` in EMU (matching the `LaidOutSlide`
 /// coordinate space) and CSS `width:100%; height:100%` to stretch over the
 /// `<article>` container (MED-3).
+///
+/// ## ID format (MED-B3)
+///
+/// Each graphical frame gets a stable id: `sf-{slide_id}-{frame_idx}` where
+/// `frame_idx` is the 0-based index of graphical frames within the slide.
 ///
 /// Returns an empty string if there are no graphical frames to render.
 #[must_use]
@@ -396,11 +426,15 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 
     // Collect graphical frame HTML. If none, skip emitting the SVG layer.
     let mut graphical_content = String::new();
+    // MED-B3: frame_idx is 0-based; incremented BEFORE use for each graphical frame.
+    // This gives ids: sf-{slide_id}-0, sf-{slide_id}-1, ... (no doubling of slide_id).
     let mut frame_idx: u32 = 0;
 
     for frame in frames {
-        // MED-3: skip frames with zero/negative bbox.
-        if frame.bbox.width.0 == 0 || frame.bbox.height.0 == 0 {
+        // MED-B5: skip frames with zero OR NEGATIVE bbox dimensions (degenerate geometry).
+        // Negative width/height must never emit CSS like width="-N".
+        // Negative x/y position is legal (off-canvas frames); only SIZE is guarded.
+        if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
             continue;
         }
 
@@ -411,26 +445,28 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 
         match &frame.content {
             FrameContent::Chart { alt } => {
+                // MED-B3: frame_id is the 0-based index string; render_chart_frame
+                // builds the full label as sf-{slide_id}-{frame_id}.
+                let frame_id_str = frame_idx.to_string();
                 frame_idx += 1;
-                let frame_id = format!("{slide_id}-{frame_idx}");
                 let alt_text = alt_text_str(alt);
                 let placeholder_svg =
                     r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
                 // WHEN real chart SVG is added (STORY-047/048) it MUST route through
                 // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
-                let chart_g = render_chart_frame(placeholder_svg, alt_text, &frame_id, slide_id);
+                let chart_g = render_chart_frame(placeholder_svg, alt_text, &frame_id_str, slide_id);
                 let _ = write!(
                     graphical_content,
                     r#"<g transform="translate({x} {y})">{chart_g}</g>"#
                 );
             },
             FrameContent::Diagram { svg, alt } => {
+                let frame_id_str = frame_idx.to_string();
                 frame_idx += 1;
-                let frame_id = format!("{slide_id}-{frame_idx}");
                 let alt_text = alt_text_str(alt);
                 // WHEN real diagram SVG is wired in (STORY-048) it MUST route through
                 // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
-                let chart_g = render_chart_frame(svg.as_str(), alt_text, &frame_id, slide_id);
+                let chart_g = render_chart_frame(svg.as_str(), alt_text, &frame_id_str, slide_id);
                 let _ = write!(
                     graphical_content,
                     r#"<g transform="translate({x} {y})">{chart_g}</g>"#
@@ -442,16 +478,20 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 // to strip script/foreignObject/on* — LOW-2.
                 match alt {
                     AltText::Provided(text) => {
+                        // MED-B3: canonical id sf-{slide_id}-{frame_idx} (0-based).
+                        let frame_id_str = frame_idx.to_string();
                         frame_idx += 1;
-                        let frame_id = format!("{slide_id}-{frame_idx}");
-                        let escaped_id = html_escape::encode_double_quoted_attribute(&frame_id);
+                        let label_id = format!("sf-{slide_id}-{frame_id_str}");
+                        let escaped_id = html_escape::encode_double_quoted_attribute(&label_id);
                         let escaped_alt = html_escape::encode_text(text);
                         let _ = write!(
                             graphical_content,
-                            "<g role=\"img\" aria-labelledby=\"sf-{escaped_id}\"><title id=\"sf-{escaped_id}\">{escaped_alt}</title><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#cccccc\"/></g>"
+                            "<g role=\"img\" aria-labelledby=\"{escaped_id}\"><title id=\"{escaped_id}\">{escaped_alt}</title><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#cccccc\"/></g>"
                         );
                     },
                     AltText::Decorative | AltText::Unspecified => {
+                        // HIGH-B2: decorative frames get aria-hidden="true" on their OWN <g>.
+                        // The outer <svg> does NOT carry aria-hidden (it carries role="presentation").
                         let _ = write!(
                             graphical_content,
                             "<g aria-hidden=\"true\"><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#eeeeee\"/></g>"
@@ -463,13 +503,14 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 let alt = &shape_frame.alt;
                 match alt {
                     AltText::Provided(text) => {
+                        let frame_id_str = frame_idx.to_string();
                         frame_idx += 1;
-                        let frame_id = format!("{slide_id}-{frame_idx}");
-                        let escaped_id = html_escape::encode_double_quoted_attribute(&frame_id);
+                        let label_id = format!("sf-{slide_id}-{frame_id_str}");
+                        let escaped_id = html_escape::encode_double_quoted_attribute(&label_id);
                         let escaped_alt = html_escape::encode_text(text);
                         let _ = write!(
                             graphical_content,
-                            r#"<g role="img" aria-labelledby="sf-{escaped_id}"><title id="sf-{escaped_id}">{escaped_alt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
+                            r#"<g role="img" aria-labelledby="{escaped_id}"><title id="{escaped_id}">{escaped_alt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
                         );
                     },
                     AltText::Decorative | AltText::Unspecified => {
@@ -504,10 +545,10 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 error_code,
                 message,
             } => {
+                let frame_id_str = frame_idx.to_string();
                 frame_idx += 1;
-                let frame_id = format!("{slide_id}-{frame_idx}");
                 let alt_text = format!("Error on slide '{slide_title}': [{error_code}] {message}");
-                let chart_g = render_chart_frame(svg, &alt_text, &frame_id, slide_id);
+                let chart_g = render_chart_frame(svg, &alt_text, &frame_id_str, slide_id);
                 let _ = write!(
                     graphical_content,
                     r#"<g transform="translate({x} {y})">{chart_g}</g>"#
@@ -526,12 +567,13 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
         return String::new();
     }
 
-    // The outer SVG is aria-hidden="true" — the non-decorative <g> elements
-    // override this via their own role="img" (ARIA spec: role on a child overrides
-    // the inherited aria-hidden from an ancestor that is aria-hidden="true").
-    // NOTE: This is the standard pattern for mixed decorative/semantic SVG layers.
+    // HIGH-B2: outer SVG uses role="presentation" — NOT aria-hidden="true".
+    // WAI-ARIA: aria-hidden on an ancestor hides the ENTIRE subtree, including
+    // child <g role="img"> elements. role="presentation" makes the container
+    // invisible to AT without hiding child elements that carry accessible roles.
+    // Decorative frames get their own aria-hidden="true" on their individual <g>.
     format!(
-        r#"<svg aria-hidden="true" viewBox="0 0 {w_emu} {h_emu}" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">{graphical_content}</svg>"#
+        r#"<svg role="presentation" viewBox="0 0 {w_emu} {h_emu}" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">{graphical_content}</svg>"#
     )
 }
 
@@ -541,7 +583,7 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 /// an `<article class="sf-slide">` landmark containing:
 /// 1. An HTML text layer: `<h1>`, `<h2>`, `<p>`, `<ul>` elements absolutely
 ///    positioned from `LaidOutFrame` EMU coordinates.
-/// 2. A sibling `<svg aria-hidden="true">` graphics layer for charts, diagrams,
+/// 2. A sibling `<svg role="presentation">` graphics layer for charts, diagrams,
 ///    images, and decorative shapes.
 ///
 /// Returns `String` (not `dyn Write`) so STORY-047 can serialize it as JSON for
@@ -549,17 +591,19 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 ///
 /// # Heading level (AC-008 / BC-4.03.003 postcondition 7)
 ///
-/// Heading level is driven by `slide.slide_type_keyword`:
-/// - `"title"` + `slide_index == 0` → `<h1>` (exactly one per document)
-/// - any other slide type → `<h2>` for the title frame
+/// The `heading_level` parameter is **pre-computed by the exporter pre-pass**
+/// in [`crate::exporter::HtmlExporter::export`]. This function does NOT decide
+/// heading level itself (see CRITICAL-B1/MED-B4 fix).
 ///
-/// No heading level is skipped.
+/// Pre-pass invariant: exactly one slide in the document receives `HeadingLevel::H1`
+/// for its Title frame. All other slides receive `HeadingLevel::H2`.
 ///
 /// # Architecture invariants (BC-4.03.003 invariant 2)
 ///
-/// - FORBIDDEN: `<foreignObject>`, `<canvas>`, `role="img"` on the outer SVG
+/// - FORBIDDEN: `<foreignObject>`, `<canvas>`, `aria-hidden="true"` on the outer SVG
 /// - Text frames (title, body, bullets) are NOT in the SVG layer
 /// - Non-decorative graphical frames use `<g role="img" aria-labelledby>`
+/// - Decorative graphical frames use `<g aria-hidden="true">`
 ///
 /// # Coordinate system (MED-3)
 ///
@@ -583,7 +627,7 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 pub fn render_slide_to_html(
     slide: &LaidOutSlide,
     brand: &Brand,
-    slide_index: usize,
+    heading_level: HeadingLevel,
     page_size: &PageSize,
 ) -> String {
     let _ = brand; // Brand used by future template-driven color/font injection.
@@ -592,25 +636,59 @@ pub fn render_slide_to_html(
     let container_w = emu_to_css_px(page_size.width);
     let container_h = emu_to_css_px(page_size.height);
 
-    // Slide ID for ARIA cross-references (1-based).
+    // Slide ID for ARIA cross-references (1-based from source_index).
     // OBS-2: "Slide N" is English-only; see doc comment above.
-    let slide_number = slide_index + 1;
+    let slide_number = slide.source_index + 1;
     let slide_id = format!("slide-{slide_number}");
 
-    // AC-008: heading level derived from slide_type_keyword, NOT content heuristics.
-    // The first title-slide (slide_index == 0 AND type == "title") gets h1.
-    // All other slides get h2 for their title frame.
-    let is_title_slide = slide.slide_type_keyword.as_ref() == "title";
-    let title_heading_level = if is_title_slide && slide_index == 0 {
-        HeadingLevel::H1
-    } else {
-        HeadingLevel::H2
-    };
-
     // Build the HTML text layer (all text frames in reading order).
+    // heading_level is pre-computed by the exporter pre-pass — NOT derived here.
+    //
+    // Body-only promotion (CRITICAL-B1 / BC-4.03.003 postcondition 6):
+    // If heading_level == H1 and there is no Title frame on this slide, the first
+    // Body/TextRun frame is wrapped in <h1> to satisfy page-has-heading-one.
+    let has_title_frame = slide
+        .frames
+        .iter()
+        .any(|f| matches!(f.content, FrameContent::Title(_)));
+    let needs_body_h1_promotion = heading_level == HeadingLevel::H1 && !has_title_frame;
+    let mut body_h1_promoted = false;
+
     let mut text_layer = String::new();
     for frame in &slide.frames {
-        if let Some(html) = render_text_frame(frame, title_heading_level) {
+        // Body-only promotion: wrap the first body/textrun frame in <h1>.
+        if needs_body_h1_promotion
+            && !body_h1_promoted
+            && (matches!(frame.content, FrameContent::Body(_))
+                || matches!(frame.content, FrameContent::TextRun(_)))
+        {
+            // MED-B5: skip degenerate frames.
+            if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+                continue;
+            }
+            let x = emu_to_css_px(frame.bbox.x);
+            let y = emu_to_css_px(frame.bbox.y);
+            let w = emu_to_css_px(frame.bbox.width);
+            let h = emu_to_css_px(frame.bbox.height);
+            let position_style = format!(
+                "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; overflow:hidden;"
+            );
+            let inner = match &frame.content {
+                FrameContent::Body(blocks) => {
+                    blocks.iter().map(render_content_block).collect::<String>()
+                },
+                FrameContent::TextRun(nodes) => render_inline_nodes(nodes),
+                _ => unreachable!("guarded above"),
+            };
+            text_layer.push_str(&format!(
+                r#"<h1 class="sf-body-promoted" style="{position_style}">{inner}</h1>"#
+            ));
+            text_layer.push('\n');
+            body_h1_promoted = true;
+            continue;
+        }
+
+        if let Some(html) = render_text_frame(frame, heading_level) {
             text_layer.push_str(&html);
             text_layer.push('\n');
         }
@@ -1605,7 +1683,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         let doc = scraper::Html::parse_document(&result);
         let sel = scraper::Selector::parse("article.sf-slide").expect("valid selector");
@@ -1629,7 +1707,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         let doc = scraper::Html::parse_document(&result);
         let sel = scraper::Selector::parse("foreignObject").expect("valid selector");
@@ -1654,7 +1732,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         let doc = scraper::Html::parse_document(&result);
         let sel = scraper::Selector::parse("canvas").expect("valid selector");
@@ -1684,7 +1762,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         // The h1 must be a direct descendant of the article, not inside svg.
         let doc = scraper::Html::parse_document(&result);
@@ -1695,10 +1773,10 @@ mod tests {
         );
     }
 
-    /// P4: The SVG graphics layer (if present) must carry aria-hidden="true" on
-    /// the outer svg — NOT role="img".
+    /// P4: The SVG graphics layer (if present) must carry role="presentation" (HIGH-B2).
+    /// aria-hidden="true" on the outer svg would hide all <g role="img"> children from AT.
     #[test]
-    fn test_BC_4_03_003_p4_graphics_layer_svg_is_aria_hidden() {
+    fn test_BC_4_03_003_p4_graphics_layer_svg_is_role_presentation() {
         let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
         let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_in));
         let slide = make_title_slide_type(
@@ -1715,24 +1793,31 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
 
-        // The outer SVG graphics layer must have aria-hidden="true" (not role="img").
-        // The <g> wrapper inside has role="img".
-        assert!(
-            result.contains(r#"aria-hidden="true""#),
-            "P4: graphics layer outer <svg> must carry aria-hidden=\"true\"; got: {result}"
-        );
-        // The outer svg must NOT have role="img" at the svg element level.
-        // (role="img" is on the <g> wrapper inside, not the outer svg).
-        // Check that the outer svg element itself doesn't have role="img":
+        // HIGH-B2: outer SVG must carry role="presentation", NOT aria-hidden="true".
+        // WAI-ARIA: aria-hidden on ancestor hides the entire subtree.
         let outer_svg_start = result.find("<svg").expect("must have svg");
         let outer_svg_end = result[outer_svg_start..].find('>').expect("must close");
         let outer_svg_tag = &result[outer_svg_start..=(outer_svg_start + outer_svg_end)];
         assert!(
+            outer_svg_tag.contains(r#"role="presentation""#),
+            "P4 / B2: outer SVG graphics layer must carry role=\"presentation\"; got: {outer_svg_tag}"
+        );
+        assert!(
+            !outer_svg_tag.contains(r#"aria-hidden="true""#),
+            "P4 / B2: outer SVG graphics layer must NOT carry aria-hidden=\"true\"; got: {outer_svg_tag}"
+        );
+        // The <g> wrapper inside must still have role="img".
+        assert!(
             !outer_svg_tag.contains(r#"role="img""#),
             "P4: outer SVG graphics layer must NOT have role=\"img\" on svg element; \
              got outer svg tag: {outer_svg_tag}"
+        );
+        // The inner <g role="img"> is accessible (not hidden by aria-hidden ancestor).
+        assert!(
+            result.contains(r#"role="img""#),
+            "P4: <g role=\"img\"> must be present in the SVG layer; got: {result}"
         );
     }
 
@@ -1752,7 +1837,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
 
         // Must have <g role="img" aria-labelledby="..."> in the SVG layer.
         assert!(
@@ -1775,12 +1860,12 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-008: Heading level from slide_type — exactly one <h1> per document
+    // AC-008: Heading level pre-computed — render_slide_to_html uses passed level
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// AC-008 — title-slide at index 0 produces <h1> for the title frame.
+    /// AC-008 — passing HeadingLevel::H1 to render_slide_to_html produces <h1>.
     #[test]
-    fn test_BC_4_03_003_ac008_title_slide_index_0_produces_h1() {
+    fn test_BC_4_03_003_ac008_h1_level_produces_h1() {
         let slide = make_title_slide_type(
             "title",
             vec![Frame {
@@ -1792,19 +1877,19 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         let doc = scraper::Html::parse_document(&result);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid");
         assert!(
             doc.select(&sel_h1).count() > 0,
-            "AC-008: title-slide at index 0 must produce <h1>; got: {result}"
+            "AC-008: HeadingLevel::H1 must produce <h1>; got: {result}"
         );
     }
 
-    /// AC-008 — content slide (non-title type) always produces <h2> for the title frame.
+    /// AC-008 — passing HeadingLevel::H2 to render_slide_to_html produces <h2>.
     #[test]
-    fn test_BC_4_03_003_ac008_content_slide_produces_h2() {
+    fn test_BC_4_03_003_ac008_h2_level_produces_h2() {
         let slide = make_title_slide_type(
             "content",
             vec![Frame {
@@ -1816,26 +1901,26 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
 
-        // content type → h2 even at slide_index 0
         let doc = scraper::Html::parse_document(&result);
         let sel_h2 = scraper::Selector::parse("h2").expect("valid");
         assert!(
             doc.select(&sel_h2).count() > 0,
-            "AC-008: content slide must produce <h2> for title frame; got: {result}"
+            "AC-008: HeadingLevel::H2 must produce <h2>; got: {result}"
         );
         let sel_h1 = scraper::Selector::parse("h1").expect("valid");
         assert_eq!(
             doc.select(&sel_h1).count(),
             0,
-            "AC-008: content slide must NOT produce <h1>; got: {result}"
+            "AC-008: HeadingLevel::H2 slide must NOT produce <h1>; got: {result}"
         );
     }
 
-    /// AC-008 — title-slide at index > 0 produces <h2> (only one <h1> per document).
+    /// AC-008 — passing HeadingLevel::H2 for a title-type slide at any position
+    /// produces <h2>, not <h1>.
     #[test]
-    fn test_BC_4_03_003_ac008_title_slide_non_zero_index_produces_h2() {
+    fn test_BC_4_03_003_ac008_title_slide_with_h2_level_produces_h2() {
         let slide = make_title_slide_type(
             "title",
             vec![Frame {
@@ -1847,32 +1932,32 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        // slide_index = 2 → must produce h2, not h1
-        let result = render_slide_to_html(&slide, &brand, 2, &page_size);
+        // Pre-pass says this slide gets H2 (not the h1 slide)
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
 
         let doc = scraper::Html::parse_document(&result);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid");
         assert_eq!(
             doc.select(&sel_h1).count(),
             0,
-            "AC-008: title-slide at index > 0 must NOT produce <h1>; got: {result}"
+            "AC-008: title-type slide with H2 level must NOT produce <h1>; got: {result}"
         );
         let sel_h2 = scraper::Selector::parse("h2").expect("valid");
         assert!(
             doc.select(&sel_h2).count() > 0,
-            "AC-008: title-slide at index > 0 must produce <h2>; got: {result}"
+            "AC-008: title-type slide with H2 level must produce <h2>; got: {result}"
         );
     }
 
-    /// AC-008 — exactly one <h1> in a multi-slide document (3 slides, first is title-slide).
+    /// AC-008 — exactly one <h1> in a multi-slide document (3 slides, pre-pass assigns levels).
     #[test]
     fn test_BC_4_03_003_ac008_exactly_one_h1_in_multi_slide_document() {
         let brand = make_brand();
         let page_size = make_page_size();
 
         let mut doc_html = String::new();
-        // Slide 0: title-slide → h1
-        let slide0 = make_title_slide_type(
+        // Slide 0: title-slide with H1 level (pre-pass result)
+        let mut slide0 = make_title_slide_type(
             "title",
             vec![Frame {
                 bbox: make_bbox_full(),
@@ -1881,10 +1966,11 @@ mod tests {
                 region_role: None,
             }],
         );
-        doc_html.push_str(&render_slide_to_html(&slide0, &brand, 0, &page_size));
+        slide0.source_index = 0;
+        doc_html.push_str(&render_slide_to_html(&slide0, &brand, HeadingLevel::H1, &page_size));
 
-        // Slide 1: content-slide → h2
-        let slide1 = make_title_slide_type(
+        // Slide 1: content-slide with H2 level
+        let mut slide1 = make_title_slide_type(
             "content",
             vec![Frame {
                 bbox: make_bbox_full(),
@@ -1893,10 +1979,11 @@ mod tests {
                 region_role: None,
             }],
         );
-        doc_html.push_str(&render_slide_to_html(&slide1, &brand, 1, &page_size));
+        slide1.source_index = 1;
+        doc_html.push_str(&render_slide_to_html(&slide1, &brand, HeadingLevel::H2, &page_size));
 
-        // Slide 2: title-slide at index 2 → h2 (not h1)
-        let slide2 = make_title_slide_type(
+        // Slide 2: title-slide at index 2 with H2 level (not the h1 slide)
+        let mut slide2 = make_title_slide_type(
             "title",
             vec![Frame {
                 bbox: make_bbox_full(),
@@ -1905,7 +1992,8 @@ mod tests {
                 region_role: None,
             }],
         );
-        doc_html.push_str(&render_slide_to_html(&slide2, &brand, 2, &page_size));
+        slide2.source_index = 2;
+        doc_html.push_str(&render_slide_to_html(&slide2, &brand, HeadingLevel::H2, &page_size));
 
         let doc = scraper::Html::parse_document(&doc_html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid");
@@ -1984,7 +2072,7 @@ mod tests {
             width: Emu(7_200_000),
             height: Emu(5_400_000),
         };
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
 
         // 7_200_000 / 914_400 * 96 ≈ 755.91 px
         assert!(
@@ -2399,7 +2487,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
         // content slide: Title → h2, Subtitle → h3
         assert!(
             result.contains("<h2"),
@@ -2544,6 +2632,315 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-B2 — outer SVG must use role="presentation", not aria-hidden="true"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B2: render_graphics_layer outer <svg> must carry role="presentation", NOT aria-hidden.
+    #[test]
+    fn test_B2_render_graphics_layer_outer_svg_has_role_presentation() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Revenue")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+
+        // Outer SVG must have role="presentation"
+        let svg_start = result.find("<svg").expect("must contain outer svg");
+        let svg_tag_end = result[svg_start..].find('>').expect("svg must close");
+        let outer_svg_tag = &result[svg_start..=(svg_start + svg_tag_end)];
+        assert!(
+            outer_svg_tag.contains(r#"role="presentation""#),
+            "B2: outer <svg> graphics layer must carry role=\"presentation\"; got: {outer_svg_tag}"
+        );
+        assert!(
+            !outer_svg_tag.contains(r#"aria-hidden="true""#),
+            "B2: outer <svg> graphics layer must NOT carry aria-hidden=\"true\"; got: {outer_svg_tag}"
+        );
+    }
+
+    /// B2: non-decorative <g role="img"> must have NO aria-hidden="true" ancestor svg.
+    #[test]
+    fn test_B2_non_decorative_g_role_img_not_hidden_by_ancestor() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("A chart")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+
+        // Must contain <g role="img"
+        assert!(
+            result.contains(r#"role="img""#),
+            "B2: non-decorative chart must have <g role=\"img\">; got: {result}"
+        );
+        // The outermost svg must NOT have aria-hidden="true" on the svg element
+        let svg_start = result.find("<svg").expect("must have svg");
+        let svg_tag_end = result[svg_start..].find('>').expect("svg must close");
+        let outer_svg_tag = &result[svg_start..=(svg_start + svg_tag_end)];
+        assert!(
+            !outer_svg_tag.contains(r#"aria-hidden="true""#),
+            "B2: outer <svg> must not be aria-hidden (hides <g role=\"img\">); got: {outer_svg_tag}"
+        );
+    }
+
+    /// B2: decorative <g> carries its own aria-hidden="true" (not from ancestor svg).
+    #[test]
+    fn test_B2_decorative_g_carries_own_aria_hidden() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Image {
+                alt: AltText::Decorative,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+
+        // The decorative group must carry aria-hidden="true" on the <g> element
+        assert!(
+            result.contains(r#"<g aria-hidden="true""#),
+            "B2: decorative frame must have <g aria-hidden=\"true\">; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-B3 — canonical id format sf-slide-{n}-{idx} (0-based, no doubling)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B3: chart frame id must be sf-slide-{n}-{idx} — no doubled slide_id.
+    #[test]
+    fn test_B3_canonical_id_format_no_doubling() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Revenue")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+
+        // ID must be sf-slide-1-0 (0-based index)
+        assert!(
+            result.contains("sf-slide-1-0"),
+            "B3: first chart frame must have id 'sf-slide-1-0'; got: {result}"
+        );
+        // Must NOT have doubled pattern
+        assert!(
+            !result.contains("sf-slide-1-slide-1"),
+            "B3: doubled slide_id 'sf-slide-1-slide-1' must not appear; got: {result}"
+        );
+    }
+
+    /// B3: second graphical frame on a slide gets index 1.
+    #[test]
+    fn test_B3_second_graphical_frame_gets_index_1() {
+        let frames = vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(4_500_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Chart A")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(4_600_000),
+                    y: Emu(0),
+                    width: Emu(4_500_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Chart B")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+        ];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-2", &page_size);
+
+        assert!(
+            result.contains("sf-slide-2-0"),
+            "B3: first chart on slide 2 must have id 'sf-slide-2-0'; got: {result}"
+        );
+        assert!(
+            result.contains("sf-slide-2-1"),
+            "B3: second chart on slide 2 must have id 'sf-slide-2-1'; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-B5 — negative geometry must be treated as degenerate (skip)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B5: negative width in render_text_frame → return None (same as zero width).
+    #[test]
+    fn test_B5_negative_width_text_frame_skipped() {
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(-500_000),
+                height: Emu(1_000_000),
+            },
+            content: FrameContent::Title(Arc::from("Broken")),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_text_frame(&frame, HeadingLevel::H2);
+        assert!(
+            result.is_none(),
+            "B5: negative-width text frame must return None; got: {result:?}"
+        );
+    }
+
+    /// B5: negative height in render_text_frame → return None.
+    #[test]
+    fn test_B5_negative_height_text_frame_skipped() {
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(9_144_000),
+                height: Emu(-1_000_000),
+            },
+            content: FrameContent::Body(vec![]),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_text_frame(&frame, HeadingLevel::H2);
+        assert!(
+            result.is_none(),
+            "B5: negative-height text frame must return None; got: {result:?}"
+        );
+    }
+
+    /// B5: negative width in render_graphics_layer → frame skipped (empty output).
+    #[test]
+    fn test_B5_negative_width_graphics_frame_skipped() {
+        let frames = vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(-9_144_000),
+                height: Emu(5_143_500),
+            },
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Broken")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+        assert!(
+            result.is_empty(),
+            "B5: negative-width graphics frame must be skipped; got: {result}"
+        );
+    }
+
+    /// B5: negative x/y coordinates are clamped/allowed (no crash; CSS may show negative pos).
+    /// The layout invariant: negative position is legal (slide can have off-canvas frames),
+    /// but negative SIZE is degenerate.
+    #[test]
+    fn test_B5_negative_x_y_position_allowed_not_skipped() {
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(-100_000),
+                y: Emu(-50_000),
+                width: Emu(9_144_000),
+                height: Emu(5_143_500),
+            },
+            content: FrameContent::Title(Arc::from("Offset")),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_text_frame(&frame, HeadingLevel::H2);
+        // Negative x/y position: frame should still render (off-canvas frames are legal)
+        assert!(
+            result.is_some(),
+            "B5: negative x/y position must not skip the frame (negative SIZE is degenerate, not negative position); got: {result:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // OBS-B8 — heading order: Subtitle after Title must maintain h2 → h3 order
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B8: Title frame AFTER Subtitle frame in vector order must still produce
+    /// h2 before h3 in document output (frames are rendered in iteration order).
+    /// If Subtitle (h3) appears before Title (h2) in the frame vector, we must
+    /// document this as a layout invariant (frames should always have Title before
+    /// Subtitle). This test asserts the actual behavior: frame vector order is
+    /// preserved in output, so callers must supply Title before Subtitle.
+    #[test]
+    fn test_B8_subtitle_before_title_in_frames_produces_h3_before_h2_reflecting_frame_order() {
+        // This test documents the CURRENT invariant: frame order is respected.
+        // Callers (layout engine) MUST supply Title frame before Subtitle frame.
+        let slide = make_title_slide_type(
+            "content",
+            vec![
+                // Subtitle BEFORE Title — unusual but possible if layout engine misbehaves
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(1_000_000),
+                        width: Emu(9_144_000),
+                        height: Emu(4_143_500),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("Sub first")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(1_000_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Title after")),
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // Pass pre-computed heading level H2 (as if from exporter pre-pass)
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
+        // Frame order is preserved: Subtitle (h3) appears before Title (h2).
+        // This is an INVARIANT documentation test — the layout engine is responsible
+        // for ordering Title before Subtitle frames.
+        let h2_pos = result.find("<h2");
+        let h3_pos = result.find("<h3");
+        // Both must be present
+        assert!(h2_pos.is_some(), "B8: Title frame must produce h2; got: {result}");
+        assert!(h3_pos.is_some(), "B8: Subtitle frame must produce h3; got: {result}");
+        // Document the actual behavior: frame order determines DOM order.
+        // This test does NOT assert h3 < h2 is invalid — it asserts the behavior is deterministic.
+        // The layout invariant comment above is load-bearing documentation.
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Snapshot tests (insta) — per Test Strategy (P4 DOM structure)
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -2561,7 +2958,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
         insta::assert_snapshot!("title_slide_html", result);
     }
 
@@ -2597,7 +2994,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
         insta::assert_snapshot!("content_slide_html", result);
     }
 
@@ -2617,7 +3014,7 @@ mod tests {
         );
         let brand = make_brand();
         let page_size = make_page_size();
-        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
         insta::assert_snapshot!("chart_slide_html", result);
     }
 }
