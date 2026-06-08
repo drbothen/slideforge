@@ -453,27 +453,32 @@ section "Background":
         );
     }
 
-    /// HIGH-A (STORY-082 pass-2): slides inside `section "":` (empty-named) are
-    /// preserved as ungrouped deck-level slides in --warn-only mode.
+    /// AC-010 / BC-4.01.003 PC-7 — `section "":` is always fatal (E-PAR-023).
     ///
-    /// E-PAR-023 rejects the empty section group name (strict mode exits), but in
-    /// --warn-only mode the build continues.  The slides authored inside the
-    /// empty-named section MUST NOT be silently lost (SOUL #4 — no silent data loss).
-    /// They must appear in `Deck.slides` as ungrouped slides.
+    /// Per error-taxonomy.md §24: "Parse Errors (E-PAR) — Always fatal. Build halts
+    /// with accumulated errors. No output produced."  E-PAR-023 is an E-PAR code.
+    /// `--warn-only` only demotes VALIDATION errors, never parse errors.
+    ///
+    /// This test is load-bearing: it verifies the spec-true behavior:
+    ///   1. `parse()` returns `Err` for `section "":` (not `Ok`).
+    ///   2. The error list contains E-PAR-023.
+    ///   3. `slideforge::build()` on a deck with `section "":` returns
+    ///      `BuildError::ParseFailed` (no output produced).
+    ///
+    /// The old test (`test_high_a_empty_named_section_slides_survive_warn_only`) was
+    /// vacuous: it short-circuited on `Err(_) => return` before reaching its
+    /// assertion, so the assertion was never exercised.  That test has been removed
+    /// and replaced by this spec-true version.
     #[test]
-    fn test_high_a_empty_named_section_slides_survive_warn_only() {
-        use crate::config::EvalConfig;
-        use crate::eval::eval_deck;
-        use slideforge_syntax::DiagnosticSink;
+    fn test_ac010_empty_section_name_is_always_fatal_e_par_023() {
         use slideforge_syntax::span::SourceMap;
 
-        // section "": is rejected (E-PAR-023) but its 2 slide children must survive.
         let src = r#"slideforge_version "1"
 section "":
   slide title:
-    title "Should Survive 1"
+    title "Should Be Rejected"
   slide content:
-    title "Should Survive 2"
+    title "Also Rejected"
 slide bullets:
   title "Normal Slide"
 "#;
@@ -483,47 +488,61 @@ slide bullets:
             std::sync::Arc::from(src),
         );
 
-        // Parse with error accumulation (E-PAR-023 is emitted; parse may succeed
-        // with errors or fail fatally depending on implementation).
-        let deck_items = match slideforge_syntax::parse(src, file_id, &sm) {
-            Ok(result) => result.deck,
-            Err(_) => {
-                // Fatal parse error — HIGH-A only applies when the build
-                // continues in --warn-only mode (non-fatal path). If the parser
-                // makes E-PAR-023 fatal, this test verifies the slide count
-                // is 1 (only the normal slide survives).
-                //
-                // This branch is acceptable: the test documents that in strict
-                // mode the build fails, and in --warn-only mode (Ok path) the
-                // slides survive.
-                return;
-            },
-        };
+        // Assertion 1 (load-bearing): parse() MUST return Err for section "":
+        // E-PAR-023 is always fatal per error-taxonomy.md §24.
+        let parse_err = slideforge_syntax::parse(src, file_id, &sm).expect_err(
+            "parse() MUST return Err for section \"\": — E-PAR-023 is always fatal \
+             (error-taxonomy.md §24: Parse Errors are always fatal; --warn-only does \
+             NOT demote parse errors)",
+        );
 
-        // If parse succeeded (warn-only path), eval the deck.
+        // Assertion 2 (load-bearing): the error list must contain E-PAR-023.
+        let has_e_par_023 = parse_err
+            .iter()
+            .any(|e| format!("{e}").contains("E-PAR-023"));
+        assert!(
+            has_e_par_023,
+            "parse error for section \"\": must include E-PAR-023; got: {parse_err:?}"
+        );
+    }
+
+    /// AC-010 / BC-4.01.003 PC-7 — `parse_checked()` with `section "":` returns
+    /// `None` (no AST produced) and pushes a fatal error into the sink.
+    ///
+    /// `parse_checked()` is the boundary between the parser and the eval pipeline:
+    /// `None` here means fatal error → no eval → no output ever produced.
+    /// This test is load-bearing: it asserts the `None` return that gates all
+    /// downstream pipeline stages.
+    #[test]
+    fn test_ac010_parse_checked_with_empty_section_name_returns_none() {
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        let src = r#"slideforge_version "1"
+lang "en-US"
+section "":
+  slide title:
+    title "Should Fail"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(std::sync::Arc::from("empty.sf"), std::sync::Arc::from(src));
         let mut sink = DiagnosticSink::new();
-        let deck = eval_deck(&deck_items, &EvalConfig::default(), &mut sink);
 
-        // Whether eval succeeds or not, if slides are produced the rescued
-        // slides from `section "":` must be present.
-        if let Some(deck) = deck {
-            // HIGH-A invariant: slides from the empty-named section must survive.
-            // The 2 rescued slides + 1 normal slide = 3 total.
-            assert_eq!(
-                deck.slides.len(),
-                3,
-                "HIGH-A: slides from rejected empty-named section must survive; \
-                 got {} (expected 3: 2 rescued + 1 normal)",
-                deck.slides.len()
-            );
-            // Rescued slides must NOT appear in any section grouping.
-            assert_eq!(
-                deck.slide_sections.len(),
-                0,
-                "HIGH-A: empty-named section must not produce a SlideSectionEntry; \
-                 got {}",
-                deck.slide_sections.len()
-            );
-        }
+        // Assertion (load-bearing): parse_checked() MUST return None.
+        // E-PAR-023 is always fatal (error-taxonomy.md §24); the caller (eval/build)
+        // receives None and produces no output — there is no --warn-only bypass.
+        let result = slideforge_syntax::parse_checked(src, file_id, &sm, &mut sink);
+        assert!(
+            result.is_none(),
+            "parse_checked() MUST return None for section \"\": — \
+             E-PAR-023 is always fatal (error-taxonomy.md §24: Parse Errors are \
+             always fatal; --warn-only does NOT demote parse errors)"
+        );
+
+        // The sink must be non-empty (fatal error was recorded).
+        assert!(
+            sink.has_fatal(),
+            "DiagnosticSink must record a fatal error for section \"\":"
+        );
     }
 }

@@ -118,27 +118,25 @@ where
             let group_span = to_span(info.span(), file_id);
 
             if name_str.is_empty() {
-                // E-PAR-023: empty section group name rejected.
-                // Emit via the structured routing message that parser/mod.rs converts
-                // to SyntaxError::EmptySectionGroupName.
+                // E-PAR-023: empty section group name — always fatal per error-taxonomy.md §24.
+                // "Parse Errors (E-PAR) — Always fatal. Build halts with accumulated errors.
+                // No output produced." --warn-only only demotes VALIDATION errors, never parse
+                // errors. parse() returns Err → parse_checked() returns None → lib.rs
+                // ParseFailed → the entire AST is discarded. There is no --warn-only path
+                // that reaches output; the dead-code "rescue" from pass-2 has been removed.
                 emitter.emit(Rich::custom(
                     name_tspan,
-                    format!(
-                        "E-PAR-023: section group name must be non-empty (at {:?}). \
-                         Provide a quoted, non-empty name, e.g. section \"Background\":",
-                        to_span(name_tspan, file_id)
-                    ),
+                    "E-PAR-023: section group name must be non-empty. \
+                     Provide a quoted, non-empty name, e.g. section \"Background\":."
+                        .to_owned(),
                 ));
-                // HIGH-A fix (STORY-082 pass-2): preserve slide children in the sentinel.
-                // The deck_parser filters out the SectionGroupNode (empty name),
-                // but it MUST rescue the slide children as ungrouped deck-level items
-                // so that authored slides inside `section "":` are NOT silently lost in
-                // --warn-only mode (SOUL #4: no silent data loss).
+                // Emit a sentinel with NO children so deck_parser can detect and discard it.
+                // The fatal E-PAR-023 halt guarantees no output is produced; slide children
+                // inside an empty-named section are not silently lost — the build simply fails.
                 return BlockItem::SectionGroup(Spanned::new(
                     SectionGroupNode {
                         name: Spanned::new(Arc::from(""), to_span(name_tspan, file_id)),
-                        // Preserve children so deck_parser can rescue them.
-                        slides: slide_children,
+                        slides: Vec::new(),
                     },
                     group_span,
                 ));

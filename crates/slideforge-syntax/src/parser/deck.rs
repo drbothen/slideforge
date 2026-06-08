@@ -613,25 +613,18 @@ where
                         deck.items.push(bi);
                     },
                     DeckItem::SectionGroup(bi) => {
-                        // STORY-082 AC-010: discard empty-name SectionGroupNode.
-                        // The parser emitted E-PAR-023 for empty names; we must
-                        // not produce any AST node for the rejected block.
+                        // STORY-082 AC-010: discard empty-name SectionGroupNode (sentinel).
+                        // E-PAR-023 is always fatal (error-taxonomy.md §24 — "Parse Errors
+                        // (E-PAR) — Always fatal. Build halts with accumulated errors. No
+                        // output produced."). parse() returns Err when E-PAR-023 is emitted,
+                        // so the AST is never used after an empty-named section is encountered.
+                        // The sentinel (slides: vec![]) is simply dropped here; no rescue is
+                        // needed because no output path survives a fatal parse error.
                         if let crate::ast::BlockItem::SectionGroup(ref spanned) = bi {
                             let group_node = spanned.value();
                             let name = group_node.name.value();
                             if name.is_empty() {
-                                // Empty name was already reported by section_group_parser.
-                                // HIGH-A fix (STORY-082 pass-2): rescue slide children as
-                                // ungrouped deck-level items.  The SECTION GROUPING is
-                                // discarded (E-PAR-023 already emitted) but the SLIDES must
-                                // NOT be silently lost (SOUL #4 — no silent data loss).
-                                // In --warn-only mode the build continues and these slides
-                                // must appear in Deck.slides.
-                                for child in group_node.slides.iter().cloned() {
-                                    let expanded = expand_block_item(child, &alias_reg);
-                                    deck.items.push(expanded);
-                                }
-                                // Do NOT push the SectionGroup sentinel itself.
+                                // Discard the sentinel. E-PAR-023 already halts the build.
                                 continue;
                             }
                             // STORY-082 AC-011: duplicate name detection (W-PAR-002).

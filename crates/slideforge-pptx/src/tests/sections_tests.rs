@@ -402,6 +402,110 @@ fn test_BC_1_14_003_ac008_no_register_content_in_ext_lst() {
     );
 }
 
+// ─── AC-008 pipeline test (OBS-1 strengthening) ──────────────────────────────
+
+/// AC-008 pipeline — Full eval→export pipeline with `detail:`/`report:` content
+/// on a sectioned slide must produce NO register content in `<p:extLst>` /
+/// `<p14:sectionLst>`.
+///
+/// The existing AC-008 test verifies this at the `SectionListBuilder::inject`
+/// level (hand-built sections arg). This test exercises the FULL pipeline to
+/// confirm no register content leaks from the eval stage through to the PPTX
+/// XML section list.
+///
+/// Traces to BC-1.14.003 postconditions 3 + 5 (OBS-1 strengthening).
+#[test]
+fn test_BC_1_14_003_ac008_no_register_bleed_full_pipeline() {
+    use slideforge_eval::{EvalConfig, eval_deck};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_syntax::DiagnosticSink;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+    // Use distinctive sentinel strings that must NEVER appear in p:extLst.
+    let detail_sentinel = "DETAIL_SENTINEL_AC008_PIPELINE_MUST_NOT_BLEED";
+    let report_sentinel = "REPORT_SENTINEL_AC008_PIPELINE_MUST_NOT_BLEED";
+
+    // Build a deck where the sectioned slide has detail: and report: content.
+    // These are register-routed fields and must NOT appear in p:extLst / p14:sectionLst.
+    let src = format!(
+        "slideforge_version \"1\"\nlang \"en-US\"\nsection \"Background\":\n  \
+         slide title:\n    title \"Background Slide\"\n    detail \"{detail_sentinel}\"\n    \
+         report \"{report_sentinel}\"\n"
+    );
+
+    let mut sm = SourceMap::default();
+    let file_id = sm.add_file(
+        std::sync::Arc::from("ac008.sf"),
+        std::sync::Arc::from(src.as_str()),
+    );
+    let parse_result = slideforge_syntax::parse(&src, file_id, &sm).expect("parse must succeed");
+
+    let mut sink = DiagnosticSink::new();
+    let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+        .expect("eval must succeed");
+    assert!(!sink.has_fatal(), "eval must produce no fatal errors");
+
+    let brand = Brand {
+        name: std::sync::Arc::from("test"),
+        palette: BrandPalette {
+            primary: std::sync::Arc::from("#003087"),
+            secondary: std::sync::Arc::from("#0066CC"),
+            accent: std::sync::Arc::from("#FF6B35"),
+            neutral: std::sync::Arc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: std::sync::Arc::from("Calibri"),
+            body: std::sync::Arc::from("Calibri"),
+            mono: std::sync::Arc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: SourceSpan::default(),
+    };
+    let laid_out = layout_run(&deck, &brand).expect("layout must succeed");
+
+    let exporter = crate::PptxExporter::new();
+    let pptx_bytes = exporter
+        .export(&deck, &laid_out, &brand, &ExportOptions::default())
+        .expect("PPTX export must succeed");
+
+    // Extract ppt/presentation.xml from the produced ZIP.
+    let cursor = std::io::Cursor::new(pptx_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("must be valid ZIP");
+    let mut prs_xml_bytes = Vec::new();
+    {
+        let mut prs_file = zip
+            .by_name("ppt/presentation.xml")
+            .expect("ppt/presentation.xml must be present");
+        std::io::Read::read_to_end(&mut prs_file, &mut prs_xml_bytes)
+            .expect("must read presentation.xml");
+    }
+    let prs_xml = String::from_utf8(prs_xml_bytes).expect("presentation.xml must be valid UTF-8");
+
+    // Isolate the p:extLst block (which contains p14:sectionLst).
+    let ext_start = prs_xml
+        .find("<p:extLst>")
+        .expect("p:extLst must be present — section produces extLst");
+    let ext_end = prs_xml
+        .find("</p:extLst>")
+        .map(|i| i + "</p:extLst>".len())
+        .expect("</p:extLst> must be present");
+    let ext_xml = &prs_xml[ext_start..ext_end];
+
+    // Neither detail nor report sentinel must appear in the section XML.
+    assert!(
+        !ext_xml.contains(detail_sentinel),
+        "p:extLst / p14:sectionLst MUST NOT contain detail content in full-pipeline test; \
+         BC-1.14.003 PC3 (OBS-1)"
+    );
+    assert!(
+        !ext_xml.contains(report_sentinel),
+        "p:extLst / p14:sectionLst MUST NOT contain report content in full-pipeline test; \
+         BC-1.14.003 PC5 (OBS-1)"
+    );
+}
+
 // ─── AC-009 tests ─────────────────────────────────────────────────────────────
 
 /// AC-009 — Identical inputs produce byte-identical output.
@@ -1136,16 +1240,83 @@ slide title:
         section_sld_ids
     );
 
-    // Also verify the sectionLst IDs are consistent with the sldIdLst.
-    // The p:sldIdLst must contain all 6 slide IDs 256..=261.
-    assert!(
-        prs_xml.contains(r#"id="258""#),
-        "CRIT-A: presentation.xml sldIdLst must contain id=258"
+    // OBS-2 strengthening: parse the FULL p:sldIdLst and assert disjoint+complete.
+    //
+    // BC VP: the sldIdLst must be complete (all 6 slide IDs 256..=261 present),
+    // and every p14:sldId in the sectionLst must be a strict subset of sldIdLst.
+    let mut sld_id_lst: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    {
+        let mut reader2 = quick_xml::Reader::from_str(&prs_xml);
+        reader2.config_mut().trim_text(true);
+        let mut in_sld_id_lst = false;
+        loop {
+            match reader2.read_event() {
+                Ok(
+                    quick_xml::events::Event::Start(ref e) | quick_xml::events::Event::Empty(ref e),
+                ) => {
+                    let prefix_bytes = e
+                        .name()
+                        .prefix()
+                        .map(|p| p.as_ref().to_vec())
+                        .unwrap_or_default();
+                    let prefix = std::str::from_utf8(&prefix_bytes).unwrap_or("");
+                    let local_bytes = e.name().local_name().as_ref().to_vec();
+                    let local = std::str::from_utf8(&local_bytes).unwrap_or("");
+                    match (prefix, local) {
+                        ("p", "sldIdLst") => in_sld_id_lst = true,
+                        ("p", "sldId") if in_sld_id_lst => {
+                            for attr in e.attributes().flatten() {
+                                if attr.key.as_ref() == b"id" {
+                                    let val = std::str::from_utf8(&attr.value).unwrap_or("");
+                                    if let Ok(id) = val.parse::<u32>() {
+                                        sld_id_lst.insert(id);
+                                    }
+                                }
+                            }
+                        },
+                        _ => {},
+                    }
+                },
+                Ok(quick_xml::events::Event::End(ref e)) => {
+                    let local_bytes = e.name().local_name().as_ref().to_vec();
+                    if std::str::from_utf8(&local_bytes).unwrap_or("") == "sldIdLst" {
+                        in_sld_id_lst = false;
+                    }
+                },
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(e) => panic!("XML parse error in sldIdLst pass: {e}"),
+                _ => {},
+            }
+        }
+    }
+
+    // Assert completeness: p:sldIdLst must contain all 6 IDs 256..=261.
+    let expected_all_ids: std::collections::HashSet<u32> = (256u32..=261).collect();
+    assert_eq!(
+        sld_id_lst, expected_all_ids,
+        "OBS-2/CRIT-A: p:sldIdLst must contain all 6 slide IDs 256..=261 (complete); \
+         got {:?}",
+        sld_id_lst
     );
+
+    // Assert subset: every p14:sldId in sectionLst must be in p:sldIdLst.
+    let section_ids_set: std::collections::HashSet<u32> = section_sld_ids.iter().copied().collect();
     assert!(
-        !prs_xml.contains(r#"<p14:sldId id="256""#),
-        "CRIT-A: Background section must NOT reference id=256 (that is a @for slide)"
+        section_ids_set.is_subset(&sld_id_lst),
+        "OBS-2/CRIT-A: p14:sectionLst slide IDs must be a strict subset of p:sldIdLst \
+         (disjoint+complete BC VP); section IDs {:?} not all in sldIdLst {:?}",
+        section_ids_set,
+        sld_id_lst
     );
+
+    // Assert @for slides (256, 257) do NOT appear in the sectionLst (disjoint).
+    for for_id in [256u32, 257u32] {
+        assert!(
+            !section_ids_set.contains(&for_id),
+            "OBS-2/CRIT-A: @for slide ID {for_id} must NOT appear in p14:sectionLst; \
+             Background section must only reference IDs [258, 259, 260]"
+        );
+    }
 }
 
 /// `format_guid` produces correct 8-4-4-4-12 brace-wrapped uppercase GUID.
