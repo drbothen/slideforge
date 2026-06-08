@@ -1,0 +1,8 @@
+---
+source: crates/slideforge-html/src/render.rs
+expression: result
+---
+<article id="slide-1" aria-label="Slide 1">
+<h1>Content Slide</h1>
+<h2>A subtitle here</h2>
+</article>

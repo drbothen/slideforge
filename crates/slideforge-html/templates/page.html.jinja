@@ -13,7 +13,7 @@
   </header>
   <main>
     {% for slide_html in slides %}
-    {{ slide_html }}
+    {{ slide_html | safe }}
     {% endfor %}
   </main>
 </body>

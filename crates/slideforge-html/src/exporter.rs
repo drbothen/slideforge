@@ -15,6 +15,8 @@ use slideforge_layout::LaidOutDeck;
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
+use crate::render::render_slide_to_html;
+
 /// Allowlist of URL schemes permitted in rendered `<a href="...">` attributes.
 ///
 /// All other schemes (e.g., `javascript:`, `data:`, `vbscript:`, `blob:`)
@@ -26,6 +28,15 @@ pub const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https", "mailto", "tel"];
 ///
 /// URLs with no scheme (relative references) are permitted by default.
 /// URLs with disallowed schemes are rejected.
+///
+/// The HTML exporter differs from `slideforge-pptx`'s `is_safe_link_scheme` in
+/// one important respect: **relative URLs (no `:`) are ALLOWED** here, because
+/// HTML documents commonly use relative paths like `/slides/2` or `#section`.
+/// The PPTX exporter rejects no-scheme URLs because OOXML external relationships
+/// require an absolute URI; HTML does not have that constraint.
+///
+/// Comparison is case-insensitive so `HTTPS://example.com` and `https://example.com`
+/// both pass.
 ///
 /// # Examples
 ///
@@ -41,7 +52,23 @@ pub const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https", "mailto", "tel"];
 /// ```
 #[must_use]
 pub fn is_safe_link_scheme(url: &str) -> bool {
-    todo!("AC-010: validate URL scheme against ALLOWED_URL_SCHEMES allowlist; return true for relative URLs (no scheme), false + tracing::warn! for disallowed schemes")
+    let Some(colon_pos) = url.find(':') else {
+        // No scheme separator — this is a relative URL; allow it.
+        return true;
+    };
+    let scheme = url[..colon_pos].to_ascii_lowercase();
+    // Check whether the scheme is in the allowlist.
+    if ALLOWED_URL_SCHEMES.contains(&scheme.as_str()) {
+        true
+    } else {
+        // Emit tracing::warn! with the rejected scheme.
+        tracing::warn!(
+            rejected_scheme = %scheme,
+            url = %url,
+            "AC-010: link URL with disallowed scheme rejected (CWE-601)"
+        );
+        false
+    }
 }
 
 /// Static HTML exporter — implements the [`Exporter`] plugin trait.
@@ -69,7 +96,6 @@ impl Exporter for HtmlExporter {
         "html"
     }
 
-
     /// Returns the default file extension for HTML output: `"html"`.
     fn extension(&self) -> &str {
         "html"
@@ -81,7 +107,8 @@ impl Exporter for HtmlExporter {
     ///
     /// The output is a well-formed UTF-8 HTML5 document beginning with
     /// `<!DOCTYPE html>`. Each slide is rendered as an `<article>` landmark
-    /// containing an `<svg>` canvas element. No `<canvas>` elements are emitted.
+    /// containing frame elements for the slide content. No `<canvas>` elements
+    /// are emitted.
     ///
     /// # Accessibility invariants (BC-4.03.003)
     ///
@@ -100,13 +127,90 @@ impl Exporter for HtmlExporter {
     /// Returns [`ExportError`] when the HTML document cannot be produced.
     fn export(
         &self,
-        _deck: &Deck,
-        _laid_out: &LaidOutDeck,
-        _brand: &Brand,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
         _opts: &ExportOptions,
     ) -> Result<Vec<u8>, ExportError> {
-        todo!("AC-001: implement HtmlExporter::export — render deck to HTML5 via minijinja templates; return UTF-8 bytes")
+        // Derive the lang attribute from deck.lang (AC-002 / BC-4.03.003 invariant 3).
+        // NEVER hardcode lang — must come from deck metadata.
+        let lang = deck
+            .metadata
+            .lang
+            .as_ref()
+            .map_or("en-US", |l| l.as_ref());
+
+        // Derive the document title from deck.metadata.title.
+        let title = deck
+            .metadata
+            .title
+            .as_ref()
+            .map_or("Presentation", |t| t.as_ref());
+
+        // Render all slides.
+        let mut slides_html = String::new();
+        for slide in &laid_out.slides {
+            slides_html.push_str(&render_slide_to_html(slide, brand));
+            slides_html.push('\n');
+        }
+
+        // Render via minijinja template.
+        let page_html = render_page_template(lang, title, &slides_html)?;
+
+        Ok(page_html.into_bytes())
     }
+}
+
+/// Render the full page HTML using the `page.html.jinja` template.
+///
+/// Uses `minijinja` for Jinja2-compatible HTML templating. The `.html` suffix
+/// on the template name enables HTML autoescape automatically (ADR-022).
+fn render_page_template(
+    lang: &str,
+    title: &str,
+    slides_html: &str,
+) -> Result<String, ExportError> {
+    use minijinja::{context, Environment};
+
+    let mut env = Environment::new();
+
+    // Load the page template. The template is embedded at compile time to
+    // avoid filesystem path issues in tests and cross-platform deployments.
+    let page_template = include_str!("../templates/page.html.jinja");
+
+    env.add_template("page.html", page_template)
+        .map_err(|e| ExportError::RenderError {
+            message: format!("failed to load page.html.jinja template: {e}"),
+        })?;
+
+    let tmpl = env
+        .get_template("page.html")
+        .map_err(|e| ExportError::RenderError {
+            message: format!("failed to get page.html template: {e}"),
+        })?;
+
+    // Build individual slide HTML values for the template loop.
+    // The slides_html is already rendered; we split it into individual slides
+    // for the template's `{% for slide_html in slides %}` loop.
+    // However, the current template expects an iterable of slide HTML strings.
+    // We pass the pre-rendered combined HTML as a single "slides" value.
+    //
+    // For simplicity and correctness, we render the page wrapper directly
+    // rather than trying to split the slides HTML.
+    // The template loop `{% for slide_html in slides %}` iterates over Vec<String>.
+    let slides_vec: Vec<&str> = vec![slides_html.trim_end()];
+
+    let output = tmpl
+        .render(context! {
+            lang => lang,
+            title => title,
+            slides => slides_vec,
+        })
+        .map_err(|e| ExportError::RenderError {
+            message: format!("template rendering failed: {e}"),
+        })?;
+
+    Ok(output)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
