@@ -99,8 +99,7 @@ fn make_brand_with_font_size_emu(font_size_emu: i64) -> Brand {
 /// Build a `ShapeSpec` at `x = ShapeUnit::Em(milliem)`, with all other positions
 /// in inches, and explicit alt text.
 fn em_x_shape_spec(x_milliem: i64) -> ShapeSpec {
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect is a valid shape type");
+    let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect is a valid shape type");
     ShapeSpec {
         shape_type: st,
         position: ShapePosition {
@@ -119,8 +118,7 @@ fn em_x_shape_spec(x_milliem: i64) -> ShapeSpec {
 
 /// Build a `ShapeSpec` at `width = ShapeUnit::Em(milliem)`, with x/y/height in inches.
 fn em_width_shape_spec(width_milliem: i64) -> ShapeSpec {
-    let st = slideforge_types::ShapeType::from_keyword("rect")
-        .expect("rect is a valid shape type");
+    let st = slideforge_types::ShapeType::from_keyword("rect").expect("rect is a valid shape type");
     ShapeSpec {
         shape_type: st,
         position: ShapePosition {
@@ -169,7 +167,11 @@ fn test_bc_3_04_001_ac001_layout_run_48pt_brand_em1_resolves_to_609600() {
     let deck = make_deck(vec![slide]);
 
     let laid_out = run(&deck, &brand_48pt).expect("layout::run must succeed");
-    assert_eq!(laid_out.slides.len(), 1, "one slide in → one laid-out slide");
+    assert_eq!(
+        laid_out.slides.len(),
+        1,
+        "one slide in → one laid-out slide"
+    );
 
     // The shape frame is appended after the region-map frames.
     // Find the Shape frame in the laid-out slide.
@@ -243,14 +245,16 @@ fn test_bc_3_04_001_ac001_different_brands_produce_different_em_resolution() {
         .iter()
         .find(|f| matches!(&f.content, FrameContent::Shape(_)))
         .expect("shape frame must be present for 24pt brand")
-        .bbox.x;
+        .bbox
+        .x;
 
     let x_48pt = laid_out_48pt.slides[0]
         .frames
         .iter()
         .find(|f| matches!(&f.content, FrameContent::Shape(_)))
         .expect("shape frame must be present for 48pt brand")
-        .bbox.x;
+        .bbox
+        .x;
 
     assert_ne!(
         x_24pt, x_48pt,
@@ -258,12 +262,14 @@ fn test_bc_3_04_001_ac001_different_brands_produce_different_em_resolution() {
          for the same Em unit; RED GATE: before fix both produce Emu(457_200)"
     );
     assert_eq!(
-        x_24pt, Emu(304_800),
+        x_24pt,
+        Emu(304_800),
         "24pt brand: x=Em(1000) must resolve to Emu(304_800); \
          RED GATE: fails with Emu(457_200)"
     );
     assert_eq!(
-        x_48pt, Emu(609_600),
+        x_48pt,
+        Emu(609_600),
         "48pt brand: x=Em(1000) must resolve to Emu(609_600); \
          RED GATE: fails with Emu(457_200)"
     );
@@ -305,8 +311,8 @@ fn test_bc_3_04_001_ac001_layout_shapes_direct_48pt_em1_resolves_to_609600() {
     };
 
     // Call layout_shapes directly with the 48pt em_in_emu
-    let output = layout_shapes(&[shape_spec], page, 0, 609_600, 0)
-        .expect("layout_shapes must succeed");
+    let output =
+        layout_shapes(&[shape_spec], page, 0, 609_600, 0).expect("layout_shapes must succeed");
 
     assert_eq!(
         output.frames[0].bbox.x,
@@ -378,8 +384,7 @@ fn test_bc_3_04_001_ac003_default_brand_em_resolution_unchanged() {
 fn test_bc_3_04_001_ac003_brand_fonts_default_has_correct_font_size_emu() {
     let fonts = BrandFonts::default();
     assert_eq!(
-        fonts.font_size_emu,
-        457_200,
+        fonts.font_size_emu, 457_200,
         "BrandFonts::default().font_size_emu must be 457_200 (AC-003 backward compat)"
     );
 }

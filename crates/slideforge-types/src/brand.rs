@@ -51,7 +51,7 @@ pub struct BrandFonts {
     /// `1em = font_size_emu` EMU. The formula for a `ShapeUnit::Em(milliem)` is:
     /// `emu = milliem * font_size_emu / 1_000` (integer division, no `f64`).
     ///
-    /// Default: `457_200` (36pt body font at 914_400 EMU/inch, matching the
+    /// Default: `457_200` (36pt body font at `914_400` EMU/inch, matching the
     /// historical `DEFAULT_EM_IN_EMU` constant in `slideforge-layout::shapes`).
     pub font_size_emu: i64,
 }
@@ -181,7 +181,7 @@ mod tests {
 
     /// AC-003 / STORY-074 — `BrandFonts::default()` sets `font_size_emu` to `457_200`.
     ///
-    /// `457_200` EMU = 0.5 inch at 914_400 EMU/inch, matching the historical
+    /// `457_200` EMU = 0.5 inch at `914_400` EMU/inch, matching the historical
     /// `DEFAULT_EM_IN_EMU` constant in `slideforge-layout::shapes`. This ensures
     /// backward compatibility: decks that never set a brand font size continue to
     /// resolve em units with the same value as before STORY-074.
@@ -194,8 +194,7 @@ mod tests {
     fn test_bc_3_04_001_ac003_brand_fonts_default_font_size_emu_is_457200() {
         let fonts = BrandFonts::default();
         assert_eq!(
-            fonts.font_size_emu,
-            457_200,
+            fonts.font_size_emu, 457_200,
             "BrandFonts::default().font_size_emu must be 457_200 (STORY-074 AC-003)"
         );
     }
@@ -207,6 +206,7 @@ mod tests {
     /// not exist, so this test fails to compile.
     #[test]
     fn test_bc_3_04_001_ac003_brand_fonts_font_size_emu_derives_traits() {
+        use std::collections::HashSet;
         let fonts = BrandFonts {
             heading: Arc::from("Calibri Light"),
             body: Arc::from("Calibri"),
@@ -215,15 +215,24 @@ mod tests {
         };
         // Clone
         let fonts2 = fonts.clone();
-        assert_eq!(fonts, fonts2, "BrandFonts must implement PartialEq for Clone equality");
+        assert_eq!(
+            fonts, fonts2,
+            "BrandFonts must implement PartialEq for Clone equality"
+        );
         // Hash
-        use std::collections::HashSet;
         let mut set: HashSet<BrandFonts> = HashSet::new();
         set.insert(fonts2);
-        assert_eq!(set.len(), 1, "BrandFonts must be hashable (comemo / DI-010)");
+        assert_eq!(
+            set.len(),
+            1,
+            "BrandFonts must be hashable (comemo / DI-010)"
+        );
         // Debug
         let s = format!("{fonts:?}");
-        assert!(s.contains("609600"), "Debug output must include font_size_emu value");
+        assert!(
+            s.contains("609600"),
+            "Debug output must include font_size_emu value"
+        );
     }
 
     /// AC-003 / STORY-074 — `BrandFonts` with `font_size_emu: 609_600` is NOT equal
@@ -264,8 +273,7 @@ mod tests {
     fn test_bc_3_04_001_ac003_make_brand_helper_has_default_font_size_emu() {
         let brand = make_brand();
         assert_eq!(
-            brand.fonts.font_size_emu,
-            457_200,
+            brand.fonts.font_size_emu, 457_200,
             "make_brand() helper must carry font_size_emu: 457_200 (backward compat)"
         );
     }
