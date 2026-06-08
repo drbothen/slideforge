@@ -16,6 +16,8 @@
 //!
 //! Story: STORY-046 (AC-007 / AC-009)
 
+#![allow(non_snake_case)]
+
 use std::sync::Arc;
 
 use slideforge_html::HtmlExporter;
@@ -95,7 +97,9 @@ fn make_three_slide_laid_out_deck() -> LaidOutDeck {
         frames: vec![Frame {
             bbox,
             content: FrameContent::Image {
-                alt: AltText::Provided(Arc::from("Bar chart: Q1 $1M, Q2 $1.3M, Q3 $1.2M, Q4 $1.8M")),
+                alt: AltText::Provided(Arc::from(
+                    "Bar chart: Q1 $1M, Q2 $1.3M, Q3 $1.2M, Q4 $1.8M",
+                )),
             },
             text_flow: None,
             region_role: None,

@@ -92,11 +92,13 @@ impl HtmlExporter {
 
 impl Exporter for HtmlExporter {
     /// Returns the unique plugin identifier: `"html"`.
+    #[allow(clippy::unnecessary_literal_bound)]
     fn id(&self) -> &str {
         "html"
     }
 
     /// Returns the default file extension for HTML output: `"html"`.
+    #[allow(clippy::unnecessary_literal_bound)]
     fn extension(&self) -> &str {
         "html"
     }
@@ -134,11 +136,7 @@ impl Exporter for HtmlExporter {
     ) -> Result<Vec<u8>, ExportError> {
         // Derive the lang attribute from deck.lang (AC-002 / BC-4.03.003 invariant 3).
         // NEVER hardcode lang — must come from deck metadata.
-        let lang = deck
-            .metadata
-            .lang
-            .as_ref()
-            .map_or("en-US", |l| l.as_ref());
+        let lang = deck.metadata.lang.as_ref().map_or("en-US", |l| l.as_ref());
 
         // Derive the document title from deck.metadata.title.
         let title = deck
@@ -165,12 +163,8 @@ impl Exporter for HtmlExporter {
 ///
 /// Uses `minijinja` for Jinja2-compatible HTML templating. The `.html` suffix
 /// on the template name enables HTML autoescape automatically (ADR-022).
-fn render_page_template(
-    lang: &str,
-    title: &str,
-    slides_html: &str,
-) -> Result<String, ExportError> {
-    use minijinja::{context, Environment};
+fn render_page_template(lang: &str, title: &str, slides_html: &str) -> Result<String, ExportError> {
+    use minijinja::{Environment, context};
 
     let mut env = Environment::new();
 
@@ -221,18 +215,21 @@ fn render_page_template(
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    non_snake_case
 )]
 mod tests {
     use std::sync::Arc;
 
-    use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize};
+    use slideforge_layout::{
+        BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+    };
     use slideforge_plugin_api::{ExportOptions, Exporter};
     use slideforge_types::{
         AltText, Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, SourceSpan,
     };
 
-    use super::{is_safe_link_scheme, HtmlExporter, ALLOWED_URL_SCHEMES};
+    use super::{ALLOWED_URL_SCHEMES, HtmlExporter, is_safe_link_scheme};
 
     // ─────────────────────────────────────────────────────────────────────────
     // Test fixtures
@@ -731,14 +728,26 @@ mod tests {
         );
     }
 
-    /// BC-4.03.003 / AC-010 — the ALLOWED_URL_SCHEMES constant contains exactly
+    /// BC-4.03.003 / AC-010 — the `ALLOWED_URL_SCHEMES` constant contains exactly
     /// the four approved schemes.
     #[test]
     fn test_BC_4_03_003_allowed_url_schemes_constant_content() {
-        assert!(ALLOWED_URL_SCHEMES.contains(&"http"), "http must be in allowlist");
-        assert!(ALLOWED_URL_SCHEMES.contains(&"https"), "https must be in allowlist");
-        assert!(ALLOWED_URL_SCHEMES.contains(&"mailto"), "mailto must be in allowlist");
-        assert!(ALLOWED_URL_SCHEMES.contains(&"tel"), "tel must be in allowlist");
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"http"),
+            "http must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"https"),
+            "https must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"mailto"),
+            "mailto must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"tel"),
+            "tel must be in allowlist"
+        );
         assert!(
             !ALLOWED_URL_SCHEMES.contains(&"javascript"),
             "javascript must NOT be in allowlist"
@@ -858,7 +867,8 @@ mod tests {
 
         // All <img> elements on this slide must have alt=""
         let sel_any_img = scraper::Selector::parse("img").expect("valid selector");
-        let sel_nonempty_alt = scraper::Selector::parse("img:not([alt=\"\"])").expect("valid selector");
+        let sel_nonempty_alt =
+            scraper::Selector::parse("img:not([alt=\"\"])").expect("valid selector");
         let total_imgs = doc.select(&sel_any_img).count();
         let non_empty_alt_imgs = doc.select(&sel_nonempty_alt).count();
         assert_eq!(

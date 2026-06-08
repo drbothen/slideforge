@@ -187,15 +187,13 @@ pub fn render_element_to_html(frame: &Frame) -> String {
             format!("<h2>{}</h2>", html_escape::encode_text(text))
         },
         FrameContent::Body(blocks) => {
+            use std::fmt::Write as _;
             let mut items = String::new();
             for block in blocks {
                 // Render each content block as a list item.
                 // ContentBlock is from slideforge-types; render text content.
                 let block_text = format!("{block:?}");
-                items.push_str(&format!(
-                    "<li>{}</li>\n",
-                    html_escape::encode_text(&block_text)
-                ));
+                let _ = writeln!(items, "<li>{}</li>", html_escape::encode_text(&block_text));
             }
             format!("<ul>\n{items}</ul>")
         },
@@ -205,7 +203,8 @@ pub fn render_element_to_html(frame: &Frame) -> String {
             // In a full implementation this would be the rendered chart SVG.
             // For now produce the minimal SVG needed for accessibility.
             let alt_text = alt_text_str(alt);
-            let placeholder_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
+            let placeholder_svg =
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
             render_svg_chart(placeholder_svg, alt_text)
         },
         FrameContent::Diagram { svg, alt } => {
@@ -215,7 +214,8 @@ pub fn render_element_to_html(frame: &Frame) -> String {
         FrameContent::Shape(shape_frame) => {
             let alt_text = alt_text_str(&shape_frame.alt);
             // Render shape as an SVG rect for accessibility.
-            let placeholder_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
+            let placeholder_svg =
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
             render_svg_chart(placeholder_svg, alt_text)
         },
         FrameContent::TextRun(nodes) => {
@@ -266,12 +266,12 @@ fn render_image(alt: &AltText) -> String {
             let safe_alt = html_escape::encode_double_quoted_attribute(text);
             format!(r#"<img alt="{safe_alt}">"#)
         },
-        AltText::Decorative => {
-            r#"<img alt="" role="presentation">"#.to_owned()
-        },
+        AltText::Decorative => r#"<img alt="" role="presentation">"#.to_owned(),
         AltText::Unspecified => {
             // Treat unspecified as decorative — validator should have caught this.
-            tracing::warn!("render_image: AltText::Unspecified encountered; rendering as decorative");
+            tracing::warn!(
+                "render_image: AltText::Unspecified encountered; rendering as decorative"
+            );
             r#"<img alt="" role="presentation">"#.to_owned()
         },
     }
@@ -346,8 +346,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     let mut new_elem = BytesStart::new("svg");
                     // Copy existing attributes, except role (we re-inject it).
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref())
-                            .unwrap_or("");
+                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                         if key != "role" {
                             new_elem.push_attribute(attr);
                         }
@@ -382,8 +381,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     // Inner <svg>: inject aria-hidden="true", remove existing aria-hidden.
                     let mut new_elem = BytesStart::new("svg");
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref())
-                            .unwrap_or("");
+                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                         if key != "aria-hidden" {
                             new_elem.push_attribute(attr);
                         }
@@ -414,8 +412,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     outer_svg_done = true;
                     let mut new_elem = BytesStart::new("svg");
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref())
-                            .unwrap_or("");
+                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                         if key != "role" {
                             new_elem.push_attribute(attr);
                         }
@@ -447,11 +444,9 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                         tracing::warn!(error = %e, "render_svg_chart: write error");
                         return svg_str.to_owned();
                     }
-                } else {
-                    if let Err(e) = writer.write_event(Event::Empty(elem)) {
-                        tracing::warn!(error = %e, "render_svg_chart: write error on empty elem");
-                        return svg_str.to_owned();
-                    }
+                } else if let Err(e) = writer.write_event(Event::Empty(elem)) {
+                    tracing::warn!(error = %e, "render_svg_chart: write error on empty elem");
+                    return svg_str.to_owned();
                 }
             },
             Ok(Event::End(elem)) => {
@@ -498,7 +493,8 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
 #[allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    non_snake_case
 )]
 mod tests {
     use std::sync::Arc;
@@ -607,7 +603,7 @@ mod tests {
         let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg width="50" height="50"><rect/></svg></svg>"#;
         let result = render_svg_chart(svg_in, "Complex chart");
 
-        let doc = scraper::Html::parse_document(&result);
+        let _doc = scraper::Html::parse_document(&result);
         // The outer svg gets role=img; the inner svg gets aria-hidden=true.
         // Parse the SVG as HTML (scraper understands both).
         assert!(
