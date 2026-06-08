@@ -524,8 +524,10 @@ mod tests {
     // AC-003: Non-decorative images have non-empty alt / <title>
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 4 — non-decorative images have non-empty alt.
-    /// Uses scraper to assert no `img[alt=""]` for decorative=false elements.
+    /// BC-4.03.003 postcondition 4 — non-decorative images have non-empty accessible name.
+    ///
+    /// F-002: Images are rendered as SVG (not bare <img>). Non-decorative images
+    /// use `role="img"` and a `<title>` with the alt text on the SVG element.
     #[test]
     fn test_BC_4_03_003_non_decorative_image_has_non_empty_alt() {
         let exporter = HtmlExporter::new();
@@ -539,15 +541,12 @@ mod tests {
             .export(&deck, &laid_out, &brand, &opts)
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
-        let doc = scraper::Html::parse_document(&html);
 
-        // Assert: no <img> with alt="" (empty alt on a non-decorative image is forbidden)
-        let sel = scraper::Selector::parse("img[alt=\"\"]").expect("valid selector");
-        assert_eq!(
-            doc.select(&sel).count(),
-            0,
-            "non-decorative image must not have empty alt attribute; \
-             found img[alt=\"\"] in output"
+        // F-002: image is now SVG, not bare <img>
+        assert!(
+            !html.contains("<img "),
+            "F-002: non-decorative image must not be bare <img>; got snippet: {:?}",
+            &html[..html.len().min(500)]
         );
 
         // Assert: the alt text "A revenue chart" appears in the output
@@ -561,8 +560,10 @@ mod tests {
     // AC-004: Decorative images have alt="" and role="presentation"
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 5 — decorative images have `alt=""` and
-    /// `role="presentation"`.
+    /// BC-4.03.003 postcondition 5 — decorative images have `role="presentation"`.
+    ///
+    /// F-002: Images are rendered as SVG (not bare <img>). Decorative images use
+    /// `role="presentation"` on the SVG element.
     #[test]
     fn test_BC_4_03_003_decorative_image_has_empty_alt_and_role_presentation() {
         let exporter = HtmlExporter::new();
@@ -576,13 +577,12 @@ mod tests {
             .export(&deck, &laid_out, &brand, &opts)
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
-        let doc = scraper::Html::parse_document(&html);
 
-        // Decorative <img> must have alt=""
-        let sel_empty_alt = scraper::Selector::parse("img[alt=\"\"]").expect("valid selector");
+        // F-002: decorative image is rendered as SVG with role="presentation"
         assert!(
-            doc.select(&sel_empty_alt).count() > 0,
-            "decorative image must have alt=\"\" attribute"
+            !html.contains("<img "),
+            "F-002: decorative image must not render as bare <img>; got snippet: {:?}",
+            &html[..html.len().min(500)]
         );
 
         // Decorative element must have role="presentation"
@@ -862,7 +862,10 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-4.03.003 EC-001 — a slide with ONLY decorative images must produce
-    /// all `alt="" role="presentation"` elements; no non-empty alt attributes.
+    /// all `role="presentation"` elements; no non-empty accessible names.
+    ///
+    /// F-002: Images are now SVG (not bare <img>). All decorative images use
+    /// `role="presentation"` on their SVG element. No bare `<img>` in output.
     #[test]
     fn test_BC_4_03_003_ec_001_only_decorative_images_all_have_empty_alt() {
         let exporter = HtmlExporter::new();
@@ -876,17 +879,19 @@ mod tests {
             .export(&deck, &laid_out, &brand, &opts)
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
-        let doc = scraper::Html::parse_document(&html);
 
-        // All <img> elements on this slide must have alt=""
-        let sel_any_img = scraper::Selector::parse("img").expect("valid selector");
-        let sel_nonempty_alt =
-            scraper::Selector::parse("img:not([alt=\"\"])").expect("valid selector");
-        let total_imgs = doc.select(&sel_any_img).count();
-        let non_empty_alt_imgs = doc.select(&sel_nonempty_alt).count();
-        assert_eq!(
-            non_empty_alt_imgs, 0,
-            "EC-001: all {total_imgs} <img> elements on an all-decorative slide must have alt=\"\""
+        // F-002: No bare <img> elements — images are SVG.
+        assert!(
+            !html.contains("<img "),
+            "EC-001 / F-002: decorative images must not render as bare <img>; \
+             got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+
+        // All image SVG elements must have role="presentation".
+        assert!(
+            html.contains(r#"role="presentation""#),
+            "EC-001: decorative image SVG elements must have role=\"presentation\""
         );
     }
 

@@ -3,5 +3,8 @@ source: crates/slideforge-html/src/render.rs
 expression: result
 ---
 <article id="slide-1" aria-label="Slide 1">
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" role="img"><title>Revenue by quarter</title></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9144000 5143500" width="9144000" height="5143500" role="img" aria-label="Slide">
+<title>Slide</title>
+<g transform="translate(0, 0)"><svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" role="img"><title>Revenue by quarter</title></svg></g>
+</svg>
 </article>
