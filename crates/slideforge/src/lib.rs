@@ -167,6 +167,32 @@ mod diag_util {
 /// dependency on `slideforge-plugin-api`.
 pub use slideforge_plugin_api::PluginRegistry;
 
+// ── Re-export diagnostic types for CLI consumers ───────────────────────────────
+
+/// Re-export of [`slideforge_syntax::DiagnosticSink`].
+///
+/// The CLI uses this to pass the sink into [`slideforge_syntax::DiagnosticRenderer`].
+/// Re-exported here so `slideforge-cli` does not need a direct dependency on
+/// `slideforge-syntax` (which is below the CLI/root crate boundary per STORY-055
+/// architecture compliance rule 3).
+pub use slideforge_syntax::DiagnosticSink;
+
+/// Re-export of [`slideforge_syntax::DiagnosticRenderer`].
+///
+/// The CLI uses this to render accumulated diagnostics to stderr.
+pub use slideforge_syntax::DiagnosticRenderer;
+
+/// Re-export of [`slideforge_syntax::ParseSeverity`].
+///
+/// The CLI uses this for the three-tier exit code model (BC-1.15.003).
+pub use slideforge_syntax::ParseSeverity;
+
+/// Re-export of [`slideforge_syntax::span::SourceMap`].
+///
+/// Required when calling [`DiagnosticSink::to_json`] and
+/// [`DiagnosticRenderer::render_all`].
+pub use slideforge_syntax::span::SourceMap;
+
 /// Re-export of [`slideforge_plugin_api::PluginRegistryBuilder`].
 pub use slideforge_plugin_api::PluginRegistryBuilder;
 

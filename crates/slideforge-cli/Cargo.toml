@@ -14,10 +14,37 @@ readme = "../../README.md"
 name = "slideforge"
 path = "src/main.rs"
 
+[lib]
+name = "slideforge_cli"
+path = "src/lib.rs"
+
+[features]
+## Enable OpenTelemetry OTLP trace export via `--otel-endpoint`.
+##
+## When this feature is enabled, `tracing-opentelemetry`, `opentelemetry`,
+## `opentelemetry_sdk`, and `opentelemetry-otlp` are activated.
+## When disabled (the default), the binary has zero OTel transitive dependencies.
+##
+## Cite ADR-021: tokio async runtime is required by `opentelemetry_sdk`'s
+## `rt-tokio` feature.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+]
+
 [dependencies]
 slideforge = { workspace = true }
 clap = { workspace = true }
 miette = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+
+## OTel deps — only compiled when the `otel` feature is active.
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
