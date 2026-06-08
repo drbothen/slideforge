@@ -1,0 +1,6 @@
+AC-006: P4 DOM structure checks
+================================
+<canvas> elements (should be 0): 0
+<foreignObject> elements (should be 0): 0
+<article> containers (should be >0): 3
+Output: PASS

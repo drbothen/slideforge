@@ -1,0 +1,5 @@
+AC-001: Well-formed HTML5 check
+================================
+<!DOCTYPE html> present: true
+<article> container count: 3
+Output: PASS

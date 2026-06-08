@@ -1,0 +1,13 @@
+AC-008: Heading hierarchy (4-step chain)
+==========================================
+Total headings: 2
+<h1> count (must be exactly 1): 1
+<h2> count: 1
+Heading level skip detected: false
+
+Heading structure:
+  <h1 class="sf-title"> "Fixture Presentation"
+  <h2 class="sf-subtitle"> "Exploring accessible document generation"
+
+Step 1 fired (title slide type + Title frame → h1): true
+Output: PASS

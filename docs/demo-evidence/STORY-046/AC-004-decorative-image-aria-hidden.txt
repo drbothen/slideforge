@@ -1,0 +1,7 @@
+AC-004: Decorative image handling
+==================================
+Bare <img> elements (should be 0): 0
+<g aria-hidden="true"> elements (decorative in SVG layer): 0
+  (Note: fixture deck does NOT contain a decorative slide — this tests the API)
+No bare <img>: PASS
+Output: PASS

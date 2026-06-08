@@ -1,0 +1,16 @@
+AC-010: URL scheme allowlist (CWE-601)
+=======================================
+Error path: javascript:alert(1) link → href DROPPED
+All <a href> values in fixture: []
+javascript: hrefs remaining (must be 0): 0
+
+Unit test evidence (from cargo test output):
+  test_BC_4_03_003_is_safe_link_scheme_rejects_javascript ... ok
+  test_BC_4_03_003_javascript_href_dropped_in_export ... ok
+  test_BC_4_03_003_rejected_scheme_emits_tracing_warn ... ok
+  test_BC_4_03_003_is_safe_link_scheme_rejects_data_uri ... ok
+  test_BC_4_03_003_is_safe_link_scheme_rejects_vbscript ... ok
+  test_F008_protocol_relative_url_is_rejected ... ok
+  test_F006_rejected_link_emits_exactly_one_warn ... ok
+
+Output: PASS
