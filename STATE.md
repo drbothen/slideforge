@@ -57,7 +57,9 @@ workspace_test_failures: 0
 - **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story. Severity: SUGGESTION.
 - **SEC-001-DIAG-HARDENING (OPEN, non-blocking LOW):** unbounded user-authored strings embedded verbatim in diagnostic messages (E-VAL-104 T2 + W-VAL-103 pattern). Truncate to ~512 chars. ANCHORED to future validator/diagnostic-hardening story.
 
-**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (4) read NEXT ACTIONS below.
+**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (4) read `.factory/BACKLOG.md` and TaskCreate one task per OPEN item (5) read NEXT ACTIONS below (6) await human go-ahead before picking a story.
+
+**Durable task source:** `.factory/BACKLOG.md` — rebuild in-session tasks from OPEN items there on every session start. State-manager mirrors it alongside STATE.md at every milestone.
 
 **LESSON-18 (MANDATORY after every merge):** After `gh pr merge --squash`, run `git fetch && git merge --ff-only origin/develop` (or `git restore --source=HEAD --staged --worktree .`) to sync the working tree. `git update-ref refs/heads/develop origin/develop` alone moves the branch pointer but leaves the working tree STALE — gate agents will review stale files. Include a disk-presence check before dispatching any gate agent. Discovered: Wave 4 re-gate first attempt (2026-06-07). Lessons file: `.factory/cycles/wave-4-gate/lessons.md`.
 
