@@ -67,16 +67,13 @@ fn render_inline_node(node: &InlineNode) -> String {
         InlineNode::Link { url, text } => {
             let inner = render_inline_nodes(text);
             // AC-010 / CWE-601: validate scheme before emitting href.
+            // is_safe_link_scheme already emits tracing::warn! on rejection —
+            // do NOT log here again (F-006: single warn per rejection, TD-VSDD-060).
             if is_safe_link_scheme(url) {
                 let safe_url = html_escape::encode_double_quoted_attribute(url);
                 format!(r#"<a href="{safe_url}">{inner}</a>"#)
             } else {
                 // Drop href — render as plain span.
-                tracing::warn!(
-                    rejected_scheme = %extract_scheme(url),
-                    url = %url,
-                    "AC-010: link URL with disallowed scheme rejected (CWE-601)"
-                );
                 format!("<span>{inner}</span>")
             }
         },
@@ -109,11 +106,6 @@ fn render_inline_node(node: &InlineNode) -> String {
             format!("<a href=\"#{safe_target}\">{display}</a>")
         },
     }
-}
-
-/// Extract the URL scheme (everything before the first `:`), or `"<no-scheme>"`.
-fn extract_scheme(url: &str) -> &str {
-    url.find(':').map_or("<no-scheme>", |pos| &url[..pos])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

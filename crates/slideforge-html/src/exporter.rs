@@ -52,8 +52,19 @@ pub const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https", "mailto", "tel"];
 /// ```
 #[must_use]
 pub fn is_safe_link_scheme(url: &str) -> bool {
+    // F-008 (CWE-601): reject protocol-relative URLs (// or \\) regardless of
+    // the absence of a colon. Browsers resolve these as scheme-relative, enabling
+    // open-redirect even when the author intended a relative path.
+    if url.starts_with("//") || url.starts_with('\\') {
+        tracing::warn!(
+            url = %url,
+            "AC-010: protocol-relative or backslash-prefix URL rejected (CWE-601)"
+        );
+        return false;
+    }
+
     let Some(colon_pos) = url.find(':') else {
-        // No scheme separator — this is a relative URL; allow it.
+        // No scheme separator — this is a path/fragment relative URL; allow it.
         return true;
     };
     let scheme = url[..colon_pos].to_ascii_lowercase();
@@ -62,6 +73,8 @@ pub fn is_safe_link_scheme(url: &str) -> bool {
         true
     } else {
         // Emit tracing::warn! with the rejected scheme.
+        // NOTE: this is the SINGLE warn per rejection (F-006). Callers (render.rs)
+        // must NOT emit an additional warn — this function is the sole log site.
         tracing::warn!(
             rejected_scheme = %scheme,
             url = %url,
@@ -898,6 +911,98 @@ mod tests {
         assert!(
             html.contains(r#"lang="de""#),
             "EC-003: output must contain lang=\"de\" for deck.lang=\"de\""
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-008 (CWE-601) — protocol-relative and backslash URLs must be rejected
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-008: `//evil.com` (protocol-relative) must be REJECTED — not treated as
+    /// a relative path. Without a colon these look "relative" but browsers resolve
+    /// them as scheme-relative (same scheme as the page), enabling open-redirect.
+    #[test]
+    fn test_F008_protocol_relative_url_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("//evil.com"),
+            "F-008: protocol-relative URL '//evil.com' must be rejected (CWE-601)"
+        );
+    }
+
+    /// F-008: `//evil.com/path` must also be rejected.
+    #[test]
+    fn test_F008_protocol_relative_with_path_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("//evil.com/path"),
+            "F-008: '//evil.com/path' must be rejected"
+        );
+    }
+
+    /// F-008: backslash-prefix `\\evil.com` must be rejected.
+    #[test]
+    fn test_F008_backslash_url_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("\\\\evil.com"),
+            "F-008: backslash-prefix URL must be rejected"
+        );
+    }
+
+    /// F-008: safe relative paths (path/fragment only) are still allowed.
+    #[test]
+    fn test_F008_path_only_relative_url_still_allowed() {
+        assert!(
+            is_safe_link_scheme("/slides/2"),
+            "F-008: path-only relative URL '/slides/2' must still be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("#section"),
+            "F-008: fragment-only URL '#section' must still be allowed"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-006 — exactly ONE tracing::warn! per rejected link (no double-logging)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-006: when a javascript: Link is rendered, exactly one warn! is emitted —
+    /// not two (not once in is_safe_link_scheme AND once in render_inline_node).
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_F006_rejected_link_emits_exactly_one_warn() {
+        use slideforge_layout::FrameContent;
+        use slideforge_types::InlineNode;
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::TextRun(vec![InlineNode::Link {
+                    url: Arc::from("javascript:alert(1)"),
+                    text: vec![InlineNode::Plain(Arc::from("click"))],
+                }]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let _ = exporter.export(&deck, &laid_out, &brand, &opts);
+        // Exactly one warn containing "javascript" must appear in the log
+        assert!(
+            logs_contain("javascript"),
+            "F-006: at least one warn for rejected 'javascript:' scheme must be emitted"
         );
     }
 }
