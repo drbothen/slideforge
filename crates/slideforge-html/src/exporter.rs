@@ -131,9 +131,7 @@ fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
     // Find the FIRST slide with a promotable text frame (Body with non-empty
     // Text/Bullets/Math blocks, or a TextRun).
     // Table/ColorBar/Shape/empty-Body are NOT promotable (LOW-1).
-    let h1_idx = slides
-        .iter()
-        .position(slide_has_promotable_text_frame);
+    let h1_idx = slides.iter().position(slide_has_promotable_text_frame);
     if let Some(idx) = h1_idx {
         tracing::warn!(
             slide_index = idx,
@@ -1925,8 +1923,7 @@ mod tests {
         );
 
         // The h1 must NOT be inside slide-1 (the empty-body slide).
-        let sel_slide1_h1 =
-            scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
+        let sel_slide1_h1 = scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
         assert_eq!(
             doc.select(&sel_slide1_h1).count(),
             0,
