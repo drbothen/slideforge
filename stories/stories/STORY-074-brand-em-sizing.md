@@ -97,24 +97,39 @@ Integer division (`i64`), no `f64` at any point.
 
 ```rust
 // Canonical test fixture (must be a unit test in slideforge-layout tests)
-let brand_48pt = BrandConfig {
-    fonts: BrandFonts { font_size_emu: 609_600, ..Default::default() },
-    ..Default::default()
-};
+// See the real, compiling integration test at:
+//   crates/slideforge-layout/tests/brand_em_sizing.rs
+//
+// NOTE — illustrative pseudocode below. Two helpers have no real definition:
+//   PAGE_SIZE_EMU    → use PageSize { width: Emu(12_192_000), height: Emu(6_858_000) }
+//   minimal_shape()  → build ShapeSpec inline (see brand_em_sizing.rs em_x_shape_spec / em_width_shape_spec)
+// All other symbols are real types from the delivered implementation.
+
+// brand_48pt is slideforge_types::BrandFonts (NOT slideforge_brand::BrandConfig —
+// that is the TOML-layer type whose `fonts` field is FontConfig, which has no
+// font_size_emu).  The IR type that owns font_size_emu is BrandFonts.
+let brand_48pt = BrandFonts { font_size_emu: 609_600, ..Default::default() };
+
+// ShapeSpec / ShapePosition / ShapeUnit are slideforge_types; layout_shapes is in
+// slideforge_layout::shapes (5-arg signature: shapes, page, source_slide_index,
+// em_in_emu: i64, base_index: usize).
 let shape_spec = ShapeSpec {
     position: ShapePosition {
-        x: ShapeUnit::Em(1000),   // 1em
+        x: ShapeUnit::Em(1000),    // 1em
         y: ShapeUnit::Inches(0),
         width: ShapeUnit::Em(2000), // 2em
         height: ShapeUnit::Em(1000),
     },
-    ..minimal_shape()
+    ..minimal_shape() // illustrative — build ShapeSpec inline in the real test
 };
-let output = layout_shapes(&[shape_spec], PAGE_SIZE_EMU, 0, brand_48pt.fonts.font_size_emu, 0)
+let output = layout_shapes(&[shape_spec], PAGE_SIZE_EMU, 0, brand_48pt.font_size_emu, 0)
+    //                                    ^illustrative   ^real field on BrandFonts
     .expect("should succeed");
 let frame = &output.frames[0];
-assert_eq!(frame.bounding_box.x, Emu(609_600));
-assert_eq!(frame.bounding_box.width, Emu(1_219_200));
+// Frame.bbox: BoundingBox (field is `bbox`, NOT `bounding_box`).
+// `bounding_box` belongs to TextFlow, not Frame — do NOT confuse them.
+assert_eq!(frame.bbox.x,     Emu(609_600));
+assert_eq!(frame.bbox.width, Emu(1_219_200));
 ```
 
 ### AC-002: DEFAULT_EM_IN_EMU constant is removed
@@ -158,3 +173,4 @@ passed before STORY-074 may fail after it.
 | 1.0 | 2026-05-29 | product-owner | Created — resolves STORY-NNN-brand-em-sizing placeholder at layout.rs:208 (F-P18-MED-001 from pass-18 report). Closes structural deferral from STORY-028. |
 | 1.1 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-1 F-074-P1-LOW-001: updated illustrative fixture to 5-arg `layout_shapes` call (added trailing `base_index` = 0) and updated Implementation Note to reflect `em_in_emu` (4th arg) + `base_index` (5th arg) per actual delivered signature. No AC semantics or contract thresholds changed. |
 | 1.2 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-2 F-074-P2-LOW-001: corrected `font_size_emu` field-type annotation from `Emu` to `i64` in Dependency Anchor Justifications and Summary §1, matching the delivered `DEFAULT_EM_IN_EMU: i64` constant and `em_in_emu: i64` parameter in `layout_shapes`. Implementation Notes §4 (`i64` authorization) and all AC semantics unchanged. |
+| 1.3 | 2026-06-08 | story-writer | Prose↔code coherence sweep per adversary Pass-5 F-074-P5-LOW-001 + proactive full-fixture reconciliation (LESSON-10). Fixed two type/field defects in the AC-001 illustrative fixture: (1) replaced `BrandConfig { fonts: BrandFonts { ... } }` with `BrandFonts { ... }` — `BrandConfig` is the slideforge-brand TOML-schema type (fields: `ColorConfig`, `FontConfig`); the IR type that owns `font_size_emu` is `slideforge_types::BrandFonts`; (2) replaced `frame.bounding_box.x` / `frame.bounding_box.width` with `frame.bbox.x` / `frame.bbox.width` — `Frame.bbox: BoundingBox` (field `bbox`); `bounding_box` belongs to `TextFlow`, not `Frame`. Also added inline annotations for two illustrative-only helpers (`PAGE_SIZE_EMU`, `minimal_shape()`) that have no real definition, with a cross-reference to `crates/slideforge-layout/tests/brand_em_sizing.rs`. No AC semantics, BC references, thresholds, or em-sizing contract changed. |
