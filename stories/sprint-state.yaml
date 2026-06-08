@@ -59,8 +59,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "e08f2f80"
-develop_pr_count: 73
+develop_sha: "3f7f99ed"
+develop_pr_count: 74
 last_updated: 2026-06-08
 wave_4_gate: PASS
 wave_4_gate_date: 2026-06-07
@@ -69,8 +69,8 @@ wave_4_followups_closed: 6
 wave_5_started: 2026-06-07
 wave_5_total_stories: 22
 wave_5_total_points: 130
-wave_5_stories_merged: 5
-wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079, STORY-080]
+wave_5_stories_merged: 6
+wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079, STORY-080, STORY-074]
 wave_5_dep_prep_pr: 69
 wave_5_dep_prep_commit: "3e3a978f"
 wave_5_dep_prep_merged: 2026-06-08
@@ -98,9 +98,13 @@ wave_5_dependency_levels:
     stories: [STORY-059]
     count: 1
     deps: {STORY-059: [STORY-056]}
-wave_5_critical_path: "046→047→056→059 (4 deep)"
+wave_5_critical_path: "047→056→059 (3 deep from current)"
 wave_5_unlock_keys: "STORY-055 (gates 5 downstream), STORY-046 (gates 4 downstream)"
 wave_5_open_followup: "FU-SEC-001-GIT2-OPENSSL (MEDIUM) — resolve before STORY-060/061"
+story_090_created: 2026-06-08
+story_090_reason: "PROC-GAP-PIPELINE-BYPASS-TESTS — 3x recurrence (STORY-082/072/081 dead wiring); mandate slideforge::build()-origin integration tests for >=2-crate eval->exporter stories"
+total_stories: 90
+total_points: 556
 ---
 
 stories:
@@ -628,18 +632,21 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 5/6/7 (7-pass total cascade)"
     notes: "Layout: ContentBlock::Bullets → FrameContent::TextRun. One TextRun frame per BulletItem (recursive, parent-before-children). MAX_BULLET_DEPTH=64 + LayoutError::BulletDepthExceeded (E-LAY-007). Had 2 CI fmt/clippy re-fixes (bare -D warnings used instead of full pedantic gate). Security CLEAN + pr-reviewer APPROVE."
   STORY-074:
-    status: in-review
+    status: merged
     wave: 5
     priority: P2
     points: 3
     pr: 74
     pr_url: "https://github.com/drbothen/slideforge/pull/74"
-    pr_head_commit: "c84976b2"
-    pr_base_commit: "2f6d5da4"
+    merge_commit: "3f7f99ed"
+    merged: 2026-06-08
     adversary_convergence: "3/3 strict-CLEAN at passes 11/12/13 (13 total passes — long doc-precision tail; code converged since pass 3)"
     adversary_streak: "3/3"
     converged: true
-    notes: "Brand-aware Em conversion (font_size_emu); follow-up from STORY-028 cascade; deferred P2 to Wave 5. LOCAL converged 3/3 strict-CLEAN passes 11-13; PR #74 OPEN in security+pr review as of 2026-06-08. STANDING MERGE AUTH applies when security CLEAN + pr-reviewer APPROVE + CI green."
+    security_review: "CLEAN (3 LOW deferrals)"
+    pr_reviewer: "APPROVE"
+    ci_status: "all-green"
+    notes: "Brand-aware em sizing: font_size_emu (i64) on Brand drives em→EMU shape resolution; DEFAULT_EM_IN_EMU removed from compiled lib (confined to #[cfg(test)]); backward-compatible default 457_200. Follow-ups: FU-074-SEC003-PALETTE-FALLBACK (layout.rs:490 parse_hex_color unwrap_or silent fallback), FU-047-ADR008-AXUM (ADR-008 axum pin stale at 0.8.1 vs shipped 0.8.9)."
   STORY-075:
     status: merged
     wave: 4
