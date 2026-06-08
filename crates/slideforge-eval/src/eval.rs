@@ -807,8 +807,10 @@ fn eval_section_nodes(
 /// Evaluate a [`slideforge_syntax::FieldValue`] into a [`Value`] in the
 /// context of a given [`Env`].
 ///
-/// Used by [`eval_deck`] to resolve vars block entries into concrete values.
-fn eval_field_value_to_value(
+/// Used by [`eval_deck`] to resolve vars block entries into concrete values,
+/// and by [`crate::for_eval::eval_slide_node`] to resolve field values in
+/// slide bodies (including `FieldValue::List` → `Value::List` for bullets).
+pub(crate) fn eval_field_value_to_value(
     field_value: &FieldValue,
     env: &Env,
     sink: &mut DiagnosticSink,
@@ -852,11 +854,22 @@ fn eval_field_value_to_value(
             }
         },
         FieldValue::Shape(_) | FieldValue::Error => None,
-        // STORY-088: FieldValue::List is evaluated to Value::List by evaluating each
-        // item. This stub returns None until STORY-088 implementation is complete.
-        // The real implementation maps items through eval_field_value_to_value and
-        // collects to Value::List(vals).
-        FieldValue::List(_) => None,
+        // STORY-088: evaluate each item through eval_field_value_to_value and
+        // collect to Value::List(vals). Items that fail to evaluate (e.g. an
+        // FieldValue::Error sentinel from the parser's error-recovery path) are
+        // silently dropped — the parser already pushed a diagnostic for them.
+        FieldValue::List(items) => {
+            let mut vals: Vec<Value> = Vec::with_capacity(items.len());
+            for item in items {
+                if let Some(v) = eval_field_value_to_value(item, env, sink) {
+                    vals.push(v);
+                }
+                // Item eval returns None when a diagnostic was already pushed by the
+                // parser (FieldValue::Error sentinel). Silently drop the item so the
+                // rest of the list is still evaluated (BC-1.15.001 error accumulation).
+            }
+            Some(Value::List(vals))
+        },
     }
 }
 

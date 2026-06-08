@@ -122,7 +122,64 @@ where
         Token::Ident(s) = e if s.as_ref() != "in" => (FieldValue::Ident(s.to_string()), e.span()),
     };
 
-    let value_p = template_val.or(other_val);
+    // List items: only template (string) items are valid for bullet-list fields.
+    // Non-string list items emit E-PAR-015 and continue (BC-1.15.001 error accumulation).
+    let list_item_tval = template_value().validate(
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            for err in errs {
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+            }
+            (FieldValue::Template(chunks), info.span())
+        },
+    );
+    let list_item_other = select! {
+        Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
+        Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
+        Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
+        Token::Ident(s) = e if s.as_ref() != "in" => (FieldValue::Ident(s.to_string()), e.span()),
+    };
+    let list_item = list_item_tval.or(list_item_other).validate(
+        move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
+            match &item {
+                // Template strings and (structurally possible) nested lists are valid.
+                FieldValue::Template(_) | FieldValue::List(_) => {},
+                _ => {
+                    emitter.emit(Rich::custom(
+                        item_span,
+                        "E-PAR-015: list items must be string literals. \
+                         Integers, floats, and booleans are not valid inside \
+                         a list literal used as a field value. \
+                         Wrap the value in quotes to use it as a string."
+                            .to_string(),
+                    ));
+                },
+            }
+            (item, item_span)
+        },
+    );
+
+    // List literal: `[` (list_item (`,` list_item)*)? `]`
+    //
+    // Token-stream idiom (chumsky 0.10): just(Token::LBracket) / just(Token::Comma)
+    // / just(Token::RBracket) — NOT char-stream combinators.
+    // allow_trailing() so `["A", "B",]` (trailing comma) is accepted.
+    let list_val = list_item
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map_with(move |items, e| {
+            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+            (FieldValue::List(items_fv), e.span())
+        });
+
+    // Priority: list_val first, then template string, then other scalars.
+    let value_p = list_val.or(template_val).or(other_val);
 
     // `shape:` block produces a FieldNode with name "shape" and FieldValue::Shape.
     let shape_field = shape_block(file_id).map_with(move |(val, val_span), e| {
@@ -171,8 +228,20 @@ where
         })
     });
 
-    // Regular field line: `IDENT value NEWLINE`.
+    // Regular field line: `IDENT (':')? value NEWLINE`.
+    //
+    // The colon separator is optional so that both DSL forms are supported:
+    //   `bullets items`     (ident reference, no colon)
+    //   `bullets: items`    (ident reference with colon — STORY-088 Form 2 / spec)
+    //   `bullets ["A","B"]` (inline list literal, no colon)
+    //   `bullets: ["A","B"]`(inline list literal with colon)
+    //
+    // This mirrors the spec's `@var` form example:
+    //   slide content:
+    //     bullets: items
+    // Both colon and non-colon forms produce identical AST nodes.
     let regular_field = any_ident()
+        .then_ignore(just(Token::Colon).or_not())
         .then(value_p)
         .then_ignore(just(Token::Newline).or_not())
         .map(move |((name, name_span), (val, val_span))| {

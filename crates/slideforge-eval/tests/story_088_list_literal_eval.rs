@@ -16,19 +16,19 @@
 //!
 //! ## Traceability
 //!
-//! BC-1.01.002 (field-value parser — STORY-088 scope);
-//! BC-1.16.001 PC-7 (Value::List → ContentBlock::Bullets, via Stage 2b).
+//! `BC-1.01.002` (field-value parser — STORY-088 scope);
+//! `BC-1.16.001` PC-7 (`Value::List` → `ContentBlock::Bullets`, via Stage 2b).
 
 #![allow(clippy::unwrap_used)] // test helpers — explicit panic on failure is correct
 
 use std::sync::Arc;
 
 use slideforge_eval::{EvalConfig, eval_deck};
+use slideforge_syntax::span::Span;
 use slideforge_syntax::{
-    BlockItem, DiagnosticSink, DeckNode, FieldNode, FieldValue, SlideNode, Spanned, TemplateChunk,
+    BlockItem, DeckNode, DiagnosticSink, FieldNode, FieldValue, SlideNode, Spanned, TemplateChunk,
     VarsBlock,
 };
-use slideforge_syntax::span::Span;
 use slideforge_types::Value;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -76,7 +76,8 @@ fn make_deck_with_var(var_name: &str, var_value: FieldValue) -> DeckNode {
         ],
         inline_items: vec![],
     };
-    deck.items.push(BlockItem::Slide(Spanned::new(slide_node, dummy_span())));
+    deck.items
+        .push(BlockItem::Slide(Spanned::new(slide_node, dummy_span())));
     deck.lang = Some(Spanned::new("en-US".to_string(), dummy_span()));
 
     deck
@@ -121,7 +122,7 @@ fn test_bc_1_01_002_eval_field_value_list_to_value_list_three_items() {
     let deck = deck_opt.expect(
         "AC-001 eval RED GATE: eval_deck must return Some(Deck) when vars block \
          contains FieldValue::List([...]) → after implementation Value::List is \
-         stored in env and the slide evaluates successfully."
+         stored in env and the slide evaluates successfully.",
     );
 
     // The slide's `bullets` field must resolve to a Value::List with 3 items.
@@ -130,7 +131,7 @@ fn test_bc_1_01_002_eval_field_value_list_to_value_list_three_items() {
 
     let bullets_field = slide.fields.get("bullets").expect(
         "AC-001 eval: slide must have a 'bullets' field after eval. \
-         The FieldValue::Ident('items') must resolve to Value::List."
+         The FieldValue::Ident('items') must resolve to Value::List.",
     );
 
     // The resolved field must be FieldValue::Literal(Value::List([...])).
@@ -147,16 +148,28 @@ fn test_bc_1_01_002_eval_field_value_list_to_value_list_three_items() {
         );
     };
     assert_eq!(items.len(), 3, "AC-001 eval: Value::List must have 3 items");
-    assert_eq!(items[0], Value::Str(Arc::from("Item A")), "AC-001 eval: item 0");
-    assert_eq!(items[1], Value::Str(Arc::from("Item B")), "AC-001 eval: item 1");
-    assert_eq!(items[2], Value::Str(Arc::from("Item C")), "AC-001 eval: item 2");
+    assert_eq!(
+        items[0],
+        Value::Str(Arc::from("Item A")),
+        "AC-001 eval: item 0"
+    );
+    assert_eq!(
+        items[1],
+        Value::Str(Arc::from("Item B")),
+        "AC-001 eval: item 1"
+    );
+    assert_eq!(
+        items[2],
+        Value::Str(Arc::from("Item C")),
+        "AC-001 eval: item 2"
+    );
 }
 
 /// BC-1.01.002 AC-002 (eval side) — `FieldValue::List([])` (empty list)
 /// evaluates to `Value::List(vec![])`.
 ///
 /// RED GATE: stub returns `None` for `FieldValue::List` → variable not stored
-/// → UndefinedVariable error → sink not empty.
+/// → `UndefinedVariable` error → sink not empty.
 #[test]
 fn test_bc_1_01_002_eval_field_value_list_empty_to_value_list_empty() {
     let var_value = FieldValue::List(vec![]);
@@ -172,9 +185,8 @@ fn test_bc_1_01_002_eval_field_value_list_empty_to_value_list_empty() {
          Got: {:?}",
         sink.errors()
     );
-    let deck = deck_opt.expect(
-        "AC-002 eval: eval_deck must return Some(Deck) for empty list variable"
-    );
+    let deck =
+        deck_opt.expect("AC-002 eval: eval_deck must return Some(Deck) for empty list variable");
 
     assert_eq!(deck.slides.len(), 1, "AC-002 eval: deck must have 1 slide");
     let slide = &deck.slides[0];
@@ -227,7 +239,11 @@ fn test_bc_1_01_002_eval_field_value_list_single_item_to_value_list() {
              got: {bullets_field:?}"
         );
     };
-    assert_eq!(items.len(), 1, "AC-003 eval: single-item list must have 1 item");
+    assert_eq!(
+        items.len(),
+        1,
+        "AC-003 eval: single-item list must have 1 item"
+    );
     assert_eq!(
         items[0],
         Value::Str(Arc::from("Only")),

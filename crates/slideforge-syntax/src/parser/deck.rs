@@ -58,10 +58,16 @@ fn to_span(ss: SimpleSpan, file_id: u32) -> Span {
 // ─── Value parser ────────────────────────────────────────────────────────────
 
 /// Parser for a field value: string literal (with template interpolation),
-/// integer, float, bool, or identifier.
+/// integer, float, bool, identifier, or list literal.
 ///
 /// String literals are parsed through `template_value()` so that `{{ expr }}`
 /// interpolation is supported. Template errors are emitted via `validate()`.
+///
+/// List literals `[item, item, ...]` produce [`FieldValue::List`]. Only string
+/// items are valid inside a list literal for `bullets:` and similar fields;
+/// non-string items (numbers, bools) emit an `E-PAR-015` diagnostic and are
+/// converted to [`FieldValue::Error`] sentinels, but parsing continues so that
+/// all errors in the file are accumulated (BC-1.15.001 error-accumulation).
 ///
 /// On error, produces `FieldValue::Error` sentinel for recovery.
 fn value_parser<'src, I>()
@@ -69,30 +75,81 @@ fn value_parser<'src, I>()
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
-    // Template string: emit any E-PAR-012/E-PAR-013/E-PAR-014 errors via validate().
-    let template_val = template_value().validate(
-        move |(chunks, errs): (
-            Vec<TemplateChunk>,
-            Vec<crate::parser::template::TemplateError>,
-        ),
-              info,
-              emitter| {
-            for err in errs {
-                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
-            }
-            (FieldValue::Template(chunks), info.span())
-        },
-    );
+    recursive(move |value_parser_ref| {
+        // Template string: emit any E-PAR-012/E-PAR-013/E-PAR-014 errors via validate().
+        let template_val = template_value().validate(
+            move |(chunks, errs): (
+                Vec<TemplateChunk>,
+                Vec<crate::parser::template::TemplateError>,
+            ),
+                  info,
+                  emitter| {
+                for err in errs {
+                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+                }
+                (FieldValue::Template(chunks), info.span())
+            },
+        );
 
-    // Non-string field values.
-    let other_val = select! {
-        Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
-        Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
-        Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
-        Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
-    };
+        // Non-string field values.
+        let other_val = select! {
+            Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
+            Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
+            Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
+            Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
+        };
 
-    template_val.or(other_val)
+        // List items: only template (string) items are valid for bullet-list fields.
+        // Non-string list items — integers, floats, and booleans — emit E-PAR-015
+        // (non-string list item) and are converted to FieldValue::Error sentinels so
+        // that parsing continues to accumulate all errors (BC-1.15.001).
+        //
+        // AC-005 / EC-002 / EC-005: non-string items must produce a diagnostic, not
+        // a silent wrong value or a panic.
+        let list_item = value_parser_ref.validate(
+            move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
+                match &item {
+                    // Template strings and (structurally possible) nested lists are valid.
+                    FieldValue::Template(_) | FieldValue::List(_) => {},
+                    _ => {
+                        // Non-string item: emit E-PAR-015 diagnostic.
+                        // The item is preserved as-is but the caller (list combinator)
+                        // wraps it inside FieldValue::List — the diagnostic signals the error.
+                        emitter.emit(Rich::custom(
+                            item_span,
+                            "E-PAR-015: list items must be string literals. \
+                             Integers, floats, and booleans are not valid inside \
+                             a list literal used as a field value. \
+                             Wrap the value in quotes to use it as a string."
+                                .to_string(),
+                        ));
+                    },
+                }
+                (item, item_span)
+            },
+        );
+
+        // List literal: `[` (list_item (`,` list_item)*)? `]`
+        //
+        // Following the chumsky 0.10 token-stream idiom from expr.rs lines 96-103:
+        // use just(Token::LBracket) / just(Token::Comma) / just(Token::RBracket) —
+        // NOT char-stream combinators like just('[').
+        //
+        // allow_trailing() so that `["A", "B",]` (trailing comma) is accepted.
+        // AC-002 (empty list): `[]` produces FieldValue::List(vec![]) without error.
+        let list_val = list_item
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map_with(move |items, e| {
+                let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+                (FieldValue::List(items_fv), e.span())
+            });
+
+        // Priority: list_val first so `[...]` is not misinterpreted as an ident.
+        list_val.or(template_val).or(other_val)
+    })
 }
 
 /// Parser for a `set` rule value: string literal (with template interpolation),
@@ -291,6 +348,70 @@ where
         .then(vars_entry.repeated().collect::<Vec<_>>())
         .then_ignore(just(Token::Dedent))
         .map(|(_vars_kw_span, entries)| VarsBlock { entries })
+}
+
+// ─── @var inline assignment parser ───────────────────────────────────────────
+
+/// Parser for an `@var ident = value` inline variable assignment at deck level.
+///
+/// Pattern: `"@" "var" IDENT "=" value NEWLINE`
+///
+/// Produces a single-entry [`VarsBlock`] equivalent to a `vars:` block
+/// with one entry. This is the DSL's shorthand for binding a single variable
+/// at deck level.
+///
+/// # STORY-088
+///
+/// This production is required for the `@var items = ["A","B","C"]` form
+/// that binds a list literal to a variable at deck level. The fixture
+/// `story-086-bullets-slide.sf` uses this form; the vars-block form is
+/// also supported via [`vars_block_parser`].
+///
+/// # Variable name collision checking
+///
+/// Same collision check as `vars_block_parser`: variable names that collide
+/// with slide type keywords produce E-PAR-008. The check is identical to
+/// the `vars_entry` validator in `vars_block_parser`.
+fn at_var_parser<'src, I>(
+    file_id: u32,
+) -> impl Parser<'src, I, VarsBlock, extra::Err<Rich<'src, Token, TSpan>>> + Clone
+where
+    I: ValueInput<'src, Token = Token, Span = TSpan>,
+{
+    // `@` `var` IDENT `=` value NEWLINE
+    just(Token::At)
+        .ignore_then(keyword("var"))
+        .ignore_then(any_ident())
+        .then_ignore(just(Token::Eq))
+        .then(value_parser())
+        .then_ignore(just(Token::Newline).or_not())
+        .validate(move |((name, name_span), (val, val_span)), info, emitter| {
+            // Same keyword collision check as vars_block_parser vars_entry.
+            let collision = if is_slide_type_keyword(&name) {
+                Some(format!(
+                    "E-PAR-008: '{name}' is a built-in slide type keyword and cannot \
+                         be used as a variable name. Use a different name, e.g. '{name}_data'."
+                ))
+            } else if classify_keyword(&name).is_some() {
+                Some(format!(
+                    "E-PAR-008: '{name}' is a reserved keyword and cannot be used as \
+                         a variable name."
+                ))
+            } else {
+                None
+            };
+
+            if let Some(msg) = collision {
+                emitter.emit(Rich::custom(info.span(), msg));
+            }
+
+            VarsBlock {
+                entries: vec![(
+                    Spanned::new(name, to_span(name_span, file_id)),
+                    Spanned::new(val, to_span(val_span, file_id)),
+                )],
+            }
+        })
 }
 
 // ─── Set rule parser ──────────────────────────────────────────────────────────
@@ -498,6 +619,8 @@ where
     let lang = lang_decl_parser(file_id).map(DeckItem::Lang);
     let brand = brand_decl_parser(file_id).map(DeckItem::Brand);
     let vars = vars_block_parser(file_id).map(DeckItem::Vars);
+    // STORY-088: @var ident = value deck-level inline assignment.
+    let at_var = at_var_parser(file_id).map(DeckItem::Vars);
     let set = set_rule_parser(file_id).map(|opt| match opt {
         Some(sr) => DeckItem::Set(sr),
         None => DeckItem::SetErr,
@@ -535,6 +658,7 @@ where
                 .or(lang)
                 .or(brand)
                 .or(vars)
+                .or(at_var)
                 .or(set)
                 .or(variants)
                 .or(alias)
@@ -1049,7 +1173,7 @@ mod tests {
     /// BC-1.01.002 AC-002 — `bullets: []` (empty list) parses to
     /// `FieldValue::List(vec![])` without error.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error, no List produced.
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error, no List produced.
     #[test]
     fn test_bc_1_01_002_ac002_empty_list_literal_parses_to_field_value_list_empty() {
         let src = concat!("slide content:\n", "  bullets []\n",);
@@ -1089,7 +1213,7 @@ mod tests {
     /// `FieldValue::List(vec![FieldValue::Template(...)])`.
     /// A single-item list must NOT be treated as a bare string.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error, no List produced.
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error, no List produced.
     #[test]
     fn test_bc_1_01_002_ac003_single_item_list_parses_as_list_not_bare_string() {
         let src = concat!("slide content:\n", "  bullets [\"Only\"]\n",);
@@ -1130,7 +1254,7 @@ mod tests {
     /// BC-1.01.002 AC-004 — list-literal parses inside a standard slide block
     /// with multiple fields; no off-by-one indentation errors.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → the `bullets:` field fails to
+    /// RED GATE: `value_parser()` has no `[...]` arm → the `bullets:` field fails to
     /// parse and may corrupt subsequent field parsing.
     #[test]
     fn test_bc_1_01_002_ac004_list_literal_in_full_slide_block_with_multiple_fields() {
@@ -1191,7 +1315,7 @@ mod tests {
     /// produces a parser diagnostic, NOT a panic. Error accumulation: the parser
     /// continues and reports all errors in the file.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm at all → the error we get may be
+    /// RED GATE: `value_parser()` has no `[...]` arm at all → the error we get may be
     /// different (the `[` token is unexpected) but the test still requires that:
     /// (a) no panic occurs, and (b) parse errors are non-zero.
     ///
@@ -1222,8 +1346,8 @@ mod tests {
     /// BC-1.01.002 AC-006 — `vars: items: ["A","B","C"]` (vars-block list assignment)
     /// parses without error. The vars-block value parser must accept `[...]` tokens.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error; the vars-block
-    /// entry fails to parse → deck.vars[0].entries[0].1 is NOT FieldValue::List.
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error; the vars-block
+    /// entry fails to parse → `deck.vars[0].entries[0].1` is NOT `FieldValue::List`.
     ///
     /// Note: This tests the `vars:` block form (with `:` separator and indented
     /// block body). The `@var ident = [...]` form (at deck-level) is tested
@@ -1245,11 +1369,7 @@ mod tests {
         );
 
         let deck = deck.expect("AC-006: deck must parse");
-        assert_eq!(
-            deck.vars.len(),
-            1,
-            "AC-006: must have 1 vars block"
-        );
+        assert_eq!(deck.vars.len(), 1, "AC-006: must have 1 vars block");
         let vb = &deck.vars[0];
         assert_eq!(vb.entries.len(), 1, "AC-006: vars block must have 1 entry");
 
@@ -1270,7 +1390,7 @@ mod tests {
     /// Note: the slide body field syntax uses `name value` without colon (e.g.
     /// `title "My Slide"`). The vars-block syntax uses `name: value` with colon.
     /// This test exercises the slide-body `bullets items` (ident reference)
-    /// path that currently works (FieldValue::Ident) to guard against
+    /// path that currently works (`FieldValue::Ident`) to guard against
     /// regressions introduced by the list-literal arm addition.
     ///
     /// GREEN GATE: This test SHOULD PASS today (the ident path already works).
@@ -1319,7 +1439,7 @@ mod tests {
     /// Covered by AC-002 above; this explicit edge-case test verifies the
     /// empty-list → `FieldValue::List(vec![])` path directly.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error.
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error.
     #[test]
     fn test_bc_1_01_002_ec001_empty_list_produces_field_value_list_empty() {
         let src = concat!("slide content:\n", "  bullets []\n");
@@ -1340,9 +1460,15 @@ mod tests {
             .find(|f| f.name.value() == "bullets")
             .expect("EC-001: bullets field");
         let FieldValue::List(items) = f.value.value() else {
-            panic!("EC-001 RED GATE: [] must be FieldValue::List([]); got: {:?}", f.value.value());
+            panic!(
+                "EC-001 RED GATE: [] must be FieldValue::List([]); got: {:?}",
+                f.value.value()
+            );
         };
-        assert!(items.is_empty(), "EC-001: FieldValue::List from [] must be empty");
+        assert!(
+            items.is_empty(),
+            "EC-001: FieldValue::List from [] must be empty"
+        );
     }
 
     // ── EC-003: trailing comma ────────────────────────────────────────────────
@@ -1351,7 +1477,7 @@ mod tests {
     /// The parser must either accept the trailing comma (preferred via
     /// `allow_trailing()`) or produce a useful diagnostic — NOT a silent wrong parse.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error (different error,
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error (different error,
     /// but test still verifies no panic and no silent wrong value).
     #[test]
     fn test_bc_1_01_002_ec003_trailing_comma_does_not_panic() {
@@ -1365,7 +1491,12 @@ mod tests {
             let crate::ast::BlockItem::Slide(s) = &deck.items[0] else {
                 return; // parse recovered to empty slide — acceptable
             };
-            if let Some(f) = s.value().fields.iter().find(|f| f.name.value() == "bullets") {
+            if let Some(f) = s
+                .value()
+                .fields
+                .iter()
+                .find(|f| f.name.value() == "bullets")
+            {
                 // If list parsed, must have 2 items (trailing comma consumed, not counted).
                 if let FieldValue::List(items) = f.value.value() {
                     assert_eq!(
@@ -1385,7 +1516,7 @@ mod tests {
     /// BC-1.01.002 EC-004 — `bullets: [""]` single empty-string item.
     /// Must parse to `FieldValue::List(vec![FieldValue::Template(vec![])])`.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error.
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error.
     #[test]
     fn test_bc_1_01_002_ec004_empty_string_item_is_valid() {
         let src = concat!("slide content:\n", "  bullets [\"\"]\n",);
@@ -1412,7 +1543,11 @@ mod tests {
                 f.value.value()
             );
         };
-        assert_eq!(items.len(), 1, "EC-004: single-item list from [\"\"] must have 1 item");
+        assert_eq!(
+            items.len(),
+            1,
+            "EC-004: single-item list from [\"\"] must have 1 item"
+        );
         assert!(
             matches!(items[0], FieldValue::Template(_)),
             "EC-004: empty-string item must be FieldValue::Template; got: {:?}",
@@ -1427,7 +1562,7 @@ mod tests {
     /// The parser must NOT fail-on-first — it must report the error for `42` AND
     /// continue to parse `"C"`.
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → parse error on the `[` token
+    /// RED GATE: `value_parser()` has no `[...]` arm → parse error on the `[` token
     /// itself, not specifically on the `42` item. The test verifies ≥1 parse error.
     #[test]
     fn test_bc_1_01_002_ec005_mixed_type_list_all_errors_collected() {
@@ -1450,7 +1585,7 @@ mod tests {
     /// the string items written in the source (LESSON-14: assert content, not
     /// mere presence).
     ///
-    /// RED GATE: value_parser() has no `[...]` arm → FieldValue::List not produced.
+    /// RED GATE: `value_parser()` has no `[...]` arm → `FieldValue::List` not produced.
     #[test]
     fn test_bc_1_01_002_invariant_parsed_list_contains_exact_string_content() {
         let src = concat!(

@@ -54,8 +54,9 @@ fn story_088_direct_literal_source() -> String {
         "{}/tests/fixtures/story-088-bullets-direct-literal.sf",
         env!("CARGO_MANIFEST_DIR")
     );
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("STORY-088: cannot read fixture 'story-088-bullets-direct-literal.sf': {e}"))
+    std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!("STORY-088: cannot read fixture 'story-088-bullets-direct-literal.sf': {e}")
+    })
 }
 
 /// Read ZIP entry as UTF-8 string.
@@ -64,11 +65,11 @@ fn read_zip_entry(
     entry: &str,
     label: &str,
 ) -> String {
+    use std::io::Read as _;
     let mut file = archive
         .by_name(entry)
         .unwrap_or_else(|e| panic!("STORY-088 {label}: ZIP entry '{entry}' not found: {e}"));
     let mut buf = String::new();
-    use std::io::Read as _;
     file.read_to_string(&mut buf)
         .unwrap_or_else(|e| panic!("STORY-088 {label}: cannot read '{entry}': {e}"));
     buf

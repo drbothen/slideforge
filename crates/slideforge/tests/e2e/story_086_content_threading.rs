@@ -414,10 +414,6 @@ fn test_bc_1_16_001_ac006_decorative_chart_strict_ok_no_e_a11_001() {
 /// Traces: BC-1.16.001 postcondition 7; BC-1.16.001 invariant 2;
 ///         LESSON-13 positive content vector (bullet text assertions).
 #[test]
-#[ignore = "Blocked by STORY-088 (DSL list-literal parser). \
-            Load-bearing AC-007 coverage: \
-            test_bc_1_16_001_ac007_value_list_produces_content_block_bullets \
-            in crates/slideforge-eval/tests/field_to_block_unit.rs (SID-1)."]
 fn test_bc_1_16_001_ac007_bullets_slide_produces_ge3_text_runs_in_pptx() {
     // AC-007: bullets slide → ≥3 <a:r> runs in PPTX slide XML.
     // RED GATE: stub → no ContentBlock::Bullets → no runs → assertion fails.

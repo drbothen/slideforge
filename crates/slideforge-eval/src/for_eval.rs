@@ -231,11 +231,19 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
                 // Error sentinel — already in sink, skip this field.
                 continue;
             },
-            FieldValue::List(_) => {
-                // STORY-088: FieldValue::List in @for slide body fields is not yet
-                // evaluated here. The implementation arm will evaluate each item and
-                // produce Value::List for bullets-type fields. Stub: skip the field.
-                continue;
+            FieldValue::List(items) => {
+                // STORY-088: evaluate each list item and collect to Value::List.
+                // Items that eval to None (e.g. FieldValue::Error sentinels from
+                // the parser) are silently dropped — the parser already pushed a
+                // diagnostic for them (BC-1.15.001 error accumulation).
+                let vals: Vec<Value> = items
+                    .iter()
+                    .filter_map(|item| {
+                        use crate::eval::eval_field_value_to_value;
+                        eval_field_value_to_value(item, env, sink)
+                    })
+                    .collect();
+                slideforge_types::FieldValue::Literal(Value::List(vals))
             },
         };
         fields.insert(field_name, field_value);
