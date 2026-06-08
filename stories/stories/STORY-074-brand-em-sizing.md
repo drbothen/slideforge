@@ -38,16 +38,19 @@ unit. The `BrandFonts.font_size_emu` field that carries this value lives in
   all established by STORY-028. This story closes that deferral by adding
   `font_size_emu: i64` to `BrandFonts` and threading the real value through
   `layout::run` → `layout_shapes`.
-- Wave TBD: Wave assignment pending orchestrator dispatch. Likely Wave 3 or 4,
-  after STORY-028 merges and before exporter stories (STORY-037+) consume
-  `LaidOutDeck` with shape frames that may use em units.
+- Wave 5: Assigned to Wave 5 per orchestrator dispatch (frontmatter `wave: 5`).
+  STORY-028 merged in Wave 4 (depends_on satisfied). Exporter stories
+  (STORY-037+) that consume `LaidOutDeck` with shape frames using em units are
+  also in Wave 5, and this story unblocks them within the wave.
 
 ## Summary
 
 STORY-028 deferred brand-aware em conversion because `BrandFonts` in
-`slideforge-types` has no `font_size_emu` field. A compile-time constant
-`DEFAULT_EM_IN_EMU = 457_200` (0.5 inch at 36pt body font) is used as a safe
-placeholder (see `crates/slideforge-layout/src/layout.rs:205–211`).
+`slideforge-types` had no `font_size_emu` field. A compile-time constant
+`DEFAULT_EM_IN_EMU = 457_200` (0.5 inch at 36pt body font) was used as a safe
+placeholder (historically at `layout.rs:205–211` in the STORY-028 delivery;
+the STORY-074-CLOSED comment now lives at `layout.rs:262–266` after this
+story's implementation).
 
 BC-3.04.001 Postcondition 2 mandates brand-aware em resolution:
 > "1em → `em_milliems * brand_font_size_emu / 1_000`"
@@ -66,7 +69,9 @@ story closes the structural gap:
    real field instead of the constant.
 
 3. **Remove `DEFAULT_EM_IN_EMU` from `shapes.rs`** once it is no longer referenced.
-   Update the deferred comment at `layout.rs:205–211` to cite this story as closed.
+   Replace the deferred comment (historically at `layout.rs:205–211` in the
+   STORY-028 delivery) with a STORY-074-CLOSED comment. In the delivered
+   implementation this closed comment lives at `layout.rs:262–266`.
 
 4. **Add unit test**: a brand with a non-default `font_size_emu` (e.g., 609_600 for
    48pt) produces correct EMU from `ShapeUnit::Em(1000)` (i.e., `609_600`), not
@@ -141,7 +146,9 @@ annotated. The deferred comment at `layout.rs:205–211` is replaced with a
 comment citing STORY-074 as closed.
 
 `cargo clippy` must report no `dead_code` warnings for the constant in
-production modules.
+production modules. In the delivered implementation the STORY-074-CLOSED
+comment replacing the original placeholder lives at `layout.rs:262–266`
+(historical STORY-028 placeholder was at `layout.rs:205–211`).
 
 ### AC-003: BrandFonts default is backward-compatible
 (traces to BC-3.04.001 Invariant 2 — integer EMU, no regressions)
@@ -174,3 +181,4 @@ passed before STORY-074 may fail after it.
 | 1.1 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-1 F-074-P1-LOW-001: updated illustrative fixture to 5-arg `layout_shapes` call (added trailing `base_index` = 0) and updated Implementation Note to reflect `em_in_emu` (4th arg) + `base_index` (5th arg) per actual delivered signature. No AC semantics or contract thresholds changed. |
 | 1.2 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-2 F-074-P2-LOW-001: corrected `font_size_emu` field-type annotation from `Emu` to `i64` in Dependency Anchor Justifications and Summary §1, matching the delivered `DEFAULT_EM_IN_EMU: i64` constant and `em_in_emu: i64` parameter in `layout_shapes`. Implementation Notes §4 (`i64` authorization) and all AC semantics unchanged. |
 | 1.3 | 2026-06-08 | story-writer | Prose↔code coherence sweep per adversary Pass-5 F-074-P5-LOW-001 + proactive full-fixture reconciliation (LESSON-10). Fixed two type/field defects in the AC-001 illustrative fixture: (1) replaced `BrandConfig { fonts: BrandFonts { ... } }` with `BrandFonts { ... }` — `BrandConfig` is the slideforge-brand TOML-schema type (fields: `ColorConfig`, `FontConfig`); the IR type that owns `font_size_emu` is `slideforge_types::BrandFonts`; (2) replaced `frame.bounding_box.x` / `frame.bounding_box.width` with `frame.bbox.x` / `frame.bbox.width` — `Frame.bbox: BoundingBox` (field `bbox`); `bounding_box` belongs to `TextFlow`, not `Frame`. Also added inline annotations for two illustrative-only helpers (`PAGE_SIZE_EMU`, `minimal_shape()`) that have no real definition, with a cross-reference to `crates/slideforge-layout/tests/brand_em_sizing.rs`. No AC semantics, BC references, thresholds, or em-sizing contract changed. |
+| 1.4 | 2026-06-08 | story-writer | Comprehensive prose coherence sweep resolving adversary Pass-8 F-074-P8-LOW-001 (wave contradiction) plus all remaining frontmatter↔body drift, stale line citations, and hedging language: (1) Replaced "Wave TBD / pending / likely Wave 3 or 4" in Dependency Anchor Justifications with resolved Wave 5 statement matching frontmatter `wave: 5`; (2) Corrected three stale `layout.rs:205–211` citations — the STORY-028 deferral placeholder location — to accurately reflect that the STORY-074-CLOSED comment now lives at `layout.rs:262–266` in the delivered implementation; historical origin clearly labelled in each case; (3) Updated Summary tense from present-continuous ("is used as a safe placeholder") to past tense reflecting the delivered state ("was used… historically"). No AC semantics, BC references, thresholds, or em-sizing contract changed. |
