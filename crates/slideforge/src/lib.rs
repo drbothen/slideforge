@@ -199,6 +199,14 @@ pub use slideforge_plugin_api::PluginRegistryBuilder;
 /// Re-export of [`slideforge_plugin_api::RegistryError`].
 pub use slideforge_plugin_api::RegistryError;
 
+/// Re-export of [`slideforge_plugin_api::BrandSource`].
+///
+/// Re-exported so that `slideforge-cli` (and other consumers that depend only
+/// on the root `slideforge` crate) can construct [`BuildOptions::brand_source`]
+/// without a direct dependency on `slideforge-plugin-api` (which is below the
+/// CLI/root crate boundary per STORY-055 architecture compliance rule 3).
+pub use slideforge_plugin_api::BrandSource;
+
 // ── Public pipeline types ─────────────────────────────────────────────────────
 
 /// Options passed to [`build`].

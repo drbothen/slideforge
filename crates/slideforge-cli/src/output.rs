@@ -78,6 +78,30 @@ impl OutputWriter {
     /// Returns `std::io::Error` if directory creation, file write, or rename
     /// fails.
     pub fn write_atomic(&self, bytes: &[u8]) -> std::io::Result<()> {
-        todo!()
+        use std::io::Write as _;
+
+        // Ensure the output directory exists.
+        std::fs::create_dir_all(&self.output_dir)?;
+
+        let tmp = self.tmp_path();
+        let final_path = self.final_path();
+
+        // Write to the tmp file.  On any error, attempt cleanup and propagate.
+        let write_result = std::fs::File::create(&tmp)
+            .and_then(|mut f| f.write_all(bytes));
+
+        if let Err(e) = write_result {
+            // Best-effort removal of the partial tmp file.
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+
+        // Atomic rename: on success the final path appears atomically.
+        if let Err(e) = std::fs::rename(&tmp, &final_path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+
+        Ok(())
     }
 }
