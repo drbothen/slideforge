@@ -1,7 +1,7 @@
 ---
 document_type: architecture-section
 section: export-architecture
-version: "1.2"
+version: "1.4"
 status: approved
 producer: architect
 timestamp: 2026-05-24T00:00:00
@@ -22,6 +22,13 @@ modified:
      code block — outer <svg> changed from aria-hidden=\"true\" to role=\"presentation\" per
      WAI-ARIA ancestor-hides-subtree rule. Updated canonical id format to sf-{slide_id}-{frame_index}
      (0-based). Both changes align with ADR-008 Pass-3 correction."
+  - "2026-06-08: v1.4 — Depth-walk root-at-1 convention (STORY-079 adversary Pass-3 OBS-1):
+     Replaced the illustrative SVG nesting-depth snippet (recursive max_depth seeded at 0)
+     with an iterative stack-based DFS snippet seeded at (root, 1), matching the canonical
+     BC-1.12.003 PC-9 convention (root counts as depth 1). Threshold expression updated from
+     DEPTH_LIMIT to MAX_SVG_NESTING_DEPTH to match the constant name in the BC and the
+     slideforge-diagrams implementation. BC-1.12.003 inv-6 (iterative traversal invariant)
+     also satisfied by the updated snippet."
 traces_to: ARCH-INDEX.md
 ---
 
@@ -382,17 +389,23 @@ depth limit BEFORE the tree is passed to any renderer. The correct walk:
 ```rust
 use usvg::{Node, Group};
 
-fn max_depth(group: &Group, current: usize) -> usize {
-    group.children().iter().fold(current, |acc, child| {
-        match child {
-            Node::Group(g) => max_depth(g, acc + 1).max(acc),
-            _ => acc,
+// Root counts as depth 1 (canonical convention: BC-1.12.003 PC-9).
+// Traversal is iterative (stack-based DFS) — BC-1.12.003 inv-6 forbids recursion.
+let mut stack: Vec<(&Group, usize)> = vec![(tree.root(), 1)];
+let mut max_seen: usize = 1;
+while let Some((group, depth)) = stack.pop() {
+    if depth > max_seen {
+        max_seen = depth;
+    }
+    for child in group.children() {
+        if let Node::Group(g) = child {
+            stack.push((g, depth + 1));
         }
-    })
+    }
 }
 ```
 
-If `max_depth(&tree.root(), 0) > DEPTH_LIMIT`, return a validation error before any
+If `max_seen > MAX_SVG_NESTING_DEPTH`, return a validation error before any
 rendering step.
 
 This design is NOT a false positive — usvg does NOT collapse nested groups in 0.47.0,
