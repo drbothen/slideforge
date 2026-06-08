@@ -9,7 +9,7 @@ points: 3
 priority: P2
 tdd_mode: strict
 status: draft
-spec_version: "1.4"
+spec_version: "1.5"
 behavioral_contracts: [BC-3.04.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -85,7 +85,7 @@ Note: hex color values MUST be quoted strings (the lexer treats `#` as a line
 comment character when unquoted). Color syntax follows the same hex rules as
 solid fills: 6-digit only, case-insensitive, short/alpha forms rejected with
 E-PAR-015. The parser records the gradient in the AST (`ShapeNode.fill` stores
-the interim string `"gradient \"#FF0000\" to \"#0000FF\""`); the structural
+the interim string `gradient #FF0000 to #0000FF`); the structural
 `FillSpec::Gradient { from: Rgb, to: Rgb }` is constructed at the
 `ShapeNode → ShapeSpec` decode boundary (see AC-002). The E-PAR-016 error is
 removed by this story.
@@ -99,7 +99,7 @@ Gradient fill is produced through a two-step process:
    `fill gradient "#RRGGBB" to "#RRGGBB"` declaration (quoted hex required — `#`
    is a comment character when unquoted), it records the fill in `ShapeNode.fill`
    as an interim AST string representation (e.g.,
-   `"gradient \"#FF0000\" to \"#0000FF\""`). The parser does NOT directly
+   `gradient #FF0000 to #0000FF`). The parser does NOT directly
    construct `FillSpec::Gradient`.
 
 2. **Decode step (IR):** At the `ShapeNode → ShapeSpec` decode boundary
@@ -183,7 +183,7 @@ does not change the alt-text contract.
 - [ ] Implement HTML gradient: emit SVG-native `<defs><linearGradient id="sf-grad-...">` with two `<stop>` elements (top→bottom, `y1="0" y2="1"`) inside the slide's `<svg role="presentation">` layer; reference via `fill="url(#sf-grad-...)"` on the shape `<rect>`. Do NOT use CSS `background: linear-gradient(...)` — CSS background does not paint SVG geometry.
 - [ ] Implement DOCX fallback: solid `from` color + lint warning
 - [ ] Write unit tests:
-  - Parser: `fill gradient "#FF0000" to "#0000FF"` → AST `ShapeNode.fill = "gradient \"#FF0000\" to \"#0000FF\""` then decoded to `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`
+  - Parser: `fill gradient "#FF0000" to "#0000FF"` → AST `ShapeNode.fill = "gradient #FF0000 to #0000FF"` then decoded to `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`
   - Layout passthrough: gradient preserved in `ShapeFrame.fill`
   - Alt-text enforcement still applies to gradient shapes
 - [ ] Write snapshot tests: PPTX XML output for a gradient shape (verify `<a:gradFill>` structure)
@@ -301,3 +301,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml`.
 | 1.2 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: removed pdf-writer direct dep (krilla=0.6.0 wraps it; direct dep causes version-skew risk per export-architecture v1.2); updated AC-004 PDF row and PDF task to use krilla paint::LinearGradient + Surface::set_fill + draw_path API; updated AC-004 PPTX row and PPTX task to use ooxmlsdk=0.6.1 typed builders for a:gradFill/a:gsLst/a:gs/a:lin; changed thiserror to {workspace=true} form (=2.0.18 per ADR-022). |
 | 1.3 | 2026-06-08 | product-owner | Adversary Pass-1 MED-001/MED-002/OBS-072-P1-001 fixes: (MED-002) corrected ALL unquoted gradient hex examples to quoted form (`"#FF0000"` not `#FF0000`) — lexer treats `#` as line-comment when unquoted, making unquoted examples unparseable; fixed in AC-001 DSL block, AC-001 prose, Tasks unit-test bullet, Test Strategy unit-test line, Test Strategy integration-test line; (MED-001) rewrote AC-002 to accurately describe two-step AST→IR reality: parser stores interim string in `ShapeNode.fill`, structural `FillSpec::Gradient` is constructed at the `ShapeNode→ShapeSpec` decode boundary; (OBS-001) added shape-pipeline-wiring dependency note in AC-002 clarifying STORY-072 scope (parser branch + structural FillSpec + 5 exporter renderers verified via constructed-ShapeSpec tests) vs. end-to-end DSL path blocked by pre-existing FU-SHAPE-PIPELINE-WIRING gap; updated Test Strategy integration-test to constructed-ShapeSpec form. |
 | 1.4 | 2026-06-08 | product-owner | Adversary Pass-2 MED-001 + AC-004 HTML correction: (MED-001 / TD-VSDD-059) AC-002 pipeline-wiring note rewritten to explicitly retract the claim that STORY-072 delivers item (b) the ShapeNode→ShapeSpec decode — exhaustive grep confirmed no production decoder exists for gradient or solid fills (`build_fill_spec` is `#[cfg(test)]` only); decode folded into FU-SHAPE-PIPELINE-WIRING deferral; clarified that constructed-ShapeSpec test verification BYPASSES the decode and does not exercise a production path. (AC-004 HTML) corrected HTML gradient output from CSS `background: linear-gradient(...)` to SVG-native `<defs><linearGradient>` + `fill="url(#sf-grad-...)"` on shape `<rect>` — CSS background does not paint SVG geometry; fixed in AC-004 table, Tasks HTML bullet, File Structure HTML row, and Test Strategy HTML assertion. |
+| 1.5 | 2026-06-08 | story-writer | Adversary Pass-3 MED-002: corrected interim `ShapeNode.fill` string representation from quoted form (`"gradient \"#FF0000\" to \"#0000FF\""`) to UNQUOTED canonical form (`gradient #FF0000 to #0000FF`) to match parser emit (`format!("gradient {from_s} to {to_s}")` — lexer already consumed the quotes) and the load-bearing pin test `test_bc_3_04_001_low001_gradient_fill_string_exact_format`. Fixed in AC-001 prose, AC-002 step-1 interim-string example, and Tasks unit-test bullet. DSL-input examples (`fill gradient "#FF0000" to "#0000FF"`) remain quoted — the user-facing syntax is unchanged; only the internal AST string is corrected. |
