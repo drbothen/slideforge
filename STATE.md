@@ -29,7 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "IN_PROGRESS — STORY-089 MERGED PR #68 (c722c28b); STORY-046 MERGED PR #70 (fa85d1136). 2 of 22 done. 20 stories / 106 pts remain. STORY-047 + STORY-081 UNLOCKED (←046). STORY-055 IN PROGRESS (L0, P0, 8pt) — rebasing onto fa85d1136, fixing Pass-1 findings."
+wave_5_status: "IN_PROGRESS — STORY-089 MERGED PR #68 (c722c28b); STORY-046 MERGED PR #70 (fa85d1136). 2 of 22 done. 20 stories / 106 pts remain. STORY-047 + STORY-081 UNLOCKED (←046). STORY-055 LOCAL CONVERGED (L0, P0, 8pt) — 3/3 strict-CLEAN (passes 5,6,7 of 7), HEAD fcdd1c55; demo + PR pending."
 develop_sha: "fa85d1136"
 develop_pr_count: 70
 error_taxonomy_version: "v2.24"
@@ -48,7 +48,7 @@ workspace_test_failures: 0
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04). Fresh machines: `git clone <repo> && git worktree add .factory factory-artifacts`.
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-046 MERGED PR #70 (fa85d1136). STORY-055 IN PROGRESS (L0, P0, 8pt) — rebasing onto fa85d1136, fixing Pass-1 findings. 20 stories / 106 pts remain.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-046 MERGED PR #70 (fa85d1136). STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN, passes 5-6-7 of 7; HEAD fcdd1c55) — demo + PR pending. 20 stories / 106 pts remain.
 
 **Wave 5 — 2 of 22 done; 20 stories / 106 pts remaining:**
 
@@ -56,7 +56,7 @@ workspace_test_failures: 0
 - **STORY-046 MERGED** PR #70 (fa85d1136): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. ADR-008 amended (P4 — real positioned HTML text layer + sibling `<svg role="presentation">` graphics; outer SVG NOT aria-hidden). BC-4.03.003 v1.4 (4-step heading chain + synthetic visually-hidden h1). HtmlExporter registered in root registry. 23-pass LOCAL cascade; 3/3 strict-CLEAN (passes 21-22-23). slideforge-html crate adds ~132 new tests. STORY-047 + STORY-081 UNLOCKED (←046).
 - **DEP-PREP MERGED** PR #69 (3e3a978f): [workspace.dependencies] centralized + ADR-022 major-version migrations + INERT Wave-5 catalog. ADR-022 migration tasks DONE.
 - **Uncertainty pass COMPLETE:** all 21 (now 20 remaining) stories spec-accurate. Ready to deliver.
-- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 055 (IN PROGRESS)/082/088/072/074/079/080. Unlock key 055 gates 5 downstream. Critical path: 047→056→059 (3 deep from current; 046 already merged). **STORY-055 IN PROGRESS** — produces all 4 formats now that HtmlExporter is registered.
+- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 055 (LOCAL CONVERGED — demo+PR pending)/082/088/072/074/079/080. Unlock key 055 gates 5 downstream (on merge). Critical path: 047→056→059 (3 deep from current; 046 already merged). **STORY-055 LOCAL CONVERGED** — 3/3 strict-CLEAN (passes 5-6-7 of 7); unified pipeline: compile_core + export_format; HEAD fcdd1c55.
 - **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story.
 - **SEC-001-DIAG-HARDENING (OPEN, non-blocking LOW):** unbounded user-authored strings in diagnostics. ANCHORED to future validator/diagnostic-hardening story.
 - **FU-SEC-001-GIT2-OPENSSL (OPEN, MEDIUM — NEW):** inert `git2` catalog entry with `features=["https"]` will pull `openssl-sys` (banned by deny.toml) when first consumed. MUST resolve before STORY-060/061. Anchored to STORY-060. See BACKLOG.md.
@@ -75,7 +75,7 @@ workspace_test_failures: 0
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 MERGED PR #68; STORY-046 MERGED PR #70; dep-prep MERGED PR #69. 20 stories / 106 pts remain. 89 stories / 553 pts total.
 
-- Active worktrees: STORY-055 (IN PROGRESS — rebasing onto fa85d1136 + fixing Pass-1 findings). Open PRs: 0.
+- Active worktrees: STORY-055 (LOCAL CONVERGED — demo + PR pending). Open PRs: 0.
 - Workspace: ~3629 pass, 18 skip (slideforge-html added ~132 html tests; known flaky: cold_budget tracked STORY-080).
 - Uncertainty pass: COMPLETE (all 21 stories spec-accurate; STORY-046 now delivered).
 - ADR-022 dep-centralization migrations: DONE (in develop). ADR-008 P4 amendment: DONE (in develop via STORY-046).
@@ -84,12 +84,12 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 
 
 ## NEXT ACTIONS
 
-**STATUS: Wave 5 IN PROGRESS. STORY-046 MERGED (PR #70, fa85d1136). STORY-055 IN PROGRESS. 20 stories / 106 pts remain. Full-width fan-out (up to 8 parallel) AUTHORIZED. DO NOT auto-pick — orchestrator/human decides launch order.**
+**STATUS: Wave 5 IN PROGRESS. STORY-046 MERGED (PR #70, fa85d1136). STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN; demo + PR pending). 20 stories / 106 pts remain. Full-width fan-out (up to 8 parallel) AUTHORIZED. DO NOT auto-pick — orchestrator/human decides launch order.**
 
 **Dependency levels — full table in BACKLOG.md WAVE5-DELIVERY:**
-- **L0 remaining (no intra-wave deps):** STORY-055 (E15,P0,8pt — IN PROGRESS), STORY-082 (E08,P0,5pt), STORY-088 (E02,P1,8pt), STORY-072 (E07,P2,3pt), STORY-074 (E07,P2,3pt), STORY-079 (E12,P2,3pt), STORY-080 (E19,P2,3pt).
+- **L0 remaining (no intra-wave deps):** STORY-055 (E15,P0,8pt — LOCAL CONVERGED; demo+PR pending), STORY-082 (E08,P0,5pt), STORY-088 (E02,P1,8pt), STORY-072 (E07,P2,3pt), STORY-074 (E07,P2,3pt), STORY-079 (E12,P2,3pt), STORY-080 (E19,P2,3pt).
 - **UNLOCKED by STORY-046 MERGE:** STORY-047 (P1,8pt,←046), STORY-081 (P0,13pt,←046) — ready to start in parallel with remaining L0.
-- **Unlock key remaining:** STORY-055 gates 5 L1 stories (057/058/060/064 + 056 via 047+055). Prioritize.
+- **Unlock key remaining:** STORY-055 gates 5 L1 stories (057/058/060/064 + 056 via 047+055). Prioritize demo+PR to unblock.
 - **Critical path:** 047→056→059 (3 deep from here). See BACKLOG.md for L1/L2/L3 full breakdown.
 - **BEFORE STORY-060/061:** resolve FU-SEC-001-GIT2-OPENSSL (openssl-sys ban — see BACKLOG.md).
 
@@ -127,17 +127,17 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop fa85d1136 (70 merged PRs). STORY-046 MERGED PR #70. STORY-055 IN PROGRESS. 20 stories / 106 pts remain.**
+**Wave 5 IN PROGRESS. develop fa85d1136 (70 merged PRs). STORY-046 MERGED PR #70. STORY-055 LOCAL CONVERGED — demo + PR pending. 20 stories / 106 pts remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-08 |
-| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). STORY-046 MERGED PR #70 (fa85d1136): Static HTML exporter, P4 Composite Rendering Model, ADR-008 P4 amendment, BC-4.03.003 v1.4, HtmlExporter registered. slideforge-html crate: ~132 new tests. STORY-047 + STORY-081 UNLOCKED. STORY-055 IN PROGRESS (L0, P0, 8pt) — rebasing onto fa85d1136, fixing Pass-1 findings. Dep-prep MERGED PR #69 (3e3a978f). Uncertainty pass COMPLETE. 20 stories/106 pts remain. |
+| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). STORY-046 MERGED PR #70 (fa85d1136): Static HTML exporter, P4 Composite Rendering Model, ADR-008 P4 amendment, BC-4.03.003 v1.4, HtmlExporter registered. slideforge-html ~132 new tests. STORY-047 + STORY-081 UNLOCKED. STORY-055 LOCAL CONVERGED (L0, P0, 8pt) — 3/3 strict-CLEAN (passes 5-6-7 of 7); HEAD fcdd1c55 rebased onto fa85d1136; unified pipeline (compile_core + export_format); demo + PR pending. Dep-prep MERGED PR #69 (3e3a978f). Uncertainty pass COMPLETE. 20 stories/106 pts remain. |
 | **develop SHA** | `fa85d1136` (70 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Active worktrees** | STORY-055 (IN PROGRESS — rebasing + Pass-1 fixes) |
+| **Active worktrees** | STORY-055 (LOCAL CONVERGED — demo + PR pending) |
 | **Workspace tests** | ~3629 pass / 18 skip (slideforge-html ~132 new tests; known flaky: cold_budget STORY-080) |
 | **factory-artifacts** | PUSHED to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-055 IN PROGRESS (rebase onto fa85d1136 + fix Pass-1 findings → produces all 4 formats now that HtmlExporter registered). STORY-047 + STORY-081 UNLOCKED (←046), ready to start. L0 remaining: 055/082/088/072/074/079/080. Prioritize 055 (unlocks 5 downstream). Full dep-graph L0–L3 table in BACKLOG.md WAVE5-DELIVERY. BEFORE 060/061: resolve FU-SEC-001-GIT2-OPENSSL. Open follow-ups: SEC-001-HARDENING, SEC-001-DIAG-HARDENING, STORY-046 LOW follow-ups (SEC-001 data:-scheme→STORY-047/048, SEC-002 npm-pin→STORY-047/048), usvg declared-but-unused + stale lib.rs doc (trivial — STORY-047 or doc sweep). Phases 4-7 remain for v1.0. |
+| **RESUME INSTRUCTION** | STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN; HEAD fcdd1c55 on feature/STORY-055; rebased onto fa85d1136). Next: dispatch demo-recorder then pr-manager for STORY-055. STORY-047 + STORY-081 UNLOCKED (←046), ready to start in parallel. L0 remaining: 055 (demo+PR)/082/088/072/074/079/080. STORY-055 merge unlocks 5 L1 downstream (057/058/060/064 + 056 via 047+055). Full dep-graph L0–L3 in BACKLOG.md WAVE5-DELIVERY. BEFORE 060/061: resolve FU-SEC-001-GIT2-OPENSSL. New follow-ups: FU-055-OFFLINE-FLAG (anchored STORY-021), FU-055-VARIANT-NOTE (traceability only), FU-055-JSON-HASFATAL-DOC (trivial prose). Phases 4-7 remain for v1.0. |
 
 ---
 
@@ -182,6 +182,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-08 | STORY-055-LOCAL-CONVERGED | STORY-055 (CLI: `slideforge build` + miette error rendering, EPIC-15, slideforge-cli) LOCAL adversarial cascade CONVERGED: 3/3 strict-CLEAN (passes 5, 6, 7); 7 total passes. Feature branch `feature/STORY-055` HEAD `fcdd1c55`, rebased onto develop `fa85d1136`. NOT YET MERGED — demo + PR pending. Key findings: CRIT-HTML (resolved by rebasing onto fa85d1136 — HtmlExporter now registered, 4-format default restored); C-1 (fabricated "STORY-091" deferral — adversary caught that `eval_deck_with_variant` IS implemented; `--variant` threaded through `CompileOptions`); HIGH-001 (validator span threading); HIGH-002 (multi-format duplicate diagnostics — unified pipeline); HIGH-003 (`--json total:1` hardcoded); HIGH-004 (`exit_code_to_u8` silent fallback); F-P2-MED-001 (non-fatal eval errors swallowed — `MultistageFailed` variant); MED-001 (all-or-nothing output atomicity); HIGH-P3-001/MED-P3-002 (source-order interleave — `diag_util` sort/dedup helper); OBS-P4-001..004 (eval dedup symmetry, JSON severity fidelity, pure `render_build_error_to_json_value`); LOW-001 (watch/init/extract-brand graceful not-implemented citing STORY-056/057). STRUCTURAL IMPROVEMENT: unified pipeline — `compile_core`/`compile_inner` is single canonical pipeline (parse→eval→brand→validate→layout); `build()`/`build_inner()` is thin adapter = `compile_core` + `export_format`. New public API: `compile()`, `export_format()`, `CompileOptions`, `CompiledDeck`. PROCESS LESSON (S-7.02 candidate, [process-gap]): orchestrator MUST independently verify implementer upstream-gap claims before accepting a deferral — fabricated "STORY-091" caught only by adversary absolute-path grep. Implementer self-disclosure of capability gaps is NOT authoritative. Open follow-ups (non-blocking): FU-055-OFFLINE-FLAG (--offline flag not threaded; anchor STORY-021), FU-055-VARIANT-NOTE (traceability), FU-055-JSON-HASFATAL-DOC (non-binding prose). Full detail: `.factory/cycles/STORY-055/convergence-summary.md`. |
 | 2026-06-08 | STORY-046-MERGE | PR #70 squash-merged → develop fa85d1136. Static HTML exporter (slideforge-html crate) via P4 Composite Rendering Model. 23-pass LOCAL adversarial convergence incl. rendering-model pivot: ADR-008 P4 amendment (slide text as positioned HTML; graphical frames in sibling `<svg role="presentation">`; Pass-3 ARIA correction — outer svg NOT aria-hidden), BC-4.03.003 v1.4 (Inv2, PC-6, PC-7 4-step heading chain + synthetic visually-hidden h1), STORY-046 v1.3. HtmlExporter REGISTERED in root registry (human-authorized HTML-seam decision). Fixed CI axe-core gate module-resolution bug. Security CLEAN (2 LOW follow-ups → STORY-047/048: SEC-001 data: scheme in SVG href, SEC-002 npm pin). pr-reviewer APPROVE. CI all-green (cold_budget flake re-run passed). Convergence detail: `.factory/cycles/STORY-046/convergence-summary.md`. |
 | 2026-06-08 | STORY-046-LOCAL-CONVERGED | STORY-046 (Static HTML Exporter, P4 Composite Rendering Model) LOCAL adversarial cascade CONVERGED: 3/3 strict-CLEAN (passes 21, 22, 23); 23 total passes. Feature branch `feature/STORY-046` HEAD `93cef9fb`. Key resolutions: ADR-008 amended (P4 model); BC-4.03.003 → v1.4; STORY-046 → v1.3; export-architecture updated; HtmlExporter registered in registry.rs (human-authorized HTML-seam decision 2026-06-08). LESSON-20 added (adversary spec paths). See `.factory/cycles/STORY-046/convergence-summary.md`. |
 | 2026-06-08 | WAVE5-DEP-PREP-MERGE | PR #69 squash-merged → develop 3e3a978f (69 merged PRs). Wave-5 dependency prep: [workspace.dependencies] centralized (ADR-022). Major-version migrations DONE: toml 0.8.23→1.1.2 (brand/data/math), sha2 0.10.9→0.11.0 (pptx/math; hybrid_array→[u8;32] boundary), criterion 0.5→0.8.2 (std::hint::black_box), notify 6.1.1→8.2.0, indexmap 2.10→2.14. INERT Wave-5 catalog entries added (tokio 1.52.3, reqwest 0.13.4, axum 0.8.9, crossterm 0.29.0, otel 0.32.0/otlp/sdk, tracing-opentelemetry 0.33.0, git2 0.21.0, tar 0.4.46, flate2 1.1.9, dirs 6.0.0, globset 0.4.18, hex 0.4.3, toml_edit 0.25.12, notify-debouncer-full 0.7.0). Security CLEAN; pr-reviewer APPROVE; CI green (cold_budget flake re-run passed). ADR-022 merged-crate migration tasks DONE. FU-SEC-001-GIT2-OPENSSL identified (NEW, MEDIUM): inert git2 https feature will pull openssl-sys (banned) when consumed — resolve before STORY-060/061. |
