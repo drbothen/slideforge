@@ -507,8 +507,8 @@ mod tests {
             .expect("fonts/MANIFEST.toml must be readable — asset audit file missing");
         // toml 1.x: `str::parse::<toml::Value>()` parses a single value expression,
         // not a document; use `toml::from_str` to parse the full TOML document.
-        let manifest: toml::Value = toml::from_str(&manifest_text)
-            .expect("fonts/MANIFEST.toml must be valid TOML");
+        let manifest: toml::Value =
+            toml::from_str(&manifest_text).expect("fonts/MANIFEST.toml must be valid TOML");
         let expected_sha256 = manifest["font"]["sha256"]
             .as_str()
             .expect("MANIFEST.toml [font].sha256 must be a string");
