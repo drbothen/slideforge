@@ -488,33 +488,76 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 
         match &frame.content {
             FrameContent::Chart { alt } => {
-                // MED-B3: frame_id is the 0-based index string; render_chart_frame
-                // builds the full label as sf-{slide_id}-{frame_id}.
-                let frame_id_str = frame_idx.to_string();
-                frame_idx += 1;
-                let alt_text = alt_text_str(alt);
+                // HIGH-1: branch on alt — decorative/unspecified frames MUST NOT emit
+                // role="img" with an empty <title> (WCAG 1.1.1 / axe-core svg-img-alt).
+                // BC-4.03.003 PC-6: role="img" is scoped to NON-decorative frames only.
                 let placeholder_svg =
                     r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
-                // WHEN real chart SVG is added (STORY-047/048) it MUST route through
-                // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
-                let chart_g =
-                    render_chart_frame(placeholder_svg, alt_text, &frame_id_str, slide_id);
-                let _ = write!(
-                    graphical_content,
-                    r#"<g transform="translate({x} {y})">{chart_g}</g>"#
-                );
+                match alt {
+                    AltText::Provided(text) => {
+                        // MED-B3: frame_id is the 0-based index string; render_chart_frame
+                        // builds the full label as sf-{slide_id}-{frame_id}.
+                        let frame_id_str = frame_idx.to_string();
+                        frame_idx += 1;
+                        // WHEN real chart SVG is added (STORY-047/048) it MUST route through
+                        // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
+                        let chart_g = render_chart_frame(
+                            placeholder_svg,
+                            text.as_ref(),
+                            &frame_id_str,
+                            slide_id,
+                        );
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g transform="translate({x} {y})">{chart_g}</g>"#
+                        );
+                    },
+                    AltText::Decorative | AltText::Unspecified => {
+                        // Decorative/unspecified: aria-hidden="true" on the <g>, NO role="img",
+                        // NO empty <title>. frame_idx NOT consumed (mirrors Image/Shape pattern).
+                        // SVG still routes through sanitize_svg_for_graphics_layer so
+                        // script/foreignObject/on*/javascript: stripping is preserved (HIGH-1).
+                        let sanitized = sanitize_svg_for_graphics_layer(placeholder_svg);
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g aria-hidden="true"><g transform="translate({x} {y})">{sanitized}</g></g>"#
+                        );
+                    },
+                }
             },
             FrameContent::Diagram { svg, alt } => {
-                let frame_id_str = frame_idx.to_string();
-                frame_idx += 1;
-                let alt_text = alt_text_str(alt);
-                // WHEN real diagram SVG is wired in (STORY-048) it MUST route through
-                // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
-                let chart_g = render_chart_frame(svg.as_str(), alt_text, &frame_id_str, slide_id);
-                let _ = write!(
-                    graphical_content,
-                    r#"<g transform="translate({x} {y})">{chart_g}</g>"#
-                );
+                // HIGH-1: branch on alt — decorative/unspecified frames MUST NOT emit
+                // role="img" with an empty <title> (WCAG 1.1.1 / axe-core svg-img-alt).
+                // BC-4.03.003 PC-6: role="img" is scoped to NON-decorative frames only.
+                match alt {
+                    AltText::Provided(text) => {
+                        let frame_id_str = frame_idx.to_string();
+                        frame_idx += 1;
+                        // WHEN real diagram SVG is wired in (STORY-048) it MUST route through
+                        // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
+                        let chart_g = render_chart_frame(
+                            svg.as_str(),
+                            text.as_ref(),
+                            &frame_id_str,
+                            slide_id,
+                        );
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g transform="translate({x} {y})">{chart_g}</g>"#
+                        );
+                    },
+                    AltText::Decorative | AltText::Unspecified => {
+                        // Decorative/unspecified: aria-hidden="true" on the <g>, NO role="img",
+                        // NO empty <title>. frame_idx NOT consumed (mirrors Image/Shape pattern).
+                        // SVG still routes through sanitize_svg_for_graphics_layer so
+                        // script/foreignObject/on*/javascript: stripping is preserved (HIGH-1).
+                        let sanitized = sanitize_svg_for_graphics_layer(svg.as_str());
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g aria-hidden="true"><g transform="translate({x} {y})">{sanitized}</g></g>"#
+                        );
+                    },
+                }
             },
             FrameContent::Image { alt } => {
                 // WHEN real image src/embedded SVG is added (STORY-047/048) it MUST
@@ -871,14 +914,6 @@ fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
             .starts_with("javascript:");
     }
     true
-}
-
-/// Extract alt text string from [`AltText`].
-fn alt_text_str(alt: &AltText) -> &str {
-    match alt {
-        AltText::Provided(text) => text.as_ref(),
-        AltText::Decorative | AltText::Unspecified => "",
-    }
 }
 
 /// Inject `<g role="img" aria-labelledby>` + `<title>` wrapper around an SVG string.
@@ -2859,6 +2894,384 @@ mod tests {
             result.contains(r#"<g aria-hidden="true""#),
             "B2: decorative frame must have <g aria-hidden=\"true\">; got: {result}"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-1 — decorative/unspecified Chart + Diagram must use aria-hidden, not
+    // empty role="img" (WCAG 1.1.1 / axe-core svg-img-alt / BC-4.03.003 PC-6).
+    //
+    // These tests cover every combination of {Chart,Diagram} × {Decorative,
+    // Unspecified} and verify:
+    //   - NO role="img" emitted
+    //   - NO <title> element emitted
+    //   - <g aria-hidden="true"> IS emitted
+    //   - SVG still routes through the sanitizer (script tags stripped)
+    //   - frame_idx NOT consumed for decorative frames
+    //   - Provided-alt Chart/Diagram regression: role="img" + <title> still present
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// HIGH-1: decorative Chart emits aria-hidden, no role="img", no empty <title>.
+    #[test]
+    fn test_HIGH1_decorative_chart_uses_aria_hidden_not_role_img() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Decorative,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-dec", &page_size);
+
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "HIGH-1: decorative Chart must emit aria-hidden=\"true\"; got: {result}"
+        );
+        assert!(
+            !result.contains(r#"role="img""#),
+            "HIGH-1: decorative Chart must NOT emit role=\"img\"; got: {result}"
+        );
+        assert!(
+            !result.contains("<title>"),
+            "HIGH-1: decorative Chart must NOT emit <title>; got: {result}"
+        );
+    }
+
+    /// HIGH-1: unspecified-alt Chart emits aria-hidden, no role="img", no empty <title>.
+    #[test]
+    fn test_HIGH1_unspecified_chart_uses_aria_hidden_not_role_img() {
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Unspecified,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-unspec", &page_size);
+
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "HIGH-1: unspecified Chart must emit aria-hidden=\"true\"; got: {result}"
+        );
+        assert!(
+            !result.contains(r#"role="img""#),
+            "HIGH-1: unspecified Chart must NOT emit role=\"img\"; got: {result}"
+        );
+        assert!(
+            !result.contains("<title>"),
+            "HIGH-1: unspecified Chart must NOT emit <title>; got: {result}"
+        );
+    }
+
+    /// HIGH-1: decorative Diagram emits aria-hidden, no role="img", no empty <title>.
+    #[test]
+    fn test_HIGH1_decorative_diagram_uses_aria_hidden_not_role_img() {
+        use slideforge_types::NormalizedDiagramSvg;
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>"#,
+        ));
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Diagram {
+                svg: normalized,
+                alt: AltText::Decorative,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-dec-diag", &page_size);
+
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "HIGH-1: decorative Diagram must emit aria-hidden=\"true\"; got: {result}"
+        );
+        assert!(
+            !result.contains(r#"role="img""#),
+            "HIGH-1: decorative Diagram must NOT emit role=\"img\"; got: {result}"
+        );
+        assert!(
+            !result.contains("<title>"),
+            "HIGH-1: decorative Diagram must NOT emit <title>; got: {result}"
+        );
+    }
+
+    /// HIGH-1: unspecified-alt Diagram emits aria-hidden, no role="img", no empty <title>.
+    #[test]
+    fn test_HIGH1_unspecified_diagram_uses_aria_hidden_not_role_img() {
+        use slideforge_types::NormalizedDiagramSvg;
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>"#,
+        ));
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Diagram {
+                svg: normalized,
+                alt: AltText::Unspecified,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-unspec-diag", &page_size);
+
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "HIGH-1: unspecified Diagram must emit aria-hidden=\"true\"; got: {result}"
+        );
+        assert!(
+            !result.contains(r#"role="img""#),
+            "HIGH-1: unspecified Diagram must NOT emit role=\"img\"; got: {result}"
+        );
+        assert!(
+            !result.contains("<title>"),
+            "HIGH-1: unspecified Diagram must NOT emit <title>; got: {result}"
+        );
+    }
+
+    /// HIGH-1 (regression): Provided-alt Chart still emits role="img" + non-empty <title>.
+    #[test]
+    fn test_HIGH1_provided_alt_chart_regression_still_has_role_img_and_title() {
+        use scraper::{Html, Selector};
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Revenue chart")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-prov-chart", &page_size);
+
+        let doc = Html::parse_fragment(&result);
+        let g_sel = Selector::parse(r#"g[role="img"]"#).expect("valid selector");
+        let title_sel = Selector::parse("title").expect("valid selector");
+
+        let g_nodes: Vec<_> = doc.select(&g_sel).collect();
+        assert_eq!(
+            g_nodes.len(),
+            1,
+            "HIGH-1 regression: provided-alt Chart must have exactly one <g role=\"img\">; got: {result}"
+        );
+        let title_nodes: Vec<_> = doc.select(&title_sel).collect();
+        assert_eq!(
+            title_nodes.len(),
+            1,
+            "HIGH-1 regression: provided-alt Chart must have exactly one <title>; got: {result}"
+        );
+        let title_text: String = title_nodes[0].text().collect();
+        assert!(
+            !title_text.trim().is_empty(),
+            "HIGH-1 regression: provided-alt Chart <title> must be non-empty; got: {result}"
+        );
+        assert_eq!(
+            title_text.trim(),
+            "Revenue chart",
+            "HIGH-1 regression: Chart <title> must equal the provided alt text; got: {title_text:?}"
+        );
+    }
+
+    /// HIGH-1 (regression): Provided-alt Diagram still emits role="img" + non-empty <title>.
+    #[test]
+    fn test_HIGH1_provided_alt_diagram_regression_still_has_role_img_and_title() {
+        use scraper::{Html, Selector};
+        use slideforge_types::NormalizedDiagramSvg;
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>"#,
+        ));
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Diagram {
+                svg: normalized,
+                alt: AltText::Provided(Arc::from("Architecture diagram")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-prov-diag", &page_size);
+
+        let doc = Html::parse_fragment(&result);
+        let g_sel = Selector::parse(r#"g[role="img"]"#).expect("valid selector");
+        let title_sel = Selector::parse("title").expect("valid selector");
+
+        let g_nodes: Vec<_> = doc.select(&g_sel).collect();
+        assert_eq!(
+            g_nodes.len(),
+            1,
+            "HIGH-1 regression: provided-alt Diagram must have exactly one <g role=\"img\">; got: {result}"
+        );
+        let title_nodes: Vec<_> = doc.select(&title_sel).collect();
+        assert_eq!(
+            title_nodes.len(),
+            1,
+            "HIGH-1 regression: provided-alt Diagram must have exactly one <title>; got: {result}"
+        );
+        let title_text: String = title_nodes[0].text().collect();
+        assert_eq!(
+            title_text.trim(),
+            "Architecture diagram",
+            "HIGH-1 regression: Diagram <title> must equal the provided alt text; got: {title_text:?}"
+        );
+    }
+
+    /// HIGH-1 (sanitizer): decorative Chart with embedded <script> — script is stripped.
+    ///
+    /// The decorative path MUST still route through sanitize_svg_for_graphics_layer
+    /// so XSS vectors are removed even when the frame is aria-hidden.
+    #[test]
+    fn test_HIGH1_decorative_chart_svg_still_sanitized_script_stripped() {
+        // The Chart arm uses a placeholder SVG — but we verify the Diagram arm
+        // with an attacker-controlled SVG containing a <script> tag to confirm
+        // sanitize_svg_for_graphics_layer is invoked on the decorative path.
+        use slideforge_types::NormalizedDiagramSvg;
+        let malicious_svg = Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="100" height="50"/></svg>"#,
+        );
+        let normalized = NormalizedDiagramSvg::from_normalized_string(malicious_svg);
+        let frames = vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Diagram {
+                svg: normalized,
+                alt: AltText::Decorative,
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-xss", &page_size);
+
+        // Must be aria-hidden (decorative path)
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "HIGH-1 sanitizer: decorative Diagram must be aria-hidden; got: {result}"
+        );
+        // <script> must be stripped even on the decorative path
+        assert!(
+            !result.to_lowercase().contains("<script"),
+            "HIGH-1 sanitizer: <script> must be stripped even in decorative/aria-hidden path; got: {result}"
+        );
+    }
+
+    /// HIGH-1 (frame_idx): decorative Chart does NOT consume a frame_idx slot.
+    ///
+    /// A provided-alt Chart after a decorative Chart must still get frame_idx=0,
+    /// not frame_idx=1 (decorative frames mirror Image/Shape pattern — no id assigned).
+    #[test]
+    fn test_HIGH1_decorative_chart_does_not_consume_frame_idx() {
+        let frames = vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(4_500_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Decorative,
+                },
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(4_600_000),
+                    y: Emu(0),
+                    width: Emu(4_500_000),
+                    height: Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("The real chart")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+        ];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-idx", &page_size);
+
+        // The provided-alt chart is the FIRST non-decorative frame → frame_idx = 0.
+        assert!(
+            result.contains("sf-slide-idx-0"),
+            "HIGH-1 frame_idx: first non-decorative Chart after a decorative one must get frame_idx=0; got: {result}"
+        );
+        // frame_idx=1 must NOT appear (would indicate decorative frame consumed an index).
+        assert!(
+            !result.contains("sf-slide-idx-1"),
+            "HIGH-1 frame_idx: decorative Chart must NOT consume a frame_idx slot; got: {result}"
+        );
+    }
+
+    /// HIGH-1 (invariant): no graphical arm may emit role="img" with an empty <title>.
+    ///
+    /// This sweeps ALL non-text FrameContent variants with Provided alt to verify
+    /// the accessible name is always non-empty when role="img" is present.
+    #[test]
+    fn test_HIGH1_invariant_no_role_img_with_empty_title_for_any_arm() {
+        use scraper::{Html, Selector};
+        use slideforge_layout::{FillSpec, ShapeFrame, ShapeType};
+        use slideforge_types::NormalizedDiagramSvg;
+
+        let normalized_svg = NormalizedDiagramSvg::from_normalized_string(Arc::from(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg>"#,
+        ));
+
+        let graphical_frames: Vec<Frame> = vec![
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Chart alt")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Diagram {
+                    svg: normalized_svg,
+                    alt: AltText::Provided(Arc::from("Diagram alt")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Image {
+                    alt: AltText::Provided(Arc::from("Image alt")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Shape(ShapeFrame {
+                    shape_type: ShapeType::Rect,
+                    fill: FillSpec::None,
+                    text: None,
+                    alt: AltText::Provided(Arc::from("Shape alt")),
+                }),
+                text_flow: None,
+                region_role: None,
+            },
+        ];
+
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&graphical_frames, "slide-inv", &page_size);
+
+        let doc = Html::parse_fragment(&result);
+        let title_sel = Selector::parse("title").expect("valid selector");
+
+        for title_node in doc.select(&title_sel) {
+            let title_text: String = title_node.text().collect();
+            assert!(
+                !title_text.trim().is_empty(),
+                "HIGH-1 invariant: every <title> inside a role=\"img\" element must be non-empty; got empty title in: {result}"
+            );
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
