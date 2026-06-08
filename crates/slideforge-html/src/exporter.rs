@@ -132,12 +132,16 @@ fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
     let len = slides.len();
     let mut levels = vec![HeadingLevel::H2; len];
 
-    // Step 1: first slide with slide_type == "title" AND a Title frame.
+    // Step 1: first slide with slide_type == "title" AND a renderable Title frame.
+    // Pass-14 / CRIT-1: the Title frame must be non-degenerate (is_non_degenerate_bbox)
+    // so that step 1 only selects a frame the render loop will actually emit.
+    // A degenerate-bbox Title frame is invisible; selecting it would assign H1 to a
+    // frame that render_text_frame silently skips → zero <h1> in the document.
     let h1_idx = slides.iter().position(|s| {
         s.slide_type_keyword.as_ref() == "title"
             && s.frames
                 .iter()
-                .any(|f| matches!(f.content, FrameContent::Title(_)))
+                .any(|f| matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox))
     });
     if let Some(idx) = h1_idx {
         levels[idx] = HeadingLevel::H1;
@@ -147,11 +151,12 @@ fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
         };
     }
 
-    // Step 2: first slide with any Title frame (regardless of slide_type).
+    // Step 2: first slide with any renderable Title frame (regardless of slide_type).
+    // Pass-14 / CRIT-1: same non-degenerate guard as step 1 (TD-VSDD-060).
     let h1_idx = slides.iter().position(|s| {
         s.frames
             .iter()
-            .any(|f| matches!(f.content, FrameContent::Title(_)))
+            .any(|f| matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox))
     });
     if let Some(idx) = h1_idx {
         levels[idx] = HeadingLevel::H1;
@@ -2558,6 +2563,309 @@ mod tests {
         assert!(
             !logs_contain("synthesizing"),
             "P10 regression: step-3 promote path must not emit synthesizing warn"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pass-14 / CRIT-1 — degenerate-bbox Title frame must NOT be selected as H1 source
+    //
+    // The heading-assignment steps 1 and 2 must apply the SAME non-degenerate-bbox
+    // guard that the render loop applies (is_non_degenerate_bbox).  A Title frame
+    // the render loop will skip (zero/negative width or height) must NOT be selected
+    // in step 1 or step 2.  If such a deck has NO other renderable Title frame and
+    // NO promotable text frame, it must fall through to step 4 → synthetic
+    // visually-hidden <h1>.
+    //
+    // has_title_frame (render.rs) must also use the renderable predicate so that
+    // the Subtitle / body-promotion logic is consistent with what the render loop
+    // actually emits.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Pass-14 / CRIT-1 / AC-008 / BC-4.03.003 PC-7:
+    ///
+    /// A title-type slide whose ONLY Title frame has a degenerate bbox (zero
+    /// width) must NOT be selected by step 1.  With no other renderable Title
+    /// frame and no promotable text frame, step 4 fires → exactly one NON-EMPTY
+    /// `<h1 class="sf-visually-hidden">` is synthesized; the synthesizing warn
+    /// is emitted.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_zero_width_title_frame_step1_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Title-type slide with a Title frame that has ZERO width (degenerate).
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate — zero width
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Title(Arc::from("Degenerate Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> in the whole document (the synthetic one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1: degenerate-Title (zero width) deck must produce exactly one <h1> (synthetic); \
+             got {}: {html}",
+            h1s.len()
+        );
+
+        // The synthetic <h1> must be NON-EMPTY.
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "CRIT-1: synthetic <h1> must be non-empty; got: {h1_text:?}"
+        );
+
+        // The synthetic <h1> must carry .sf-visually-hidden.
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            h1_classes.contains("sf-visually-hidden"),
+            "CRIT-1: synthetic <h1> must carry class sf-visually-hidden; got class={h1_classes:?}"
+        );
+
+        // The "synthesizing" warn must be emitted (step 4 path fired).
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1: synthesizing visually-hidden <h1> warn must be emitted for degenerate-Title deck"
+        );
+    }
+
+    /// Pass-14 / CRIT-1:
+    /// Same scenario but using a NEGATIVE HEIGHT Title frame — still degenerate.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_negative_height_title_frame_step1_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(-100_000), // degenerate — negative height
+                },
+                content: FrameContent::Title(Arc::from("Negative Height Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1: degenerate-Title (neg height) deck must produce exactly one <h1> (synthetic); \
+             got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1: synthesizing warn must be emitted for negative-height degenerate Title"
+        );
+    }
+
+    /// Pass-14 / CRIT-1 / Step-2 path:
+    ///
+    /// A non-title-type slide whose ONLY Title frame has a degenerate bbox (zero
+    /// height) must NOT be selected by step 2.  With no other renderable Title or
+    /// promotable text, step 4 fires → synthetic <h1>.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_zero_height_title_frame_step2_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Content-type (not "title") slide with a degenerate Title frame.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(0), // degenerate — zero height
+                },
+                content: FrameContent::Title(Arc::from("Degenerate Step2 Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1 step2: degenerate-Title (zero height) content-type slide must produce \
+             exactly one synthetic <h1>; got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1 step2: synthesizing warn must be emitted when only Title frame is degenerate"
+        );
+    }
+
+    /// Pass-14 / CRIT-1 / Multi-slide: first Title frame degenerate, second renderable.
+    ///
+    /// A two-slide deck where slide 0's Title frame is degenerate but slide 1's Title
+    /// frame is renderable: step 2 must select slide 1's Title frame as h1 source.
+    /// Slide 0 gets H2.  No synthetic h1.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_multi_slide_first_title_degenerate_second_renderable_h1_on_second() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Slide 0: content-type, degenerate Title frame.
+        let slide0 = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Title(Arc::from("Degenerate First")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        // Slide 1: content-type, renderable Title frame.
+        let slide1 = LaidOutSlide {
+            source_index: 1,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(457_200),
+                    y: slideforge_types::Emu(1_600_200),
+                    width: slideforge_types::Emu(8_229_600),
+                    height: slideforge_types::Emu(1_143_000),
+                },
+                content: FrameContent::Title(Arc::from("Renderable Second")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide0, slide1],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly ONE <h1> in the document, and it must contain "Renderable Second".
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1 multi: exactly one <h1> expected; got {}: {html}",
+            h1s.len()
+        );
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            h1_text.contains("Renderable Second"),
+            "CRIT-1 multi: <h1> must contain text from the renderable slide; got: {h1_text:?}"
+        );
+
+        // The h1 must NOT have sf-visually-hidden (it's a real rendered Title).
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            !h1_classes.contains("sf-visually-hidden"),
+            "CRIT-1 multi: renderable-Title h1 must not be synthetic; classes={h1_classes:?}"
+        );
+
+        // Slide 1 must be inside slide-2 article (source_index=1 → slide number 2).
+        let sel_slide2 = scraper::Selector::parse("#slide-2 h1").expect("valid selector");
+        assert!(
+            doc.select(&sel_slide2).next().is_some(),
+            "CRIT-1 multi: <h1> must live inside #slide-2 (the renderable slide); got: {html}"
         );
     }
 

@@ -737,10 +737,15 @@ pub fn render_slide_to_html(
     // LOW-1: Only Text/Bullets/Math blocks with non-empty content are promotable.
     // Table / ColorBar / Shape / empty-Body are NOT promotable and must never be
     // wrapped in <h1>. Non-promotable frames are rendered normally (not skipped).
+    // Pass-14 / CRIT-1: has_title_frame must use the SAME non-degenerate-bbox guard
+    // as compute_heading_levels steps 1/2 (TD-VSDD-060 / LESSON-19).
+    // A degenerate Title frame is invisible (render_text_frame returns None for it);
+    // counting it as a "title frame present" would incorrectly gate Subtitle as <h3>
+    // and suppress body-promotion, both inconsistent with what the render loop emits.
     let has_title_frame = slide
         .frames
         .iter()
-        .any(|f| matches!(f.content, FrameContent::Title(_)));
+        .any(|f| matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox));
     let needs_body_h1_promotion = heading_level == HeadingLevel::H1 && !has_title_frame;
     let mut body_h1_promoted = false;
 
