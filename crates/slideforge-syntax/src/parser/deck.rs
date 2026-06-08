@@ -65,7 +65,7 @@ fn to_span(ss: SimpleSpan, file_id: u32) -> Span {
 ///
 /// List literals `[item, item, ...]` produce [`FieldValue::List`]. Only string
 /// items are valid inside a list literal for `bullets:` and similar fields;
-/// non-string items (numbers, bools) emit an `E-PAR-015` diagnostic and are
+/// non-string items (numbers, bools) emit an `E-PAR-024` diagnostic and are
 /// converted to [`FieldValue::Error`] sentinels, but parsing continues so that
 /// all errors in the file are accumulated (BC-1.15.001 error-accumulation).
 ///
@@ -100,7 +100,7 @@ where
         };
 
         // List items: only template (string) items are valid for bullet-list fields.
-        // Non-string list items — integers, floats, and booleans — emit E-PAR-015
+        // Non-string list items — integers, floats, and booleans — emit E-PAR-024
         // (non-string list item) and are converted to FieldValue::Error sentinels so
         // that parsing continues to accumulate all errors (BC-1.15.001).
         //
@@ -112,14 +112,13 @@ where
                     // Template strings and (structurally possible) nested lists are valid.
                     FieldValue::Template(_) | FieldValue::List(_) => {},
                     _ => {
-                        // Non-string item: emit E-PAR-015 diagnostic.
+                        // Non-string item: emit E-PAR-024 diagnostic.
                         // The item is preserved as-is but the caller (list combinator)
                         // wraps it inside FieldValue::List — the diagnostic signals the error.
                         emitter.emit(Rich::custom(
                             item_span,
-                            "E-PAR-015: list items must be string literals. \
-                             Integers, floats, and booleans are not valid inside \
-                             a list literal used as a field value. \
+                            "E-PAR-024: non-string list item. \
+                             List items must be quoted string literals; got non-string value. \
                              Wrap the value in quotes to use it as a string."
                                 .to_string(),
                         ));
@@ -1637,5 +1636,360 @@ mod tests {
         assert_eq!(texts[0], "Alpha", "invariant: first item must be 'Alpha'");
         assert_eq!(texts[1], "Beta", "invariant: second item must be 'Beta'");
         assert_eq!(texts[2], "Gamma", "invariant: third item must be 'Gamma'");
+    }
+
+    // ── HIGH-1: bullets: [...] WITH COLON (spec-canonical form) ─────────────
+
+    /// BC-1.01.002 HIGH-1 — `bullets: ["A","B","C"]` (WITH colon separator, the
+    /// spec-canonical form) parses to `FieldValue::List` with 3 items and 0 errors.
+    ///
+    /// The DSL spec and AC-007 specify the colon form as canonical. This test
+    /// ensures the colon form (not just the no-colon form) is covered by unit tests.
+    ///
+    /// Both colon and no-colon forms produce identical AST nodes; both are accepted.
+    #[test]
+    fn test_bc_1_01_002_high1_bullets_colon_form_parses_to_field_value_list() {
+        // Spec-canonical form: `bullets: ["A","B","C"]` (WITH colon).
+        let src = concat!(
+            "slide content:\n",
+            "  title \"My Slide\"\n",
+            "  bullets: [\"A\", \"B\", \"C\"]\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(
+            lex_errs.is_empty(),
+            "HIGH-1: no lex errors expected for colon form; got: {lex_errs:?}"
+        );
+        assert_eq!(
+            parse_err_count, 0,
+            "HIGH-1: bullets: [...] (WITH colon) must produce 0 parse errors; \
+             got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("HIGH-1: deck must parse successfully");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("HIGH-1: expected BlockItem::Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("HIGH-1: 'bullets' field must be present");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "HIGH-1: bullets: [...] (WITH colon) must produce FieldValue::List; \
+                 got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            3,
+            "HIGH-1: colon-form list must have 3 items; got: {items:?}"
+        );
+        // Each item must be a FieldValue::Template wrapping a single Literal chunk.
+        for (i, item) in items.iter().enumerate() {
+            assert!(
+                matches!(item, FieldValue::Template(_)),
+                "HIGH-1: item[{i}] must be FieldValue::Template; got: {item:?}"
+            );
+        }
+    }
+
+    /// BC-1.01.002 HIGH-1 regression — the no-colon form `bullets ["A","B","C"]` must
+    /// still work after the colon-form acceptance is confirmed.
+    ///
+    /// Both forms produce identical AST nodes. This test is the regression guard
+    /// ensuring the no-colon path is not broken when the colon path is added.
+    #[test]
+    fn test_bc_1_01_002_high1_bullets_no_colon_form_still_parses() {
+        // No-colon form: `bullets ["A","B","C"]` (without colon).
+        let src = concat!(
+            "slide content:\n",
+            "  title \"My Slide\"\n",
+            "  bullets [\"A\", \"B\", \"C\"]\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(
+            lex_errs.is_empty(),
+            "HIGH-1 no-colon: no lex errors expected"
+        );
+        assert_eq!(
+            parse_err_count, 0,
+            "HIGH-1 no-colon: bullets [...] (WITHOUT colon) must still parse; \
+             got {parse_err_count} errors"
+        );
+        let deck = deck.expect("HIGH-1 no-colon: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("HIGH-1 no-colon: expected BlockItem::Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("HIGH-1 no-colon: 'bullets' field must be present");
+        assert!(
+            matches!(bullets_field.value.value(), FieldValue::List(_)),
+            "HIGH-1 no-colon: bullets [...] must still produce FieldValue::List; \
+             got: {:?}",
+            bullets_field.value.value()
+        );
+    }
+
+    // ── HIGH-2: @var ident = [...] unit tests ────────────────────────────────
+
+    /// BC-1.01.002 HIGH-2 (a) — `@var items = ["A","B","C"]` produces a
+    /// `VarsBlock` entry whose value is `FieldValue::List` with 3 items and 0 errors.
+    ///
+    /// This is the DIRECT unit test for `at_var_parser`. SID-1: a non-ignored
+    /// behavior must be driven by a unit test, not only by cross-crate E2E.
+    #[test]
+    fn test_bc_1_01_002_high2a_at_var_list_assignment_produces_fieldvalue_list() {
+        let src = concat!(
+            "@var items = [\"A\", \"B\", \"C\"]\n",
+            "slide content:\n",
+            "  title \"My Slide\"\n",
+        );
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(
+            lex_errs.is_empty(),
+            "HIGH-2a: no lex errors expected; got: {lex_errs:?}"
+        );
+        assert_eq!(
+            parse_err_count, 0,
+            "HIGH-2a: @var items = [...] must produce 0 parse errors; \
+             got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("HIGH-2a: deck must parse successfully");
+        assert_eq!(
+            deck.vars.len(),
+            1,
+            "HIGH-2a: deck must have 1 vars block (from @var)"
+        );
+        let vb = &deck.vars[0];
+        assert_eq!(vb.entries.len(), 1, "HIGH-2a: vars block must have 1 entry");
+
+        let (_name, value_spanned) = &vb.entries[0];
+        let FieldValue::List(items) = value_spanned.value() else {
+            panic!(
+                "HIGH-2a: @var items = [...] value must be FieldValue::List; got: {:?}",
+                value_spanned.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            3,
+            "HIGH-2a: @var list must have 3 items; got: {items:?}"
+        );
+        for (i, item) in items.iter().enumerate() {
+            assert!(
+                matches!(item, FieldValue::Template(_)),
+                "HIGH-2a: item[{i}] must be FieldValue::Template; got: {item:?}"
+            );
+        }
+    }
+
+    /// BC-1.01.002 HIGH-2 (b) — `@var content = ["x"]` where `content` is a
+    /// reserved slide-type keyword produces E-PAR-008.
+    ///
+    /// This is the DIRECT unit test for the keyword-collision branch of
+    /// `at_var_parser`. SID-1: the collision check is a non-ignored behavior
+    /// that must be driven by a unit test.
+    #[test]
+    fn test_bc_1_01_002_high2b_at_var_keyword_collision_emits_e_par_008() {
+        // `content` is a reserved slide-type keyword — @var content = [...] must
+        // emit E-PAR-008 (VarNameCollision).
+        let src = "@var content = [\"x\"]\n";
+        let file: std::sync::Arc<str> = std::sync::Arc::from("test.sf");
+        let (tokens, lex_errs) = crate::lexer::lex(src, file.clone());
+        assert!(lex_errs.is_empty(), "HIGH-2b: no lex errors expected");
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (_deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+        assert!(
+            !parse_errs.is_empty(),
+            "HIGH-2b: @var content = [...] must emit E-PAR-008 (content is a slide-type keyword); \
+             got 0 parse errors"
+        );
+        // Rich::custom reasons are accessible via format!("{:?}", e.reason()).
+        let has_e_par_008 = parse_errs
+            .iter()
+            .any(|e| format!("{:?}", e.reason()).contains("E-PAR-008"));
+        assert!(
+            has_e_par_008,
+            "HIGH-2b: @var content = [...] must emit E-PAR-008 for keyword collision; \
+             got errors: {parse_errs:?}"
+        );
+    }
+
+    // ── MED-1: AC-005/EC-005 strengthened to assert E-PAR-024 code ──────────
+
+    /// BC-1.01.002 MED-1 / AC-005 strengthened — `bullets [42, true]` produces
+    /// a diagnostic containing the code `E-PAR-024` (LESSON-14 load-bearing).
+    ///
+    /// This test is the load-bearing form of AC-005: it asserts the SPECIFIC error
+    /// code emitted, not merely that errors > 0. If the emitted code changes from
+    /// E-PAR-024 to something else, this test will fail.
+    #[test]
+    fn test_bc_1_01_002_med1_non_string_list_items_emit_e_par_024_code() {
+        let src = concat!("slide content:\n", "  bullets [42, true]\n");
+        let file: Arc<str> = Arc::from("test.sf");
+        let (tokens, lex_errs) = lex(src, file.clone());
+        assert!(lex_errs.is_empty(), "MED-1: no lex errors expected");
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (_deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+
+        assert!(
+            !parse_errs.is_empty(),
+            "MED-1: non-string list items [42, true] must produce ≥1 parse error; got 0"
+        );
+        // Rich::custom reasons are accessible via format!("{:?}", e.reason()).
+        let has_e_par_024 = parse_errs
+            .iter()
+            .any(|e| format!("{:?}", e.reason()).contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "MED-1: at least one error must contain 'E-PAR-024' for non-string list items; \
+             got: {parse_errs:?}"
+        );
+    }
+
+    /// BC-1.01.002 MED-1 / EC-005 strengthened — `bullets ["A", 42, "C"]`
+    /// (mixed types) must include `E-PAR-024` in the emitted diagnostics.
+    #[test]
+    fn test_bc_1_01_002_med1_mixed_type_list_emits_e_par_024_code() {
+        let src = concat!("slide content:\n", "  bullets [\"A\", 42, \"C\"]\n");
+        let file: Arc<str> = Arc::from("test.sf");
+        let (tokens, lex_errs) = lex(src, file.clone());
+        assert!(lex_errs.is_empty(), "MED-1 EC-005: no lex errors expected");
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (_deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+
+        assert!(
+            !parse_errs.is_empty(),
+            "MED-1 EC-005: mixed-type list [\"A\", 42, \"C\"] must produce ≥1 parse error; got 0"
+        );
+        // Rich::custom reasons are accessible via format!("{:?}", e.reason()).
+        let has_e_par_024 = parse_errs
+            .iter()
+            .any(|e| format!("{:?}", e.reason()).contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "MED-1 EC-005: at least one error must contain 'E-PAR-024'; \
+             got: {parse_errs:?}"
+        );
+    }
+
+    // ── MED-2: no-coercion test ──────────────────────────────────────────────
+
+    /// BC-1.01.002 MED-2 / Architecture Compliance Rule #3 — no implicit type
+    /// coercion: `bullets ["NO", "1.10"]` must produce `FieldValue::List` whose
+    /// item literals are EXACTLY the strings "NO" and "1.10" — not `Bool(false)`,
+    /// not `Float(1.1)`, not any normalized/coerced value.
+    ///
+    /// CLAUDE.md Forbidden Pattern: "Implicit type coercion (`NO` → bool, `1.10`
+    /// → float) — All values stay as-is; strings are strings (R3 finding)."
+    #[test]
+    fn test_bc_1_01_002_med2_no_coercion_of_string_literals_in_list() {
+        use crate::template::TemplateChunk;
+        // These look like a boolean and a float but are quoted strings — must NOT be coerced.
+        let src = concat!("slide content:\n", "  bullets [\"NO\", \"1.10\"]\n");
+        let (deck, lex_errs, parse_err_count) = parse_src(src);
+        assert!(lex_errs.is_empty(), "MED-2: no lex errors expected");
+        assert_eq!(
+            parse_err_count, 0,
+            "MED-2: quoted strings \"NO\" and \"1.10\" must parse without error; \
+             got {parse_err_count} errors"
+        );
+
+        let deck = deck.expect("MED-2: deck must parse");
+        let crate::ast::BlockItem::Slide(slide_spanned) = &deck.items[0] else {
+            panic!("MED-2: expected Slide");
+        };
+        let bullets_field = slide_spanned
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect("MED-2: 'bullets' field must exist");
+
+        let FieldValue::List(items) = bullets_field.value.value() else {
+            panic!(
+                "MED-2: bullets must be FieldValue::List; got: {:?}",
+                bullets_field.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "MED-2: list must have 2 items; got: {items:?}"
+        );
+
+        // Item 0: MUST be Template("NO"), NOT Bool(false).
+        let FieldValue::Template(chunks0) = &items[0] else {
+            panic!(
+                "MED-2: \"NO\" must be FieldValue::Template (not Bool/coerced); \
+                 got: {:?}. Architecture Rule: no implicit type coercion.",
+                items[0]
+            );
+        };
+        assert_eq!(chunks0.len(), 1, "MED-2: \"NO\" must have 1 chunk");
+        let TemplateChunk::Literal(s0) = &chunks0[0] else {
+            panic!("MED-2: \"NO\" chunk must be Literal; got: {:?}", chunks0[0]);
+        };
+        assert_eq!(
+            s0, "NO",
+            "MED-2: literal must be exactly \"NO\", not coerced"
+        );
+
+        // Item 1: MUST be Template("1.10"), NOT Float(1.1).
+        let FieldValue::Template(chunks1) = &items[1] else {
+            panic!(
+                "MED-2: \"1.10\" must be FieldValue::Template (not Float/coerced); \
+                 got: {:?}. Architecture Rule: no implicit type coercion.",
+                items[1]
+            );
+        };
+        assert_eq!(chunks1.len(), 1, "MED-2: \"1.10\" must have 1 chunk");
+        let TemplateChunk::Literal(s1) = &chunks1[0] else {
+            panic!(
+                "MED-2: \"1.10\" chunk must be Literal; got: {:?}",
+                chunks1[0]
+            );
+        };
+        assert_eq!(
+            s1, "1.10",
+            "MED-2: literal must be exactly \"1.10\", not coerced to float 1.1"
+        );
     }
 }

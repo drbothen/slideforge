@@ -1,24 +1,20 @@
 # STORY-088 fixture: content slide with a DIRECT list-literal bullets field.
 #
-# This fixture uses the primary new syntax delivered by STORY-088:
+# This fixture uses the spec-canonical colon form delivered by STORY-088:
 #
 #   bullets: ["Item A", "Item B", "Item C"]
 #
-# Unlike the STORY-086 fixture (story-086-bullets-slide.sf) which uses the
-# @var items = [...] / bullets: items binding form, this fixture uses the
-# inline list-literal form directly in the slide field.
+# The colon separator is the spec-canonical form per the DSL spec and AC-007.
+# The no-colon form (bullets ["Item A", ...]) is also accepted by the parser,
+# and is covered by unit tests in deck.rs and control_flow.rs.
 #
 # This fixture is used by:
 #   test_bc_1_01_002_ac007_direct_list_literal_bullets_produces_ge3_text_runs_pptx
 #   (crates/slideforge/tests/e2e/story_088_bullets_list_literal.rs)
-#
-# RED GATE: This fixture will NOT parse with the current parser — the field
-# value_parser() in deck.rs does not yet support [...]  list-literal tokens.
-# Parsing support is delivered in STORY-088.
 
 slideforge_version "1"
 lang "en-US"
 
 slide content:
   title "Agenda"
-  bullets ["Item A", "Item B", "Item C"]
+  bullets: ["Item A", "Item B", "Item C"]

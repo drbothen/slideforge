@@ -123,7 +123,7 @@ where
     };
 
     // List items: only template (string) items are valid for bullet-list fields.
-    // Non-string list items emit E-PAR-015 and continue (BC-1.15.001 error accumulation).
+    // Non-string list items emit E-PAR-024 and continue (BC-1.15.001 error accumulation).
     let list_item_tval = template_value().validate(
         move |(chunks, errs): (
             Vec<TemplateChunk>,
@@ -151,9 +151,8 @@ where
                 _ => {
                     emitter.emit(Rich::custom(
                         item_span,
-                        "E-PAR-015: list items must be string literals. \
-                         Integers, floats, and booleans are not valid inside \
-                         a list literal used as a field value. \
+                        "E-PAR-024: non-string list item. \
+                         List items must be quoted string literals; got non-string value. \
                          Wrap the value in quotes to use it as a string."
                             .to_string(),
                     ));
