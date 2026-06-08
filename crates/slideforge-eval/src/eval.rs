@@ -765,11 +765,11 @@ fn eval_section_nodes(
                 // combinator is present. Therefore this arm can only be reached via
                 // direct construction in tests — NOT via the parser.
                 //
-                // The `#[non_exhaustive]` on FieldValue means we must still handle
-                // it, but a silent `continue` without a diagnostic violates the
-                // no-silent-failure ban (F-077-P4-001). Per the adversary's direction
-                // (OBS-P8-B), we keep this arm explicit but document the impossibility
-                // clearly rather than adding a tracing::warn! for an unreachable path.
+                // `FieldValue` is NOT `#[non_exhaustive]` — exhaustiveness is
+                // compiler-enforced regardless. We keep this arm explicit to
+                // document the impossibility clearly, but do not add a
+                // tracing::warn! for a path that cannot be reached via the parser.
+                // Per the adversary's direction (OBS-P8-B).
                 continue;
             },
             slideforge_syntax::FieldValue::Error => {

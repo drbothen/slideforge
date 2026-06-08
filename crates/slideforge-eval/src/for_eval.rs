@@ -142,6 +142,8 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
 /// - [`slideforge_syntax::FieldValue::Ident`]: looked up in env.
 /// - [`slideforge_syntax::FieldValue::Error`]: skipped (error already in sink).
 /// - [`slideforge_syntax::FieldValue::Shape`]: stored as a block (future story).
+/// - [`slideforge_syntax::FieldValue::List`]: each item is evaluated recursively
+///   and collected into `Value::List` (STORY-088, implemented at ~line 300).
 ///
 /// Set-rule defaults (`set_rule_defaults`) are applied after explicit field
 /// evaluation: for each `(slide_type, field_name) -> default_value` entry, if

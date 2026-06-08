@@ -145,36 +145,40 @@ where
     };
     let list_item = list_item_tval.or(list_item_other).validate(
         move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
-            match &item {
-                // Template strings and (structurally possible) nested lists are valid.
-                FieldValue::Template(_) | FieldValue::List(_) => (item, item_span),
-                _ => {
-                    // Non-string item: map to a human-readable type name and emit
-                    // E-PAR-024 with the actual type substituted for <type>
-                    // (error-taxonomy v2.27 §E-PAR-024 binding format).
-                    let type_name = match &item {
-                        FieldValue::Num(_) => "integer",
-                        FieldValue::Float(_) => "decimal number",
-                        FieldValue::Bool(_) => "boolean",
-                        FieldValue::Ident(_) => "bare word",
-                        FieldValue::Shape(_) => "shape block",
-                        // Error sentinel from a nested recovery path — already reported.
-                        FieldValue::Error => "error sentinel",
-                        // Template and List are matched in the outer arm above.
-                        FieldValue::Template(_) | FieldValue::List(_) => unreachable!(),
-                    };
-                    emitter.emit(Rich::custom(
-                        item_span,
-                        format!(
-                            "E-PAR-024: non-string list item. \
-                             List items must be quoted string literals; got {type_name}. \
-                             Wrap the value in quotes to use it as a string."
-                        ),
-                    ));
-                    // Substitute FieldValue::Error so the evaluator's --warn-only
-                    // path skips this item rather than coercing it to a wrong value.
-                    (FieldValue::Error, item_span)
-                },
+            // Only template strings (quoted string literals) are valid list items.
+            // Nested lists are NOT in scope (STORY-088 spec, line ~185);
+            // silently accepting them would violate the no-silent-failure ban.
+            if let FieldValue::Template(_) = &item {
+                (item, item_span)
+            } else {
+                // Non-string item: map to a human-readable type name and emit
+                // E-PAR-024 with the actual type substituted for <type>
+                // (error-taxonomy v2.27 §E-PAR-024 binding format).
+                let type_name = match &item {
+                    FieldValue::Num(_) => "integer",
+                    FieldValue::Float(_) => "decimal number",
+                    FieldValue::Bool(_) => "boolean",
+                    FieldValue::Ident(_) => "bare word",
+                    FieldValue::Shape(_) => "shape block",
+                    // Error sentinel from a nested recovery path — already reported.
+                    FieldValue::Error => "error sentinel",
+                    // Nested list literals are out of scope (STORY-088 spec);
+                    // reject them explicitly so no items are silently dropped.
+                    FieldValue::List(_) => "nested list",
+                    // Template is matched in the outer arm above.
+                    FieldValue::Template(_) => unreachable!(),
+                };
+                emitter.emit(Rich::custom(
+                    item_span,
+                    format!(
+                        "E-PAR-024: non-string list item. \
+                         List items must be quoted string literals; got {type_name}. \
+                         Wrap the value in quotes to use it as a string."
+                    ),
+                ));
+                // Substitute FieldValue::Error so the evaluator's --warn-only
+                // path skips this item rather than coercing it to a wrong value.
+                (FieldValue::Error, item_span)
             }
         },
     );
@@ -1558,6 +1562,71 @@ mod tests {
             has_bare_word,
             "MED-001c (cf): E-PAR-024 message for bullets [someident] must contain 'bare word' \
              (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    // ── MED-P3-001 (Pass-3, cf path): nested list literal → rejected (not silently accepted) ──
+    //
+    // Same requirement as deck.rs MED-P3-001 but exercising the control_flow
+    // parser path (`slide_body` / `field_line_cf` / `@for`-context list).
+    //
+    // Parser behavior: `[["A"]]` is rejected at the grammar level because `[`
+    // (LBracket) is not a valid token for any list-item alternative. The
+    // `FieldValue::List(_) => "nested list"` arm in the validate hook is
+    // defense-in-depth for direct AST construction; the grammar-level
+    // rejection is the first line of enforcement.
+
+    /// MED-P3-001 (cf path) — `bullets [["A"]]` inside a slide body → ≥1 parse
+    /// error (NOT silently accepted).
+    ///
+    /// Load-bearing: enforces flat-only list scope at the control-flow parser
+    /// path. Verifies the silent-failure ban.
+    #[test]
+    fn test_bc_1_01_002_med_p3_001_cf_nested_list_item_is_not_silently_accepted() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-P3-001 (cf): bullets [[\"A\"]] must produce ≥1 parse error; got 0. \
+             Nested list literals are out of scope (STORY-088 spec); they must be rejected, \
+             not silently accepted as valid."
+        );
+        // The grammar-level rejection produces an ExpectedFound (LBracket not
+        // expected as a list item token). This confirms nested lists are not
+        // silently accepted.
+        let has_lbracket_rejection = errors.iter().any(|msg| {
+            msg.contains("LBracket") || msg.contains("E-PAR-024") || msg.contains("nested")
+        });
+        assert!(
+            has_lbracket_rejection,
+            "MED-P3-001 (cf): error for bullets [[\"A\"]] must reference the rejected \
+             nested bracket token or E-PAR-024; got errors: {errors:?}"
+        );
+    }
+
+    // ── MED-P3-002 (Pass-3, cf path): float list item → E-PAR-024 ────────────
+    //
+    // `bullets [1.5]` lexes to FloatLit → FieldValue::Float(1.5). The
+    // `FieldValue::Float(_) => "decimal number"` branch was untested at this site.
+
+    /// MED-P3-002 (cf path) — `bullets [1.5]` inside a slide body → ≥1 error
+    /// containing `"decimal number"`.
+    ///
+    /// Load-bearing: exercises the `FieldValue::Float(_) => "decimal number"` arm
+    /// in the control-flow `list_item` validator.
+    #[test]
+    fn test_bc_1_01_002_med_p3_002_cf_float_item_produces_e_par_024_decimal_number() {
+        let src = concat!("slide content:\n", "  bullets [1.5]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-P3-002 (cf): bullets [1.5] must produce ≥1 parse error; got 0"
+        );
+        let has_decimal = errors.iter().any(|msg| msg.contains("decimal number"));
+        assert!(
+            has_decimal,
+            "MED-P3-002 (cf): E-PAR-024 message for bullets [1.5] must contain \
+             'decimal number'; got errors: {errors:?}"
         );
     }
 }
