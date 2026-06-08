@@ -580,6 +580,48 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
     )
 }
 
+/// Extract the PHRASING content of the first promotable block in a `Body` frame
+/// for body-only `<h1>` promotion (F-P9-001 / AC-001 / BC-4.03.003 PC-7).
+///
+/// HTML5 heading content model is PHRASING CONTENT only — `<p>`, `<ul>`,
+/// `<ol>`, and `<table>` are FLOW content and are invalid inside `<h1>`.
+/// This function extracts inline/phrasing HTML only:
+///
+/// - `Text` block → inline nodes of the first non-empty `Text` block
+///   (no `<p>` wrapper)
+/// - `Bullets` block → inline nodes of the FIRST bullet item of the first
+///   `Bullets` block (no `<ul>`/`<li>` wrapper)
+/// - `Math` block → `<code class="math">...</code>` (phrasing element)
+///
+/// If no promotable block is found, returns an empty string (the caller's
+/// `is_promotable` guard prevents this case in practice).
+#[must_use]
+fn promote_body_blocks_to_phrasing(blocks: &[ContentBlock]) -> String {
+    for block in blocks {
+        match block {
+            ContentBlock::Text(text_block) if !text_block.inlines.is_empty() => {
+                // Text block: render inline nodes directly — no <p> wrapper.
+                return render_inline_nodes(&text_block.inlines);
+            },
+            ContentBlock::Bullets(items) if !items.is_empty() => {
+                // Bullets block: use only the FIRST item's inline content.
+                // A heading cannot contain a list; extract phrasing only.
+                return render_inline_nodes(&items[0].inlines);
+            },
+            ContentBlock::Math(math_node) => {
+                // Math block: inline <code class="math"> is phrasing content.
+                return format!(
+                    "<code class=\"math\">{}</code>",
+                    html_escape::encode_text(&math_node.latex)
+                );
+            },
+            // Non-promotable or empty variants: skip and try next block.
+            _ => {},
+        }
+    }
+    String::new()
+}
+
 /// Render a single slide to an HTML fragment string (P4 Composite Rendering Model).
 ///
 /// The returned `String` is a self-contained HTML fragment representing one slide:
@@ -699,7 +741,12 @@ pub fn render_slide_to_html(
                 );
                 let inner = match &frame.content {
                     FrameContent::Body(blocks) => {
-                        blocks.iter().map(render_content_block).collect::<String>()
+                        // F-P9-001: extract PHRASING content only — the first
+                        // promotable block's inline nodes. HTML5 heading content
+                        // model forbids <p>/<ul>/<table> (flow content) inside
+                        // <h1>. render_content_block emits block-level elements;
+                        // promote_body_blocks_to_phrasing extracts inlines only.
+                        promote_body_blocks_to_phrasing(blocks)
                     },
                     FrameContent::TextRun(nodes) => render_inline_nodes(nodes),
                     _ => unreachable!("is_promotable guard above"),
@@ -3064,5 +3111,124 @@ mod tests {
         let page_size = make_page_size();
         let result = render_slide_to_html(&slide, &brand, HeadingLevel::H2, &page_size);
         insta::assert_snapshot!("chart_slide_html", result);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-P9-001 — Body-frame h1 promotion must emit PHRASING content only.
+    // A <h1> content model is phrasing content; <p>/<ul>/<table> are flow
+    // content and are INVALID inside <h1> (HTML5 conformance, AC-001).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-P9-001 / AC-001 — bullets-only deck (no Title frame): step-3 promotion
+    /// must NOT wrap a `<ul>` inside `<h1>`.
+    ///
+    /// When the first promotable block is `Bullets`, the first bullet item's
+    /// inline content is extracted and placed directly inside `<h1>` — no
+    /// `<ul>` or `<li>` descendants.
+    #[test]
+    fn test_F_P9_001_body_bullets_promotion_h1_has_no_ul_child() {
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        let bullet_text = "First bullet heading";
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Body(vec![ContentBlock::Bullets(vec![BulletItem {
+                    inlines: vec![InlineNode::Plain(Arc::from(bullet_text))],
+                    children: vec![],
+                    span: SourceSpan::default(),
+                }])]),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // H1 + no Title frame = step-3 body promotion.
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+
+        // <h1> must exist.
+        let h1_sel = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_nodes: Vec<_> = doc.select(&h1_sel).collect();
+        assert_eq!(h1_nodes.len(), 1, "F-P9-001: exactly one <h1> must be present; got: {result}");
+
+        // <h1> must NOT contain <ul>.
+        let ul_in_h1_sel = scraper::Selector::parse("h1 ul").expect("valid selector");
+        assert_eq!(
+            doc.select(&ul_in_h1_sel).count(),
+            0,
+            "F-P9-001: <h1> must not contain <ul> (invalid HTML5 nesting); got: {result}"
+        );
+
+        // <h1> must NOT contain <li>.
+        let li_in_h1_sel = scraper::Selector::parse("h1 li").expect("valid selector");
+        assert_eq!(
+            doc.select(&li_in_h1_sel).count(),
+            0,
+            "F-P9-001: <h1> must not contain <li> (invalid HTML5 nesting); got: {result}"
+        );
+
+        // The <h1> text content must equal the first bullet's text.
+        let h1_text: String = h1_nodes[0].text().collect();
+        assert_eq!(
+            h1_text.trim(),
+            bullet_text,
+            "F-P9-001: <h1> text must equal first bullet's text; got: {:?}", h1_text
+        );
+    }
+
+    /// F-P9-001 / AC-001 — paragraph-only deck (no Title frame): step-3 promotion
+    /// must NOT wrap a `<p>` inside `<h1>`.
+    ///
+    /// When the first promotable block is `Text`, the block's inline content is
+    /// extracted and placed directly inside `<h1>` — no `<p>` descendant.
+    #[test]
+    fn test_F_P9_001_body_text_promotion_h1_has_no_p_child() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+
+        let paragraph_text = "This is the page heading from a text block";
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(paragraph_text))],
+                    tag: TextTag::Untagged,
+                    span: SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // H1 + no Title frame = step-3 body promotion.
+        let result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+
+        // <h1> must exist.
+        let h1_sel = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_nodes: Vec<_> = doc.select(&h1_sel).collect();
+        assert_eq!(h1_nodes.len(), 1, "F-P9-001: exactly one <h1> must be present; got: {result}");
+
+        // <h1> must NOT contain <p>.
+        let p_in_h1_sel = scraper::Selector::parse("h1 p").expect("valid selector");
+        assert_eq!(
+            doc.select(&p_in_h1_sel).count(),
+            0,
+            "F-P9-001: <h1> must not contain <p> (invalid HTML5 nesting); got: {result}"
+        );
+
+        // The <h1> text content must equal the paragraph's text.
+        let h1_text: String = h1_nodes[0].text().collect();
+        assert_eq!(
+            h1_text.trim(),
+            paragraph_text,
+            "F-P9-001: <h1> text must equal first text block's text; got: {:?}", h1_text
+        );
     }
 }
