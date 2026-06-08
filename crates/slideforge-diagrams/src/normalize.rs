@@ -70,6 +70,76 @@ use tracing::instrument;
 use crate::types::{DiagramError, NormalizedDiagramSvg, RawDiagramSvg};
 use crate::xml_escape::{xml_attr_escape, xml_text_escape};
 
+/// Maximum byte length accepted by [`usvg_normalize`].
+///
+/// 50 MiB is a generous ceiling for any real SVG produced by `mermaid-rs-renderer`.
+/// Inputs larger than this are rejected before calling `usvg::Tree::from_str` to
+/// prevent heap-memory exhaustion.
+///
+/// **SEC-002 (CWE-400):** Size exceeded → [`DiagramError::SvgNormalizationFailed`]
+/// with error code `E-EXP-004`.
+///
+/// **Invariant:** This value MUST equal `MAX_SVG_BYTES` in
+/// `crates/slideforge-pdf/src/svg_embed.rs`. Both constants enforce the same
+/// security policy at different pipeline stages (defense-in-depth). If one is
+/// changed, the other MUST be updated in the same commit.
+const MAX_SVG_BYTES: usize = 50 * 1024 * 1024;
+
+/// Check that an SVG byte length is within the accepted limit.
+///
+/// This pure helper encapsulates the SEC-002 byte-size boundary check so it
+/// can be independently unit-tested at the exact boundary (`== MAX_SVG_BYTES`
+/// → `Ok`, `== MAX_SVG_BYTES + 1` → `Err`) without allocating a full 50 MiB
+/// document. `usvg_normalize` delegates to this helper before calling any
+/// allocation-heavy code.
+///
+/// # Errors
+///
+/// Returns `Err(DiagramError::SvgNormalizationFailed)` with error code
+/// `E-EXP-004` when `len > MAX_SVG_BYTES`. The `cause` field contains the
+/// actual byte count and the limit. Returns `Ok(())` for `len == MAX_SVG_BYTES`
+/// (exclusive boundary — the limit is exact-pass).
+///
+/// `slide_title` is forwarded into the error for operator diagnostics.
+fn check_svg_size(len: usize, slide_title: &str) -> Result<(), DiagramError> {
+    if len > MAX_SVG_BYTES {
+        tracing::warn!(
+            bytes = len,
+            limit = MAX_SVG_BYTES,
+            "usvg_normalize: SVG rejected — exceeds size cap"
+        );
+        return Err(DiagramError::SvgNormalizationFailed {
+            slide_title: Arc::from(slide_title),
+            cause: Arc::from(
+                format!("SVG input too large: {len} bytes exceeds the {MAX_SVG_BYTES}-byte limit")
+                    .as_str(),
+            ),
+            span: SourceSpan::from(0..0),
+        });
+    }
+    Ok(())
+}
+
+/// Maximum `<g>` group nesting depth accepted by [`usvg_normalize`].
+///
+/// SVGs with deeply nested `<g>` elements can exhaust stack space during tree
+/// traversal. 64 levels is far beyond any legitimate Mermaid diagram or chart
+/// output (real-world SVGs from mermaid rarely exceed 5–10 levels) and provides
+/// a safe hard ceiling.
+///
+/// The depth scan MUST be iterative (stack-based DFS over the parsed
+/// `usvg::Tree`), NOT recursive — a recursive implementation would replace one
+/// stack-exhaustion path with another.
+///
+/// **SEC-001 (CWE-674):** Depth exceeded → [`DiagramError::SvgNormalizationFailed`]
+/// with error code `E-EXP-004`.
+///
+/// **Invariant:** This value MUST equal `MAX_SVG_NESTING_DEPTH` in
+/// `crates/slideforge-pdf/src/svg_embed.rs`. Both constants enforce the same
+/// security policy at different pipeline stages (defense-in-depth). If one is
+/// changed, the other MUST be updated in the same commit.
+const MAX_SVG_NESTING_DEPTH: usize = 64;
+
 /// Lazily-initialized system font database for usvg text normalization.
 ///
 /// Loading system fonts is expensive (50–300ms depending on platform). This
@@ -174,6 +244,16 @@ pub fn usvg_normalize(
     raw: &RawDiagramSvg,
     slide_title: &str,
 ) -> Result<NormalizedDiagramSvg, DiagramError> {
+    // SEC-002 (CWE-400): byte-size guard — reject oversized input BEFORE any
+    // allocation-heavy parse or font-DB load. A pathologically large SVG payload
+    // from a compromised mermaid renderer or malicious @data source could
+    // exhaust heap memory if passed to usvg::Tree::from_str. The check fires on
+    // the raw byte length before touching the font database.
+    //
+    // Delegated to `check_svg_size` so the boundary can be independently
+    // unit-tested (EC-005 / EC-006 exact-boundary coverage).
+    check_svg_size(raw.as_str().len(), slide_title)?;
+
     // Build usvg options, always loading the system font database.
     //
     // System fonts are required so that usvg preserves <text> elements as text
@@ -320,6 +400,53 @@ pub fn usvg_normalize(
             span,
         }
     })?;
+
+    // SEC-001 (CWE-674): iterative nesting-depth guard — scan the parsed usvg
+    // Tree for excessive <g> Group nesting BEFORE re-serialization. A recursive
+    // scan would replace one stack-exhaustion path with another; this
+    // implementation uses an explicit heap-allocated stack (iterative DFS).
+    //
+    // usvg 0.47.0 preserves source <g> nesting 1:1 in the parsed Tree (dummy-group
+    // removal was dropped in usvg 0.30.0), so counting Group depth in the Tree is
+    // equivalent to counting raw <g> depth. (per export-architecture v1.2)
+    //
+    // Root `Tree::root()` is itself a Group and counts as depth 1. Each nested
+    // child `Node::Group` increments the depth counter. Nodes other than Group
+    // (Path, Image, Text) are leaves and do not increase nesting depth.
+    {
+        let mut max_depth: usize = 0;
+        // Stack items: (group reference, current depth).
+        // Root group is depth 1.
+        let mut stack: Vec<(&usvg::Group, usize)> = vec![(tree.root(), 1)];
+        while let Some((group, depth)) = stack.pop() {
+            if depth > max_depth {
+                max_depth = depth;
+            }
+            for child in group.children() {
+                if let usvg::Node::Group(child_group) = child {
+                    stack.push((child_group, depth + 1));
+                }
+            }
+        }
+        if max_depth > MAX_SVG_NESTING_DEPTH {
+            tracing::warn!(
+                depth = max_depth,
+                limit = MAX_SVG_NESTING_DEPTH,
+                "usvg_normalize: SVG rejected — exceeds nesting depth cap"
+            );
+            return Err(DiagramError::SvgNormalizationFailed {
+                slide_title: Arc::from(slide_title),
+                cause: Arc::from(
+                    format!(
+                        "SVG group nesting depth {max_depth} exceeds the \
+                         {MAX_SVG_NESTING_DEPTH}-level limit; possible DoS input"
+                    )
+                    .as_str(),
+                ),
+                span: SourceSpan::from(0..0),
+            });
+        }
+    }
 
     // Re-serialize the parsed tree back to SVG. This produces a normalized
     // form with all usvg guarantees applied (no foreignObject, no script,
@@ -1408,5 +1535,372 @@ mod tests {
         let normalized = usvg_normalize(&raw, "snapshot-test")
             .expect("usvg_normalize must succeed for simple_geometry_svg fixture");
         insta::assert_snapshot!(normalized.as_str());
+    }
+
+    // -----------------------------------------------------------------------
+    // STORY-079: DoS hardening tests (Red Gate — guards not yet implemented)
+    //
+    // These three tests exercise the two new security invariants added by
+    // STORY-079 to BC-1.12.003 postcondition 7:
+    //
+    //   SEC-002 (CWE-400): byte-size cap — reject before usvg::Tree::from_str
+    //   SEC-001 (CWE-674): nesting-depth cap — reject after parse, before re-serial
+    //
+    // All three tests MUST FAIL before the implementation guards are added to
+    // `usvg_normalize`. They are the Red Gate for STORY-079.
+    //
+    // Test naming: test_BC_S_SS_NNN_xxx pattern (BC-1.12.003, ACs 001–003).
+    // -----------------------------------------------------------------------
+
+    /// AC-001 / SEC-002 (CWE-400): An SVG whose byte length exceeds
+    /// `MAX_SVG_BYTES` (50 MiB + 1 byte) MUST be rejected by `usvg_normalize`
+    /// with `Err(DiagramError::SvgNormalizationFailed)` BEFORE calling
+    /// `usvg::Tree::from_str`. The error display string MUST contain "E-EXP-004"
+    /// and the `cause` field MUST mention both the actual byte count and the limit.
+    ///
+    /// Non-vacuity: the test constructs exactly `MAX_SVG_BYTES + 1` bytes of
+    /// well-formed SVG padding so the guard fires on size, not on parse failure.
+    ///
+    /// ## Red Gate expectation
+    ///
+    /// Without the size guard in `usvg_normalize`, the oversized SVG is passed
+    /// directly to `usvg::Tree::from_str`. usvg will either succeed (returning
+    /// `Ok`) or fail with a parse error whose `cause` string does NOT contain the
+    /// size-cap message. Either outcome means this test FAILS — proving the Red Gate.
+    #[test]
+    fn test_bc_1_12_003_sec_dos_svg_oversize_rejected() {
+        // Construct exactly MAX_SVG_BYTES + 1 bytes of well-formed SVG.
+        // The SVG is syntactically valid XML so usvg would normally parse it —
+        // the guard must fire on byte length BEFORE the parse attempt.
+        // Technique from Previous Story Intelligence (STORY-043): pad with spaces
+        // inside the root element so the total byte length crosses the threshold
+        // without making the SVG unparseable.
+        let prefix = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">";
+        let suffix = b"</svg>";
+        let padding_needed = (MAX_SVG_BYTES + 1)
+            .checked_sub(prefix.len() + suffix.len())
+            .expect("MAX_SVG_BYTES is large enough that prefix+suffix < limit");
+        let svg = format!(
+            "{}{}{}",
+            std::str::from_utf8(prefix).unwrap(),
+            " ".repeat(padding_needed),
+            std::str::from_utf8(suffix).unwrap()
+        );
+        assert_eq!(
+            svg.len(),
+            MAX_SVG_BYTES + 1,
+            "test fixture must be exactly MAX_SVG_BYTES+1 bytes; \
+             actual: {} bytes (expected: {})",
+            svg.len(),
+            MAX_SVG_BYTES + 1
+        );
+
+        let raw = RawDiagramSvg(svg);
+        let result = usvg_normalize(&raw, "oversize-diagram");
+
+        // The result MUST be Err — not Ok.
+        let err = result.expect_err(
+            "usvg_normalize MUST reject SVG > MAX_SVG_BYTES with Err(SvgNormalizationFailed); \
+             got Ok — the size guard is not yet implemented (Red Gate)",
+        );
+
+        // The error MUST be SvgNormalizationFailed (not a different variant).
+        assert!(
+            matches!(err, DiagramError::SvgNormalizationFailed { .. }),
+            "error must be SvgNormalizationFailed; got: {err:?}"
+        );
+
+        // The error display string MUST contain E-EXP-004.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-EXP-004"),
+            "error display must contain 'E-EXP-004'; got: {msg}"
+        );
+
+        // The cause field MUST mention the actual byte count AND the limit so
+        // operators can diagnose the rejection.
+        if let DiagramError::SvgNormalizationFailed { cause, .. } = &err {
+            let cause_str = cause.as_ref();
+            assert!(
+                cause_str.contains(&(MAX_SVG_BYTES + 1).to_string())
+                    || cause_str.contains("too large")
+                    || cause_str.contains("bytes"),
+                "cause must describe the size-cap rejection (mention byte count or 'too large'); \
+                 got: {cause_str}"
+            );
+            assert!(
+                cause_str.contains(&MAX_SVG_BYTES.to_string())
+                    || cause_str.contains("limit")
+                    || cause_str.contains("exceeds"),
+                "cause must mention the limit or 'exceeds'; got: {cause_str}"
+            );
+        }
+    }
+
+    /// AC-002 / SEC-001 (CWE-674): An SVG with more than `MAX_SVG_NESTING_DEPTH`
+    /// (64) nested `<g>` elements MUST be rejected by `usvg_normalize` with
+    /// `Err(DiagramError::SvgNormalizationFailed)` AFTER the usvg parse step
+    /// but BEFORE `tree.to_string()` is called. The error `cause` field MUST
+    /// describe a depth-cap rejection (not a size-cap or parse failure).
+    ///
+    /// Non-vacuity: the test constructs exactly `MAX_SVG_NESTING_DEPTH + 1`
+    /// nested `<g>` elements so the depth guard fires on nesting depth, not on
+    /// any other error path.
+    ///
+    /// ## Red Gate expectation
+    ///
+    /// Without the depth guard in `usvg_normalize`, the deeply nested SVG is
+    /// fully parsed and serialized — returning `Ok(NormalizedDiagramSvg)`. That
+    /// outcome means this test FAILS (asserting `Err` on an `Ok`) — proving
+    /// the Red Gate.
+    ///
+    /// ## LOW-1 hardening (adversary Pass-1, updated adv Pass-2 OBS-1)
+    ///
+    /// Each nested `<g>` carries `transform="translate(0,N)"` where N = i+1
+    /// (starting at 1, not 0) so EVERY group has a strictly non-identity
+    /// transform. A future usvg upgrade that elides identity or empty groups
+    /// would otherwise make this fixture vacuous — the depth count would
+    /// silently drop below 65 and the guard would never fire. Non-identity
+    /// transforms are preserved 1:1 through usvg's Group model.
+    #[test]
+    fn test_bc_1_12_003_sec_dos_svg_deep_nesting_rejected() {
+        // Construct an SVG with exactly MAX_SVG_NESTING_DEPTH + 1 nested <g> elements.
+        // The root <svg> counts as depth 1 (usvg Tree::root() is a Group).
+        // So we need MAX_SVG_NESTING_DEPTH additional nested <g> elements inside
+        // the <svg> root, giving a total Group depth of MAX_SVG_NESTING_DEPTH + 1.
+        //
+        // Structure:
+        //   <svg>                                <- root Group (depth 1 per AC-002 spec)
+        //     <g transform="translate(0,1)">    <- depth 2
+        //       <g transform="translate(0,2)">  <- depth 3
+        //         ...
+        //           <g transform="translate(0,N)">  <- depth MAX_SVG_NESTING_DEPTH + 1
+        //             <rect ... />
+        //           </g>
+        //         ...
+        //       </g>
+        //     </g>
+        //   </svg>
+        //
+        // Each transform="translate(0,N)" (N >= 1) is strictly non-identity,
+        // preventing usvg from collapsing any group as a no-op container —
+        // future usvg upgrades that elide identity or empty groups cannot make
+        // this fixture vacuous (LOW-1, adversary Pass-1; OBS-1 closure Pass-2).
+        let nesting = MAX_SVG_NESTING_DEPTH; // one extra <g> beyond the root Group
+        let mut svg =
+            String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
+        for i in 0..nesting {
+            // i+1 ensures every group has a non-identity transform (no translate(0,0)).
+            let _ = write!(svg, "<g transform=\"translate(0,{})\">", i + 1);
+        }
+        svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"red\"/>");
+        for _ in 0..nesting {
+            svg.push_str("</g>");
+        }
+        svg.push_str("</svg>");
+
+        // Sanity-check: the fixture is well within the size cap (must be parseable).
+        assert!(
+            svg.len() < MAX_SVG_BYTES,
+            "deep-nesting fixture must be well under the size cap to avoid \
+             accidentally triggering the size guard: {} bytes",
+            svg.len()
+        );
+
+        let raw = RawDiagramSvg(svg);
+        let result = usvg_normalize(&raw, "deep-nesting-diagram");
+
+        // The result MUST be Err — not Ok.
+        let err = result.expect_err(
+            "usvg_normalize MUST reject SVG with group depth > MAX_SVG_NESTING_DEPTH \
+             with Err(SvgNormalizationFailed); got Ok — the depth guard is not yet \
+             implemented (Red Gate)",
+        );
+
+        // The error MUST be SvgNormalizationFailed (not a different variant).
+        assert!(
+            matches!(err, DiagramError::SvgNormalizationFailed { .. }),
+            "error must be SvgNormalizationFailed; got: {err:?}"
+        );
+
+        // The error display string MUST contain E-EXP-004.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("E-EXP-004"),
+            "error display must contain 'E-EXP-004'; got: {msg}"
+        );
+
+        // The cause field MUST describe a depth-cap rejection — not a size-cap
+        // or a usvg parse error. This distinguishes the two guard paths.
+        if let DiagramError::SvgNormalizationFailed { cause, .. } = &err {
+            let cause_str = cause.as_ref();
+            // Must mention depth or nesting in the cause.
+            assert!(
+                cause_str.contains("depth")
+                    || cause_str.contains("nesting")
+                    || cause_str.contains("DoS"),
+                "cause must describe the depth-cap rejection (mention 'depth', 'nesting', \
+                 or 'DoS'); got: {cause_str}. \
+                 If this says 'too large' or 'usvg parse', the wrong guard fired."
+            );
+        }
+    }
+
+    /// AC-003: A real-world Mermaid SVG well within both `MAX_SVG_BYTES` and
+    /// `MAX_SVG_NESTING_DEPTH` limits MUST return `Ok(NormalizedDiagramSvg)`
+    /// after the guards are added. The guards MUST NOT alter the normalization
+    /// output for legitimate SVG.
+    ///
+    /// Non-vacuity: this test uses the `simple_geometry_svg` fixture and asserts
+    /// the specific `Ok` variant — not just `!is_err()`. It proves the guards
+    /// do not accidentally reject legitimate input.
+    ///
+    /// ## Red Gate behaviour
+    ///
+    /// This test is a GREEN-GATE test — it already passes before any guard is
+    /// added (the existing `usvg_normalize` returns `Ok` for valid SVG). It MUST
+    /// CONTINUE to pass after the guards are added.
+    ///
+    /// However, a WRONG implementation of the depth guard (e.g., off-by-one on
+    /// the boundary check, or incorrect root-Group counting) would reject the
+    /// `simple_geometry_svg` fixture. This test catches that regression.
+    ///
+    /// Including this test in the Red Gate suite is required by the story spec
+    /// (AC-003 non-vacuity requirement). It is intentionally listed here with
+    /// the `DoS` tests so the implementer sees all three together.
+    #[test]
+    fn test_bc_1_12_003_sec_dos_svg_valid_input_unaffected() {
+        // Use the existing simple_geometry_svg fixture (geometry-only, no text).
+        // It is 119 bytes — far below MAX_SVG_BYTES.
+        // It has a single top-level <rect> child — far below MAX_SVG_NESTING_DEPTH.
+        let raw = RawDiagramSvg(test_fixtures::simple_geometry_svg().to_owned());
+
+        // Verify byte length is well under cap.
+        assert!(
+            raw.as_str().len() < MAX_SVG_BYTES,
+            "simple_geometry_svg must be < MAX_SVG_BYTES; actual: {} bytes",
+            raw.as_str().len()
+        );
+
+        let result = usvg_normalize(&raw, "valid-input-test");
+
+        // The result MUST be Ok — the guards must not reject valid input.
+        let normalized = result.expect(
+            "usvg_normalize MUST return Ok for a valid SVG well within both limits; \
+             the size/depth guards must not reject legitimate input",
+        );
+
+        // The Ok value must be a non-empty NormalizedDiagramSvg.
+        assert!(
+            !normalized.is_empty(),
+            "normalized SVG must not be empty for valid input"
+        );
+        assert!(
+            normalized.as_str().contains("<svg"),
+            "normalized SVG must contain the <svg root element"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Adversary Pass-1 MED-1: exact-boundary PASS tests (EC-005, EC-007)
+    //
+    // These tests prove the guards use EXCLUSIVE `>` semantics:
+    //   - byte length EXACTLY == MAX_SVG_BYTES → PASS (Ok)
+    //   - group depth EXACTLY == MAX_SVG_NESTING_DEPTH → PASS (Ok)
+    //
+    // Without these tests a `>`→`>=` off-by-one regression goes undetected
+    // (the oversized/over-deep FAIL tests only exercise the Err paths).
+    // -----------------------------------------------------------------------
+
+    /// EC-005 (MED-1): `check_svg_size` with `len == MAX_SVG_BYTES` MUST return
+    /// `Ok(())` — the boundary is exclusive. This is a pure helper test and does
+    /// not allocate or parse a 50 MiB document.
+    ///
+    /// If the guard were `>=` instead of `>`, this test would fail with `Err`.
+    #[test]
+    fn test_bc_1_12_003_sec_size_exact_boundary_passes() {
+        // Exact boundary: MUST return Ok (exclusive >).
+        let result = check_svg_size(MAX_SVG_BYTES, "boundary-test");
+        assert!(
+            result.is_ok(),
+            "check_svg_size(MAX_SVG_BYTES) MUST return Ok — boundary is exclusive (`>`); \
+             if this returns Err the guard uses `>=` which is an off-by-one (EC-005 violation). \
+             Got: {result:?}"
+        );
+    }
+
+    /// EC-006 companion (MED-1): `check_svg_size` with `len == MAX_SVG_BYTES + 1`
+    /// MUST return `Err`. This ensures the helper correctly rejects one byte over
+    /// the limit and pairs with EC-005 to pin the exact boundary.
+    #[test]
+    fn test_bc_1_12_003_sec_size_one_over_boundary_fails() {
+        let result = check_svg_size(MAX_SVG_BYTES + 1, "over-boundary-test");
+        let err = result.expect_err(
+            "check_svg_size(MAX_SVG_BYTES + 1) MUST return Err; \
+             one byte over the limit must be rejected",
+        );
+        assert!(
+            matches!(err, DiagramError::SvgNormalizationFailed { .. }),
+            "error must be SvgNormalizationFailed; got: {err:?}"
+        );
+        if let DiagramError::SvgNormalizationFailed { cause, .. } = &err {
+            let cause_str = cause.as_ref();
+            assert!(
+                cause_str.contains("too large") || cause_str.contains("bytes"),
+                "cause must describe the size-cap rejection; got: {cause_str}"
+            );
+        }
+    }
+
+    /// EC-007 (MED-1): An SVG with group nesting depth EXACTLY equal to
+    /// `MAX_SVG_NESTING_DEPTH` (64) MUST return `Ok` — the depth guard is
+    /// exclusive (`>`). Root `Tree::root()` = depth 1, so 63 nested `<g>`
+    /// elements produce total depth 64.
+    ///
+    /// If the guard were `>=` instead of `>`, this fixture (depth == 64) would
+    /// be rejected instead of passing, and this test would catch the regression.
+    ///
+    /// Each `<g>` carries `transform="translate(0,N)"` where N = i+1 (starting
+    /// at 1, never 0) so every group has a strictly non-identity transform —
+    /// preventing usvg from collapsing any group on future usvg upgrades
+    /// (OBS-1 closure, adversary Pass-2).
+    #[test]
+    fn test_bc_1_12_003_sec_depth_exact_boundary_passes() {
+        // Root Tree::root() is depth 1.  We want total max depth == MAX_SVG_NESTING_DEPTH.
+        // Therefore we need MAX_SVG_NESTING_DEPTH - 1 nested <g> children
+        // (depth 2 through depth MAX_SVG_NESTING_DEPTH).
+        let nested_g_count = MAX_SVG_NESTING_DEPTH - 1; // 63 nested <g> elements → max depth 64
+        let mut svg =
+            String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
+        for i in 0..nested_g_count {
+            // i+1 ensures every group has a non-identity transform (no translate(0,0)).
+            let _ = write!(svg, "<g transform=\"translate(0,{})\">", i + 1);
+        }
+        svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"blue\"/>");
+        for _ in 0..nested_g_count {
+            svg.push_str("</g>");
+        }
+        svg.push_str("</svg>");
+
+        // Sanity-check: this fixture is well within the size cap.
+        assert!(
+            svg.len() < MAX_SVG_BYTES,
+            "depth-boundary fixture must be under the size cap; actual: {} bytes",
+            svg.len()
+        );
+
+        let raw = RawDiagramSvg(svg);
+        let result = usvg_normalize(&raw, "depth-exact-boundary");
+
+        // MUST be Ok — depth 64 == MAX_SVG_NESTING_DEPTH is within the limit.
+        let normalized = result.expect(
+            "usvg_normalize MUST return Ok when group depth == MAX_SVG_NESTING_DEPTH (64); \
+             boundary is exclusive (`>` rejects, `==` passes). \
+             If this is Err the guard uses `>=` — an off-by-one regression (EC-007 violation).",
+        );
+        assert!(
+            !normalized.is_empty(),
+            "normalized SVG must not be empty for the depth-exact-boundary fixture"
+        );
     }
 }
