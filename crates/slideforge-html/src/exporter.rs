@@ -11,11 +11,29 @@
 //! allowlist before rendering to `<a href="...">`. Disallowed schemes are
 //! dropped; a `tracing::warn!` is emitted for each rejection.
 
-use slideforge_layout::{FrameContent, LaidOutDeck, LaidOutSlide};
+use slideforge_layout::{BoundingBox, FrameContent, LaidOutDeck, LaidOutSlide};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, ContentBlock, Deck};
 
 use crate::render::{HeadingLevel, render_slide_to_html};
+
+/// Returns `true` iff the bounding box has strictly positive width AND height.
+///
+/// This is the **single source of truth** for the degeneracy condition used in
+/// two places (TD-VSDD-060):
+/// - The exporter pre-pass (`slide_has_promotable_text_frame`) — to decide
+///   whether a frame can be considered promotable to `<h1>`.
+/// - The render-time loop (`render.rs` MED-B5 guard) — to decide whether a
+///   frame can actually emit HTML (frames with zero/negative bbox are skipped).
+///
+/// A frame is non-degenerate when `width.0 > 0 && height.0 > 0`.  Negative
+/// values are also degenerate (they can arise from pathological layout input
+/// and the layout engine's MED-B5 guards treat them identically to zero).
+#[inline]
+#[must_use]
+pub(crate) fn is_non_degenerate_bbox(bbox: &BoundingBox) -> bool {
+    bbox.width.0 > 0 && bbox.height.0 > 0
+}
 
 /// Result of the heading-level pre-pass.
 ///
@@ -53,18 +71,34 @@ fn body_has_promotable_content(blocks: &[ContentBlock]) -> bool {
 
 /// Returns `true` if the slide has at least one promotable text frame.
 ///
-/// Promotable text frames (HIGH-1 / LOW-1):
+/// Promotable text frames (HIGH-1 / LOW-1 / Pass-10):
 /// - `FrameContent::Body` whose blocks contain at least one `Text`/`Bullets`/`Math`
-///   block with non-empty content.
-/// - `FrameContent::TextRun` (always promotable).
+///   block with non-empty content **AND** whose bbox is non-degenerate
+///   (`width.0 > 0 && height.0 > 0`).
+/// - `FrameContent::TextRun` (always promotable) **AND** whose bbox is non-degenerate.
+///
+/// The bbox condition mirrors the render-time MED-B5 degeneracy guard in
+/// `render.rs` — both use [`is_non_degenerate_bbox`] as the **single source of
+/// truth** (TD-VSDD-060).  A frame the render loop would skip (degenerate bbox)
+/// must not be considered promotable by the pre-pass, because the render loop
+/// would not actually emit an `<h1>` for it, leaving the document without any
+/// heading element (axe-core `page-has-heading-one` violation).
 ///
 /// Non-promotable: `Title` (handled in step 1/2), `Subtitle`, `Image`, `Chart`,
-/// `Diagram`, `Shape`, `ColorBar`, `ErrorSlidePlaceholder`, `Empty`.
+/// `Diagram`, `Shape`, `ColorBar`, `ErrorSlidePlaceholder`, `Empty`, and any
+/// frame with a degenerate bbox.
 fn slide_has_promotable_text_frame(slide: &LaidOutSlide) -> bool {
-    slide.frames.iter().any(|f| match &f.content {
-        FrameContent::TextRun(nodes) => !nodes.is_empty(),
-        FrameContent::Body(blocks) => body_has_promotable_content(blocks),
-        _ => false,
+    slide.frames.iter().any(|f| {
+        // Pass-10 / MED-B5: bbox must be non-degenerate — same condition used by
+        // the render-time loop (single source of truth via is_non_degenerate_bbox).
+        if !is_non_degenerate_bbox(&f.bbox) {
+            return false;
+        }
+        match &f.content {
+            FrameContent::TextRun(nodes) => !nodes.is_empty(),
+            FrameContent::Body(blocks) => body_has_promotable_content(blocks),
+            _ => false,
+        }
     })
 }
 
@@ -2318,6 +2352,210 @@ mod tests {
             html.contains("sf-visually-hidden"),
             "HIGH-1: page template must include .sf-visually-hidden CSS rule; got snippet: {:?}",
             &html[..html.len().min(2000)]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOW-B7 — empty <nav> must not appear in page output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pass-10 — bbox-aware text-frame promotability
+    //
+    // A Body/TextRun frame is "promotable" for heading purposes ONLY if it has
+    // both (a) non-empty promotable content AND (b) a non-degenerate bbox
+    // (width.0 > 0 && height.0 > 0).  This mirrors the render-time guard
+    // (render.rs MED-B5) so the pre-pass and the render loop agree on which
+    // frames can actually emit an <h1>.
+    //
+    // If the ONLY text frame has a degenerate bbox, step 3 must NOT fire;
+    // step 4 must fire instead → synthetic visually-hidden <h1>.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Pass-10 / AC-007 / AC-008 / PC-7:
+    /// A step-3 deck (no Title frame) whose ONLY promotable text frame has a
+    /// degenerate bbox (zero width) must fall through to step 4 → exactly one
+    /// NON-EMPTY `<h1>` with `.sf-visually-hidden` is emitted; no `<h1>` appears
+    /// inside any `<article>` (the h1 is the synthetic one before the slides);
+    /// the "synthesizing" warn is emitted.
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_degenerate_zero_width_body_frame_falls_to_step4_synthesizes_h1() {
+        use slideforge_types::{ContentBlock, InlineNode, TextBlock, TextTag};
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // One slide: one Body frame with real text but ZERO width (degenerate bbox).
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate — zero width
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Degenerate frame text"))],
+                    tag: TextTag::Body,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> in the whole document (the synthetic one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "P10: degenerate-bbox deck must produce exactly one <h1> (synthetic); got {}: {html}",
+            h1s.len()
+        );
+
+        // The synthetic <h1> must be NON-EMPTY.
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "P10: synthetic <h1> must be non-empty; got: {h1_text:?}"
+        );
+
+        // The synthetic <h1> must carry .sf-visually-hidden.
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            h1_classes.contains("sf-visually-hidden"),
+            "P10: synthetic <h1> must carry class sf-visually-hidden; got class={h1_classes:?}"
+        );
+
+        // The "synthesizing" warn must be emitted (step 4 path).
+        assert!(
+            logs_contain("synthesizing"),
+            "P10: synthesizing visually-hidden <h1> warn must be emitted for degenerate-bbox deck"
+        );
+    }
+
+    /// Pass-10 / AC-007 / AC-008 / PC-7:
+    /// Same as above but with a ZERO HEIGHT bbox (negative dimension variant).
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_degenerate_zero_height_body_frame_falls_to_step4_synthesizes_h1() {
+        use slideforge_types::{ContentBlock, InlineNode, TextBlock, TextTag};
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(0), // degenerate — zero height
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Zero height text"))],
+                    tag: TextTag::Body,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "P10: zero-height-bbox deck must produce exactly one <h1> (synthetic); got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "P10: synthesizing warn must be emitted for zero-height degenerate bbox"
+        );
+    }
+
+    /// Pass-10 regression: a non-degenerate step-3 body-only deck still promotes
+    /// (no synthetic h1 — real h1 from promoted body frame, no sf-visually-hidden).
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_non_degenerate_step3_body_still_promotes_real_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // make_body_only_slide has non-degenerate bbox (9_144_000 × 5_143_500)
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_body_only_slide("Real content")],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> (real, promoted from body frame).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "P10 regression: non-degenerate body deck must produce exactly one real <h1>; got: {html}"
+        );
+
+        // The <h1> must NOT be .sf-visually-hidden (it's a real promoted body h1).
+        let h1 = doc.select(&sel_h1).next().expect("h1 exists");
+        let classes = h1.value().attr("class").unwrap_or("");
+        assert!(
+            !classes.contains("sf-visually-hidden"),
+            "P10 regression: real promoted body <h1> must not have sf-visually-hidden class; got class={classes:?}"
+        );
+
+        // The "synthesizing" warn must NOT be emitted (step 3, not step 4).
+        assert!(
+            !logs_contain("synthesizing"),
+            "P10 regression: step-3 promote path must not emit synthesizing warn"
         );
     }
 

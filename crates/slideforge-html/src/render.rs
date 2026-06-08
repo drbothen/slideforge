@@ -85,7 +85,7 @@
 use slideforge_layout::{Frame, FrameContent, LaidOutSlide, PageSize};
 use slideforge_types::{AltText, Brand, ContentBlock, Emu, InlineNode};
 
-use crate::exporter::is_safe_link_scheme;
+use crate::exporter::{is_non_degenerate_bbox, is_safe_link_scheme};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Coordinate conversion
@@ -331,11 +331,15 @@ pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<S
     let w = emu_to_css_px(frame.bbox.width);
     let h = emu_to_css_px(frame.bbox.height);
 
-    // MED-B5: guard zero OR NEGATIVE bbox dimensions — skip degenerate frames.
-    // Negative SIZE (width/height) must never emit CSS like width="-N". This is
-    // the same guard as render_graphics_layer (width.0 <= 0 || height.0 <= 0).
+    // MED-B5 / Pass-10: guard zero OR NEGATIVE bbox dimensions — skip degenerate frames.
+    // Negative SIZE (width/height) must never emit CSS like width="-N".
     // Negative POSITION (x/y) is legal (off-canvas frames) and is not guarded here.
-    if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+    //
+    // Uses is_non_degenerate_bbox — the SINGLE SOURCE OF TRUTH shared with the
+    // exporter pre-pass (slide_has_promotable_text_frame) per TD-VSDD-060.
+    // Both gates must agree on which frames are renderable so the pre-pass does
+    // not assign <h1> to a frame the render loop will silently skip.
+    if !is_non_degenerate_bbox(&frame.bbox) {
         tracing::warn!(
             "render_text_frame: skipping frame with zero or degenerate bbox \
              (width={}, height={})",
@@ -433,10 +437,13 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
     let mut frame_idx: u32 = 0;
 
     for frame in frames {
-        // MED-B5: skip frames with zero OR NEGATIVE bbox dimensions (degenerate geometry).
+        // MED-B5 / Pass-10: skip frames with zero OR NEGATIVE bbox dimensions.
         // Negative width/height must never emit CSS like width="-N".
         // Negative x/y position is legal (off-canvas frames); only SIZE is guarded.
-        if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+        //
+        // Uses is_non_degenerate_bbox — SINGLE SOURCE OF TRUTH shared with the
+        // exporter pre-pass (TD-VSDD-060).
+        if !is_non_degenerate_bbox(&frame.bbox) {
             continue;
         }
 
@@ -727,8 +734,10 @@ pub fn render_slide_to_html(
             };
 
             if is_promotable {
-                // MED-B5: skip degenerate frames (cannot promote zero/negative bbox).
-                if frame.bbox.width.0 <= 0 || frame.bbox.height.0 <= 0 {
+                // MED-B5 / Pass-10: skip degenerate frames (cannot promote zero/negative bbox).
+                // Uses is_non_degenerate_bbox — SINGLE SOURCE OF TRUTH shared with the
+                // exporter pre-pass (slide_has_promotable_text_frame) per TD-VSDD-060.
+                if !is_non_degenerate_bbox(&frame.bbox) {
                     // Degenerate promotable frame: skip and keep looking for next.
                     continue;
                 }
