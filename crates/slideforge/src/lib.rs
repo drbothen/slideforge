@@ -122,10 +122,16 @@ mod diag_util {
     }
 
     /// Convert a slice of [`slideforge_syntax::BoxDiagnostic`] to a `Vec`
-    /// of re-boxed [`OwnedDiag`] values.
+    /// of re-boxed [`OwnedDiag`] values, pairing each with its source position.
     ///
     /// Captures `code()`, `Display` message, `help()` hint text, and `labels()`
     /// source-span information from each source diagnostic.
+    ///
+    /// The `positions` parameter is accepted for API symmetry with call sites that
+    /// pass `DiagnosticSink::positions()`, but the positions are NOT stored in the
+    /// returned `OwnedDiag` values.  Source-order sorting for eval diagnostics uses
+    /// the parallel `accumulated_eval_positions` vec in `compile_inner` directly
+    /// (BC-1.15.002 PC2 / HIGH-P3-001 fix).
     ///
     /// ## HIGH-3
     ///
@@ -133,6 +139,7 @@ mod diag_util {
     /// `labels`. This version losslessly captures all four fields.
     pub(crate) fn collect_diagnostics(
         errors: &[slideforge_syntax::BoxDiagnostic],
+        _positions: &[(String, u32, u32)],
         fallback_code: &str,
     ) -> Vec<slideforge_syntax::BoxDiagnostic> {
         errors
@@ -157,6 +164,60 @@ mod diag_util {
             })
             .collect()
     }
+
+    /// Sort key for a `slideforge_plugin_api::Diagnostic` (validator diagnostic).
+    ///
+    /// Returns `(span.file.to_string(), span.line, span.col)`.
+    /// If the file is empty and line + col are 0 (default span), returns
+    /// `("<unknown>", 0, 0)` which sorts to top-of-unknown-file (deterministic).
+    pub(crate) fn validator_diag_sort_key(
+        d: &slideforge_plugin_api::Diagnostic,
+    ) -> (String, u32, u32) {
+        let s = &d.span;
+        if s.file.is_empty() && s.line == 0 && s.col == 0 {
+            ("<unknown>".to_owned(), 0u32, 0u32)
+        } else {
+            (s.file.to_string(), s.line, s.col)
+        }
+    }
+
+    /// Dedup exact-duplicate [`slideforge_plugin_api::Diagnostic`] entries.
+    ///
+    /// Two diagnostics are considered exact duplicates if they share the same
+    /// `code`, `span.file`, `span.line`, `span.col`, and `message`. Distinct
+    /// errors at the same location (different code or message) are NOT duplicates
+    /// and are both kept (BC-1.15.002 invariant 1 / EC-004 / LESSON-11 cascade).
+    ///
+    /// Returns the deduped list. Preserves first occurrence of each unique key.
+    pub(crate) fn dedup_validator_diagnostics(
+        diags: Vec<slideforge_plugin_api::Diagnostic>,
+    ) -> Vec<slideforge_plugin_api::Diagnostic> {
+        let mut seen: std::collections::HashSet<(String, String, u32, u32, String)> =
+            std::collections::HashSet::new();
+        diags
+            .into_iter()
+            .filter(|d| {
+                let key = (
+                    d.code.to_string(),
+                    d.span.file.to_string(),
+                    d.span.line,
+                    d.span.col,
+                    d.message.to_string(),
+                );
+                seen.insert(key)
+            })
+            .collect()
+    }
+
+    /// Sort a `Vec<slideforge_plugin_api::Diagnostic>` in place by
+    /// `(span.file, span.line, span.col)` ascending (BC-1.15.002 PC2).
+    pub(crate) fn sort_validator_diagnostics(diags: &mut [slideforge_plugin_api::Diagnostic]) {
+        diags.sort_by(|a, b| {
+            let ka = validator_diag_sort_key(a);
+            let kb = validator_diag_sort_key(b);
+            ka.cmp(&kb)
+        });
+    }
 }
 
 // ── Re-export the plugin registry API ─────────────────────────────────────────
@@ -176,6 +237,13 @@ pub use slideforge_plugin_api::PluginRegistry;
 /// `slideforge-syntax` (which is below the CLI/root crate boundary per STORY-055
 /// architecture compliance rule 3).
 pub use slideforge_syntax::DiagnosticSink;
+
+/// Re-export of [`slideforge_syntax::BoxDiagnostic`].
+///
+/// The CLI uses this type when constructing
+/// [`error::BuildError::MultistageFailed`] entries in integration tests
+/// and when accessing eval-stage diagnostics for rendering.
+pub use slideforge_syntax::BoxDiagnostic;
 
 /// Re-export of [`slideforge_syntax::DiagnosticRenderer`].
 ///
@@ -218,6 +286,43 @@ pub use slideforge_plugin_api::Diagnostic as ValidationDiagnostic;
 /// The CLI uses this when rendering `file:line:col` span information from
 /// [`ValidationDiagnostic::span`].
 pub use slideforge_types::SourceSpan;
+
+// ── Sort-key utilities for cross-stage source-order rendering ─────────────────
+
+/// Extract the source sort key `(file, line, col)` from a
+/// [`slideforge_plugin_api::Diagnostic`] (validator diagnostic).
+///
+/// Used by the CLI to merge-sort the `validator_diagnostics` side of
+/// [`error::BuildError::MultistageFailed`] with the parallel `eval_sort_keys`
+/// in source-file order at render time (BC-1.15.002 PC2 / HIGH-P3-001 fix).
+#[must_use]
+pub fn validator_diag_sort_key(d: &ValidationDiagnostic) -> (String, u32, u32) {
+    diag_util::validator_diag_sort_key(d)
+}
+
+/// Create a test `BoxDiagnostic` for use in integration tests.
+///
+/// This function is primarily intended for integration tests in `slideforge-cli`
+/// that need to construct `MultistageFailed.eval_diagnostics` entries to test
+/// source-order rendering without going through the full pipeline.
+///
+/// The returned `BoxDiagnostic` has the given `code` and `message`.
+/// The corresponding sort key must be provided separately as an entry in the
+/// parallel `eval_sort_keys` vec passed to `BuildError::MultistageFailed`.
+///
+/// # Arguments
+///
+/// * `code` — the error code string (e.g., `"E-EVL-001"`)
+/// * `message` — the human-readable message
+#[must_use]
+pub fn make_test_owned_diag(code: &str, message: &str) -> slideforge_syntax::BoxDiagnostic {
+    Box::new(diag_util::OwnedDiag {
+        code: code.to_owned(),
+        msg: message.to_owned(),
+        help: None,
+        labels: Vec::new(),
+    })
+}
 
 // ── Public pipeline types ─────────────────────────────────────────────────────
 
@@ -479,7 +584,8 @@ fn compile_inner(
         );
         let mut sink = DiagnosticSink::new();
         parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
-            let diagnostics = diag_util::collect_diagnostics(sink.errors(), "E-PAR-???");
+            let diagnostics =
+                diag_util::collect_diagnostics(sink.errors(), sink.positions(), "E-PAR-???");
             let count = diagnostics.len();
             error::BuildError::ParseFailed { diagnostics, count }
         })?
@@ -500,9 +606,11 @@ fn compile_inner(
     // OBS-1 fix: fresh DiagnosticSink for eval so that EvalFailed carries only
     // eval-phase diagnostics, not residual parse-phase ones.
     // accumulated_eval_diags: all BoxDiagnostic entries from eval stage (Error + Warning).
+    // accumulated_eval_positions: source positions parallel to accumulated_eval_diags,
+    //   used to build eval_sort_keys for MultistageFailed (HIGH-P3-001 fix).
     // eval_error_count: count of Error-and-Fatal severity items in accumulated_eval_diags,
     // used by the combined strict gate to detect eval errors without re-scanning the vec.
-    let (mut deck, accumulated_eval_diags, eval_error_count) = {
+    let (mut deck, accumulated_eval_diags, accumulated_eval_positions, eval_error_count) = {
         let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
         let eval_config = EvalConfig::default();
@@ -524,7 +632,13 @@ fn compile_inner(
 
         let deck = maybe_deck.ok_or_else(|| {
             // Fatal eval failure: eval returned None.
-            let diags = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVL-???");
+            // Note: for EvalFailed (fatal path), sort keys are not needed since
+            // there are no validator diagnostics to interleave with.
+            let diags = diag_util::collect_diagnostics(
+                eval_sink.errors(),
+                eval_sink.positions(),
+                "E-EVL-???",
+            );
             let count = diags.len();
             error::BuildError::EvalFailed {
                 diagnostics: diags,
@@ -538,9 +652,14 @@ fn compile_inner(
         // Some) there are no Fatal items, so this equals the non-fatal Error count.
         let err_count = eval_sink.error_and_fatal_count();
 
+        // HIGH-P3-001: capture positions before consuming eval_sink so we can
+        // build eval_sort_keys for MultistageFailed construction below.
+        let positions: Vec<(String, u32, u32)> = eval_sink.positions().to_vec();
+
         // Collect all eval diagnostics (Error + Warning) into BoxDiagnostic vec.
         // This is reached only when maybe_deck was Some (no Fatal).
-        let eval_diag_boxes = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVL-???");
+        let eval_diag_boxes =
+            diag_util::collect_diagnostics(eval_sink.errors(), eval_sink.positions(), "E-EVL-???");
 
         // Emit tracing events for eval diagnostics (mirrors validator diagnostic tracing).
         for diag in &eval_diag_boxes {
@@ -565,7 +684,7 @@ fn compile_inner(
         // returned and the pipeline continues. The eval_diag_boxes are passed back for
         // the combined strict gate below.
 
-        (deck, eval_diag_boxes, err_count)
+        (deck, eval_diag_boxes, positions, err_count)
     };
 
     // Stage 2b: field-to-block threading (ADR-019).
@@ -641,9 +760,16 @@ fn compile_inner(
                         .cloned()
                         .collect();
                 if !pre_layout_errors.is_empty() {
-                    let count = pre_layout_errors.len();
+                    // Sort and dedup before returning (BC-1.15.002 PC2 / EC-004).
+                    let mut diags = all_validator_diagnostics;
+                    diag_util::sort_validator_diagnostics(&mut diags);
+                    diags = diag_util::dedup_validator_diagnostics(diags);
+                    let count = diags
+                        .iter()
+                        .filter(|d| d.severity == DiagnosticSeverity::Error)
+                        .count();
                     return Err(error::BuildError::ValidationFailed {
-                        diagnostics: all_validator_diagnostics,
+                        diagnostics: diags,
                         count,
                     });
                 }
@@ -672,6 +798,16 @@ fn compile_inner(
         all_validator_diagnostics.extend(post_diags);
     }
 
+    // BC-1.15.002 PC2 / HIGH-P3-001 fix: sort all_validator_diagnostics by source position
+    // (ascending file, line, col) so Stage-5 and Stage-6b diagnostics are interleaved
+    // in source order, not Stage-5-all-then-Stage-6b-all.
+    //
+    // BC-1.15.002 invariant 1 / EC-004 fix: dedup exact-duplicate validator diagnostics
+    // (same code + span + message) before constructing the error variant, so the count
+    // and rendered output both reflect only independent errors.
+    diag_util::sort_validator_diagnostics(&mut all_validator_diagnostics);
+    all_validator_diagnostics = diag_util::dedup_validator_diagnostics(all_validator_diagnostics);
+
     // Combined strict-mode gate (F-P2-MED-001 fix / BC-1.15.002 invariant 3):
     //
     // Apply ONE strict gate after ALL stages (eval + Stage 5 validators + Stage 6b
@@ -693,6 +829,7 @@ fn compile_inner(
         // it counts Error + Fatal severity eval diagnostics.
         let has_eval_errors = eval_error_count > 0;
 
+        // BC-1.15.002 PC2: recount validator errors after sort+dedup.
         let validator_error_count = all_validator_diagnostics
             .iter()
             .filter(|d| d.severity == DiagnosticSeverity::Error)
@@ -703,8 +840,24 @@ fn compile_inner(
             (true, true) => {
                 // Case (c): MultistageFailed — both eval and validator errors present.
                 // BC-1.15.002 TV-13.1 — the cross-stage accumulation case.
+                //
+                // HIGH-P3-001: sort both eval_diagnostics and eval_sort_keys together
+                // by (file, line, col) so the render side can merge-sort with the
+                // (already-sorted) validator_diagnostics. The parallel positions were
+                // captured from eval_sink.positions() above as accumulated_eval_positions.
+                let mut indexed_eval: Vec<((String, u32, u32), slideforge_syntax::BoxDiagnostic)> =
+                    accumulated_eval_positions
+                        .into_iter()
+                        .zip(accumulated_eval_diags)
+                        .collect();
+                indexed_eval.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
+                let (eval_sort_keys, eval_diags): (
+                    Vec<(String, u32, u32)>,
+                    Vec<slideforge_syntax::BoxDiagnostic>,
+                ) = indexed_eval.into_iter().unzip();
                 return Err(error::BuildError::MultistageFailed {
-                    eval_diagnostics: accumulated_eval_diags,
+                    eval_diagnostics: eval_diags,
+                    eval_sort_keys,
                     validator_diagnostics: all_validator_diagnostics,
                     eval_count: eval_error_count,
                     validator_count: validator_error_count,
@@ -1569,7 +1722,9 @@ mod tests {
             }
 
             // Now call collect_diagnostics and verify codes AND help are preserved.
-            let owned_diags = super::diag_util::collect_diagnostics(errors, "E-PAR-???");
+            // Pass empty positions slice — this test only checks code + help preservation,
+            // not sort keys (sort keys are tested in the P3 interleave tests).
+            let owned_diags = super::diag_util::collect_diagnostics(errors, &[], "E-PAR-???");
             for (i, (src_err, owned)) in errors.iter().zip(owned_diags.iter()).enumerate() {
                 // HIGH-3: The owned diagnostic's code() must be preserved.
                 let code = owned.code().map(|c| c.to_string());

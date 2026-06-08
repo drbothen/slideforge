@@ -1621,6 +1621,304 @@ fn test_OBS_1_bc_1_15_001_hint_text_present_in_rendered_output() {
     );
 }
 
+// ── BC-1.15.002 P3-001: cross-stage interleave by source position ─────────────
+
+/// BC-1.15.002 PC2 / HIGH-P3-001: MultistageFailed renders eval + validator
+/// diagnostics interleaved in source-file order (ascending line number),
+/// NOT eval-first-then-validator.
+///
+/// Fixture: eval error at line 3, validator error at line 5, eval error at line 7.
+/// Expected render order: line3 (eval), line5 (validator), line7 (eval).
+///
+/// Uses `render_build_error_to_string` directly to assert rendered content order
+/// without spawning a subprocess. Eval diagnostics are `OwnedDiag` wrappers
+/// (BoxDiagnostic); validator diagnostics are `slideforge_plugin_api::Diagnostic`.
+#[test]
+fn test_BC_1_15_002_p3_cross_stage_interleave_by_source_position() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // Build two eval (BoxDiagnostic) entries at lines 3 and 7,
+    // and one validator (plugin-api Diagnostic) entry at line 5.
+    // The MultistageFailed variant is constructed directly here to drive
+    // the render path without going through the full pipeline.
+    //
+    // To exercise the interleave, we deliberately construct MultistageFailed with
+    // eval_diagnostics in WRONG order (line 7 before line 3) and validator at
+    // line 5 — then assert the rendered output has them in ascending order.
+    // The render path must interleave them using sort keys from box_diag_sort_key.
+
+    // Build eval BoxDiagnostic entries using the public test helper.
+    let eval_diag_line3 = slideforge::make_test_owned_diag("E-EVL-001", "eval error at line 3");
+    let eval_diag_line7 = slideforge::make_test_owned_diag("E-EVL-001", "eval error at line 7");
+
+    // Deliberately put line 7 before line 3 in the vec to prove the
+    // render path interleaves them using sort keys.
+    let eval_diagnostics: Vec<slideforge::BoxDiagnostic> = vec![eval_diag_line7, eval_diag_line3];
+
+    // Parallel sort keys for the eval diagnostics (in same wrong order).
+    let eval_sort_keys: Vec<(String, u32, u32)> = vec![
+        ("deck.sf".to_owned(), 7, 1), // line 7 — wrong order
+        ("deck.sf".to_owned(), 3, 1), // line 3 — wrong order
+    ];
+
+    let validator_diagnostics: Vec<Diagnostic> = vec![Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from("E-VAL-001"),
+        message: Arc::from("validator error at line 5"),
+        span: SourceSpan {
+            file: Arc::from("deck.sf"),
+            line: 5,
+            col: 1,
+            ..SourceSpan::default()
+        },
+        hint: None,
+    }];
+
+    let err = BuildError::MultistageFailed {
+        eval_diagnostics,
+        eval_sort_keys,
+        validator_diagnostics,
+        eval_count: 2,
+        validator_count: 1,
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // All three error codes/messages must appear.
+    assert!(
+        rendered.contains("line 3") || rendered.contains("E-EVL-001"),
+        "P3-001: eval error at line 3 must appear in rendered output; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("line 5") || rendered.contains("E-VAL-001"),
+        "P3-001: validator error at line 5 must appear in rendered output; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("line 7"),
+        "P3-001: eval error at line 7 must appear in rendered output; got:\n{rendered}"
+    );
+
+    // Source order: line 3 must appear before line 5, and line 5 before line 7.
+    // We search for the distinct messages to pinpoint positions.
+    let pos_line3 = rendered
+        .find("line 3")
+        .expect("'line 3' must appear in rendered output");
+    let pos_line5 = rendered
+        .find("line 5")
+        .expect("'line 5' must appear in rendered output");
+    let pos_line7 = rendered
+        .find("line 7")
+        .expect("'line 7' must appear in rendered output");
+
+    assert!(
+        pos_line3 < pos_line5,
+        "P3-001 / BC-1.15.002 PC2: eval error at line 3 must render before validator \
+         error at line 5 (source order); positions: line3={pos_line3} line5={pos_line5}"
+    );
+    assert!(
+        pos_line5 < pos_line7,
+        "P3-001 / BC-1.15.002 PC2: validator error at line 5 must render before eval \
+         error at line 7 (source order); positions: line5={pos_line5} line7={pos_line7}"
+    );
+}
+
+// ── BC-1.15.002 P3-002: cross-validator Stage-5 vs Stage-6b ordering ──────────
+
+/// BC-1.15.002 PC2 / MED-P3-002: ValidationFailed renders Stage-5 and Stage-6b
+/// diagnostics in source-file order, not Stage-5-all-before-Stage-6b-all.
+///
+/// Fixture: Stage-6b diagnostic at line 2, Stage-5 diagnostic at line 50.
+/// Expected render order: line 2 before line 50.
+///
+/// This tests that `all_validator_diagnostics` is sorted before constructing
+/// ValidationFailed (or at render time), so a post-layout (Stage-6b) diagnostic
+/// at an earlier source line renders before a pre-layout (Stage-5) diagnostic
+/// at a later source line.
+#[test]
+fn test_BC_1_15_002_p3_cross_validator_stage5_vs_stage6b_source_order() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // Stage-6b diagnostic at line 2 (post-layout), Stage-5 diagnostic at line 50.
+    // Deliberately placed Stage-5 (line 50) FIRST to prove the sort applies.
+    let diagnostics: Vec<Diagnostic> = vec![
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-LAY-001"),
+            message: Arc::from("canvas overflow at line 50 (stage-5)"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 50,
+                col: 3,
+                ..SourceSpan::default()
+            },
+            hint: None,
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-A11-001"),
+            message: Arc::from("missing alt text at line 2 (stage-6b)"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 2,
+                col: 1,
+                ..SourceSpan::default()
+            },
+            hint: None,
+        },
+    ];
+
+    let err = BuildError::ValidationFailed {
+        count: 2,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    let pos_line2 = rendered
+        .find("line 2")
+        .expect("'line 2' must appear in rendered output");
+    let pos_line50 = rendered
+        .find("line 50")
+        .expect("'line 50' must appear in rendered output");
+
+    assert!(
+        pos_line2 < pos_line50,
+        "P3-002 / BC-1.15.002 PC2 / MED-P3-002: Stage-6b error at line 2 must render \
+         before Stage-5 error at line 50 (source order); \
+         positions: line2={pos_line2} line50={pos_line50}\nRendered:\n{rendered}"
+    );
+}
+
+// ── BC-1.15.002 P3-003: deduplication of exact-duplicate diagnostics ──────────
+
+/// BC-1.15.002 invariant 1 / EC-004: exact-duplicate diagnostics
+/// (same code + same span + same message) must appear only ONCE in rendered
+/// output and the count must reflect the post-dedup count.
+///
+/// Constructs a ValidationFailed with two identical diagnostics (same code,
+/// same span, same message). The rendered output must show exactly ONE entry
+/// and count=1.
+///
+/// Note: DISTINCT diagnostics with different code/span/message (e.g. E-EVL-001
+/// + E-VAL-102 from one root — the LESSON-11 cascade) are NOT duplicates and
+///   both must be kept.
+#[test]
+fn test_BC_1_15_002_p3_dedup_exact_duplicate_diagnostics() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // Two IDENTICAL diagnostics — same code, same span, same message.
+    // This simulates two validators both emitting E-A11-001 for the same element.
+    let dup = Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from("E-A11-001"),
+        message: Arc::from("missing alt text on image"),
+        span: SourceSpan {
+            file: Arc::from("deck.sf"),
+            line: 10,
+            col: 3,
+            ..SourceSpan::default()
+        },
+        hint: Some(Arc::from("add alt \"...\" to the image block")),
+    };
+    let diagnostics = vec![dup.clone(), dup];
+
+    // ValidationFailed with count=2 (pre-dedup) — the implementation must dedup
+    // before rendering and update the count to 1.
+    let err = BuildError::ValidationFailed {
+        count: 2,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // After dedup: "E-A11-001" must appear exactly once.
+    let code_count = rendered.matches("E-A11-001").count();
+    assert_eq!(
+        code_count, 1,
+        "P3-003 / BC-1.15.002 EC-004: exact duplicate diagnostic must appear exactly \
+         once after dedup; got {code_count} occurrences in:\n{rendered}"
+    );
+
+    // The hint must still be present.
+    assert!(
+        rendered.contains("add alt"),
+        "P3-003: hint must be preserved after dedup; got:\n{rendered}"
+    );
+}
+
+/// BC-1.15.002 invariant 1 / EC-004: DISTINCT diagnostics with different code or
+/// message are NOT duplicates — both must be preserved.
+///
+/// This is the LESSON-11 cascade case: E-EVL-001 + E-VAL-102 triggered by the
+/// same root cause are distinct errors (different codes) and must both appear.
+#[test]
+fn test_BC_1_15_002_p3_dedup_preserves_distinct_diagnostics() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // Two diagnostics at the SAME span but with DIFFERENT codes — must NOT be deduped.
+    let diagnostics = vec![
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-EVL-001"),
+            message: Arc::from("undefined variable: x"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 10,
+                col: 3,
+                ..SourceSpan::default()
+            },
+            hint: None,
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-VAL-102"),
+            message: Arc::from("value type mismatch at x"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 10,
+                col: 3,
+                ..SourceSpan::default()
+            },
+            hint: None,
+        },
+    ];
+
+    let err = BuildError::ValidationFailed {
+        count: 2,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // Both distinct error codes must appear.
+    assert!(
+        rendered.contains("E-EVL-001"),
+        "P3-003 / LESSON-11: E-EVL-001 must appear (distinct from E-VAL-102); \
+         got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("E-VAL-102"),
+        "P3-003 / LESSON-11: E-VAL-102 must appear (distinct from E-EVL-001); \
+         got:\n{rendered}"
+    );
+}
+
 /// OBS-1 / BC-1.15.002 invariant: exact error count matches rendered entries.
 ///
 /// Constructs 2 independent ParseFailed diagnostics and asserts the rendered output

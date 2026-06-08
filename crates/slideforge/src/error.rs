@@ -178,9 +178,10 @@ pub enum BuildError {
     ///
     /// ## Rendering
     ///
-    /// The CLI renders `eval_diagnostics` first (via `BoxDiagnostic` / miette),
-    /// then `validator_diagnostics` (via `slideforge_plugin_api::Diagnostic`).
-    /// This preserves the existing rendering paths for each type.
+    /// The CLI uses `eval_sort_keys` (parallel to `eval_diagnostics`) and
+    /// `slideforge_plugin_api::Diagnostic::span` to merge-sort the two sets in
+    /// source-file order (ascending `(file, line, col)`) at render time.
+    /// This satisfies BC-1.15.002 PC2 (HIGH-P3-001 fix).
     ///
     /// ## Exit code
     ///
@@ -188,8 +189,9 @@ pub enum BuildError {
     ///
     /// ## Traceability
     ///
-    /// - BC-1.15.002 PC1, invariant 3
+    /// - BC-1.15.002 PC1, PC2, invariant 3
     /// - STORY-055 AC-006 / F-P2-MED-001 fix
+    /// - HIGH-P3-001 fix (source-order interleaving)
     #[error(
         "build failed with {eval_count} eval error(s) and {validator_count} validator \
          error(s); run with --warn-only to demote to warnings"
@@ -199,12 +201,27 @@ pub enum BuildError {
         ///
         /// Contains all non-fatal eval errors (e.g. `E-EVL-001` undefined variable)
         /// that were accumulated when `eval_deck_with_variant` returned `Some(Deck)`.
+        ///
+        /// Sorted by `(file, line, col)` ascending before being placed here
+        /// (HIGH-P3-001 fix in `compile_inner`).
         eval_diagnostics: Vec<slideforge_syntax::BoxDiagnostic>,
+
+        /// Source positions `(file, line, col)` parallel to `eval_diagnostics`.
+        ///
+        /// `eval_sort_keys[i]` is the sort key for `eval_diagnostics[i]`.
+        /// Used by the CLI renderer to interleave eval and validator diagnostics
+        /// in source-file order (BC-1.15.002 PC2 / HIGH-P3-001 fix).
+        ///
+        /// Avoids the need to downcast `BoxDiagnostic` at render time.
+        eval_sort_keys: Vec<(String, u32, u32)>,
 
         /// Validator-stage diagnostics (from all registered `Validator` plugins).
         ///
         /// Contains all diagnostics (Error + Warning) from Stage 5 + Stage 6b
         /// validators — same set that `ValidationFailed` would carry.
+        ///
+        /// Sorted by `(span.file, span.line, span.col)` ascending and deduped
+        /// (BC-1.15.002 PC2, EC-004) before being placed here.
         validator_diagnostics: Vec<Diagnostic>,
 
         /// Count of `Error`-severity diagnostics in `eval_diagnostics`.

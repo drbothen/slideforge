@@ -185,6 +185,22 @@ impl DiagnosticSink {
         &self.diagnostics
     }
 
+    /// Return the source positions `(file, line, col)` captured at push time,
+    /// parallel to [`DiagnosticSink::errors`].
+    ///
+    /// Each entry corresponds to the diagnostic at the same index in `errors()`.
+    /// For [`crate::SyntaxError`] diagnostics the position comes from the
+    /// variant's source-span fields. For other diagnostic types the position
+    /// defaults to `("<unknown>", 0, 0)`.
+    ///
+    /// This slice is used by `slideforge` (the root crate) to thread sort keys
+    /// into `OwnedDiag` wrappers so that eval diagnostics can be interleaved
+    /// with validator diagnostics in source-file order (BC-1.15.002 PC2).
+    #[must_use]
+    pub fn positions(&self) -> &[(String, u32, u32)] {
+        &self.positions
+    }
+
     /// Return the count of diagnostics with [`ParseSeverity::Error`] or
     /// [`ParseSeverity::Fatal`] severity.
     ///

@@ -321,6 +321,16 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
 /// redirecting stderr. This is the single-site implementation shared by
 /// `render_build_error` (which writes to stderr) and integration test content
 /// assertions.
+///
+/// BC-1.15.002 PC2 / HIGH-P3-001 fix: `ValidationFailed` diagnostics are
+/// rendered in source-file order (already guaranteed by the sort in
+/// `compile_inner`). `MultistageFailed` diagnostics are merge-sorted at render
+/// time using `slideforge::box_diag_sort_key` (for eval entries) and
+/// `slideforge::validator_diag_sort_key` (for validator entries).
+///
+/// BC-1.15.002 invariant 1 / EC-004: exact-duplicate diagnostics are removed
+/// at accumulation time (in `compile_inner`); the render path trusts the
+/// deduped list it receives.
 #[must_use]
 pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String {
     let mut buf = String::new();
@@ -340,7 +350,16 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
             // HIGH-001 fix: ValidationFailed holds plugin-api Diagnostics.
             // Render them with `file:line:col` from diag.span so EVERY
             // emitted diagnostic carries source location information.
-            for diag in diagnostics {
+            //
+            // BC-1.15.002 PC2 / MED-P3-002: sort by (file, line, col) at render
+            // time so Stage-5 and Stage-6b diagnostics are interleaved in source
+            // order regardless of accumulation order.
+            //
+            // BC-1.15.002 invariant 1 / EC-004: dedup exact duplicates at render
+            // time (same sort + dedup logic as accumulation in compile_inner, but
+            // also applied here so direct ValidationFailed construction in tests
+            // and in the layout-early-return path is covered).
+            for diag in sort_and_dedup_validator_diags_for_render(diagnostics) {
                 let rendered = render_validation_diagnostic_to_string(diag, use_color);
                 buf.push_str(&rendered);
                 buf.push('\n');
@@ -348,21 +367,39 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
         },
         BuildError::MultistageFailed {
             eval_diagnostics,
+            eval_sort_keys,
             validator_diagnostics,
             ..
         } => {
-            // F-P2-MED-001 fix: render eval-stage BoxDiagnostics first (miette),
-            // then validator-stage plugin-api Diagnostics (file:line:col format).
-            // BC-1.15.002 invariant 3: both sets rendered in one pass.
-            for diag in eval_diagnostics {
-                let rendered = render_box_diagnostic(diag.as_ref(), use_color);
+            // HIGH-P3-001 fix: interleave eval + validator diagnostics in source-file
+            // order (BC-1.15.002 PC2) using a merge-sort at render time.
+            //
+            // Both eval_diagnostics and validator_diagnostics are individually sorted
+            // (by compile_inner). We merge them here using their sort keys.
+            // eval_sort_keys is parallel to eval_diagnostics (same index).
+            //
+            // This is the SINGLE sort site for MultistageFailed rendering — shared
+            // between text and JSON paths via the `interleave_multistage_diagnostics`
+            // helper (TD-VSDD-060: no third drift site).
+            let interleaved = interleave_multistage_diagnostics(
+                eval_diagnostics,
+                eval_sort_keys,
+                validator_diagnostics,
+            );
+            for item in &interleaved {
+                let rendered = match item {
+                    MultiDiag::Eval(d) => {
+                        let mut s = render_box_diagnostic(d.as_ref(), use_color);
+                        s.push('\n');
+                        s
+                    },
+                    MultiDiag::Validator(d) => {
+                        let mut s = render_validation_diagnostic_to_string(d, use_color);
+                        s.push('\n');
+                        s
+                    },
+                };
                 buf.push_str(&rendered);
-                buf.push('\n');
-            }
-            for diag in validator_diagnostics {
-                let rendered = render_validation_diagnostic_to_string(diag, use_color);
-                buf.push_str(&rendered);
-                buf.push('\n');
             }
         },
         other => {
@@ -371,6 +408,111 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
     }
 
     buf
+}
+
+/// Sort and dedup a slice of `ValidationDiagnostic` for rendering.
+///
+/// Returns an iterator over references to the sorted, deduped diagnostics.
+///
+/// Sorting is by `(span.file, span.line, span.col)` ascending
+/// (BC-1.15.002 PC2 / MED-P3-002).
+///
+/// Deduplication removes exact duplicates with the same `(code, span.file,
+/// span.line, span.col, message)` — the first occurrence is kept
+/// (BC-1.15.002 invariant 1 / EC-004).
+///
+/// This helper is used by both text and JSON render paths for `ValidationFailed`
+/// and is the SINGLE canonical site for render-time sort+dedup of validator
+/// diagnostics (TD-VSDD-060: no third drift site).
+fn sort_and_dedup_validator_diags_for_render(
+    diagnostics: &[slideforge::ValidationDiagnostic],
+) -> Vec<&slideforge::ValidationDiagnostic> {
+    use std::collections::HashSet;
+
+    // Build sorted indices by sort key.
+    let mut indices: Vec<usize> = (0..diagnostics.len()).collect();
+    indices.sort_by(|&a, &b| {
+        let ka = slideforge::validator_diag_sort_key(&diagnostics[a]);
+        let kb = slideforge::validator_diag_sort_key(&diagnostics[b]);
+        ka.cmp(&kb)
+    });
+
+    // Iterate in sorted order, deduplicating.
+    let mut seen: HashSet<(String, String, u32, u32, String)> = HashSet::new();
+    indices
+        .into_iter()
+        .filter_map(|i| {
+            let d = &diagnostics[i];
+            let key = (
+                d.code.to_string(),
+                d.span.file.to_string(),
+                d.span.line,
+                d.span.col,
+                d.message.to_string(),
+            );
+            if seen.insert(key) { Some(d) } else { None }
+        })
+        .collect()
+}
+
+/// Enum used by [`interleave_multistage_diagnostics`] to represent a single
+/// diagnostic from either the eval or validator stage.
+///
+/// Borrowing refs to avoid cloning the entire `BoxDiagnostic` vector.
+enum MultiDiag<'a> {
+    /// A diagnostic from the eval stage (a `BoxDiagnostic` / `OwnedDiag`).
+    Eval(&'a slideforge::BoxDiagnostic),
+    /// A diagnostic from the validator stage (`slideforge_plugin_api::Diagnostic`).
+    Validator(&'a slideforge::ValidationDiagnostic),
+}
+
+/// Merge-sort eval and validator diagnostics by source position.
+///
+/// Both input slices must already be individually sorted by `(file, line, col)`.
+/// This function performs a standard two-pointer merge.
+///
+/// `eval_sort_keys` is the parallel sort-key vec from
+/// `BuildError::MultistageFailed.eval_sort_keys` — index `i` of `eval_sort_keys`
+/// is the `(file, line, col)` key for `eval_diags[i]`. The validator sort key
+/// is derived from `slideforge::validator_diag_sort_key(d)`.
+///
+/// This is the SINGLE canonical merge helper for `MultistageFailed` rendering.
+/// It is used by both `render_build_error_to_string` (text) and
+/// `render_build_error_json` (JSON) to avoid a third drift site (TD-VSDD-060).
+///
+/// BC-1.15.002 PC2 / HIGH-P3-001.
+fn interleave_multistage_diagnostics<'a>(
+    eval_diags: &'a [slideforge::BoxDiagnostic],
+    eval_sort_keys: &'a [(String, u32, u32)],
+    validator_diags: &'a [slideforge::ValidationDiagnostic],
+) -> Vec<MultiDiag<'a>> {
+    // BC-1.15.002 PC2 / HIGH-P3-001: merge eval and validator diagnostics in
+    // source-file order.
+    //
+    // Build a combined list of (sort_key, MultiDiag) pairs, then stable-sort
+    // by (file, line, col). We do NOT assume the inputs are pre-sorted — a full
+    // sort is performed so that tests constructing MultistageFailed directly
+    // (without going through compile_inner) also produce correct output.
+
+    let mut combined: Vec<((String, u32, u32), MultiDiag<'a>)> =
+        Vec::with_capacity(eval_diags.len() + validator_diags.len());
+
+    for (i, d) in eval_diags.iter().enumerate() {
+        let key = eval_sort_keys
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| ("<unknown>".to_owned(), 0u32, 0u32));
+        combined.push((key, MultiDiag::Eval(d)));
+    }
+    for d in validator_diags {
+        let key = slideforge::validator_diag_sort_key(d);
+        combined.push((key, MultiDiag::Validator(d)));
+    }
+
+    // Stable sort by (file, line, col): preserves insertion order for ties.
+    combined.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
+
+    combined.into_iter().map(|(_, d)| d).collect()
 }
 
 /// Render a single `dyn miette::Diagnostic` to a string using the appropriate
@@ -455,79 +597,89 @@ fn render_build_error_json(err: &BuildError) {
                 obj
             })
             .collect(),
-        BuildError::ValidationFailed { diagnostics, .. } => diagnostics
-            .iter()
-            .map(|d| {
-                let span = &d.span;
-                let mut obj = serde_json::json!({
-                    "code": d.code.as_ref(),
-                    "message": d.message.as_ref(),
-                    "severity": d.severity.to_string(),
-                    "span": {
-                        "file": span.file.as_ref(),
-                        "line": span.line,
-                        "col": span.col,
-                    },
-                });
-                if let Some(ref hint) = d.hint {
-                    obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
-                }
-                obj
-            })
-            .collect(),
-        BuildError::MultistageFailed {
-            eval_diagnostics,
-            validator_diagnostics,
-            ..
-        } => {
-            // F-P2-MED-001: emit eval diagnostics (BoxDiagnostic) then validator
-            // diagnostics (plugin-api Diagnostic) as a single merged JSON array.
-            let mut combined: Vec<serde_json::Value> = eval_diagnostics
+        BuildError::ValidationFailed { diagnostics, .. } => {
+            // BC-1.15.002 PC2 / EC-004: sort+dedup at render time (same as text path).
+            sort_and_dedup_validator_diags_for_render(diagnostics)
                 .iter()
                 .map(|d| {
-                    let code = d.code().map_or_else(String::new, |c| c.to_string());
-                    let message = d.to_string();
-                    let hint = d.help().map(|h| h.to_string());
-                    let span_obj = d.labels().and_then(|mut labels| {
-                        labels.next().map(|label| {
-                            serde_json::json!({
-                                "offset": label.offset(),
-                                "length": label.len(),
-                            })
-                        })
-                    });
+                    let span = &d.span;
                     let mut obj = serde_json::json!({
-                        "code": code,
-                        "message": message,
-                        "severity": "error",
+                        "code": d.code.as_ref(),
+                        "message": d.message.as_ref(),
+                        "severity": d.severity.to_string(),
+                        "span": {
+                            "file": span.file.as_ref(),
+                            "line": span.line,
+                            "col": span.col,
+                        },
                     });
-                    if let Some(h) = hint {
-                        obj["hint"] = serde_json::Value::String(h);
-                    }
-                    if let Some(s) = span_obj {
-                        obj["span"] = s;
+                    if let Some(ref hint) = d.hint {
+                        obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
                     }
                     obj
                 })
-                .collect();
-            combined.extend(validator_diagnostics.iter().map(|d| {
-                let span = &d.span;
-                let mut obj = serde_json::json!({
-                    "code": d.code.as_ref(),
-                    "message": d.message.as_ref(),
-                    "severity": d.severity.to_string(),
-                    "span": {
-                        "file": span.file.as_ref(),
-                        "line": span.line,
-                        "col": span.col,
+                .collect()
+        },
+        BuildError::MultistageFailed {
+            eval_diagnostics,
+            eval_sort_keys,
+            validator_diagnostics,
+            ..
+        } => {
+            // HIGH-P3-001: interleave eval + validator in source order using the
+            // single canonical merge helper (same as the text renderer — TD-VSDD-060).
+            let interleaved = interleave_multistage_diagnostics(
+                eval_diagnostics,
+                eval_sort_keys,
+                validator_diagnostics,
+            );
+            interleaved
+                .iter()
+                .map(|item| match item {
+                    MultiDiag::Eval(d) => {
+                        let code = d.code().map_or_else(String::new, |c| c.to_string());
+                        let message = d.to_string();
+                        let hint = d.help().map(|h| h.to_string());
+                        let span_obj = d.labels().and_then(|mut labels| {
+                            labels.next().map(|label| {
+                                serde_json::json!({
+                                    "offset": label.offset(),
+                                    "length": label.len(),
+                                })
+                            })
+                        });
+                        let mut obj = serde_json::json!({
+                            "code": code,
+                            "message": message,
+                            "severity": "error",
+                        });
+                        if let Some(h) = hint {
+                            obj["hint"] = serde_json::Value::String(h);
+                        }
+                        if let Some(s) = span_obj {
+                            obj["span"] = s;
+                        }
+                        obj
                     },
-                });
-                if let Some(ref hint) = d.hint {
-                    obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
-                }
-                obj
-            }));
-            combined
+                    MultiDiag::Validator(d) => {
+                        let span = &d.span;
+                        let mut obj = serde_json::json!({
+                            "code": d.code.as_ref(),
+                            "message": d.message.as_ref(),
+                            "severity": d.severity.to_string(),
+                            "span": {
+                                "file": span.file.as_ref(),
+                                "line": span.line,
+                                "col": span.col,
+                            },
+                        });
+                        if let Some(ref hint) = d.hint {
+                            obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
+                        }
+                        obj
+                    },
+                })
+                .collect()
         },
         other => {
             vec![serde_json::json!({"message": other.to_string()})]
