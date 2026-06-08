@@ -208,17 +208,18 @@ debounce. Do not re-implement debounce — use `notify-debouncer-full` in
 
 ## Architecture Compliance Rules
 
-1. **Client-side reconnect (BC-5.05.005 invariant 1)**: Reconnection is handled
+1. **P4 Composite Rendering Model — consumed, not re-implemented (ADR-008 binding 2026-06-08)**: The slide HTML consumed by this story (in WebSocket reload/full-state messages and the initial page) is the `<article>` string produced by `render_slide_to_html()` from `slideforge-html` (STORY-046). This crate does NOT re-implement rendering. The P4 model (text as real HTML elements; graphical elements in a sibling `<svg aria-hidden="true">` layer; no `<canvas>`; no `<foreignObject>`) is enforced upstream in `slideforge-html`. The browser-side JavaScript in this story updates `<article>` elements in the DOM; it does not reconstruct slide structure.
+2. **Client-side reconnect (BC-5.05.005 invariant 1)**: Reconnection is handled
    entirely in browser JavaScript. The axum server does not detect client disconnects
    beyond the WebSocket close event. The server never attempts to re-push to a
    disconnected client.
-2. **Full-state on every new connection (BC-5.05.005 invariant 2)**: Every new or
+3. **Full-state on every new connection (BC-5.05.005 invariant 2)**: Every new or
    reconnecting WebSocket client receives `{type: "full-state", ...}` as its first
    message. No assumption about prior client state.
-3. **Backoff cap at 30s (BC-5.05.005 invariant 3)**: The JavaScript client's backoff
+4. **Backoff cap at 30s (BC-5.05.005 invariant 3)**: The JavaScript client's backoff
    delay must not exceed 30,000ms between attempts. Verified by integration test
    in AC-002.
-4. **aria-live for status (NFR-013)**: All dynamic status changes must go through
+5. **aria-live for status (NFR-013)**: All dynamic status changes must go through
    `aria-live` regions. No status change is communicated only via visual means.
 
 ## Library & Framework Requirements

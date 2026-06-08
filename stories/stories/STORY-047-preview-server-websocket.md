@@ -221,8 +221,7 @@ to be extensible from the start: use a `type` discriminator field.
    only receives pre-rendered `SlideHtml` strings and pushes them.
 3. **No output files written (BC-4.03.004 invariant 3)**: `PreviewServer` has no
    filesystem writes. This is verified by the integration test in AC-006.
-4. **SVG canvas (BC-4.03.003 invariant 2)**: The initial page served by `GET /`
-   uses the same SVG-based rendering as `slideforge-html`. No `<canvas>` elements.
+4. **P4 Composite Rendering Model — consumed, not re-implemented (ADR-008 binding 2026-06-08)**: The HTML served by `GET /` is the `<article>` string produced by `render_slide_to_html()` from `slideforge-html` (STORY-046). This crate does NOT re-implement slide rendering. The P4 model (text as real HTML elements in an `<article style="position:relative">` container; graphical elements in a sibling `<svg aria-hidden="true">` layer; no `<canvas>`; no `<foreignObject>`) is enforced in `slideforge-html`. No `<canvas>` elements appear in the output of this server.
 5. **Async runtime (ADR-021)**: Tokio is the exclusive async runtime for this crate.
    Use `tokio =1.52.3` with curated features (`rt-multi-thread,macros,net,time,sync,
    signal,fs,io-util`), NOT `features = ["full"]`. Graceful shutdown via

@@ -18,6 +18,10 @@ modified:
      1:1 (DoS depth-guard design confirmed sound); ooxmlsdk 0.6.1 HAS typed builders for DrawingML
      run-properties + gradients (raw XML injection only for genuine extension particles, not standard
      elements); quick-xml push_attribute auto-escapes (no pre-escaping in callers)."
+  - "2026-06-08: v1.3 — ARIA correction (ADR-008 Pass-3): corrected HTML/Preview Exporter DOM
+     code block — outer <svg> changed from aria-hidden=\"true\" to role=\"presentation\" per
+     WAI-ARIA ancestor-hides-subtree rule. Updated canonical id format to sf-{slide_id}-{frame_index}
+     (0-based). Both changes align with ADR-008 Pass-3 correction."
 traces_to: ARCH-INDEX.md
 ---
 
@@ -98,9 +102,35 @@ The web preview is an embedded `axum` server with WebSocket push. SVG-based
 canvas rendering is required (not `<canvas>`) per S3 WCAG constraint:
 a bare `<canvas>` is opaque to axe-core and screen readers (WCAG 1.1.1).
 
-Slides render as SVG elements with ARIA attributes. The Node.js footprint is
-test-harness only (`@axe-core/playwright` in `crates/slideforge-preview/tests/`).
-The production binary has zero Node.js dependency.
+**P4 Composite Rendering Model (binding — ADR-008 scope clarification 2026-06-08):**
+The "SVG canvas" requirement applies to the graphical layer only. Slide text is emitted
+as real HTML elements (not SVG/foreignObject) CSS-absolutely-positioned over a sibling
+`<svg aria-hidden="true">` graphics layer. The DOM structure per slide:
+
+```
+<article style="position:relative">
+  <h1|h2 style="position:absolute; left:Xpx; top:Ypx; ...">Title text</h1|h2>
+  <p|ul style="position:absolute; ...">Body/bullets</p|ul>
+  <!-- role="presentation" — NOT aria-hidden="true"; WAI-ARIA forbids descendant
+       re-exposure through an aria-hidden ancestor (Pass-3 correction, 2026-06-08).
+       Canonical id format: sf-{slide_id}-{frame_index} (0-based graphical frames). -->
+  <svg role="presentation" style="position:absolute; top:0; left:0; ...">
+    <g role="img" aria-labelledby="sf-{slide_id}-{frame_index}">
+      <title id="sf-{slide_id}-{frame_index}">Chart alt text</title>
+      <!-- chart SVG — role/title injected via quick-xml after usvg pass -->
+    </g>
+    <g aria-hidden="true"><!-- decorative shapes — individually hidden --></g>
+  </svg>
+</article>
+```
+
+Heading level is determined by slide type at render time (title-slide → h1; all others →
+h2+). The `render_slide_to_html()` function in `slideforge-html` is the single shared
+implementation consumed by both static export (STORY-046) and the WebSocket preview push
+(STORY-047/048). foreignObject is forbidden — usvg 0.47.0 drops it silently.
+
+The Node.js footprint is test-harness only (`@axe-core/playwright` in
+`crates/slideforge-preview/tests/`). The production binary has zero Node.js dependency.
 
 ## PPTX Slide Sections (sectionLst extension)
 
