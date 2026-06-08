@@ -772,9 +772,10 @@ fn test_BC_1_15_003_ec_004_warn_only_does_not_demote_parse_errors() {
 
 /// EC-006 / BC-1.15.003 / MED-002: `--variant` produces a clean usage error (exit 2).
 ///
-/// MED-002 fix: variant selection is NOT supported yet (STORY-091). The CLI
-/// returns a deterministic exit 2 with a clear message citing STORY-091,
-/// instead of the previous substring-heuristic that fabricated exit codes.
+/// MED-002 fix: variant selection is not yet supported (no variant is applied
+/// during evaluation in this release). The CLI returns a deterministic exit 2
+/// with a clear honest message, instead of the previous substring-heuristic
+/// that fabricated exit codes.
 #[test]
 fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
     let tmp = tempfile::tempdir().expect("create tempdir");

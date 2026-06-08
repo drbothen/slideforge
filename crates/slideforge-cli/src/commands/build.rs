@@ -92,19 +92,19 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     // EC-006: variant selection.
     //
     // The root `slideforge::compile()` API does not yet support variant selection
-    // in the `CompileOptions` struct — variant resolution is deferred to STORY-091
-    // (variant DSL parsing). Providing `--variant` before that story is a clean
-    // usage error, not a runtime heuristic.
+    // in the `CompileOptions` struct — variant resolution requires eval-layer support
+    // not present in this release. STORY-008 (merged) parses the `variants:` block
+    // but does not apply a selected variant at eval time. Providing `--variant`
+    // is therefore a clean usage error, not a runtime heuristic.
     //
     // Decision: return E-VAR-004 (exit 2) when `--variant` is specified, with a
-    // deterministic error message citing STORY-091 as the blocking dependency.
-    // This avoids the substring-matching heuristic (MED-002) and ensures the CLI
-    // behaves predictably.
+    // deterministic honest message. This avoids the substring-matching heuristic
+    // (MED-002) and ensures the CLI behaves predictably.
     if let Some(variant_name) = args.variant.as_deref() {
         render_plain_error(&format!(
             "Error: variant selection is not yet supported (E-VAR-004). \
-             The '--variant {variant_name}' flag will be enabled in STORY-091 \
-             (DSL variant parsing). Remove '--variant' to build without variant selection."
+             '--variant {variant_name}' is not applied during evaluation in this release. \
+             Remove '--variant' to build without variant selection."
         ));
         return ExitCode::from(EXIT_VALIDATION_ERROR);
     }
