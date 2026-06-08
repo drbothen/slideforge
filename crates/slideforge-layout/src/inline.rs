@@ -389,6 +389,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 

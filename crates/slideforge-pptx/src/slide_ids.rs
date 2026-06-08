@@ -13,9 +13,11 @@
 
 /// The minimum slide ID required by ECMA-376 (BC-4.01.005 invariant 1 / Spike S6 BUG-006).
 ///
-/// All generated `<p:sldId id="...">` attributes must use this as the starting
-/// value. IDs are sequential: 256, 257, 258, …
-pub const SLIDE_ID_START: u32 = 256;
+/// Re-exported from [`slideforge_types::PPTX_SLIDE_ID_START`] — the single
+/// authoritative source for this value (MED-3 single-source fix, STORY-082).
+/// `slideforge-eval::section_groups::SLIDE_ID_START` also aliases this value so
+/// that both the exporter and the eval-stage mapper can never diverge.
+pub const SLIDE_ID_START: u32 = slideforge_types::PPTX_SLIDE_ID_START;
 
 /// The slide master ID required by several PPTX renderers (BC-4.01.005 invariant 2).
 ///

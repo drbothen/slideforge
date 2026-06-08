@@ -150,6 +150,7 @@ fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
         metadata: make_metadata(),
         registers: slideforge_types::ordered_map::OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

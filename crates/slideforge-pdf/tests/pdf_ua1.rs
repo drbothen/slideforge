@@ -109,6 +109,7 @@ fn deck_with_lang(lang: &str) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -126,6 +127,7 @@ fn deck_without_lang() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -1740,6 +1742,7 @@ fn deck_with_slides(slides: Vec<Slide>) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -1760,6 +1763,7 @@ fn deck_without_doc_title() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -2940,6 +2944,7 @@ fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     };
 
     // Minimal LaidOutDeck: one slide, source_index 0.

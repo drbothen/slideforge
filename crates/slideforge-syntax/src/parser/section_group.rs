@@ -63,8 +63,12 @@ where
 ///
 /// Produces a [`BlockItem::SectionGroup`] from the grammar:
 /// ```text
-/// section_group ::= "section" STRING ":" NEWLINE INDENT slide_block* DEDENT
+/// section_group ::= "section" STRING ":" NEWLINE INDENT block_item* DEDENT
 /// ```
+///
+/// The `block_item_sub` parameter is the same `block_item` combinator used at
+/// deck level. This allows the section body to contain `slide`, `@for`, and
+/// `@if` blocks just like the top-level deck.
 ///
 /// # Empty name detection (AC-010 / EC-010)
 ///
@@ -82,39 +86,48 @@ where
 ///
 /// Introduced in STORY-082.
 #[must_use]
-pub fn section_group_parser<'src, I>(
+pub fn section_group_parser<'src, I, P>(
     file_id: u32,
+    block_item_sub: P,
 ) -> impl Parser<'src, I, BlockItem, extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
+    P: Parser<'src, I, BlockItem, extra::Err<Rich<'src, Token, TSpan>>> + Clone + 'src,
 {
     // Match a STRING token and return its content and span.
     let string_token = select! { Token::StringLit(s) = e => (s.to_string(), e.span()) };
+
+    let nl = just(Token::Newline).ignored();
 
     keyword("section")
         .then(string_token)
         .then_ignore(just(Token::Colon))
         .then_ignore(just(Token::Newline).or_not())
         .then_ignore(select! { Token::Indent(_) => () })
-        // TODO(STORY-082-impl): parse actual slide children when slide_block_parser is available.
-        // For now, consume tokens until Dedent so the block does not cause parse errors.
+        // Parse actual slide/control-flow children using the real block_item sub-parser.
         .then(
-            any()
-                .filter(|t| !matches!(t, Token::Dedent))
+            nl.clone()
                 .repeated()
-                .collect::<Vec<_>>(),
+                .ignore_then(block_item_sub)
+                .then_ignore(nl.repeated())
+                .repeated()
+                .collect::<Vec<BlockItem>>(),
         )
         .then_ignore(just(Token::Dedent))
-        .validate(move |((kw_span, (name_str, name_tspan)), _body), info, emitter| {
+        .validate(move |((kw_span, (name_str, name_tspan)), slide_children), info, emitter| {
             let group_span = to_span(info.span(), file_id);
 
             if name_str.is_empty() {
                 // E-PAR-023: empty section group name rejected.
-                // Emit the routing message that parser/mod.rs routes to errors.
+                // Emit via the structured routing message that parser/mod.rs converts
+                // to SyntaxError::EmptySectionGroupName.
                 emitter.emit(Rich::custom(
                     name_tspan,
-                    "E-PAR-023: section group name must be non-empty. \
-                     Provide a quoted, non-empty name, e.g. section \"Background\":",
+                    format!(
+                        "E-PAR-023: section group name must be non-empty (at {:?}). \
+                         Provide a quoted, non-empty name, e.g. section \"Background\":",
+                        to_span(name_tspan, file_id)
+                    ),
                 ));
                 // Produce a sentinel BlockItem that is filtered out in the deck pass.
                 // Using a real node with a sentinel name is safer than returning None.
@@ -132,7 +145,7 @@ where
             BlockItem::SectionGroup(Spanned::new(
                 SectionGroupNode {
                     name: Spanned::new(Arc::from(name_str.as_str()), to_span(name_tspan, file_id)),
-                    slides: vec![],
+                    slides: slide_children,
                 },
                 group_span,
             ))

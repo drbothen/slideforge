@@ -88,6 +88,7 @@ fn make_deck_with_lang(lang: &str) -> Deck {
         metadata: make_metadata_with_lang(lang),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -109,6 +110,7 @@ fn make_deck_no_lang() -> Deck {
         metadata: make_metadata_no_lang(),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

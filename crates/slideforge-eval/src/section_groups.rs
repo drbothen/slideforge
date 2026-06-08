@@ -28,16 +28,18 @@
 //!
 //! Introduced in STORY-082 (PPTX: Slide-Grouping Sections).
 
-use slideforge_layout::SlideSectionEntry;
 use slideforge_syntax::{BlockItem, DeckNode};
+use slideforge_types::{PPTX_SLIDE_ID_START, SlideSectionEntry};
 
 // ─── PPTX slide ID constants ──────────────────────────────────────────────────
 
 /// The PPTX slide ID of the first slide.
 ///
-/// All slide IDs are assigned sequentially starting from this value.
-/// Matches `slideforge_pptx::slide_ids::SLIDE_ID_START`.
-pub const SLIDE_ID_START: u32 = 256;
+/// Re-exported from [`slideforge_types::PPTX_SLIDE_ID_START`] — the single
+/// authoritative source for this value (MED-3 single-source fix).
+/// Both this module and `slideforge_pptx::slide_ids` derive their constant from
+/// `slideforge_types` so they can never diverge.
+pub const SLIDE_ID_START: u32 = PPTX_SLIDE_ID_START;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -150,4 +152,141 @@ pub fn count_direct_slides(items: &[BlockItem]) -> usize {
         .iter()
         .filter(|item| matches!(item, BlockItem::Slide(_)))
         .count()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use slideforge_syntax::span::SourceMap;
+
+    use super::*;
+
+    /// CRIT-2: `extract_slide_sections` returns non-empty Vec when section groups
+    /// with slide children are present in the parsed [`DeckNode`].
+    ///
+    /// This test proves the CRIT-2 wiring: the function exists, takes the
+    /// [`DeckNode`], and produces a populated `Vec<SlideSectionEntry>`.
+    #[test]
+    fn test_crit2_extract_slide_sections_populated() {
+        let src = r#"slideforge_version "1"
+section "Background":
+  slide title:
+    title "Slide 1"
+  slide content:
+    title "Slide 2"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let sections = extract_slide_sections(&parse_result.deck);
+
+        assert_eq!(
+            sections.len(),
+            1,
+            "must have 1 section entry; got {}",
+            sections.len()
+        );
+        assert_eq!(sections[0].name.as_ref(), "Background");
+        assert_eq!(
+            sections[0].slide_ids,
+            vec![256, 257],
+            "slide IDs must start at PPTX_SLIDE_ID_START (256); got {:?}",
+            sections[0].slide_ids
+        );
+    }
+
+    /// CRIT-2 supplement: ungrouped slides do NOT appear in any `SlideSectionEntry`
+    /// but DO advance the slide index.
+    #[test]
+    fn test_crit2_ungrouped_slides_advance_index() {
+        let src = r#"slideforge_version "1"
+slide title:
+  title "Ungrouped 1"
+slide content:
+  title "Ungrouped 2"
+section "MyGroup":
+  slide bullets:
+    title "Grouped"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let sections = extract_slide_sections(&parse_result.deck);
+
+        // The two ungrouped slides advance the index to 2 before "MyGroup".
+        // The grouped slide is at index 2, so PPTX ID = 256 + 2 = 258.
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].name.as_ref(), "MyGroup");
+        assert_eq!(
+            sections[0].slide_ids,
+            vec![258],
+            "grouped slide after 2 ungrouped slides must have ID 258; got {:?}",
+            sections[0].slide_ids
+        );
+    }
+
+    /// MED-3: `SLIDE_ID_START` in this module equals `PPTX_SLIDE_ID_START` from types.
+    ///
+    /// This test proves the single-source-of-truth invariant: both constants are
+    /// the same value and cannot diverge between the eval module and pptx module.
+    #[test]
+    fn test_med3_slide_id_start_single_source() {
+        assert_eq!(
+            SLIDE_ID_START,
+            slideforge_types::PPTX_SLIDE_ID_START,
+            "SLIDE_ID_START must equal PPTX_SLIDE_ID_START (MED-3 single-source-of-truth)"
+        );
+    }
+
+    /// CRIT-4: `eval_block_items` processes `SectionGroup` children, producing
+    /// the expected number of slides in the flat `Deck.slides` vec.
+    ///
+    /// Slides inside section groups MUST appear in Deck.slides — the grouping
+    /// is metadata only. Silent data loss (SOUL #4 violation) is tested here.
+    #[test]
+    fn test_crit4_section_group_slides_appear_in_deck() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        let src = r#"slideforge_version "1"
+section "Background":
+  slide title:
+    title "Grouped Slide 1"
+  slide content:
+    title "Grouped Slide 2"
+slide bullets:
+  title "Ungrouped Slide"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed");
+
+        // CRIT-4: grouped slides must appear in Deck.slides — no data loss.
+        assert_eq!(
+            deck.slides.len(),
+            3,
+            "Deck must contain all 3 slides (2 grouped + 1 ungrouped); \
+             got {} — CRIT-4: grouped slides must not be silently dropped",
+            deck.slides.len()
+        );
+
+        // CRIT-2: slide_sections must be populated from eval.
+        assert_eq!(
+            deck.slide_sections.len(),
+            1,
+            "Deck.slide_sections must have 1 entry; got {}",
+            deck.slide_sections.len()
+        );
+        assert_eq!(deck.slide_sections[0].name.as_ref(), "Background");
+        assert_eq!(deck.slide_sections[0].slide_ids, vec![256, 257]);
+    }
 }

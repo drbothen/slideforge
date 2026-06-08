@@ -1728,6 +1728,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -3004,6 +3005,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let laid_out = minimal_laid_out_deck();
         let brand = minimal_brand();
@@ -3051,6 +3053,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let laid_out = minimal_laid_out_deck();
         let brand = minimal_brand();

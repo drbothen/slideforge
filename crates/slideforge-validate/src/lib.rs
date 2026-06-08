@@ -141,6 +141,7 @@ mod integration_tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
 
         let opts = ValidatorOptions::default();
@@ -246,6 +247,7 @@ mod integration_tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
 
         let opts = ValidatorOptions::default();

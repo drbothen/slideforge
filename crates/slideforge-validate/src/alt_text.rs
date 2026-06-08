@@ -388,6 +388,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -1500,6 +1501,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
 
         // Run the layout — this calls thread_media_alt_into_frames internally.
@@ -1604,6 +1606,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
 
         let laid_out = slideforge_layout::run(&deck, &brand)

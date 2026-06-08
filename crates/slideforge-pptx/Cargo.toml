@@ -38,5 +38,10 @@ sha2 = { workspace = true }
 insta = { workspace = true }
 # slideforge-eval with test-utils feature exposes BleedChecker for AC-010 bleed tests.
 slideforge-eval = { workspace = true, features = ["test-utils"] }
+# STORY-082 HIGH-3/MED-2: end-to-end wiring test uses the full parse→eval→layout→export pipeline.
+# slideforge-syntax: parse .sf source strings in tests
+# slideforge-docx: MED-2 assertion that DOCX output has no sectionLst
+slideforge-syntax = { workspace = true }
+slideforge-docx = { workspace = true }
 # tracing-test for load-bearing warn-capture tests (F-P5-LOW-001 partial-reuse warn).
 tracing-test = "=0.2.5"

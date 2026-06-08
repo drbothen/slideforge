@@ -350,12 +350,10 @@ pub fn derive_section_guid(name: &str) -> String {
 ///
 /// Format: `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}` (uppercase hex, 8-4-4-4-12).
 ///
-/// # Panics
-///
-/// Panics if `bytes.len() != 16`.
+/// The parameter type `&[u8; 16]` statically guarantees exactly 16 bytes —
+/// no runtime assertion needed (MED-1 fix, STORY-082 adversary pass 1).
 #[must_use]
-pub fn format_guid(bytes: &[u8]) -> String {
-    assert_eq!(bytes.len(), 16, "GUID requires exactly 16 bytes");
+pub fn format_guid(bytes: &[u8; 16]) -> String {
     format!(
         "{{{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
         bytes[0],

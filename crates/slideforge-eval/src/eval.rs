@@ -471,12 +471,20 @@ pub fn eval_deck_with_variant(
         deck_vars_ordered.insert(k.clone(), v.clone());
     }
 
+    // ── Step 8: Extract slide-section groupings (STORY-082 / CRIT-2) ──
+    // extract_slide_sections needs the DeckNode (the parsed AST) to walk
+    // section "Name": blocks and map their children to PPTX slide IDs.
+    // We have the DeckNode here at eval time — this is the correct place to
+    // extract sections before layout runs (layout only receives Deck, not DeckNode).
+    let slide_sections = crate::section_groups::extract_slide_sections(deck_node);
+
     Some(Deck {
         slides,
         vars: deck_vars_ordered,
         metadata,
         registers: OrderedMap::new(),
         section_blocks,
+        slide_sections,
     })
 }
 

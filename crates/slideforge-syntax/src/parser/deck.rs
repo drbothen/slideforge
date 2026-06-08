@@ -513,10 +513,13 @@ where
     let include = include_directive_parser(file_id).map(DeckItem::Include);
     // STORY-078: section block (bare-ident form: `section methodology:`)
     let section = section_block_parser(file_id).map(DeckItem::Section);
-    // STORY-082: section group (quoted-string form: `section "Name":`)
-    let section_group = section_group_parser(file_id).map(DeckItem::SectionGroup);
     // Use block_item() to handle slide, @for, and @if at deck level.
     let block = block_item(file_id).map(DeckItem::Block);
+    // STORY-082: section group (quoted-string form: `section "Name":`)
+    // block_item(file_id) is passed as the sub-parser so that section bodies
+    // can contain the same slide/control-flow productions as the top-level deck.
+    let section_group =
+        section_group_parser(file_id, block_item(file_id)).map(DeckItem::SectionGroup);
 
     // Orphan Dedent tokens can appear at deck level when a malformed indented
     // block (e.g. a `@for` with a bad header) leaves its body's closing Dedents
@@ -614,7 +617,8 @@ where
                         // The parser emitted E-PAR-023 for empty names; we must
                         // not produce any AST node for the rejected block.
                         if let crate::ast::BlockItem::SectionGroup(ref spanned) = bi {
-                            let name = spanned.value().name.value();
+                            let group_node = spanned.value();
+                            let name = group_node.name.value();
                             if name.is_empty() {
                                 // Empty name was already reported by section_group_parser.
                                 // Drop the sentinel node — do NOT push to deck.items.
@@ -622,10 +626,16 @@ where
                             }
                             // STORY-082 AC-011: duplicate name detection (W-PAR-002).
                             // Both sections are emitted; warning is cosmetic (exit 0).
+                            // HIGH-2 fix: use the real name span so the rendered message
+                            // has correct file:line:col (not 0..0 sentinel span).
                             let name_arc: std::sync::Arc<str> = std::sync::Arc::clone(name);
                             if seen_section_group_names.contains(&name_arc) {
+                                // The name span from the AST carries the real byte offset.
+                                let name_span = group_node.name.span();
+                                let name_simple_span =
+                                    SimpleSpan::from(name_span.start..name_span.end);
                                 emitter.emit(Rich::custom(
-                                    SimpleSpan::from(0usize..0usize),
+                                    name_simple_span,
                                     format!(
                                         "W-PAR-002: Duplicate section group name '{name_arc}'. \
                                          Both sections are emitted with the same GUID. \

@@ -118,6 +118,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -580,6 +581,7 @@ mod tests {
             },
             registers: slideforge_types::OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let brand = Brand {
             name: Arc::from("test-brand"),
@@ -685,6 +687,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let result = run(&deck, &brand).expect("layout::run must succeed for severity_cards slide");
@@ -738,6 +741,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![exec_block, methodology_block],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let result =
@@ -797,6 +801,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let result = run(&deck, &brand).expect("layout::run must succeed with section_order");

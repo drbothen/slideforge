@@ -587,6 +587,304 @@ fn test_BC_4_01_003_slide_section_entry_different_names_not_equal() {
     assert_ne!(a, b);
 }
 
+// ─── HIGH-3: Keystone end-to-end wiring test (LESSON-21) ─────────────────────
+
+/// HIGH-3 — Full pipeline wiring test: parse → eval → layout → pptx export.
+///
+/// Builds a real deck containing `section "Background":` groupings, runs the
+/// complete pipeline, extracts `ppt/presentation.xml` from the produced ZIP,
+/// and re-parses it with `quick-xml` to assert:
+///
+/// 1. `<p:extLst>` is the LAST child of `<p:presentation>`.
+/// 2. `<p:ext uri="{BB962C8B-B8C3-4F9C-9F0B-04B162FE9A02}">` is present.
+/// 3. `<p14:sectionLst>` is present with the correct number of `<p14:section>`
+///    children.
+/// 4. `xmlns:p14` is declared on `<p:presentation>`.
+///
+/// This test is the keystone that proves CRIT-1 through CRIT-4 are wired
+/// end-to-end: parser populates slide children → eval flows them into Deck.slides
+/// AND Deck.slide_sections → layout passes slide_sections to LaidOutDeck →
+/// exporter calls SectionListBuilder::inject.
+///
+/// Traces to BC-4.01.003 (all ACs), CRIT-1/2/3/4 adversary findings.
+// This is a full-pipeline test by design; its length reflects the 8-step
+// assertion chain required to prove end-to-end wiring (LESSON-21).
+#[allow(clippy::too_many_lines)]
+#[test]
+fn test_BC_4_01_003_high3_e2e_pipeline_section_lst_in_presentation_xml() {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+    use slideforge_eval::{EvalConfig, eval_deck};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_syntax::DiagnosticSink;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+    let src = r#"slideforge_version "1"
+lang "en-US"
+section "Background":
+  slide title:
+    title "Background Slide 1"
+  slide content:
+    title "Background Slide 2"
+section "Analysis":
+  slide content:
+    title "Analysis Slide"
+slide title:
+  title "Ungrouped Slide"
+"#;
+
+    // Step 1: Parse
+    let mut sm = SourceMap::default();
+    let file_id = sm.add_file(std::sync::Arc::from("e2e.sf"), std::sync::Arc::from(src));
+    let parse_result =
+        slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed for valid DSL");
+
+    // Step 2: Eval
+    let mut sink = DiagnosticSink::new();
+    let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+        .expect("eval must succeed");
+    assert!(!sink.has_fatal(), "eval must produce no fatal errors");
+
+    // Assert CRIT-4: grouped slides appear in Deck.slides (no silent data loss)
+    assert_eq!(
+        deck.slides.len(),
+        4,
+        "Deck must contain all 4 slides (2+1 grouped + 1 ungrouped); \
+         CRIT-4: grouped slides must not be silently dropped"
+    );
+
+    // Assert CRIT-2: slide_sections is populated on Deck
+    assert_eq!(
+        deck.slide_sections.len(),
+        2,
+        "Deck.slide_sections must have 2 entries (Background + Analysis); \
+         CRIT-2: extract_slide_sections must wire into eval"
+    );
+
+    // Step 3: Layout
+    let brand = Brand {
+        name: std::sync::Arc::from("test"),
+        palette: BrandPalette {
+            primary: std::sync::Arc::from("#003087"),
+            secondary: std::sync::Arc::from("#0066CC"),
+            accent: std::sync::Arc::from("#FF6B35"),
+            neutral: std::sync::Arc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: std::sync::Arc::from("Calibri"),
+            body: std::sync::Arc::from("Calibri"),
+            mono: std::sync::Arc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: SourceSpan::default(),
+    };
+    let laid_out = layout_run(&deck, &brand).expect("layout::run must succeed");
+
+    // Assert CRIT-2 pass-through: LaidOutDeck.slide_sections must equal Deck.slide_sections
+    assert_eq!(
+        laid_out.slide_sections.len(),
+        2,
+        "LaidOutDeck.slide_sections must have 2 entries (passed through from Deck); \
+         CRIT-2: layout pass-through wiring"
+    );
+    assert_eq!(laid_out.slide_sections[0].name.as_ref(), "Background");
+    assert_eq!(laid_out.slide_sections[0].slide_ids, vec![256, 257]);
+    assert_eq!(laid_out.slide_sections[1].name.as_ref(), "Analysis");
+    assert_eq!(laid_out.slide_sections[1].slide_ids, vec![258]);
+
+    // Step 4: PPTX Export
+    let exporter = crate::PptxExporter::new();
+    let pptx_bytes = exporter
+        .export(&deck, &laid_out, &brand, &ExportOptions::default())
+        .expect("PPTX export must succeed");
+
+    // Step 5: Extract ppt/presentation.xml from the ZIP
+    let cursor = std::io::Cursor::new(pptx_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("must be valid ZIP");
+    let mut prs_xml_bytes = Vec::new();
+    {
+        let mut prs_file = zip
+            .by_name("ppt/presentation.xml")
+            .expect("ppt/presentation.xml must be present in PPTX archive");
+        std::io::Read::read_to_end(&mut prs_file, &mut prs_xml_bytes)
+            .expect("must read presentation.xml");
+    }
+    let prs_xml = String::from_utf8(prs_xml_bytes).expect("presentation.xml must be valid UTF-8");
+
+    // Step 6: Assert p:extLst is the LAST child of p:presentation (BC-4.01.003 inv4)
+    let close_pos = prs_xml
+        .rfind("</p:presentation>")
+        .expect("closing </p:presentation> tag must be present");
+    let ext_lst_pos = prs_xml.rfind("<p:extLst>")
+        .expect("p:extLst must be present in presentation.xml — CRIT-1: SectionListBuilder::inject not called");
+    assert!(
+        ext_lst_pos < close_pos,
+        "p:extLst must appear BEFORE </p:presentation>; \
+         BC-4.01.003 invariant 4"
+    );
+    // Verify nothing structural appears between </p:extLst> and </p:presentation>
+    let ext_lst_close_pos = prs_xml
+        .rfind("</p:extLst>")
+        .expect("closing </p:extLst> must be present");
+    let between = prs_xml[ext_lst_close_pos + "</p:extLst>".len()..close_pos].trim();
+    assert!(
+        between.is_empty(),
+        "p:extLst must be the LAST child of p:presentation; \
+         found content between </p:extLst> and </p:presentation>: {between:?}"
+    );
+
+    // Step 7: Assert xmlns:p14 is declared on <p:presentation (BC-4.01.003 PC5)
+    let open_tag_end = prs_xml
+        .find('>')
+        .expect("presentation must have an opening tag");
+    let open_tag = &prs_xml[..open_tag_end];
+    assert!(
+        open_tag.contains("xmlns:p14="),
+        "xmlns:p14 must be declared on <p:presentation>; got opening tag: {open_tag:?}"
+    );
+
+    // Step 8: Re-parse the XML with quick-xml to assert structural invariants
+    let mut reader = Reader::from_str(&prs_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut section_lst_found = false;
+    let mut section_count = 0usize;
+    let mut ext_uri_ok = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+                let local = e.name().local_name();
+                let local_str = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                let prefix_bytes = e
+                    .name()
+                    .prefix()
+                    .map(|p| p.as_ref().to_vec())
+                    .unwrap_or_default();
+                let prefix_str = std::str::from_utf8(&prefix_bytes).unwrap_or("");
+                match (prefix_str, local_str) {
+                    ("p", "ext") => {
+                        // Check the uri attribute
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"uri" {
+                                let val = String::from_utf8_lossy(&attr.value);
+                                if val.as_ref() == SECTION_LST_EXT_URI {
+                                    ext_uri_ok = true;
+                                }
+                            }
+                        }
+                    },
+                    ("p14", "sectionLst") => {
+                        section_lst_found = true;
+                    },
+                    ("p14", "section") => {
+                        section_count += 1;
+                    },
+                    _ => {},
+                }
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => panic!("XML parse error: {e}"),
+            _ => {},
+        }
+    }
+
+    assert!(
+        ext_uri_ok,
+        "p:ext must have uri=\"{SECTION_LST_EXT_URI}\" (BC-4.01.003 PC5)"
+    );
+    assert!(
+        section_lst_found,
+        "p14:sectionLst must be present in presentation.xml — \
+         CRIT-1: SectionListBuilder::inject is not wired"
+    );
+    assert_eq!(
+        section_count, 2,
+        "must have exactly 2 p14:section elements (Background + Analysis); \
+         got {section_count}"
+    );
+}
+
+/// MED-2 — DOCX export must NOT produce sectionLst.
+///
+/// Non-PPTX exporters must not emit `p14:sectionLst` or any PPTX-specific
+/// section metadata. This test builds a deck with section groups, exports to
+/// DOCX, and asserts the output contains no `sectionLst` string.
+///
+/// Traces to BC-4.01.003 EC-006 (non-PPTX exporters skip sectionLst entirely).
+#[test]
+fn test_BC_4_01_003_med2_docx_has_no_section_lst() {
+    use slideforge_eval::{EvalConfig, eval_deck};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_syntax::DiagnosticSink;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+    let src = r#"slideforge_version "1"
+lang "en-US"
+section "Background":
+  slide title:
+    title "Grouped Slide"
+"#;
+
+    let mut sm = SourceMap::default();
+    let file_id = sm.add_file(std::sync::Arc::from("e2e.sf"), std::sync::Arc::from(src));
+    let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+    let mut sink = DiagnosticSink::new();
+    let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+        .expect("eval must succeed");
+
+    let brand = Brand {
+        name: std::sync::Arc::from("test"),
+        palette: BrandPalette {
+            primary: std::sync::Arc::from("#003087"),
+            secondary: std::sync::Arc::from("#0066CC"),
+            accent: std::sync::Arc::from("#FF6B35"),
+            neutral: std::sync::Arc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: std::sync::Arc::from("Calibri"),
+            body: std::sync::Arc::from("Calibri"),
+            mono: std::sync::Arc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: SourceSpan::default(),
+    };
+    let laid_out = layout_run(&deck, &brand).expect("layout must succeed");
+
+    // Use the DOCX exporter (not PPTX) — MED-2 requires no sectionLst in DOCX output.
+    let docx_exporter = slideforge_docx::DocxExporter;
+    let docx_bytes = docx_exporter
+        .export(&deck, &laid_out, &brand, &ExportOptions::default())
+        .expect("DOCX export must succeed");
+
+    // The DOCX ZIP should contain no reference to p14:sectionLst or PPTX section metadata.
+    // Read all file contents in the ZIP and check for the sectionLst string.
+    let cursor = std::io::Cursor::new(docx_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("must be valid ZIP");
+    for i in 0..zip.len() {
+        let mut file = zip.by_index(i).expect("must access zip entry");
+        let fname = file.name().to_ascii_lowercase();
+        let fname_path = std::path::Path::new(&fname);
+        if fname_path.extension().is_some_and(|e| e == "xml")
+            || fname_path.extension().is_some_and(|e| e == "rels")
+        {
+            let mut content = String::new();
+            std::io::Read::read_to_string(&mut file, &mut content).unwrap_or_default();
+            assert!(
+                !content.contains("sectionLst"),
+                "DOCX XML part '{}' must NOT contain 'sectionLst'; \
+                 MED-2: sectionLst is PPTX-only (BC-4.01.003 EC-006)",
+                file.name()
+            );
+        }
+    }
+}
+
 /// `format_guid` produces correct 8-4-4-4-12 brace-wrapped uppercase GUID.
 #[test]
 fn test_BC_4_01_003_format_guid_produces_correct_format() {

@@ -28,39 +28,12 @@ pub use slideforge_types::{AltText, FillSpec, LayoutWarning, Rgb, ShapeType};
 
 use crate::sections::GeneratedSection;
 
-/// A single slide-grouping section for PPTX `<p14:sectionLst>` (STORY-082).
-///
-/// `SlideSectionEntry` maps a user-declared `section "Name":` DSL block to the
-/// PPTX slide IDs that fall within it. The PPTX exporter reads this field to
-/// build the `<p14:sectionLst>` extension block in `presentation.xml`.
-///
-/// ## Invariants
-///
-/// - `name` must be non-empty (enforced at parse time by E-PAR-023).
-/// - `slide_ids` must be non-empty (a section with no slides is not emitted
-///   by the eval pass).
-/// - IDs are PPTX slide IDs (start at 256), NOT zero-based indices.
-///
-/// ## Separation from `GeneratedSection`
-///
-/// `SlideSectionEntry` is a NEW, DISTINCT type from `GeneratedSection`.
-/// `GeneratedSection` carries DOCX/PDF document section data (e.g.,
-/// `ExecutiveSummary`, `RiskRegister`). `SlideSectionEntry` carries PPTX-only
-/// slide grouping data. They MUST NOT be conflated or reused for each other.
-///
-/// ## STORY-082
-///
-/// Introduced in STORY-082 (PPTX: Slide-Grouping Sections).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SlideSectionEntry {
-    /// The section group name as declared in the DSL (`section "Name":`).
-    pub name: std::sync::Arc<str>,
-    /// The PPTX slide IDs that belong to this section group, in deck order.
-    ///
-    /// IDs start at 256 (PPTX convention). An empty list means the section
-    /// has no slides and should not be emitted.
-    pub slide_ids: Vec<u32>,
-}
+// `SlideSectionEntry` is defined in `slideforge-types` (the leaf crate) so that
+// both `Deck` (semantic IR) and `LaidOutDeck` (geometric IR) can reference it
+// without creating a circular dependency.  Re-export it here so that all callers
+// of `slideforge-layout` see it at the familiar `slideforge_layout::SlideSectionEntry`
+// path (backward-compatible).
+pub use slideforge_types::SlideSectionEntry;
 
 /// The default canvas width for the layout engine (10 inches = 9,144,000 EMU).
 ///

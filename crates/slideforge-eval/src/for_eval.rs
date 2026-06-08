@@ -469,13 +469,19 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                 slides.extend(generated);
             },
             BlockItem::Section(_spanned_section) => {
-                // Section blocks generate no slides at the eval level.
+                // Section blocks (bare-ident form, STORY-078) generate no slides
+                // at the eval level — they carry register content for DOCX/PDF.
             },
-            BlockItem::SectionGroup(_spanned_group) => {
-                // SectionGroup ("Name": form) generates no slides directly here.
-                // Slide children are handled by the STORY-082 eval pass
-                // (slideforge-eval::section_groups) which populates
-                // LaidOutDeck.slide_sections.
+            BlockItem::SectionGroup(spanned_group) => {
+                // SectionGroup ("Name": form) — CRIT-4 fix.
+                // The grouping is METADATA for the PPTX exporter (p14:sectionLst).
+                // The slides themselves MUST still flow into Deck.slides in
+                // declaration order — grouping must not cause silent data loss.
+                // Recurse into the section body just like any other block list.
+                let group = spanned_group.value();
+                let group_slides =
+                    eval_block_items(env, &group.slides, set_rule_defaults, config, sink);
+                slides.extend(group_slides);
             },
         }
     }

@@ -568,6 +568,9 @@ fn build_presentation_xml(
         notes_master_rel_id,
         handout_master_rel_id,
     )?;
+    // STORY-082 CRIT-1: inject p14:sectionLst into presentation.xml when
+    // slide_sections is non-empty. If empty, returns bytes unchanged (AC-004).
+    let prs_xml = crate::sections::SectionListBuilder::inject(prs_xml, &laid_out.slide_sections)?;
     parts.push(ZipPart {
         path: "ppt/presentation.xml".to_string(),
         bytes: prs_xml,

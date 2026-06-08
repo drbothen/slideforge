@@ -38,7 +38,7 @@ use crate::{BlockItem, parse};
 /// `name == "Background"`. Traces to BC-4.01.003 precondition 5.
 #[test]
 fn test_BC_4_01_003_ac001_section_group_node_parses_with_name() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section "Background":
   slide title:
     title "Background Slide"
@@ -79,7 +79,7 @@ section "Background":
 /// Traces to BC-4.01.003 precondition 5 (no grammar collision).
 #[test]
 fn test_BC_4_01_003_ac002_section_group_distinct_from_section_block() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section methodology:
   report: "This is the methodology."
 section "Background":
@@ -149,7 +149,7 @@ section "Background":
 /// Traces to BC-4.01.003 postcondition 7 + invariant 5.
 #[test]
 fn test_BC_4_01_003_ac010_empty_section_name_rejected_e_par_023() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section "":
   slide title:
     title "Should Be Rejected"
@@ -203,7 +203,7 @@ section "":
 /// Traces to BC-4.01.003 postcondition 7 + invariant 5.
 #[test]
 fn test_BC_4_01_003_ac010_empty_section_name_no_section_group_node() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section "":
   slide title:
     title "Should Be Rejected"
@@ -241,7 +241,7 @@ section "":
 /// Traces to BC-4.01.003 postcondition 8 + invariant 5.
 #[test]
 fn test_BC_4_01_003_ac011_duplicate_section_name_warning_w_par_002() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section "Background":
   slide title:
     title "First Background"
@@ -277,7 +277,7 @@ section "Background":
 /// Traces to BC-4.01.003 postcondition 8.
 #[test]
 fn test_BC_4_01_003_ac011_duplicate_section_name_both_sections_present() {
-    let src = r#"slideforge_version "0.1.0"
+    let src = r#"slideforge_version "1"
 section "Background":
   slide title:
     title "First Background"
@@ -303,4 +303,96 @@ section "Background":
         "both duplicate SectionGroupNode entries must appear in AST; got {group_count} \
          (BC-4.01.003 PC8)"
     );
+}
+
+// ─── CRIT-3: section group parses real slide children (not empty) ─────────────
+
+/// CRIT-3 — A `section "Name":` with N slides must produce a `SectionGroupNode`
+/// with `slides.len() == N` containing the correct slide types.
+///
+/// This test closes the CRIT-3 finding: the parser was previously consuming
+/// the section body and DISCARDING the tokens. This test asserts the real
+/// slide children are populated in `SectionGroupNode.slides`.
+///
+/// Traces to BC-4.01.003 (parser must populate slide children).
+#[test]
+fn test_BC_4_01_003_crit3_section_group_slides_parsed() {
+    let src = r#"slideforge_version "1"
+section "Background":
+  slide title:
+    title "First Slide"
+  slide content:
+    title "Second Slide"
+  slide bullets:
+    title "Third Slide"
+"#;
+    let mut source_map = SourceMap::default();
+    let file_id = source_map.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+    let result = parse(src, file_id, &source_map);
+
+    let parse_result = result.expect("section with 3 slides must parse without fatal errors");
+
+    let section_group = parse_result
+        .deck
+        .items
+        .iter()
+        .find_map(|item| {
+            if let BlockItem::SectionGroup(spanned) = item {
+                Some(spanned.value())
+            } else {
+                None
+            }
+        })
+        .expect("deck must contain a BlockItem::SectionGroup");
+
+    assert_eq!(
+        section_group.slides.len(),
+        3,
+        "SectionGroupNode.slides must contain 3 children; got {} \
+         (CRIT-3: parser was previously discarding section body tokens)",
+        section_group.slides.len()
+    );
+
+    // Verify that children are Slide block items with correct types.
+    let types: Vec<&str> = section_group
+        .slides
+        .iter()
+        .filter_map(|item| {
+            if let BlockItem::Slide(spanned) = item {
+                Some(spanned.value().kind.value().as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        types,
+        vec!["title", "content", "bullets"],
+        "section slide children must be in source order with correct types; got {types:?}"
+    );
+}
+
+/// CRIT-3 supplement — a section with 0 slides parses with empty `slides` vec.
+#[test]
+fn test_BC_4_01_003_crit3_empty_section_body() {
+    // An empty section body is unusual but the grammar should permit it.
+    // The eval pass will simply produce no SlideSectionEntry for it (per spec).
+    let src = "slideforge_version \"1\"\nsection \"Empty\":\n";
+    let mut source_map = SourceMap::default();
+    let file_id = source_map.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
+    // Empty section bodies may or may not parse successfully depending on grammar strictness.
+    // The key invariant: if parse succeeds, the slides vec is empty.
+    if let Ok(parse_result) = parse(src, file_id, &source_map) {
+        for item in &parse_result.deck.items {
+            if let BlockItem::SectionGroup(spanned) = item {
+                assert!(
+                    spanned.value().slides.is_empty(),
+                    "SectionGroupNode for empty body must have 0 slides"
+                );
+            }
+        }
+    }
+    // If parse fails with an error, that's acceptable — empty section bodies may
+    // require at least one child. The CRIT-3 fix is demonstrated by the 3-slide test.
 }

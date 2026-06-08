@@ -57,6 +57,7 @@ fn make_deck(lang: Option<&str>) -> Deck {
         metadata: make_metadata(lang),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

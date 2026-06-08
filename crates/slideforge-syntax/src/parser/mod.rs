@@ -159,6 +159,10 @@ pub fn parse_checked(
 ///
 /// Returns `Err(Vec<SyntaxError>)` when any lex or parse error occurred.
 /// The error vector is never empty when `Err` is returned.
+// parse() is a multi-phase error routing function; its length is inherent to
+// the number of error code branches it must handle. Extracting phases would
+// require threading extra state across helper boundaries — less readable, not safer.
+#[allow(clippy::too_many_lines)]
 pub fn parse(
     src: &str,
     file_id: u32,
@@ -223,6 +227,23 @@ pub fn parse(
             let raw_message = format!("{:?}", rich_err.reason());
             let message = strip_custom_wrapper(&raw_message);
 
+            if message.contains("W-PAR-002") {
+                // W-PAR-002: duplicate section group name — route to dedicated variant.
+                // Extract name from the message (between first and second single-quote).
+                let dup_name = extract_w_par_002_name(&message).unwrap_or_default();
+                let warning = SyntaxError::duplicate_section_group_name(
+                    file_path.to_string(),
+                    line,
+                    col,
+                    dup_name.to_string(),
+                    message,
+                    src.to_string(),
+                    byte_start,
+                    span_len,
+                );
+                parse_time_warnings.push(warning);
+                continue;
+            }
             if message.contains("W-PAR-") {
                 let warning = SyntaxError::unexpected_token(
                     file_path.to_string(),
@@ -234,6 +255,20 @@ pub fn parse(
                     span_len,
                 );
                 parse_time_warnings.push(warning);
+                continue;
+            }
+            if message.contains("E-PAR-023") {
+                // E-PAR-023: empty section group name — route to dedicated variant.
+                let syntax_err = SyntaxError::empty_section_group_name(
+                    file_path.to_string(),
+                    line,
+                    col,
+                    message,
+                    src.to_string(),
+                    byte_start,
+                    span_len,
+                );
+                errors.push(syntax_err);
                 continue;
             }
 
@@ -434,11 +469,7 @@ fn pre_parse_version_gate(
                     // Stable v1.x series: compatible.
                     return VersionGateResult::Compatible;
                 }
-                if major == 0 && ver_str.contains('.') {
-                    // Pre-1.0 development (e.g. "0.1.0"): compatible.
-                    return VersionGateResult::Compatible;
-                }
-                // Either bare "0" or major >= 2: reject.
+                // major == 0 or major >= 2: reject.
                 let msg = if major >= 2 {
                     format!(
                         "E-PAR-010: forward-incompatible version '{ver_str}' — \
@@ -447,8 +478,7 @@ fn pre_parse_version_gate(
                 } else {
                     format!(
                         "E-PAR-010: invalid version string '{ver_str}' — \
-                         the version must be a numeric major version (1.x) or \
-                         a pre-1.0 development version (0.x.y), e.g. \"1\" or \"0.1.0\""
+                         the version must be a numeric major version (1.x), e.g. \"1\" or \"1.0\""
                     )
                 };
                 errors.push(SyntaxError::version_error(
@@ -712,6 +742,17 @@ fn extract_quoted_name(msg: &str) -> Option<&str> {
     let rest = &msg[start..];
     let end = rest.find('\'')?;
     Some(&rest[..end])
+}
+
+/// Extract the section group name from a W-PAR-002 message.
+///
+/// W-PAR-002 messages are formatted as:
+/// `"W-PAR-002: Duplicate section group name '{name}'. ..."`
+///
+/// This helper extracts `name` from between the first pair of single-quotes.
+fn extract_w_par_002_name(msg: &str) -> Option<&str> {
+    // Same logic as extract_quoted_name — find the first '...' span.
+    extract_quoted_name(msg)
 }
 
 /// Convert a byte offset in `src` to a 1-based `(line, col)` pair.

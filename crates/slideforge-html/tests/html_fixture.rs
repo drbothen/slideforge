@@ -65,6 +65,7 @@ fn make_deck(lang: &str) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

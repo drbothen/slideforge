@@ -74,6 +74,7 @@ fn demo_deck(title: &str) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

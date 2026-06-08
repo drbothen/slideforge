@@ -88,6 +88,7 @@ fn make_deck(n: usize) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
