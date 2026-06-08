@@ -4,9 +4,9 @@
 //! deck: color palette, typography, and slide layout definitions. Brand data
 //! is loaded by the `BrandProvider` plugin and applied during layout and export.
 //!
-//! This module provides skeleton types. Full brand schema definition (font
-//! weights, palette derivation, layout geometry) is handled in the brand-spec
-//! story.
+//! This module provides the production brand schema: palette, typography
+//! (including [`BrandFonts::font_size_emu`] for brand-aware em resolution),
+//! and named slide layout definitions.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub struct BrandPalette {
 
 /// Brand font configuration.
 ///
-/// ## STORY-074 — `font_size_emu` stub
+/// ## STORY-074 — brand-aware em resolution
 ///
 /// The `font_size_emu` field carries the brand's body font size expressed in
 /// EMU (English Metric Units). It is used by the layout engine to resolve

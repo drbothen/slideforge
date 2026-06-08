@@ -778,15 +778,12 @@ mod tests {
     /// Red Gate: panics with `todo!()` inside `layout_shapes`.
     #[test]
     fn test_bc_3_04_001_ac003_layout_shapes_emits_offcanvas_warning_and_produces_frame() {
-        // A shape at x=-0.5in, y=1.0in, width=2.0in, height=1.0in
-        // The ShapeSpec carries position via the position_emu field injected
-        // by a future extended ShapeSpec; for now we use a test-only approach
-        // that calls layout_shapes with a standard ShapeSpec and verifies that
-        // the function detects off-canvas via a pre-computed BoundingBox path.
-        //
-        // Since ShapeSpec does not yet carry position fields, we test is_off_canvas
-        // directly and assert the warning type — the full layout_shapes integration
-        // test is in test_bc_3_04_001_ac003_layout_shapes_full_off_canvas_warning.
+        // A shape at x=-0.5in, y=1.0in, width=2.0in, height=1.0in.
+        // ShapeSpec carries a `position: ShapePosition` field (shipped in STORY-028);
+        // this test verifies the off-canvas detection path via `is_off_canvas` directly
+        // and asserts the LayoutWarning variant can be constructed as expected.
+        // The full layout_shapes integration test exercising the warning-emission path
+        // end-to-end is in test_bc_3_04_001_ac003_layout_shapes_full_off_canvas_warning.
         let off_canvas_bbox = BoundingBox {
             x: Emu(-457_200),
             y: Emu(914_400),
