@@ -2,10 +2,7 @@
 source: crates/slideforge-html/src/render.rs
 expression: result
 ---
-<article id="slide-1" aria-label="Slide 1">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9144000 5143500" width="9144000" height="5143500" role="img" aria-label="Content Slide">
-<title>Content Slide</title>
-<foreignObject x="0" y="0" width="9144000" height="1000000"><h1 xmlns="http://www.w3.org/1999/xhtml">Content Slide</h1></foreignObject>
-<foreignObject x="0" y="1000000" width="9144000" height="4143500"><h2 xmlns="http://www.w3.org/1999/xhtml">A subtitle here</h2></foreignObject>
-</svg>
+<article id="slide-1" class="sf-slide" aria-label="Slide 1" style="position:relative; width:960.00px; height:540.00px; overflow:hidden;">
+<h2 class="sf-title" style="position:absolute; left:0.00px; top:0.00px; width:960.00px; height:104.99px; overflow:hidden;">Content Slide</h2>
+<h3 class="sf-subtitle" style="position:absolute; left:0.00px; top:104.99px; width:960.00px; height:435.01px; overflow:hidden;">A subtitle here</h3>
 </article>

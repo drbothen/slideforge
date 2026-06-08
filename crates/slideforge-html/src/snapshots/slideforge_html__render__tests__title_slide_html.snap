@@ -2,9 +2,6 @@
 source: crates/slideforge-html/src/render.rs
 expression: result
 ---
-<article id="slide-1" aria-label="Slide 1">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9144000 5143500" width="9144000" height="5143500" role="img" aria-label="Hello World">
-<title>Hello World</title>
-<foreignObject x="0" y="0" width="9144000" height="5143500"><h1 xmlns="http://www.w3.org/1999/xhtml">Hello World</h1></foreignObject>
-</svg>
+<article id="slide-1" class="sf-slide" aria-label="Slide 1" style="position:relative; width:960.00px; height:540.00px; overflow:hidden;">
+<h1 class="sf-title" style="position:absolute; left:0.00px; top:0.00px; width:960.00px; height:540.00px; overflow:hidden;">Hello World</h1>
 </article>

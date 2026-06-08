@@ -158,10 +158,11 @@ impl Exporter for HtmlExporter {
             .as_ref()
             .map_or("Presentation", |t| t.as_ref());
 
-        // Render all slides.
+        // Render all slides (MED-3: thread page_size; AC-008: thread slide_index).
+        let page_size = &laid_out.page_size;
         let mut slides_html = String::new();
-        for slide in &laid_out.slides {
-            slides_html.push_str(&render_slide_to_html(slide, brand));
+        for (slide_index, slide) in laid_out.slides.iter().enumerate() {
+            slides_html.push_str(&render_slide_to_html(slide, brand, slide_index, page_size));
             slides_html.push('\n');
         }
 
@@ -493,7 +494,7 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-006: No <canvas> elements in output
+    // AC-006: No <canvas>, no <foreignObject>, <article> container present
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-4.03.003 invariant 2 — no `<canvas>` elements appear in the HTML
@@ -521,14 +522,62 @@ mod tests {
         );
     }
 
+    /// BC-4.03.003 invariant 2 (P4) — no `<foreignObject>` elements in output.
+    /// usvg drops foreignObject silently; its presence is a rendering regression.
+    #[test]
+    fn test_BC_4_03_003_no_foreign_object_in_output() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse("foreignObject").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "P4: output must contain ZERO <foreignObject> elements"
+        );
+    }
+
+    /// BC-4.03.003 invariant 2 (P4) — at least one `<article>` slide container.
+    #[test]
+    fn test_BC_4_03_003_article_container_present() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse("article").expect("valid selector");
+        assert!(
+            doc.select(&sel).count() > 0,
+            "P4: output must contain at least one <article> slide container"
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-003: Non-decorative images have non-empty alt / <title>
+    // AC-003: Non-decorative images have non-empty alt / <title> (P4 SVG layer)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-4.03.003 postcondition 4 — non-decorative images have non-empty accessible name.
     ///
-    /// F-002: Images are rendered as SVG (not bare <img>). Non-decorative images
-    /// use `role="img"` and a `<title>` with the alt text on the SVG element.
+    /// P4: Images go to the SVG graphics layer. Non-decorative images use
+    /// `<g role="img" aria-labelledby><title>alt text</title>...</g>`.
     #[test]
     fn test_BC_4_03_003_non_decorative_image_has_non_empty_alt() {
         let exporter = HtmlExporter::new();
@@ -543,28 +592,33 @@ mod tests {
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
-        // F-002: image is now SVG, not bare <img>
+        // P4: image is in SVG layer, not bare <img>
         assert!(
             !html.contains("<img "),
-            "F-002: non-decorative image must not be bare <img>; got snippet: {:?}",
+            "P4: non-decorative image must not be bare <img>; got snippet: {:?}",
             &html[..html.len().min(500)]
         );
 
-        // Assert: the alt text "A revenue chart" appears in the output
+        // Assert: the alt text "A revenue chart" appears in the output (in <title>)
         assert!(
             html.contains("A revenue chart"),
-            "non-decorative image alt text must appear in HTML output"
+            "non-decorative image alt text must appear in HTML output (in <title>)"
+        );
+        // Must have role="img" on the <g> wrapper in the SVG layer.
+        assert!(
+            html.contains(r#"role="img""#),
+            "non-decorative image must have role=\"img\" on the <g> wrapper in SVG layer"
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-004: Decorative images have alt="" and role="presentation"
+    // AC-004: Decorative images have aria-hidden="true" in SVG layer (P4)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 5 — decorative images have `role="presentation"`.
+    /// BC-4.03.003 postcondition 5 — decorative images are hidden from AT.
     ///
-    /// F-002: Images are rendered as SVG (not bare <img>). Decorative images use
-    /// `role="presentation"` on the SVG element.
+    /// P4: Decorative images go to the SVG graphics layer with
+    /// `<g aria-hidden="true">` — NOT `role="presentation"` on an `<img>`.
     #[test]
     fn test_BC_4_03_003_decorative_image_has_empty_alt_and_role_presentation() {
         let exporter = HtmlExporter::new();
@@ -579,26 +633,26 @@ mod tests {
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
-        // F-002: decorative image is rendered as SVG with role="presentation"
+        // P4: decorative image is hidden via aria-hidden="true" on the <g> group
         assert!(
             !html.contains("<img "),
-            "F-002: decorative image must not render as bare <img>; got snippet: {:?}",
+            "P4: decorative image must not render as bare <img>; got snippet: {:?}",
             &html[..html.len().min(500)]
         );
 
-        // Decorative element must have role="presentation"
+        // Decorative element must have aria-hidden="true" (P4 SVG layer pattern)
         assert!(
-            html.contains(r#"role="presentation""#),
-            "decorative image must have role=\"presentation\" attribute"
+            html.contains(r#"aria-hidden="true""#),
+            "decorative image must have aria-hidden=\"true\" in the SVG layer (P4)"
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-008: Heading hierarchy h1→h2 non-skipped
+    // AC-008: Heading hierarchy — slide_type drives heading level (P4)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 7 — slide title maps to `<h1>`; no heading
-    /// levels are skipped (h1 → h3 without h2 is forbidden).
+    /// BC-4.03.003 postcondition 7 — title-slide at index 0 maps title frame to `<h1>`.
+    /// (AC-008 P4: heading level from slide_type_keyword, not content heuristics.)
     #[test]
     fn test_BC_4_03_003_slide_title_maps_to_h1() {
         let exporter = HtmlExporter::new();
@@ -617,18 +671,18 @@ mod tests {
         let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
         assert!(
             doc.select(&sel_h1).count() > 0,
-            "slide title must produce at least one <h1> element in the HTML output"
+            "title-slide at index 0 must produce at least one <h1> element in the HTML output"
         );
     }
 
-    /// BC-4.03.003 postcondition 7 — a deck with h1 and h3 but no h2 is
-    /// structurally invalid. The exporter must not skip heading levels.
-    /// This test verifies that if an h3 appears, an h2 must also appear.
+    /// BC-4.03.003 postcondition 7 (P4) — a content slide with Title + Subtitle
+    /// produces h2 → h3 (no skipped levels). The content-type title → h2;
+    /// subtitle → h3. Heading order: h2 before h3.
     #[test]
     fn test_BC_4_03_003_heading_hierarchy_no_skipped_levels() {
         let exporter = HtmlExporter::new();
         let deck = make_deck("en-US");
-        // A slide with title (h1) and body containing a sub-heading (h2)
+        // A content slide with Title (→ h2) and Subtitle (→ h3)
         let slide = LaidOutSlide {
             source_index: 0,
             slide_type_keyword: Arc::from("content"),
@@ -670,15 +724,25 @@ mod tests {
         let html = String::from_utf8(bytes).expect("valid UTF-8");
         let doc = scraper::Html::parse_document(&html);
 
-        // If there is an h2, there must also be an h1 (no skip from none to h2)
+        // Content-type slide: Title → h2, Subtitle → h3.
+        // No heading levels are skipped: h2 before h3 is valid.
         let sel_h2 = scraper::Selector::parse("h2").expect("valid selector");
-        if doc.select(&sel_h2).count() > 0 {
-            let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
-            assert!(
-                doc.select(&sel_h1).count() > 0,
-                "h2 elements exist but h1 is missing — heading hierarchy skips levels"
-            );
-        }
+        let sel_h3 = scraper::Selector::parse("h3").expect("valid selector");
+        assert!(
+            doc.select(&sel_h2).count() > 0,
+            "content slide Title must produce h2; P4 heading hierarchy rule"
+        );
+        assert!(
+            doc.select(&sel_h3).count() > 0,
+            "content slide Subtitle must produce h3 (below h2, no level skip)"
+        );
+        // h2 must appear before h3 in document order (no skip).
+        let h2_pos = html.find("<h2").expect("h2 must be present");
+        let h3_pos = html.find("<h3").expect("h3 must be present");
+        assert!(
+            h2_pos < h3_pos,
+            "h2 must appear before h3 in document order (no level skip); got: {html}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -863,10 +927,10 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-4.03.003 EC-001 — a slide with ONLY decorative images must produce
-    /// all `role="presentation"` elements; no non-empty accessible names.
+    /// aria-hidden elements; no accessible names exposed to AT.
     ///
-    /// F-002: Images are now SVG (not bare <img>). All decorative images use
-    /// `role="presentation"` on their SVG element. No bare `<img>` in output.
+    /// P4: Decorative images in the SVG layer use `<g aria-hidden="true">`.
+    /// No bare `<img>` in output.
     #[test]
     fn test_BC_4_03_003_ec_001_only_decorative_images_all_have_empty_alt() {
         let exporter = HtmlExporter::new();
@@ -881,18 +945,18 @@ mod tests {
             .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
-        // F-002: No bare <img> elements — images are SVG.
+        // P4: No bare <img> elements — images are in SVG graphics layer.
         assert!(
             !html.contains("<img "),
-            "EC-001 / F-002: decorative images must not render as bare <img>; \
+            "EC-001 / P4: decorative images must not render as bare <img>; \
              got snippet: {:?}",
             &html[..html.len().min(500)]
         );
 
-        // All image SVG elements must have role="presentation".
+        // P4: Decorative image groups must have aria-hidden="true".
         assert!(
-            html.contains(r#"role="presentation""#),
-            "EC-001: decorative image SVG elements must have role=\"presentation\""
+            html.contains(r#"aria-hidden="true""#),
+            "EC-001 / P4: decorative image group must have aria-hidden=\"true\""
         );
     }
 
@@ -970,8 +1034,9 @@ mod tests {
     // F-006 — exactly ONE tracing::warn! per rejected link (no double-logging)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// F-006: when a javascript: Link is rendered, exactly one warn! is emitted —
+    /// F-006: when a javascript: Link is rendered, EXACTLY ONE warn! is emitted —
     /// not two (not once in is_safe_link_scheme AND once in render_inline_node).
+    /// LOW-1: count == 1, not just >= 1.
     #[tracing_test::traced_test]
     #[test]
     fn test_F006_rejected_link_emits_exactly_one_warn() {
@@ -1005,10 +1070,24 @@ mod tests {
         let brand = make_brand();
         let opts = ExportOptions::default();
         let _ = exporter.export(&deck, &laid_out, &brand, &opts);
-        // Exactly one warn containing "javascript" must appear in the log
-        assert!(
-            logs_contain("javascript"),
-            "F-006: at least one warn for rejected 'javascript:' scheme must be emitted"
-        );
+
+        // LOW-1: EXACTLY one warn containing "javascript" must appear in the log
+        // (not two — one from is_safe_link_scheme, NOT a second from render_inline_node).
+        logs_assert(|lines| {
+            let matching: Vec<&&str> = lines
+                .iter()
+                .filter(|line| line.contains("javascript"))
+                .collect();
+            if matching.len() == 1 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "F-006 / LOW-1: expected exactly 1 warn containing 'javascript', \
+                     got {}. Lines: {:?}",
+                    matching.len(),
+                    matching
+                ))
+            }
+        });
     }
 }

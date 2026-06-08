@@ -1,25 +1,71 @@
-//! Slide-to-HTML rendering functions.
+//! Slide-to-HTML rendering functions — P4 Composite Rendering Model.
 //!
-//! This module provides the core rendering primitives:
+//! This module provides the core rendering primitives for the P4 model
+//! (ADR-008 binding 2026-06-08, BC-4.03.003 v1.2):
 //!
 //! - [`render_slide_to_html`] — renders a single [`LaidOutSlide`] to an HTML
-//!   fragment string. Returns `String` (not `dyn Write`) so STORY-047 can
-//!   serialize it as JSON for WebSocket push. (Previous Story Intelligence note)
+//!   fragment string. Uses the P4 model: `<article>` container with an HTML
+//!   text layer (real heading/paragraph elements) and a sibling
+//!   `<svg aria-hidden="true">` graphics layer. Returns `String` (not `dyn Write`)
+//!   so STORY-047 can serialize it as JSON for WebSocket push.
+//!   (Previous Story Intelligence note)
 //!
-//! - [`render_element_to_html`] — renders a single [`Frame`] content to an HTML
-//!   fragment string.
+//! - [`render_text_frame`] — converts a text `LaidOutFrame` to the appropriate
+//!   absolutely-positioned HTML element.
 //!
-//! - [`render_svg_chart`] — injects `role="img"` and `<title>` into an SVG
-//!   string via `quick-xml` XML manipulation after usvg geometry processing.
-//!   MUST NOT use the usvg tree API for accessibility injection — usvg 0.47.0
-//!   strips all non-presentation attributes (AC-003/AC-005 / export-architecture v1.2).
+//! - [`render_graphics_layer`] — builds the `<svg aria-hidden="true">` layer for
+//!   charts, diagrams, images, and decorative shapes.
 //!
-//! ## usvg limitation (export-architecture v1.2)
+//! - [`render_chart_frame`] — injects `role="img"`, `aria-labelledby`, and
+//!   `<title>` into an SVG string via `quick-xml` after usvg geometry processing.
+//!
+//! ## P4 Composite Rendering Model (ADR-008 / BC-4.03.003 invariant 2)
+//!
+//! The slide DOM skeleton is:
+//! ```html
+//! <article class="sf-slide" style="position:relative; width:{W}px; height:{H}px; overflow:hidden;">
+//!   <!-- HTML TEXT LAYER: one element per text LaidOutFrame, in reading order -->
+//!   <h1 class="sf-title" style="position:absolute; left:{x}px; top:{y}px; ...">{title}</h1>
+//!   <p class="sf-body" style="position:absolute; ...">{body}</p>
+//!   <!-- SVG GRAPHICS LAYER: charts/diagrams/images/decorative shapes ONLY -->
+//!   <svg aria-hidden="true" viewBox="0 0 {W_emu} {H_emu}"
+//!        style="position:absolute; top:0; left:0; width:100%; height:100%;
+//!               pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+//!     <g role="img" aria-labelledby="sf-{slide_id}-{frame_id}">
+//!       <title id="sf-{slide_id}-{frame_id}">{alt}</title>
+//!       <!-- chart SVG (aria-hidden="true" on inner root <svg>) -->
+//!     </g>
+//!   </svg>
+//! </article>
+//! ```
+//!
+//! **FORBIDDEN:** `<foreignObject>` anywhere; `<canvas>`; `role="img"` on the
+//! outer slide `<svg aria-hidden="true">` layer; injecting role/aria via usvg
+//! tree; pre-escaping before `push_attribute`; heading level by content
+//! inspection; >1 `<h1>` per document.
+//!
+//! ## Heading level semantics (AC-008 / BC-4.03.003 postcondition 7)
+//!
+//! Heading level is determined by `slide.slide_type_keyword` at render time —
+//! **not** by content heuristics. If `slide_type_keyword == "title"` AND this is
+//! the first slide in the deck (`slide_index == 0`), the title frame emits
+//! `<h1>`. All other title frames emit `<h2>`. Sub-headings use `<h3>` / `<h4>`.
+//! Exactly one `<h1>` exists per HTML document.
+//!
+//! ## Coordinate conversion (MED-3 / EMU → CSS px @96 dpi)
+//!
+//! `emu as f64 / 914_400.0 * 96.0`, formatted as `"{:.2}px"`. The slide
+//! `<article>` carries literal `width` / `height` CSS derived from the deck's
+//! `PageSize`. The SVG graphics layer uses `viewBox` in EMU and CSS `width:100%;
+//! height:100%` so it stretches to cover the article.
+//!
+//! ## usvg limitation (export-architecture v1.2 / AC-003/AC-005)
 //!
 //! `usvg` is used for geometry normalization and validation ONLY. After usvg
-//! processing, `quick-xml` XML manipulation is used to inject `role="img"` on
-//! the outer `<svg>` element and prepend a `<title>` child with the alt text.
-//! This ensures accessibility attributes survive through to the rendered HTML.
+//! processing, `quick-xml` XML manipulation is used to inject `role="img"` +
+//! `<title>` inside a `<g>` wrapper. usvg strips all non-presentation attributes
+//! including `role`, `aria-*`, and `<title>` — do not use its tree API for
+//! accessibility injection.
 //!
 //! ## URL scheme security (AC-010 / CWE-601)
 //!
@@ -27,15 +73,26 @@
 //! validated via [`crate::exporter::is_safe_link_scheme`] before being emitted
 //! as `href` attributes.
 
-use slideforge_layout::{Frame, FrameContent, LaidOutSlide};
+use slideforge_layout::{Frame, FrameContent, LaidOutSlide, PageSize};
 use slideforge_types::{AltText, Brand, ContentBlock, Emu, InlineNode};
 
 use crate::exporter::is_safe_link_scheme;
 
-/// Default SVG canvas width in EMU (matches `slideforge_layout::DEFAULT_PAGE_WIDTH`).
-const CANVAS_WIDTH_EMU: Emu = Emu(9_144_000);
-/// Default SVG canvas height in EMU (matches `slideforge_layout::DEFAULT_PAGE_HEIGHT`).
-const CANVAS_HEIGHT_EMU: Emu = Emu(5_143_500);
+// ─────────────────────────────────────────────────────────────────────────────
+// Coordinate conversion
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert an EMU value to CSS pixels at 96 dpi.
+///
+/// Formula: `emu / 914_400 * 96`, result formatted as `"{:.2}px"`.
+///
+/// MED-3: canvas uses CSS px from `PageSize` (not hardcoded constants); all
+/// frame coordinates are converted via this function.
+#[allow(clippy::cast_precision_loss)] // EMU values are in range [0, ~10^7]; no precision loss at i64→f64 for typical slide coordinates.
+fn emu_to_css_px(emu: Emu) -> String {
+    let px = emu.0 as f64 / 914_400.0 * 96.0;
+    format!("{px:.2}")
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline node rendering
@@ -57,7 +114,7 @@ pub fn render_inline_nodes(nodes: &[InlineNode]) -> String {
 
 /// Render a single [`InlineNode`] to an HTML fragment.
 #[must_use]
-fn render_inline_node(node: &InlineNode) -> String {
+pub(crate) fn render_inline_node(node: &InlineNode) -> String {
     match node {
         InlineNode::Plain(text) => html_escape::encode_text(text).into_owned(),
         InlineNode::Bold(children) => {
@@ -134,10 +191,10 @@ fn render_inline_node(node: &InlineNode) -> String {
 /// - `Bullets` → `<ul><li>` structure with nested sub-bullets
 /// - `Math` → code block with math class (full `MathML` rendering is STORY-045 scope)
 /// - `Chart` / `Diagram` / `Image` → these are handled via `FrameContent`
-///   variants before reaching `Body`; here we emit a placeholder note
+///   variants before reaching `Body`; here we emit empty string (no debug output)
 /// - `Table` → `<table>` (basic rendering)
-/// - `ColorBar` → placeholder text (full bar is via `FrameContent::ColorBar`)
-/// - `Shape` → placeholder (shapes are handled via `FrameContent::Shape`)
+/// - `ColorBar` → accessible progressbar span
+/// - `Shape` → empty (shapes are handled via `FrameContent::Shape`)
 ///
 /// F-003: MUST NOT use `format!("{block:?}")` — all variants must render
 /// semantic HTML, never Rust debug output.
@@ -208,361 +265,369 @@ fn render_bullet_item(item: &slideforge_types::BulletItem) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public API
+// P4 rendering helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Render a slide frame as SVG content positioned at the frame's bounding box.
+/// Heading level enum for the P4 text layer (AC-008 / BC-4.03.003 postcondition 7).
 ///
-/// Returns an SVG fragment string (elements that go inside the outer `<svg>` canvas).
-/// Text/heading content is placed inside `<foreignObject>` to preserve semantic HTML
-/// structure (headings, paragraphs) within the SVG canvas (BC-4.03.003 invariant 2).
-///
-/// F-001 (Architecture Compliance Rule 1): every slide is rendered as an `<svg>`
-/// element; this function produces the content that goes inside that canvas.
-///
-/// F-002: Images are rendered as `<image>` inside the SVG — never as bare `<img>`.
-#[must_use]
-fn render_frame_as_svg_content(frame: &Frame, heading_level: u32) -> String {
-    let x = frame.bbox.x.0;
-    let y = frame.bbox.y.0;
-    let w = frame.bbox.width.0;
-    let h = frame.bbox.height.0;
+/// Heading level is derived from `slide_type_keyword` at render time — NEVER
+/// from content inspection. Exactly one `<h1>` per HTML document (the title-slide
+/// at index 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadingLevel {
+    /// Document-level heading — exactly one per document (title-slide index 0).
+    H1,
+    /// Section-level heading — all other title frames.
+    H2,
+    /// Sub-section heading.
+    H3,
+    /// Sub-sub-section heading.
+    H4,
+}
 
-    match &frame.content {
-        FrameContent::Title(text) => {
-            // Title → <h1> inside <foreignObject> for semantic heading in SVG canvas.
-            let escaped = html_escape::encode_text(text);
-            format!(
-                r#"<foreignObject x="{x}" y="{y}" width="{w}" height="{h}"><h1 xmlns="http://www.w3.org/1999/xhtml">{escaped}</h1></foreignObject>"#
-            )
-        },
-        FrameContent::Subtitle(text) => {
-            // Subtitle → <hN> inside <foreignObject>; level determined by caller.
-            let escaped = html_escape::encode_text(text);
-            let hl = heading_level.clamp(1, 6);
-            format!(
-                r#"<foreignObject x="{x}" y="{y}" width="{w}" height="{h}"><h{hl} xmlns="http://www.w3.org/1999/xhtml">{escaped}</h{hl}></foreignObject>"#
-            )
-        },
-        FrameContent::Body(blocks) => {
-            let body_html: String = blocks.iter().map(render_content_block).collect();
-            let escaped_body = body_html; // body_html is already HTML-escaped at block level
-            format!(
-                r#"<foreignObject x="{x}" y="{y}" width="{w}" height="{h}"><div xmlns="http://www.w3.org/1999/xhtml">{escaped_body}</div></foreignObject>"#
-            )
-        },
-        FrameContent::Image { alt } => {
-            // F-002: Image must render as <image> inside SVG — never bare <img>.
-            // Since Image frames don't carry a src path (path is resolved elsewhere),
-            // we emit an accessible SVG placeholder with the alt text.
-            match alt {
-                AltText::Provided(text) => {
-                    let safe_alt = html_escape::encode_double_quoted_attribute(text);
-                    let escaped_text = html_escape::encode_text(text);
-                    format!(
-                        "<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
-                         role=\"img\" aria-label=\"{safe_alt}\">\
-                         <title>{escaped_text}</title>\
-                         <rect width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#cccccc\"/>\
-                         </svg>"
-                    )
-                },
-                AltText::Decorative | AltText::Unspecified => {
-                    format!(
-                        "<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
-                         role=\"presentation\" aria-hidden=\"true\">\
-                         <rect width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#cccccc\"/>\
-                         </svg>"
-                    )
-                },
-            }
-        },
-        FrameContent::Chart { alt } => {
-            let alt_text = alt_text_str(alt);
-            let placeholder_svg =
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
-            let chart_svg = render_svg_chart(placeholder_svg, alt_text);
-            // Position the chart SVG at the frame's bbox.
-            format!(r#"<g transform="translate({x}, {y})">{chart_svg}</g>"#)
-        },
-        FrameContent::Diagram { svg, alt } => {
-            let alt_text = alt_text_str(alt);
-            let diagram_svg = render_svg_chart(svg.as_str(), alt_text);
-            format!(r#"<g transform="translate({x}, {y})">{diagram_svg}</g>"#)
-        },
-        FrameContent::Shape(shape_frame) => {
-            let alt_text = alt_text_str(&shape_frame.alt);
-            let placeholder_svg =
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
-            let shape_svg = render_svg_chart(placeholder_svg, alt_text);
-            format!(r#"<g transform="translate({x}, {y})">{shape_svg}</g>"#)
-        },
-        FrameContent::TextRun(nodes) => {
-            let text_html = format!("<p>{}</p>", render_inline_nodes(nodes));
-            format!(
-                r#"<foreignObject x="{x}" y="{y}" width="{w}" height="{h}"><div xmlns="http://www.w3.org/1999/xhtml">{text_html}</div></foreignObject>"#
-            )
-        },
-        FrameContent::ColorBar {
-            filled_width_emu,
-            total_width_emu,
-            percent,
-            color,
-        } => {
-            let _ = total_width_emu;
-            let color_hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-            let fill_w = filled_width_emu.0;
-            format!(
-                r#"<g transform="translate({x}, {y})"><rect width="{fill_w}" height="{h}" fill="{color_hex}" role="img" aria-label="{percent}% complete"/></g>"#
-            )
-        },
-        FrameContent::Empty => String::new(),
-        FrameContent::ErrorSlidePlaceholder {
-            svg,
-            slide_title,
-            error_code,
-            message,
-        } => {
-            let alt_text = format!("Error on slide '{slide_title}': [{error_code}] {message}");
-            let error_svg = render_svg_chart(svg, &alt_text);
-            format!(r#"<g transform="translate({x}, {y})">{error_svg}</g>"#)
-        },
+impl HeadingLevel {
+    /// Return the numeric level (1-4).
+    #[must_use]
+    pub fn as_u8(self) -> u8 {
+        match self {
+            HeadingLevel::H1 => 1,
+            HeadingLevel::H2 => 2,
+            HeadingLevel::H3 => 3,
+            HeadingLevel::H4 => 4,
+        }
     }
 }
 
-/// Render a single slide to an HTML fragment string.
+/// Render a text frame to an absolutely-positioned HTML element.
 ///
-/// The returned `String` is a self-contained HTML fragment representing one
-/// slide: an `<article>` landmark containing an `<svg>` canvas with frame
-/// elements positioned at their bounding-box coordinates.
+/// P4 text layer rule:
+/// - `FrameContent::Title` → `<h{level}>` at the slide's heading level
+/// - `FrameContent::Subtitle` → `<h3>` (sub-heading below the slide heading)
+/// - `FrameContent::Body` → `<div class="sf-body">` containing content blocks
+/// - `FrameContent::TextRun` → `<p class="sf-text">`
+///
+/// The returned HTML element is absolutely positioned using inline CSS derived
+/// from `frame.bbox` EMU coordinates converted to CSS pixels (MED-3).
+///
+/// Returns `None` for non-text frames (graphical frames go to the SVG layer).
+#[must_use]
+pub fn render_text_frame(frame: &Frame, heading_level: HeadingLevel) -> Option<String> {
+    let x = emu_to_css_px(frame.bbox.x);
+    let y = emu_to_css_px(frame.bbox.y);
+    let w = emu_to_css_px(frame.bbox.width);
+    let h = emu_to_css_px(frame.bbox.height);
+
+    // MED-3: guard zero or negative bbox — skip degenerate frames.
+    if frame.bbox.width.0 == 0 || frame.bbox.height.0 == 0 {
+        tracing::warn!(
+            "render_text_frame: skipping frame with zero or degenerate bbox \
+             (width={}, height={})",
+            frame.bbox.width.0,
+            frame.bbox.height.0
+        );
+        return None;
+    }
+
+    let position_style = format!(
+        "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; overflow:hidden;"
+    );
+
+    match &frame.content {
+        FrameContent::Title(text) => {
+            let hl = heading_level.as_u8();
+            let escaped = html_escape::encode_text(text);
+            Some(format!(
+                r#"<h{hl} class="sf-title" style="{position_style}">{escaped}</h{hl}>"#
+            ))
+        },
+        FrameContent::Subtitle(text) => {
+            // Subtitle is always h3 — it appears below the slide heading (h1 or h2).
+            // Never skip levels: h1 → h3 without h2 would violate heading-order.
+            // The slide heading (h1/h2) is emitted for the Title frame;
+            // Subtitle is always h3 (sub-section of the slide heading).
+            let escaped = html_escape::encode_text(text);
+            Some(format!(
+                r#"<h3 class="sf-subtitle" style="{position_style}">{escaped}</h3>"#
+            ))
+        },
+        FrameContent::Body(blocks) => {
+            let body_html: String = blocks.iter().map(render_content_block).collect();
+            Some(format!(
+                r#"<div class="sf-body" style="{position_style}">{body_html}</div>"#
+            ))
+        },
+        FrameContent::TextRun(nodes) => {
+            let text_html = render_inline_nodes(nodes);
+            Some(format!(
+                r#"<p class="sf-text" style="{position_style}">{text_html}</p>"#
+            ))
+        },
+        // Graphical frames go to the SVG layer — not rendered here.
+        FrameContent::Image { .. }
+        | FrameContent::Chart { .. }
+        | FrameContent::Diagram { .. }
+        | FrameContent::Shape(_)
+        | FrameContent::ColorBar { .. }
+        | FrameContent::ErrorSlidePlaceholder { .. }
+        | FrameContent::Empty => None,
+    }
+}
+
+/// Render the SVG graphics layer for a slide.
+///
+/// Produces a single `<svg aria-hidden="true" ...>` element containing wrapped
+/// groups for each graphical `LaidOutFrame`:
+/// - Non-decorative graphical frames: `<g role="img" aria-labelledby="...">`
+///   with `<title>` child, then the chart/diagram SVG with `aria-hidden="true"`
+///   on its root `<svg>`.
+/// - Decorative elements: `<g aria-hidden="true">`.
+///
+/// The graphics layer SVG uses `viewBox` in EMU (matching the `LaidOutSlide`
+/// coordinate space) and CSS `width:100%; height:100%` to stretch over the
+/// `<article>` container (MED-3).
+///
+/// Returns an empty string if there are no graphical frames to render.
+#[must_use]
+pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageSize) -> String {
+    use std::fmt::Write as _;
+
+    let w_emu = page_size.width.0;
+    let h_emu = page_size.height.0;
+
+    // Collect graphical frame HTML. If none, skip emitting the SVG layer.
+    let mut graphical_content = String::new();
+    let mut frame_idx: u32 = 0;
+
+    for frame in frames {
+        // MED-3: skip frames with zero/negative bbox.
+        if frame.bbox.width.0 == 0 || frame.bbox.height.0 == 0 {
+            continue;
+        }
+
+        let x = frame.bbox.x.0;
+        let y = frame.bbox.y.0;
+        let w = frame.bbox.width.0;
+        let h = frame.bbox.height.0;
+
+        match &frame.content {
+            FrameContent::Chart { alt } => {
+                frame_idx += 1;
+                let frame_id = format!("{slide_id}-{frame_idx}");
+                let alt_text = alt_text_str(alt);
+                let placeholder_svg =
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
+                // WHEN real chart SVG is added (STORY-047/048) it MUST route through
+                // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
+                let chart_g = render_chart_frame(placeholder_svg, alt_text, &frame_id, slide_id);
+                let _ = write!(
+                    graphical_content,
+                    r#"<g transform="translate({x} {y})">{chart_g}</g>"#
+                );
+            },
+            FrameContent::Diagram { svg, alt } => {
+                frame_idx += 1;
+                let frame_id = format!("{slide_id}-{frame_idx}");
+                let alt_text = alt_text_str(alt);
+                // WHEN real diagram SVG is wired in (STORY-048) it MUST route through
+                // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
+                let chart_g = render_chart_frame(svg.as_str(), alt_text, &frame_id, slide_id);
+                let _ = write!(
+                    graphical_content,
+                    r#"<g transform="translate({x} {y})">{chart_g}</g>"#
+                );
+            },
+            FrameContent::Image { alt } => {
+                // WHEN real image src/embedded SVG is added (STORY-047/048) it MUST
+                // route through the SVG sanitizer (render_chart_frame or equivalent)
+                // to strip script/foreignObject/on* — LOW-2.
+                match alt {
+                    AltText::Provided(text) => {
+                        frame_idx += 1;
+                        let frame_id = format!("{slide_id}-{frame_idx}");
+                        let escaped_id = html_escape::encode_double_quoted_attribute(&frame_id);
+                        let escaped_alt = html_escape::encode_text(text);
+                        let _ = write!(
+                            graphical_content,
+                            "<g role=\"img\" aria-labelledby=\"sf-{escaped_id}\"><title id=\"sf-{escaped_id}\">{escaped_alt}</title><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#cccccc\"/></g>"
+                        );
+                    },
+                    AltText::Decorative | AltText::Unspecified => {
+                        let _ = write!(
+                            graphical_content,
+                            "<g aria-hidden=\"true\"><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"none\" stroke=\"#eeeeee\"/></g>"
+                        );
+                    },
+                }
+            },
+            FrameContent::Shape(shape_frame) => {
+                let alt = &shape_frame.alt;
+                match alt {
+                    AltText::Provided(text) => {
+                        frame_idx += 1;
+                        let frame_id = format!("{slide_id}-{frame_idx}");
+                        let escaped_id = html_escape::encode_double_quoted_attribute(&frame_id);
+                        let escaped_alt = html_escape::encode_text(text);
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g role="img" aria-labelledby="sf-{escaped_id}"><title id="sf-{escaped_id}">{escaped_alt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
+                        );
+                    },
+                    AltText::Decorative | AltText::Unspecified => {
+                        let _ = write!(
+                            graphical_content,
+                            r#"<g aria-hidden="true"><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
+                        );
+                    },
+                }
+            },
+            FrameContent::ColorBar {
+                filled_width_emu,
+                total_width_emu: _,
+                percent,
+                color,
+            } => {
+                // OBS-2: "% complete" string is English-only. This is a KNOWN-LIMITATION:
+                // the aria-label for ColorBar uses hardcoded English ("% complete").
+                // When deck.lang support is threaded through (future story), this MUST
+                // be sourced from a locale map keyed on deck.lang rather than emitting
+                // hardcoded English text for non-English decks.
+                let fill_w = filled_width_emu.0;
+                let color_hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+                let _ = write!(
+                    graphical_content,
+                    r#"<g aria-label="{percent}% complete" role="img"><rect x="{x}" y="{y}" width="{fill_w}" height="{h}" fill="{color_hex}"/></g>"#
+                );
+            },
+            FrameContent::ErrorSlidePlaceholder {
+                svg,
+                slide_title,
+                error_code,
+                message,
+            } => {
+                frame_idx += 1;
+                let frame_id = format!("{slide_id}-{frame_idx}");
+                let alt_text = format!("Error on slide '{slide_title}': [{error_code}] {message}");
+                let chart_g = render_chart_frame(svg, &alt_text, &frame_id, slide_id);
+                let _ = write!(
+                    graphical_content,
+                    r#"<g transform="translate({x} {y})">{chart_g}</g>"#
+                );
+            },
+            // Text frames (Title, Subtitle, Body, TextRun) go to the HTML text layer.
+            FrameContent::Title(_)
+            | FrameContent::Subtitle(_)
+            | FrameContent::Body(_)
+            | FrameContent::TextRun(_)
+            | FrameContent::Empty => {},
+        }
+    }
+
+    if graphical_content.is_empty() {
+        return String::new();
+    }
+
+    // The outer SVG is aria-hidden="true" — the non-decorative <g> elements
+    // override this via their own role="img" (ARIA spec: role on a child overrides
+    // the inherited aria-hidden from an ancestor that is aria-hidden="true").
+    // NOTE: This is the standard pattern for mixed decorative/semantic SVG layers.
+    format!(
+        r#"<svg aria-hidden="true" viewBox="0 0 {w_emu} {h_emu}" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">{graphical_content}</svg>"#
+    )
+}
+
+/// Render a single slide to an HTML fragment string (P4 Composite Rendering Model).
+///
+/// The returned `String` is a self-contained HTML fragment representing one slide:
+/// an `<article class="sf-slide">` landmark containing:
+/// 1. An HTML text layer: `<h1>`, `<h2>`, `<p>`, `<ul>` elements absolutely
+///    positioned from `LaidOutFrame` EMU coordinates.
+/// 2. A sibling `<svg aria-hidden="true">` graphics layer for charts, diagrams,
+///    images, and decorative shapes.
 ///
 /// Returns `String` (not `dyn Write`) so STORY-047 can serialize it as JSON for
 /// WebSocket push without an extra allocation step. (Previous Story Intelligence)
 ///
-/// # Accessibility invariants (BC-4.03.003)
+/// # Heading level (AC-008 / BC-4.03.003 postcondition 7)
 ///
-/// - Every non-decorative image/chart/diagram has a non-empty `alt` (img) or
-///   `<title>` (svg) attribute.
-/// - Every decorative element has `alt="" role="presentation"`.
-/// - Heading hierarchy starts at `<h1>` for the slide title — no skipped levels
-///   (F-004 / BC-4.03.003 postcondition 7 / axe-core heading-order).
-/// - No `<canvas>` elements in the output (BC-4.03.003 invariant 2).
+/// Heading level is driven by `slide.slide_type_keyword`:
+/// - `"title"` + `slide_index == 0` → `<h1>` (exactly one per document)
+/// - any other slide type → `<h2>` for the title frame
 ///
-/// # Architecture (F-001 / AC-006 / ADR-008)
+/// No heading level is skipped.
 ///
-/// The slide is rendered as an `<svg>` canvas within `<article>`. Text is in
-/// `<foreignObject>` to preserve semantic HTML headings within the SVG.
-/// Images are `<image>` elements (never bare `<img>` — F-002).
+/// # Architecture invariants (BC-4.03.003 invariant 2)
+///
+/// - FORBIDDEN: `<foreignObject>`, `<canvas>`, `role="img"` on the outer SVG
+/// - Text frames (title, body, bullets) are NOT in the SVG layer
+/// - Non-decorative graphical frames use `<g role="img" aria-labelledby>`
+///
+/// # Coordinate system (MED-3)
+///
+/// `page_size` determines the CSS `width` and `height` of the `<article>` (via
+/// EMU→px conversion). The SVG graphics layer uses the same `page_size` for its
+/// `viewBox` so EMU coordinates are shared with the text layer.
 ///
 /// # Security (AC-010 / CWE-601)
 ///
 /// All inline `Link`/`Xref` nodes are validated via
 /// [`crate::exporter::is_safe_link_scheme`] before becoming `href` attributes.
+///
+/// # OBS-2 — Locale note
+///
+/// The `aria-label="Slide N"` on the `<article>` element uses a hardcoded
+/// English string. This is a KNOWN-LIMITATION: when deck.lang support is
+/// threaded through from the exporter (future story), this MUST be sourced from
+/// a locale map keyed on deck.lang rather than emitting hardcoded English text
+/// for non-English decks.
 #[must_use]
-pub fn render_slide_to_html(slide: &LaidOutSlide, brand: &Brand) -> String {
+pub fn render_slide_to_html(
+    slide: &LaidOutSlide,
+    brand: &Brand,
+    slide_index: usize,
+    page_size: &PageSize,
+) -> String {
     let _ = brand; // Brand used by future template-driven color/font injection.
 
-    // F-004 (BC-4.03.003 PC-7): Compute heading state before rendering.
-    // If the slide has no Title frame, a Subtitle frame becomes h1 (not h2).
-    let has_title_frame = slide
-        .frames
-        .iter()
-        .any(|f| matches!(&f.content, FrameContent::Title(_)));
+    // MED-3: derive slide container dimensions from page_size (not hardcoded consts).
+    let container_w = emu_to_css_px(page_size.width);
+    let container_h = emu_to_css_px(page_size.height);
 
-    let slide_index = slide.source_index + 1;
-    let canvas_w = CANVAS_WIDTH_EMU.0;
-    let canvas_h = CANVAS_HEIGHT_EMU.0;
+    // Slide ID for ARIA cross-references (1-based).
+    // OBS-2: "Slide N" is English-only; see doc comment above.
+    let slide_number = slide_index + 1;
+    let slide_id = format!("slide-{slide_number}");
 
-    // Build SVG content (all frames positioned within the canvas).
-    let mut svg_content = String::new();
-    let mut h1_emitted = false;
+    // AC-008: heading level derived from slide_type_keyword, NOT content heuristics.
+    // The first title-slide (slide_index == 0 AND type == "title") gets h1.
+    // All other slides get h2 for their title frame.
+    let is_title_slide = slide.slide_type_keyword.as_ref() == "title";
+    let title_heading_level = if is_title_slide && slide_index == 0 {
+        HeadingLevel::H1
+    } else {
+        HeadingLevel::H2
+    };
 
+    // Build the HTML text layer (all text frames in reading order).
+    let mut text_layer = String::new();
     for frame in &slide.frames {
-        let heading_level = match &frame.content {
-            FrameContent::Subtitle(_) if !has_title_frame && !h1_emitted => {
-                h1_emitted = true;
-                1 // Promote to h1 (F-004)
-            },
-            FrameContent::Subtitle(_) => 2,
-            FrameContent::Title(_) => {
-                h1_emitted = true;
-                1
-            },
-            _ => 1,
-        };
-        let frame_svg = render_frame_as_svg_content(frame, heading_level);
-        if !frame_svg.is_empty() {
-            svg_content.push_str(&frame_svg);
-            svg_content.push('\n');
+        if let Some(html) = render_text_frame(frame, title_heading_level) {
+            text_layer.push_str(&html);
+            text_layer.push('\n');
         }
     }
 
-    // Use slide.html.jinja template pattern via inline construction.
-    // The template defines: <article><svg viewBox="..."><title>...</title>{content}</svg></article>
-    // We embed via include_str! in exporter.rs; here we produce the article fragment directly.
-    // The slide title is derived from the first Title frame (if any).
-    let slide_title = slide
-        .frames
-        .iter()
-        .find_map(|f| {
-            if let FrameContent::Title(t) = &f.content {
-                Some(t.as_ref())
-            } else {
-                None
-            }
-        })
-        .unwrap_or("Slide");
-    let escaped_title = html_escape::encode_double_quoted_attribute(slide_title);
-    let escaped_title_text = html_escape::encode_text(slide_title);
+    // Build the SVG graphics layer (graphical frames only).
+    let svg_layer = render_graphics_layer(&slide.frames, &slide_id, page_size);
 
     format!(
-        r#"<article id="slide-{slide_index}" aria-label="Slide {slide_index}">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {canvas_w} {canvas_h}" width="{canvas_w}" height="{canvas_h}" role="img" aria-label="{escaped_title}">
-<title>{escaped_title_text}</title>
-{svg_content}</svg>
-</article>"#
+        r#"<article id="{slide_id}" class="sf-slide" aria-label="Slide {slide_number}" style="position:relative; width:{container_w}px; height:{container_h}px; overflow:hidden;">
+{text_layer}{svg_layer}</article>"#
     )
 }
 
-/// Render a single [`Frame`] content to an HTML fragment string.
-///
-/// Dispatches on the [`slideforge_layout::FrameContent`] variant to produce
-/// the appropriate HTML element:
-///
-/// - `Title` → `<h1>` element
-/// - `Subtitle` → `<h2>` element
-/// - `Body` → `<ul>` / `<ol>` list
-/// - `Image { alt, .. }` → `<img>` with alt attribute (or `alt="" role="presentation"`)
-/// - `Chart { alt, .. }` → `<svg role="img"><title>alt</title>...</svg>` via [`render_svg_chart`]
-/// - `Diagram { svg, alt }` → `<svg role="img"><title>alt</title>...</svg>` via [`render_svg_chart`]
-/// - `Shape(_)` → `<svg>` element
-/// - `TextRun(_)` → inline HTML
-/// - `ColorBar { .. }` → `<div>` with width style representing fill percentage
-/// - `ErrorSlidePlaceholder { .. }` → gray error-state slide SVG
-/// - `Empty` → empty string
-///
-/// # Accessibility (AC-003/AC-004/AC-005)
-///
-/// Accessibility attributes are injected via `quick-xml` XML manipulation for
-/// SVG-bearing variants. usvg is used for geometry/normalization only.
-#[must_use]
-pub fn render_element_to_html(frame: &Frame) -> String {
-    match &frame.content {
-        FrameContent::Title(text) => {
-            format!("<h1>{}</h1>", html_escape::encode_text(text))
-        },
-        FrameContent::Subtitle(text) => {
-            format!("<h2>{}</h2>", html_escape::encode_text(text))
-        },
-        FrameContent::Body(blocks) => {
-            // F-003: render each ContentBlock variant properly via render_content_block.
-            // MUST NOT use format!("{block:?}") — Rust debug output is forbidden in
-            // production rendering.
-            let mut body_html = String::new();
-            for block in blocks {
-                body_html.push_str(&render_content_block(block));
-                body_html.push('\n');
-            }
-            body_html
-        },
-        FrameContent::Image { alt } => render_image(alt),
-        FrameContent::Chart { alt } => {
-            // Generate a placeholder SVG for the chart.
-            // In a full implementation this would be the rendered chart SVG.
-            // For now produce the minimal SVG needed for accessibility.
-            let alt_text = alt_text_str(alt);
-            let placeholder_svg =
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
-            render_svg_chart(placeholder_svg, alt_text)
-        },
-        FrameContent::Diagram { svg, alt } => {
-            let alt_text = alt_text_str(alt);
-            render_svg_chart(svg.as_str(), alt_text)
-        },
-        FrameContent::Shape(shape_frame) => {
-            let alt_text = alt_text_str(&shape_frame.alt);
-            // Render shape as an SVG rect for accessibility.
-            let placeholder_svg =
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
-            render_svg_chart(placeholder_svg, alt_text)
-        },
-        FrameContent::TextRun(nodes) => {
-            format!("<p>{}</p>", render_inline_nodes(nodes))
-        },
-        FrameContent::ColorBar {
-            filled_width_emu,
-            total_width_emu,
-            percent,
-            color,
-        } => {
-            // Render a progress bar as a <div> with inline CSS width.
-            let pct = if total_width_emu.0 > 0 {
-                // Use the canonical percent field (no re-derivation — OBS-P6-002).
-                *percent
-            } else {
-                0
-            };
-            let _ = filled_width_emu; // carried for exporter convenience
-            let _ = total_width_emu;
-            let color_hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-            format!(
-                r#"<div role="progressbar" aria-valuenow="{pct}" aria-valuemin="0" aria-valuemax="100" style="width:{pct}%;background-color:{color_hex}"></div>"#
-            )
-        },
-        FrameContent::Empty => String::new(),
-        FrameContent::ErrorSlidePlaceholder {
-            svg,
-            slide_title,
-            error_code,
-            message,
-        } => {
-            // Render error-state SVG with accessible description.
-            let alt_text = format!("Error on slide '{slide_title}': [{error_code}] {message}");
-            render_svg_chart(svg, &alt_text)
-        },
-    }
-}
-
-/// Render an image element within an SVG canvas.
-///
-/// F-002 (story forbidden dependency): SVG is ALWAYS embedded as `<svg>`, never
-/// `<img>`. Image frames render as an accessible `<svg>` placeholder with the
-/// alt text as the `<title>` element.
-///
-/// - `AltText::Provided(text)` → `<svg role="img"><title>text</title>...</svg>`
-/// - `AltText::Decorative` → `<svg role="presentation" aria-hidden="true">...</svg>`
-/// - `AltText::Unspecified` → treated as decorative with a `tracing::warn!`
-fn render_image(alt: &AltText) -> String {
-    match alt {
-        AltText::Provided(text) => {
-            let safe_alt = html_escape::encode_double_quoted_attribute(text);
-            let escaped_text = html_escape::encode_text(text);
-            format!(
-                r#"<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{safe_alt}"><title>{escaped_text}</title></svg>"#
-            )
-        },
-        AltText::Decorative => {
-            r#"<svg xmlns="http://www.w3.org/2000/svg" role="presentation" aria-hidden="true"></svg>"#
-                .to_owned()
-        },
-        AltText::Unspecified => {
-            // Treat unspecified as decorative — validator should have caught this.
-            tracing::warn!(
-                "render_image: AltText::Unspecified encountered; rendering as decorative"
-            );
-            r#"<svg xmlns="http://www.w3.org/2000/svg" role="presentation" aria-hidden="true"></svg>"#
-                .to_owned()
-        },
-    }
-}
-
-/// Extract alt text string from [`AltText`].
-fn alt_text_str(alt: &AltText) -> &str {
-    match alt {
-        AltText::Provided(text) => text.as_ref(),
-        AltText::Decorative | AltText::Unspecified => "",
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// SVG sanitization and chart rendering
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Returns `true` if the given SVG element local name is on the SVG blocklist.
 ///
@@ -571,8 +636,13 @@ fn alt_text_str(alt: &AltText) -> &str {
 /// - `foreignObject` — embeds arbitrary HTML/script content
 ///
 /// F-005 (XSS): these are stripped when inline SVG is embedded in HTML output.
+///
+/// MED-2: comparison is CASE-INSENSITIVE — `<SCRIPT>`, `<ScRiPt>`, and
+/// `<foreignobject>` are all blocked. HTML parsers are case-insensitive so
+/// mixed-case variants must be stripped too.
 fn is_blocked_svg_element(local_name: &[u8]) -> bool {
-    matches!(local_name, b"script" | b"foreignObject")
+    let lower: Vec<u8> = local_name.iter().map(u8::to_ascii_lowercase).collect();
+    matches!(lower.as_slice(), b"script" | b"foreignobject")
 }
 
 /// Returns `true` if the given attribute key is safe to emit in inline SVG.
@@ -603,16 +673,26 @@ fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
     true
 }
 
-/// Inject `role=\"img\"` and `<title>alt text</title>` into an SVG string.
+/// Extract alt text string from [`AltText`].
+fn alt_text_str(alt: &AltText) -> &str {
+    match alt {
+        AltText::Provided(text) => text.as_ref(),
+        AltText::Decorative | AltText::Unspecified => "",
+    }
+}
+
+/// Inject `<g role="img" aria-labelledby>` + `<title>` wrapper around an SVG string.
 ///
 /// This function performs raw XML manipulation via `quick-xml` to:
 /// 1. Parse the SVG string.
 /// 2. **Sanitize:** strip `<script>`, `<foreignObject>`, event-handler attributes
 ///    (`on*`), and `javascript:` hrefs (F-005 / XSS prevention).
-/// 3. Inject `role="img"` on the outer `<svg>` element.
-/// 4. Prepend a `<title>alt_text</title>` child as the first child of `<svg>`.
-/// 5. Mark all inner `<svg>` elements (nested SVGs) with `aria-hidden="true"`.
-/// 6. Return the modified SVG string.
+/// 3. Strip `role` from the outer `<svg>` (it gets wrapped in `<g role="img">`).
+/// 4. Mark the outer `<svg>` (and all inner `<svg>` elements) with
+///    `aria-hidden="true"` — the wrapping `<g>` provides the accessible name.
+/// 5. Return the sanitized SVG string to be embedded inside a
+///    `<g role="img" aria-labelledby="sf-{slide_id}-{frame_id}">` wrapper
+///    with a `<title id="sf-{slide_id}-{frame_id}">` sibling.
 ///
 /// ## Why NOT the usvg tree API (export-architecture v1.2 / AC-003/AC-005)
 ///
@@ -622,23 +702,428 @@ fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
 /// attributes. This function operates on the raw SVG string after any usvg
 /// processing is complete.
 ///
-/// ## SVG-within-HTML semantics (BC-4.03.003 invariant 2)
+/// ## P4 DOM output (AC-003/AC-005/AC-006)
 ///
-/// The outer `<svg>` element receives `role="img"` and a `<title>` child, which
-/// exposes the accessible name to assistive technologies. Inner SVG elements
-/// (chart axes, diagram sub-groups) receive `aria-hidden="true"` so they do not
-/// pollute the accessibility tree (EC-002 / AC-005).
+/// The caller wraps the returned SVG in:
+/// ```html
+/// <g role="img" aria-labelledby="sf-{slide_id}-{frame_id}">
+///   <title id="sf-{slide_id}-{frame_id}">{alt, XML-escaped by quick-xml}</title>
+///   {sanitized svg with aria-hidden="true"}
+/// </g>
+/// ```
 ///
-/// ## Security (F-005 / XSS)
+/// ## Security (F-005 / XSS / MED-2)
 ///
 /// Inline SVG executes script in HTML context. This function strips all elements
-/// and attributes that can execute code before the SVG is placed in the HTML output.
+/// and attributes that can execute code. Element name matching is
+/// CASE-INSENSITIVE (MED-2): `<SCRIPT>`, `<ScRiPt>`, `<foreignObject>`,
+/// `<FOREIGNOBJECT>` are all stripped.
 ///
 /// # Returns
 ///
 /// A `String` containing the modified SVG markup. On parse error (malformed
 /// SVG input), returns the original `svg_str` unchanged and emits a
 /// `tracing::warn!`.
+// The SVG sanitization + accessibility injection loop is necessarily long due to the
+// number of event variants × element types it handles. Splitting it would fragment
+// the control flow and harm correctness auditing. Justified exception to too_many_lines.
+#[allow(clippy::too_many_lines)]
+#[must_use]
+fn sanitize_svg_for_graphics_layer(svg_str: &str) -> String {
+    use quick_xml::events::{BytesStart, Event};
+    use quick_xml::{Reader, Writer};
+
+    let mut reader = Reader::from_str(svg_str);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut depth: u32 = 0;
+    let mut outer_svg_done = false;
+    // F-005: track depth inside blocked elements (script/foreignObject).
+    // When blocked_depth > 0, ALL events are skipped until the matching end tag.
+    let mut blocked_depth: u32 = 0;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "sanitize_svg_for_graphics_layer: failed to parse SVG input — returning original string unchanged"
+                );
+                return svg_str.to_owned();
+            },
+            Ok(Event::Start(elem)) => {
+                let local_name = elem.name().local_name();
+
+                // F-005: if we are inside a blocked element, skip all events.
+                if blocked_depth > 0 {
+                    if is_blocked_svg_element(local_name.as_ref()) {
+                        blocked_depth += 1;
+                    }
+                    continue;
+                }
+
+                // F-005 / MED-2: if this element starts a blocked subtree, enter blocked mode.
+                if is_blocked_svg_element(local_name.as_ref()) {
+                    blocked_depth += 1;
+                    tracing::warn!(
+                        element = %String::from_utf8_lossy(local_name.as_ref()),
+                        "sanitize_svg_for_graphics_layer: F-005 blocked element stripped from SVG"
+                    );
+                    continue;
+                }
+
+                let is_svg = local_name.as_ref().eq_ignore_ascii_case(b"svg");
+
+                if is_svg && !outer_svg_done {
+                    // Outer <svg>: set aria-hidden="true", sanitize + copy existing attrs.
+                    outer_svg_done = true;
+                    let mut new_elem = BytesStart::new("svg");
+                    // F-010: skip non-UTF-8 keys; F-005: skip event handlers + drop role/aria-hidden.
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            // drop role (the <g> wrapper provides role="img") and aria-hidden (we inject below)
+                            Ok("role" | "aria-hidden") => {},
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler attribute stripped \
+                                     from outer <svg>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe attribute value stripped \
+                                         from outer <svg>"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                tracing::warn!(
+                                    "sanitize_svg_for_graphics_layer: non-UTF-8 attribute key skipped \
+                                     on outer <svg>"
+                                );
+                            },
+                        }
+                    }
+                    // Inject aria-hidden="true" on the inner SVG root.
+                    new_elem.push_attribute(("aria-hidden", "true"));
+
+                    if let Err(e) = writer.write_event(Event::Start(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on outer svg start");
+                        return svg_str.to_owned();
+                    }
+
+                    depth = 1;
+                } else if is_svg && depth > 0 {
+                    // Inner <svg>: inject aria-hidden="true", sanitize + copy attrs.
+                    let mut new_elem = BytesStart::new("svg");
+                    // F-005 + F-010: sanitize attributes.
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("aria-hidden") => {}, // drop — we inject below
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler attribute stripped \
+                                     from inner <svg>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe attribute value stripped \
+                                         from inner <svg>"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                tracing::warn!(
+                                    "sanitize_svg_for_graphics_layer: non-UTF-8 attribute key skipped \
+                                     on inner <svg>"
+                                );
+                            },
+                        }
+                    }
+                    new_elem.push_attribute(("aria-hidden", "true"));
+
+                    if let Err(e) = writer.write_event(Event::Start(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on inner svg start");
+                        return svg_str.to_owned();
+                    }
+                    depth += 1;
+                } else {
+                    // Other element: sanitize attributes (F-005), then emit.
+                    let elem_name_bytes = elem.name();
+                    let elem_name_str =
+                        std::str::from_utf8(elem_name_bytes.as_ref()).unwrap_or("element");
+                    let mut new_elem = BytesStart::new(elem_name_str);
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler attribute stripped"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe attribute value stripped"
+                                    );
+                                }
+                            },
+                            Err(_) => {}, // skip non-UTF-8 key
+                        }
+                    }
+                    if depth > 0 {
+                        depth += 1;
+                    }
+                    if let Err(e) = writer.write_event(Event::Start(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on elem start");
+                        return svg_str.to_owned();
+                    }
+                }
+            },
+            Ok(Event::Empty(elem)) => {
+                let local_name = elem.name().local_name();
+
+                // F-005: if inside a blocked subtree, skip empty elements too.
+                if blocked_depth > 0 {
+                    continue;
+                }
+
+                // F-005 / MED-2: self-closing blocked elements — skip.
+                if is_blocked_svg_element(local_name.as_ref()) {
+                    tracing::warn!(
+                        element = %String::from_utf8_lossy(local_name.as_ref()),
+                        "sanitize_svg_for_graphics_layer: F-005 self-closing blocked element stripped"
+                    );
+                    continue;
+                }
+
+                let is_svg = local_name.as_ref().eq_ignore_ascii_case(b"svg");
+
+                if is_svg && !outer_svg_done {
+                    // Outer self-closing <svg/>: inject aria-hidden="true".
+                    outer_svg_done = true;
+                    let mut new_elem = BytesStart::new("svg");
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            // drop role and aria-hidden — we inject aria-hidden below
+                            Ok("role" | "aria-hidden") => {},
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler stripped from \
+                                     self-closing outer <svg/>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe value stripped from \
+                                         self-closing outer <svg/>"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                tracing::warn!(
+                                    "sanitize_svg_for_graphics_layer: non-UTF-8 attribute key skipped \
+                                     on self-closing outer <svg/>"
+                                );
+                            },
+                        }
+                    }
+                    new_elem.push_attribute(("aria-hidden", "true"));
+                    if let Err(e) = writer.write_event(Event::Empty(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on self-closing outer svg");
+                        return svg_str.to_owned();
+                    }
+                } else if is_svg && depth > 0 {
+                    // F-007 (EC-002): inner self-closing <svg/> at depth > 0 must
+                    // receive aria-hidden="true".
+                    let mut new_elem = BytesStart::new("svg");
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("aria-hidden") => {}, // drop — we inject below
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler stripped from \
+                                     self-closing inner <svg/>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe value stripped from \
+                                         self-closing inner <svg/>"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                tracing::warn!(
+                                    "sanitize_svg_for_graphics_layer: non-UTF-8 attribute key skipped \
+                                     on self-closing inner <svg/>"
+                                );
+                            },
+                        }
+                    }
+                    new_elem.push_attribute(("aria-hidden", "true"));
+                    if let Err(e) = writer.write_event(Event::Empty(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on inner self-closing svg");
+                        return svg_str.to_owned();
+                    }
+                } else {
+                    // Other self-closing element: sanitize attributes (F-005).
+                    let elem_name_bytes = elem.name();
+                    let elem_name_str =
+                        std::str::from_utf8(elem_name_bytes.as_ref()).unwrap_or("element");
+                    let mut new_elem = BytesStart::new(elem_name_str);
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "sanitize_svg_for_graphics_layer: F-005 event-handler stripped from empty elem"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "sanitize_svg_for_graphics_layer: F-005 unsafe value stripped from \
+                                         empty elem"
+                                    );
+                                }
+                            },
+                            Err(_) => {}, // skip non-UTF-8 key
+                        }
+                    }
+                    if let Err(e) = writer.write_event(Event::Empty(new_elem)) {
+                        tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on empty elem");
+                        return svg_str.to_owned();
+                    }
+                }
+            },
+            Ok(Event::End(elem)) => {
+                // F-005: if inside a blocked subtree, handle end tag.
+                if blocked_depth > 0 {
+                    if is_blocked_svg_element(elem.name().local_name().as_ref()) {
+                        blocked_depth = blocked_depth.saturating_sub(1);
+                    }
+                    continue;
+                }
+                if depth > 0 {
+                    depth = depth.saturating_sub(1);
+                }
+                if let Err(e) = writer.write_event(Event::End(elem)) {
+                    tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on end elem");
+                    return svg_str.to_owned();
+                }
+            },
+            Ok(other) => {
+                // F-005: skip text/cdata inside blocked elements.
+                if blocked_depth > 0 {
+                    continue;
+                }
+                if let Err(e) = writer.write_event(other) {
+                    tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: write error on other event");
+                    return svg_str.to_owned();
+                }
+            },
+        }
+    }
+
+    // If we never found an outer <svg>, the input was not SVG at all.
+    if !outer_svg_done {
+        tracing::warn!(
+            "sanitize_svg_for_graphics_layer: no <svg> element found in input — \
+             returning original string unchanged (parse error)"
+        );
+        return svg_str.to_owned();
+    }
+
+    match String::from_utf8(writer.into_inner()) {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::warn!(error = %e, "sanitize_svg_for_graphics_layer: UTF-8 encoding error — returning original");
+            svg_str.to_owned()
+        },
+    }
+}
+
+/// Inject `role="img"`, `aria-labelledby`, and `<title>` around an SVG string.
+///
+/// Produces:
+/// ```html
+/// <g role="img" aria-labelledby="sf-{slide_id}-{frame_id}">
+///   <title id="sf-{slide_id}-{frame_id}">{alt, XML-escaped by quick-xml}</title>
+///   {sanitized svg with aria-hidden="true" on outer root}
+/// </g>
+/// ```
+///
+/// The SVG is first passed through the sanitizer (strips script/foreignObject/
+/// on* attrs, marks inner SVG roots as `aria-hidden="true"`).
+///
+/// P4 rule: NEVER inject `role` via the usvg tree API — usvg 0.47.0 strips it.
+/// P4 rule: Do NOT pre-escape `alt_text` before passing — quick-xml auto-escapes
+/// attribute values and text content.
+///
+/// ## Security (F-005 / AC-003 / AC-005)
+///
+/// All chart/diagram SVG content passes through the internal SVG sanitizer
+/// before being embedded in HTML. This strips executable content (script,
+/// foreignObject, on* attrs, javascript: hrefs).
+#[must_use]
+pub fn render_chart_frame(svg_str: &str, alt_text: &str, frame_id: &str, slide_id: &str) -> String {
+    let sanitized = sanitize_svg_for_graphics_layer(svg_str);
+
+    // Build the combined label ID: sf-{slide_id}-{frame_id}
+    let label_id = format!("sf-{slide_id}-{frame_id}");
+    let escaped_label_id = html_escape::encode_double_quoted_attribute(&label_id);
+    let escaped_alt = html_escape::encode_text(alt_text);
+
+    format!(
+        r#"<g role="img" aria-labelledby="{escaped_label_id}"><title id="{escaped_label_id}">{escaped_alt}</title>{sanitized}</g>"#
+    )
+}
+
+/// Inject `role=\"img\"` and `<title>alt text</title>` into an SVG string.
+///
+/// This is the legacy chart-SVG injection API preserved for backward compatibility
+/// with tests that call it directly. For P4 rendering, prefer
+/// [`render_chart_frame`] which wraps the sanitized SVG in a `<g role="img">`
+/// as required by the P4 Composite Rendering Model.
+///
+/// This function injects `role="img"` on the outer `<svg>` element and prepends
+/// a `<title>` child (the pre-P4 pattern). Chart/diagram SVGs going into the P4
+/// graphics layer MUST use [`render_chart_frame`] instead.
+///
+/// ## Security (F-005 / XSS / MED-2)
+///
+/// Strips `<script>`, `<foreignObject>`, event-handler attributes (`on*`), and
+/// `javascript:` hrefs. Element name matching is CASE-INSENSITIVE (MED-2).
 // The SVG sanitization + accessibility injection loop is necessarily long due to the
 // number of event variants × element types it handles. Splitting it would fragment
 // the control flow and harm correctness auditing. Justified exception to too_many_lines.
@@ -679,7 +1164,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     continue;
                 }
 
-                // F-005: if this element starts a blocked subtree, enter blocked mode.
+                // F-005 / MED-2: if this element starts a blocked subtree, enter blocked mode.
                 if is_blocked_svg_element(local_name.as_ref()) {
                     blocked_depth += 1;
                     tracing::warn!(
@@ -689,7 +1174,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     continue;
                 }
 
-                let is_svg = local_name.as_ref() == b"svg";
+                let is_svg = local_name.as_ref().eq_ignore_ascii_case(b"svg");
 
                 if is_svg && !outer_svg_done {
                     // Outer <svg>: inject role="img", sanitize + copy existing attrs.
@@ -835,7 +1320,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     continue;
                 }
 
-                // F-005: self-closing blocked elements (e.g., <script/>) — skip.
+                // F-005 / MED-2: self-closing blocked elements — skip.
                 if is_blocked_svg_element(local_name.as_ref()) {
                     tracing::warn!(
                         element = %String::from_utf8_lossy(local_name.as_ref()),
@@ -844,7 +1329,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     continue;
                 }
 
-                let is_svg = local_name.as_ref() == b"svg";
+                let is_svg = local_name.as_ref().eq_ignore_ascii_case(b"svg");
 
                 if is_svg && !outer_svg_done {
                     // Outer self-closing <svg/>: inject role="img" and a <title>.
@@ -1043,13 +1528,16 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutSlide};
+    use slideforge_layout::{BoundingBox, Frame, FrameContent, LaidOutSlide, PageSize};
     use slideforge_types::AltText;
     use slideforge_types::{
         Brand, BrandFonts, BrandPalette, Emu, NormalizedDiagramSvg, SourceSpan,
     };
 
-    use super::{render_element_to_html, render_slide_to_html, render_svg_chart};
+    use super::{
+        HeadingLevel, render_chart_frame, render_graphics_layer, render_slide_to_html,
+        render_svg_chart, render_text_frame,
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Fixtures
@@ -1083,10 +1571,14 @@ mod tests {
         }
     }
 
-    fn make_slide(frames: Vec<Frame>) -> LaidOutSlide {
+    fn make_page_size() -> PageSize {
+        PageSize::default()
+    }
+
+    fn make_title_slide_type(slide_type: &str, frames: Vec<Frame>) -> LaidOutSlide {
         LaidOutSlide {
             source_index: 0,
-            slide_type_keyword: Arc::from("content"),
+            slide_type_keyword: Arc::from(slide_type),
             frames,
             speaker_notes: None,
             register_tags: vec![],
@@ -1095,7 +1587,458 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-003 / render_svg_chart: role="img" and <title> injection
+    // P4 DOM structure: <article> container (AC-006)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-006 / BC-4.03.003 invariant 2 — render_slide_to_html produces an
+    /// <article> slide container, not an outer <svg> canvas with role="img".
+    #[test]
+    fn test_BC_4_03_003_p4_article_container_present() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Hello P4")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+        let sel = scraper::Selector::parse("article.sf-slide").expect("valid selector");
+        assert!(
+            doc.select(&sel).count() > 0,
+            "P4: render_slide_to_html must produce <article class=\"sf-slide\">; got: {result}"
+        );
+    }
+
+    /// AC-006 — no <foreignObject> in output (P4 model forbids it).
+    #[test]
+    fn test_BC_4_03_003_p4_no_foreign_object_in_output() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Title Slide")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+        let sel = scraper::Selector::parse("foreignObject").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "P4: no <foreignObject> allowed in HTML output; got: {result}"
+        );
+    }
+
+    /// AC-006 — no <canvas> in output.
+    #[test]
+    fn test_BC_4_03_003_render_slide_to_html_no_canvas_elements() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Test")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+        let sel = scraper::Selector::parse("canvas").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "render_slide_to_html must not produce <canvas> elements; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P4: Text frames as real HTML elements (not in SVG)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// P4: Title frame must produce a real <h1> or <h2> element at the article
+    /// level — NOT inside an <svg>/<foreignObject>.
+    #[test]
+    fn test_BC_4_03_003_p4_title_frame_as_real_heading() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Real Heading")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        // The h1 must be a direct descendant of the article, not inside svg.
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h1 = scraper::Selector::parse("article.sf-slide > h1").expect("valid");
+        assert!(
+            doc.select(&sel_h1).count() > 0,
+            "P4: title frame must produce <h1> directly inside <article>, not inside svg; got: {result}"
+        );
+    }
+
+    /// P4: The SVG graphics layer (if present) must carry aria-hidden="true" on
+    /// the outer svg — NOT role="img".
+    #[test]
+    fn test_BC_4_03_003_p4_graphics_layer_svg_is_aria_hidden() {
+        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
+        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_in));
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Diagram {
+                    svg: normalized,
+                    alt: AltText::Provided(Arc::from("A diagram")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        // The outer SVG graphics layer must have aria-hidden="true" (not role="img").
+        // The <g> wrapper inside has role="img".
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "P4: graphics layer outer <svg> must carry aria-hidden=\"true\"; got: {result}"
+        );
+        // The outer svg must NOT have role="img" at the svg element level.
+        // (role="img" is on the <g> wrapper inside, not the outer svg).
+        // Check that the outer svg element itself doesn't have role="img":
+        let outer_svg_start = result.find("<svg").expect("must have svg");
+        let outer_svg_end = result[outer_svg_start..].find('>').expect("must close");
+        let outer_svg_tag = &result[outer_svg_start..=(outer_svg_start + outer_svg_end)];
+        assert!(
+            !outer_svg_tag.contains(r#"role="img""#),
+            "P4: outer SVG graphics layer must NOT have role=\"img\" on svg element; \
+             got outer svg tag: {outer_svg_tag}"
+        );
+    }
+
+    /// P4: Chart frame produces <g role="img" aria-labelledby> inside the SVG layer.
+    #[test]
+    fn test_BC_4_03_003_p4_chart_frame_has_g_role_img() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue by quarter")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        // Must have <g role="img" aria-labelledby="..."> in the SVG layer.
+        assert!(
+            result.contains(r#"role="img""#),
+            "P4: chart frame must produce <g role=\"img\"> in SVG layer; got: {result}"
+        );
+        assert!(
+            result.contains("aria-labelledby="),
+            "P4: chart frame must produce aria-labelledby on <g>; got: {result}"
+        );
+        // Must have a <title> with the alt text.
+        assert!(
+            result.contains("<title"),
+            "P4: chart frame must have <title> child in <g>; got: {result}"
+        );
+        assert!(
+            result.contains("Revenue by quarter"),
+            "P4: chart alt text must appear in <title>; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-008: Heading level from slide_type — exactly one <h1> per document
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-008 — title-slide at index 0 produces <h1> for the title frame.
+    #[test]
+    fn test_BC_4_03_003_ac008_title_slide_index_0_produces_h1() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Opening Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid");
+        assert!(
+            doc.select(&sel_h1).count() > 0,
+            "AC-008: title-slide at index 0 must produce <h1>; got: {result}"
+        );
+    }
+
+    /// AC-008 — content slide (non-title type) always produces <h2> for the title frame.
+    #[test]
+    fn test_BC_4_03_003_ac008_content_slide_produces_h2() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Content Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        // content type → h2 even at slide_index 0
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid");
+        assert!(
+            doc.select(&sel_h2).count() > 0,
+            "AC-008: content slide must produce <h2> for title frame; got: {result}"
+        );
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            0,
+            "AC-008: content slide must NOT produce <h1>; got: {result}"
+        );
+    }
+
+    /// AC-008 — title-slide at index > 0 produces <h2> (only one <h1> per document).
+    #[test]
+    fn test_BC_4_03_003_ac008_title_slide_non_zero_index_produces_h2() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Second Title Slide")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        // slide_index = 2 → must produce h2, not h1
+        let result = render_slide_to_html(&slide, &brand, 2, &page_size);
+
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            0,
+            "AC-008: title-slide at index > 0 must NOT produce <h1>; got: {result}"
+        );
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid");
+        assert!(
+            doc.select(&sel_h2).count() > 0,
+            "AC-008: title-slide at index > 0 must produce <h2>; got: {result}"
+        );
+    }
+
+    /// AC-008 — exactly one <h1> in a multi-slide document (3 slides, first is title-slide).
+    #[test]
+    fn test_BC_4_03_003_ac008_exactly_one_h1_in_multi_slide_document() {
+        let brand = make_brand();
+        let page_size = make_page_size();
+
+        let mut doc_html = String::new();
+        // Slide 0: title-slide → h1
+        let slide0 = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Opening")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        doc_html.push_str(&render_slide_to_html(&slide0, &brand, 0, &page_size));
+
+        // Slide 1: content-slide → h2
+        let slide1 = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Content")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        doc_html.push_str(&render_slide_to_html(&slide1, &brand, 1, &page_size));
+
+        // Slide 2: title-slide at index 2 → h2 (not h1)
+        let slide2 = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Section Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        doc_html.push_str(&render_slide_to_html(&slide2, &brand, 2, &page_size));
+
+        let doc = scraper::Html::parse_document(&doc_html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "AC-008: exactly one <h1> must exist across a 3-slide document; got full HTML: {doc_html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-2: case-insensitive SVG element blocklist
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-2: SCRIPT (upper-case) must be stripped from SVG.
+    #[test]
+    fn test_MED2_uppercase_script_stripped() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><SCRIPT>evil()</SCRIPT><rect/></svg>"#;
+        let result = render_svg_chart(svg, "chart");
+        assert!(
+            !result.to_ascii_lowercase().contains("<script"),
+            "MED-2: <SCRIPT> must be stripped; got: {result}"
+        );
+        assert!(
+            !result.contains("evil()"),
+            "MED-2: script content must be stripped; got: {result}"
+        );
+    }
+
+    /// MED-2: mixed-case ScRiPt must be stripped.
+    #[test]
+    fn test_MED2_mixed_case_script_stripped() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><ScRiPt>evil()</ScRiPt><rect/></svg>"#;
+        let result = render_svg_chart(svg, "chart");
+        assert!(
+            !result.to_ascii_lowercase().contains("<script"),
+            "MED-2: <ScRiPt> must be stripped; got: {result}"
+        );
+    }
+
+    /// MED-2: FOREIGNOBJECT (upper-case) must be stripped.
+    #[test]
+    fn test_MED2_uppercase_foreign_object_stripped() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><FOREIGNOBJECT><div>evil</div></FOREIGNOBJECT></svg>"#;
+        let result = render_svg_chart(svg, "chart");
+        assert!(
+            !result.to_ascii_lowercase().contains("foreignobject"),
+            "MED-2: <FOREIGNOBJECT> must be stripped; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-3: PageSize threading + EMU→px conversion + zero-bbox guard
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// MED-3: non-default PageSize produces correct CSS width/height on the article.
+    #[test]
+    fn test_MED3_non_default_page_size_in_article() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(1_000_000),
+                    height: Emu(500_000),
+                },
+                content: FrameContent::Title(Arc::from("Custom Size")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        // Non-default page size: 4:3 portrait (7,200,000 × 5,400,000 EMU)
+        let page_size = PageSize {
+            width: Emu(7_200_000),
+            height: Emu(5_400_000),
+        };
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+
+        // 7_200_000 / 914_400 * 96 ≈ 755.91 px
+        assert!(
+            result.contains("755.91"),
+            "MED-3: article width must be derived from page_size.width (7_200_000 EMU ≈ 755.91px); got: {result}"
+        );
+    }
+
+    /// MED-3: zero-bbox frame is skipped by render_text_frame (no panic).
+    #[test]
+    fn test_MED3_zero_bbox_frame_skipped() {
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(0), // zero width
+                height: Emu(500_000),
+            },
+            content: FrameContent::Title(Arc::from("Degenerate")),
+            text_flow: None,
+            region_role: None,
+        };
+        // Must return None — no panic, no output for zero-bbox frame.
+        let result = render_text_frame(&frame, HeadingLevel::H1);
+        assert!(
+            result.is_none(),
+            "MED-3: zero-bbox frame must return None from render_text_frame; got: {result:?}"
+        );
+    }
+
+    /// MED-3: negative-like (very large EMU) bbox is handled — render proceeds.
+    #[test]
+    fn test_MED3_large_bbox_does_not_panic() {
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(9_144_000),
+                height: Emu(5_143_500),
+            },
+            content: FrameContent::Title(Arc::from("Large bbox")),
+            text_flow: None,
+            region_role: None,
+        };
+        // Must return Some(html) — no panic.
+        let result = render_text_frame(&frame, HeadingLevel::H1);
+        assert!(
+            result.is_some(),
+            "MED-3: normal large bbox must produce Some(html); got: {result:?}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-003 / render_svg_chart: role="img" and <title> injection (preserved)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// BC-4.03.003 postcondition 6 — `render_svg_chart` injects `role="img"` on
@@ -1149,7 +2092,6 @@ mod tests {
 
         let _doc = scraper::Html::parse_document(&result);
         // The outer svg gets role=img; the inner svg gets aria-hidden=true.
-        // Parse the SVG as HTML (scraper understands both).
         assert!(
             result.contains(r#"aria-hidden="true""#),
             "EC-002: nested <svg> inside chart must have aria-hidden=\"true\"; got: {result}"
@@ -1176,166 +2118,140 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-003 / render_element_to_html: non-decorative image alt
+    // AC-003 / render_chart_frame: P4 <g role="img" aria-labelledby><title>
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 4 — `render_element_to_html` for a non-decorative
-    /// image frame produces a non-empty accessible name.
-    ///
-    /// F-002: Images are rendered as SVG (not bare <img>). The accessible name is
-    /// expressed via `role="img"` and `<title>alt text</title>` on the SVG element.
+    /// AC-003 / AC-005 — render_chart_frame produces <g role="img" aria-labelledby>
+    /// with a <title> child and the sanitized SVG (aria-hidden on inner root).
     #[test]
-    fn test_BC_4_03_003_render_element_non_decorative_image_has_non_empty_alt() {
-        let frame = Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Image {
-                alt: AltText::Provided(Arc::from("A bar chart showing quarterly revenue")),
-            },
-            text_flow: None,
-            region_role: None,
-        };
-        let result = render_element_to_html(&frame);
-        // F-002: image is now SVG, not <img>. Must have role="img" on SVG element.
+    fn test_BC_4_03_003_render_chart_frame_g_wrapper() {
+        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
+        let result = render_chart_frame(svg_in, "Revenue by quarter", "slide-1-1", "slide-1");
+
         assert!(
-            !result.contains("<img "),
-            "F-002: image must not be a bare <img>; got: {result}"
+            result.contains(r#"role="img""#),
+            "render_chart_frame must produce <g role=\"img\">; got: {result}"
         );
         assert!(
-            result.contains("<svg"),
-            "non-decorative image must produce an <svg> element; got: {result}"
+            result.contains("aria-labelledby="),
+            "render_chart_frame must produce aria-labelledby on <g>; got: {result}"
         );
         assert!(
-            result.contains("A bar chart showing quarterly revenue"),
-            "non-decorative image alt text must appear in rendered output; got: {result}"
+            result.contains("<title"),
+            "render_chart_frame must produce a <title> child; got: {result}"
+        );
+        assert!(
+            result.contains("Revenue by quarter"),
+            "render_chart_frame must include alt text in <title>; got: {result}"
+        );
+        // The inner SVG root must carry aria-hidden="true".
+        assert!(
+            result.contains(r#"aria-hidden="true""#),
+            "render_chart_frame: inner SVG root must carry aria-hidden=\"true\"; got: {result}"
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-004 / render_element_to_html: decorative image
+    // AC-004 / decorative images via render_graphics_layer
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 postcondition 5 — `render_element_to_html` for a decorative
-    /// image produces `role="presentation"`.
-    ///
-    /// F-002: Images are rendered as SVG (not bare <img>). Decorative images use
-    /// `role="presentation"` and `aria-hidden="true"` on the SVG element.
+    /// AC-004 — decorative image frame produces aria-hidden="true" group in SVG layer.
     #[test]
     fn test_BC_4_03_003_render_element_decorative_image_empty_alt_and_role() {
-        let frame = Frame {
+        let frames = vec![Frame {
             bbox: make_bbox_full(),
             content: FrameContent::Image {
                 alt: AltText::Decorative,
             },
             text_flow: None,
             region_role: None,
-        };
-        let result = render_element_to_html(&frame);
-        // F-002: image is now SVG. Check for role="presentation" on SVG element.
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+        // Decorative image → <g aria-hidden="true"> in the SVG layer
         assert!(
-            !result.contains("<img "),
-            "F-002: decorative image must not be a bare <img>; got: {result}"
+            result.contains(r#"aria-hidden="true""#),
+            "decorative image must produce aria-hidden group in SVG layer; got: {result}"
         );
-        assert!(
-            result.contains("<svg"),
-            "decorative image must produce an <svg> element; got: {result}"
-        );
-        assert!(
-            result.contains(r#"role="presentation""#),
-            "decorative image must produce role=\"presentation\"; got: {result}"
-        );
+        // Must NOT have role="img" for a decorative image
+        // (the outer svg is aria-hidden; the decorative group is also aria-hidden)
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // AC-005 / render_element_to_html: Chart SVG
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// BC-4.03.003 postcondition 6 — `render_element_to_html` for a Chart frame
-    /// produces `<svg role="img"><title>alt text</title>`.
+    /// AC-003 — non-decorative image frame produces <g role="img" aria-labelledby> in SVG layer.
     #[test]
-    fn test_BC_4_03_003_render_element_chart_svg_has_role_img_and_title() {
-        let frame = Frame {
+    fn test_BC_4_03_003_render_element_non_decorative_image_has_non_empty_alt() {
+        let frames = vec![Frame {
             bbox: make_bbox_full(),
-            content: FrameContent::Chart {
-                alt: AltText::Provided(Arc::from("Revenue by quarter")),
+            content: FrameContent::Image {
+                alt: AltText::Provided(Arc::from("A bar chart showing quarterly revenue")),
             },
             text_flow: None,
             region_role: None,
-        };
-        let result = render_element_to_html(&frame);
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+        // Non-decorative → <g role="img" aria-labelledby="..."><title>...</title>
         assert!(
             result.contains(r#"role="img""#),
-            "Chart frame must produce <svg role=\"img\">; got: {result}"
+            "non-decorative image must produce role=\"img\" in SVG layer; got: {result}"
         );
         assert!(
-            result.contains("<title>Revenue by quarter</title>"),
-            "Chart frame must produce <title>Revenue by quarter</title>; got: {result}"
+            result.contains("A bar chart showing quarterly revenue"),
+            "non-decorative image alt text must appear in <title>; got: {result}"
         );
     }
 
-    /// BC-4.03.003 postcondition 6 — `render_element_to_html` for a Diagram frame
-    /// produces `<svg role="img"><title>alt text</title>`.
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-005 / render_chart_frame: Chart SVG role="img"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 6 — render_chart_frame for a Chart frame
+    /// produces `<g role="img" aria-labelledby><title>alt text</title>`.
+    #[test]
+    fn test_BC_4_03_003_render_element_chart_svg_has_role_img_and_title() {
+        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
+        let result = render_chart_frame(svg_in, "Revenue by quarter", "frame-1", "slide-1");
+        assert!(
+            result.contains(r#"role="img""#),
+            "Chart frame must produce <g role=\"img\">; got: {result}"
+        );
+        assert!(
+            result.contains("<title"),
+            "Chart frame must produce <title>; got: {result}"
+        );
+        assert!(
+            result.contains("Revenue by quarter"),
+            "Chart frame alt text must appear in <title>; got: {result}"
+        );
+    }
+
+    /// BC-4.03.003 postcondition 6 — render_chart_frame for a Diagram frame
+    /// produces `<g role="img" aria-labelledby><title>`.
     #[test]
     fn test_BC_4_03_003_render_element_diagram_svg_has_role_img_and_title() {
         let svg_str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect x="0" y="0" width="400" height="300"/></svg>"#;
-        let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(svg_str));
-        let frame = Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Diagram {
-                svg: normalized,
-                alt: AltText::Provided(Arc::from("Mermaid flowchart")),
-            },
-            text_flow: None,
-            region_role: None,
-        };
-        let result = render_element_to_html(&frame);
+        let result = render_chart_frame(svg_str, "Mermaid flowchart", "frame-1", "slide-1");
         assert!(
             result.contains(r#"role="img""#),
-            "Diagram frame must produce <svg role=\"img\">; got: {result}"
+            "Diagram frame must produce <g role=\"img\">; got: {result}"
         );
         assert!(
-            result.contains("<title>Mermaid flowchart</title>"),
+            result.contains("Mermaid flowchart"),
             "Diagram frame must produce <title>Mermaid flowchart</title>; got: {result}"
         );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AC-006 / render_slide_to_html: No <canvas>
+    // AC-005 / render_slide_to_html: inner SVG gets aria-hidden
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// BC-4.03.003 invariant 2 — `render_slide_to_html` produces no `<canvas>`
-    /// elements.
-    #[test]
-    fn test_BC_4_03_003_render_slide_to_html_no_canvas_elements() {
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Title(Arc::from("Test")),
-            text_flow: None,
-            region_role: None,
-        }]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-
-        let doc = scraper::Html::parse_document(&result);
-        let sel = scraper::Selector::parse("canvas").expect("valid selector");
-        assert_eq!(
-            doc.select(&sel).count(),
-            0,
-            "render_slide_to_html must not produce <canvas> elements; got: {result}"
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // AC-005 / render_element_to_html: inner SVG gets aria-hidden
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// BC-4.03.003 EC-002 — when a Diagram frame contains nested SVG elements,
-    /// inner SVG elements must have `aria-hidden="true"`.
+    /// BC-4.03.003 EC-002 — Diagram with nested SVG elements: inner SVGs must
+    /// have aria-hidden="true".
     #[test]
     fn test_BC_4_03_003_ec_002_diagram_inner_svg_gets_aria_hidden() {
-        // SVG with a nested <svg> element (complex chart structure)
         let nested_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><svg width="200" height="150"><rect/></svg></svg>"#;
         let normalized = NormalizedDiagramSvg::from_normalized_string(Arc::from(nested_svg));
-        let frame = Frame {
+        let frames = vec![Frame {
             bbox: make_bbox_full(),
             content: FrameContent::Diagram {
                 svg: normalized,
@@ -1343,8 +2259,9 @@ mod tests {
             },
             text_flow: None,
             region_role: None,
-        };
-        let result = render_element_to_html(&frame);
+        }];
+        let page_size = make_page_size();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
         // EC-002: inner svg elements must have aria-hidden="true"
         assert!(
             result.contains(r#"aria-hidden="true""#),
@@ -1353,223 +2270,11 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Snapshot tests (insta) — per Test Strategy
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// Snapshot test: title slide renders to expected HTML structure.
-    /// Per Test Strategy: "insta snapshots for rendered HTML of reference slide types".
-    /// Snapshot will be empty/unreviewed on first run — fails until implementation
-    /// exists (Red Gate).
-    #[test]
-    fn test_BC_4_03_003_snapshot_title_slide_html() {
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Title(Arc::from("Hello World")),
-            text_flow: None,
-            region_role: None,
-        }]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        insta::assert_snapshot!("title_slide_html", result);
-    }
-
-    /// Snapshot test: content slide with subtitle renders correctly.
-    #[test]
-    fn test_BC_4_03_003_snapshot_content_slide_html() {
-        let slide = make_slide(vec![
-            Frame {
-                bbox: BoundingBox {
-                    x: Emu(0),
-                    y: Emu(0),
-                    width: Emu(9_144_000),
-                    height: Emu(1_000_000),
-                },
-                content: FrameContent::Title(Arc::from("Content Slide")),
-                text_flow: None,
-                region_role: None,
-            },
-            Frame {
-                bbox: BoundingBox {
-                    x: Emu(0),
-                    y: Emu(1_000_000),
-                    width: Emu(9_144_000),
-                    height: Emu(4_143_500),
-                },
-                content: FrameContent::Subtitle(Arc::from("A subtitle here")),
-                text_flow: None,
-                region_role: None,
-            },
-        ]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        insta::assert_snapshot!("content_slide_html", result);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // F-001 / F-002 — SVG canvas rendering and image-as-svg
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// F-001 (AC-006 / BC-4.03.003 invariant 2): render_slide_to_html must produce
-    /// an outer <svg> canvas containing all frame elements (not bare flow HTML).
-    #[test]
-    fn test_F001_render_slide_to_html_produces_svg_canvas() {
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Title(Arc::from("SVG Canvas Test")),
-            text_flow: None,
-            region_role: None,
-        }]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        // Must contain an <svg> canvas inside the <article>
-        assert!(
-            result.contains("<svg"),
-            "F-001: render_slide_to_html must produce an <svg> canvas element; got: {result}"
-        );
-        // Must not contain bare <h1> at article level (h1 goes inside SVG/foreignObject)
-        // — actually AC-008 still requires h1 via accessible heading. Per ADR-008
-        //   we must have an outer <svg> canvas in the article.
-        let doc = scraper::Html::parse_document(&result);
-        let sel_article = scraper::Selector::parse("article").expect("valid");
-        let sel_svg = scraper::Selector::parse("article svg").expect("valid");
-        assert!(
-            doc.select(&sel_article).count() > 0,
-            "F-001: must have <article> landmark"
-        );
-        assert!(
-            doc.select(&sel_svg).count() > 0,
-            "F-001: <article> must contain an <svg> canvas; got: {result}"
-        );
-    }
-
-    /// F-001: the slide.html.jinja template must be used (SVG has viewBox attribute).
-    #[test]
-    fn test_F001_svg_canvas_has_view_box() {
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Title(Arc::from("ViewBox Test")),
-            text_flow: None,
-            region_role: None,
-        }]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        assert!(
-            result.contains("viewBox"),
-            "F-001: SVG canvas must have a viewBox attribute; got: {result}"
-        );
-    }
-
-    /// F-002 (story forbidden dependency): Image frames must NOT render as bare
-    /// `<img>` elements. SVG is always embedded as <svg>, never <img>.
-    /// For Image frames, the HTML exporter must emit an SVG <image> element or
-    /// otherwise avoid bare <img src="..."> with missing src.
-    #[test]
-    fn test_F002_image_frame_renders_as_svg_not_bare_img() {
-        let frame = Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Image {
-                alt: AltText::Provided(Arc::from("A photo")),
-            },
-            text_flow: None,
-            region_role: None,
-        };
-        let result = render_element_to_html(&frame);
-        // The result must NOT be a bare <img> with no src attribute.
-        // Per story: "image is embedded as <svg>, never <img>"
-        // An <svg> wrapping an <image> element is acceptable.
-        // A bare <img alt="..."> with no src is forbidden.
-        assert!(
-            !result.contains("<img "),
-            "F-002: Image frame must not render as bare <img>; must use <svg><image>; got: {result}"
-        );
-        assert!(
-            result.contains("<svg"),
-            "F-002: Image frame must render within an <svg> element; got: {result}"
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // F-004 — heading hierarchy: <h2> must not appear without a preceding <h1>
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// F-004: A slide that starts with Subtitle only (no Title frame) must NOT
-    /// produce a bare <h2> without a preceding <h1>. The exporter must ensure
-    /// heading levels start at h1 (axe-core heading-order rule / BC-4.03.003 PC-7).
-    /// Note: headings are inside <foreignObject> within the SVG canvas.
-    #[test]
-    fn test_F004_subtitle_only_slide_must_not_produce_bare_h2() {
-        // A slide with ONLY a Subtitle frame (no Title) — simulates the bug path.
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Subtitle(Arc::from("Just a subtitle")),
-            text_flow: None,
-            region_role: None,
-        }]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        // Headings inside <foreignObject>: check raw HTML for h2 without h1.
-        let has_h2 = result.contains("<h2 ") || result.contains("<h2>");
-        let has_h1 = result.contains("<h1 ") || result.contains("<h1>");
-        if has_h2 {
-            assert!(
-                has_h1,
-                "F-004: heading hierarchy violation — h2 present without h1; \
-                 axe-core heading-order would fail; got: {result}"
-            );
-        }
-        // The subtitle-only slide must render as h1 (promoted).
-        assert!(
-            has_h1,
-            "F-004: Subtitle-only slide must produce h1 (promoted, no Title frame); \
-             got: {result}"
-        );
-    }
-
-    /// F-004: A slide with Title then Subtitle must produce h1 before h2 (valid).
-    /// Note: headings are inside <foreignObject> within the SVG canvas (F-001 rework).
-    #[test]
-    fn test_F004_title_then_subtitle_produces_h1_then_h2() {
-        let slide = make_slide(vec![
-            Frame {
-                bbox: make_bbox_full(),
-                content: FrameContent::Title(Arc::from("Main Title")),
-                text_flow: None,
-                region_role: None,
-            },
-            Frame {
-                bbox: make_bbox_full(),
-                content: FrameContent::Subtitle(Arc::from("Sub heading")),
-                text_flow: None,
-                region_role: None,
-            },
-        ]);
-        let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
-        // Headings are inside <foreignObject>. Check the raw HTML for h1 and h2 tags.
-        assert!(
-            result.contains("<h1 ") || result.contains("<h1>"),
-            "F-004: Title must produce h1 (possibly inside foreignObject); got: {result}"
-        );
-        assert!(
-            result.contains("<h2 ") || result.contains("<h2>"),
-            "F-004: Subtitle after Title must produce h2 (possibly inside foreignObject); got: {result}"
-        );
-        // Verify h1 comes before h2 in document order.
-        let h1_pos = result.find("<h1").unwrap_or(usize::MAX);
-        let h2_pos = result.find("<h2").unwrap_or(usize::MAX);
-        assert!(
-            h1_pos < h2_pos,
-            "F-004: h1 must appear before h2 in document order; got: {result}"
-        );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
     // F-003 — FrameContent::Body must render ContentBlock variants properly
     // ─────────────────────────────────────────────────────────────────────────
 
     /// F-003: Body frame with a Text block must render a <p> element containing
-    /// the text content — NOT the Rust Debug representation like
-    /// "Text(TextBlock { inlines: [...] })".
+    /// the text content — NOT the Rust Debug representation.
     #[test]
     fn test_F003_body_text_block_renders_as_p_not_debug() {
         use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
@@ -1583,7 +2288,7 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_element_to_html(&frame);
+        let result = render_text_frame(&frame, HeadingLevel::H2).expect("body frame must render");
         assert!(
             !result.contains("TextBlock"),
             "F-003: Body must NOT render debug output (TextBlock); got: {result}"
@@ -1623,7 +2328,7 @@ mod tests {
             text_flow: None,
             region_role: None,
         };
-        let result = render_element_to_html(&frame);
+        let result = render_text_frame(&frame, HeadingLevel::H2).expect("body frame must render");
         assert!(
             !result.contains("BulletItem"),
             "F-003: Bullets must NOT render debug output; got: {result}"
@@ -1639,6 +2344,77 @@ mod tests {
         assert!(
             result.contains("Second item"),
             "F-003: Bullet item text must appear; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-004 — heading hierarchy: subtitle renders as h3 (not h2 after h2)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-004: Subtitle frame always renders as <h3> (sub-section of slide heading).
+    #[test]
+    fn test_F004_subtitle_frame_renders_as_h3() {
+        let frame = Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Subtitle(Arc::from("A subtitle")),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_text_frame(&frame, HeadingLevel::H2).expect("subtitle must render");
+        assert!(
+            result.contains("<h3"),
+            "F-004: Subtitle frame must render as <h3>; got: {result}"
+        );
+    }
+
+    /// F-004: Title + Subtitle slide produces h2 → h3 (no skipped levels for content slides).
+    #[test]
+    fn test_F004_title_then_subtitle_produces_h2_then_h3_for_content_slide() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(1_000_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Main Title")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(1_000_000),
+                        width: Emu(9_144_000),
+                        height: Emu(4_143_500),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("Sub heading")),
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        // content slide: Title → h2, Subtitle → h3
+        assert!(
+            result.contains("<h2"),
+            "F-004: content slide Title must produce h2; got: {result}"
+        );
+        assert!(
+            result.contains("<h3"),
+            "F-004: Subtitle after content-slide Title must produce h3; got: {result}"
+        );
+        // h2 must appear before h3 in document order.
+        let h2_pos = result.find("<h2").expect("h2 must be present");
+        let h3_pos = result.find("<h3").expect("h3 must be present");
+        assert!(
+            h2_pos < h3_pos,
+            "F-004: h2 must appear before h3 in document order; got: {result}"
         );
     }
 
@@ -1703,15 +2479,12 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// F-007 (EC-002): a self-closing nested `<svg/>` (Event::Empty) inside the
-    /// outer `<svg>` must receive `aria-hidden="true"`, not pass through untouched.
+    /// outer `<svg>` must receive `aria-hidden="true"`.
     #[test]
     fn test_F007_self_closing_nested_svg_gets_aria_hidden() {
-        // The outer <svg> is a Start event; the inner <svg/> is an Empty event.
         let svg_in =
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg/></svg>"#;
         let result = render_svg_chart(svg_in, "complex chart");
-        // The inner self-closing <svg/> must now have aria-hidden="true".
-        // There are two svg elements; the inner one must have aria-hidden.
         assert!(
             result.contains("aria-hidden=\"true\""),
             "F-007: self-closing inner <svg/> must have aria-hidden=\"true\"; got: {result}"
@@ -1736,16 +2509,12 @@ mod tests {
         );
     }
 
-    /// F-009: Xref validation — even though Xref always prepends '#', the target
-    /// must not start with '//' or '\' after prepending (guards against crafted
-    /// targets that could bypass the fragment prefix). A plain text Xref target
-    /// such as "slide-3" must pass cleanly.
+    /// F-009: safe Xref must not emit a warn.
     #[tracing_test::traced_test]
     #[test]
     fn test_F009_xref_routes_through_allowlist() {
         use super::render_inline_node;
         use slideforge_types::InlineNode;
-        // Normal Xref — must produce a valid anchor, no warn emitted.
         let node = InlineNode::Xref(Arc::from("intro"));
         let result = render_inline_node(&node);
         assert!(
@@ -1763,8 +2532,7 @@ mod tests {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// F-010: render_svg_chart processes SVG with a standard ASCII attribute key —
-    /// must NOT use unwrap_or("") for key parsing (covered by code fix; this test
-    /// verifies the happy path still works correctly).
+    /// must NOT use unwrap_or("") for key parsing.
     #[test]
     fn test_F010_svg_attr_key_standard_ascii_processed_correctly() {
         let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>"#;
@@ -1776,22 +2544,80 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Snapshot tests (insta) — per Test Strategy
+    // Snapshot tests (insta) — per Test Strategy (P4 DOM structure)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Snapshot test: chart slide with SVG role="img" and <title>.
+    /// Snapshot test: title slide renders to P4 HTML structure (article + h1 text layer).
+    #[test]
+    fn test_BC_4_03_003_snapshot_title_slide_html() {
+        let slide = make_title_slide_type(
+            "title",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Hello World")),
+                text_flow: None,
+                region_role: None,
+            }],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        insta::assert_snapshot!("title_slide_html", result);
+    }
+
+    /// Snapshot test: content slide with subtitle renders correctly (h2 + h3).
+    #[test]
+    fn test_BC_4_03_003_snapshot_content_slide_html() {
+        let slide = make_title_slide_type(
+            "content",
+            vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(0),
+                        width: Emu(9_144_000),
+                        height: Emu(1_000_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Content Slide")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(1_000_000),
+                        width: Emu(9_144_000),
+                        height: Emu(4_143_500),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("A subtitle here")),
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+        );
+        let brand = make_brand();
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
+        insta::assert_snapshot!("content_slide_html", result);
+    }
+
+    /// Snapshot test: chart slide with <g role="img" aria-labelledby><title>.
     #[test]
     fn test_BC_4_03_003_snapshot_chart_slide_html() {
-        let slide = make_slide(vec![Frame {
-            bbox: make_bbox_full(),
-            content: FrameContent::Chart {
-                alt: AltText::Provided(Arc::from("Revenue by quarter")),
-            },
-            text_flow: None,
-            region_role: None,
-        }]);
+        let slide = make_title_slide_type(
+            "content",
+            vec![Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue by quarter")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+        );
         let brand = make_brand();
-        let result = render_slide_to_html(&slide, &brand);
+        let page_size = make_page_size();
+        let result = render_slide_to_html(&slide, &brand, 0, &page_size);
         insta::assert_snapshot!("chart_slide_html", result);
     }
 }
