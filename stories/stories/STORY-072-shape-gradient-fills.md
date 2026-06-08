@@ -9,7 +9,7 @@ points: 3
 priority: P2
 tdd_mode: strict
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 behavioral_contracts: [BC-3.04.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -114,19 +114,32 @@ Both colors follow the same hex parsing rules as `FillSpec::SolidColor`: quoted
 `Rgb { r: u8, g: u8, b: u8 }` integers. Short form `"#RGB"` and alpha form
 `"#RRGGBBAA"` are rejected with E-PAR-015 at the decode step.
 
-> **Shape-pipeline-wiring dependency note (OBS-072-P1-001):** STORY-072 delivers
-> (a) the parser branch that records gradient syntax in `ShapeNode.fill`, (b) the
-> `ShapeNode → ShapeSpec` decode that produces `FillSpec::Gradient`, and (c) the
-> gradient rendering logic in all 5 exporters (PPTX/PDF/HTML/DOCX-fallback/layout
-> passthrough). These are verified via unit tests constructed with a direct
-> `ShapeSpec { fill: FillSpec::Gradient { ... }, ... }`. However, the
-> end-to-end DSL path from a `.sf` source file through to rendered output is NOT
-> wired in production: Stage-2b (`thread_fields_to_blocks`) does not yet emit
+> **Shape-pipeline-wiring dependency note (OBS-072-P1-001 / Adv-P2-MED-001):**
+> STORY-072 delivers exactly two things:
+> (a) the parser branch that records gradient syntax in `ShapeNode.fill` as an
+> interim AST string, and (c) the gradient rendering logic in all 5 exporters
+> (PPTX/PDF/HTML/DOCX-fallback/layout passthrough), verified via unit tests that
+> directly construct `ShapeSpec { fill: FillSpec::Gradient { ... }, ... }`.
+>
+> STORY-072 does NOT deliver (b) the `ShapeNode → ShapeSpec` decode that produces
+> `FillSpec::Gradient`. No such decoder exists in production for gradient or even
+> solid fills — `build_fill_spec` is `#[cfg(test)]` only and has no gradient arm
+> (confirmed by exhaustive grep across all crates, Adv Pass-2). The
+> `ShapeNode → ShapeSpec` decode is the same absent pipeline stage as Stage-2b
+> `ContentBlock::Shape` emission and is explicitly deferred to
+> **FU-SHAPE-PIPELINE-WIRING** (wave-gate story).
+>
+> The "verification" for the gradient IR path (directly constructing
+> `ShapeSpec { fill: FillSpec::Gradient {...} }` in tests) BYPASSES the decode
+> — it does not exercise a production decode path. Do NOT claim the decode is
+> delivered or verified in STORY-072.
+>
+> The end-to-end DSL path from a `.sf` source file through to rendered output is
+> NOT wired in production: Stage-2b (`thread_fields_to_blocks`) does not yet emit
 > `ContentBlock::Shape` for any shape block (pre-existing gap, broader than
-> gradients — see BC-1.16.001 inv-4). The full DSL→output pipeline requires a
-> separate shape-pipeline-wiring story (route to wave-gate as
-> FU-SHAPE-PIPELINE-WIRING). Do NOT claim a working end-to-end DSL path in tests
-> or implementation claims.
+> gradients — see BC-1.16.001 inv-4). The full DSL→output pipeline, including the
+> `ShapeNode → ShapeSpec` decode, requires FU-SHAPE-PIPELINE-WIRING. Do NOT claim
+> a working end-to-end DSL path in tests or implementation claims.
 
 ### AC-003: Layout passthrough — gradient frame in LaidOutDeck
 (traces to BC-3.04.001 postcondition 3 — shape appears in LaidOutDeck)
@@ -146,7 +159,7 @@ Each exporter emits gradients as follows:
 | PPTX | Native: ooxmlsdk `=0.6.1` typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` — emit typed DrawingML gradient fill with `a:lin ang="5400000"` (top→bottom) and two `a:gs` stops at `pos="0"` (from) and `pos="100000"` (to). Use the typed-builder API, not raw XML. |
 | DOCX | Fallback: solid first color (`from` Rgb) rendered as `<w:shd w:fill="RRGGBB"/>`. A lint warning is emitted: "DOCX gradient fill downgraded to solid (DOCX does not support shape gradient fills)" |
 | PDF | Native via krilla `=0.6.0`: `Surface::set_fill(Some(Fill { paint: LinearGradient { x1, y1, x2, y2, spread_method, stops: Vec<Stop> }.into(), rule: FillRule::NonZero, opacity }))` then `draw_path(rect)`. Uses `paint::LinearGradient` from the krilla API. `pdf-writer` is NOT a direct dependency — krilla wraps it internally and a direct `pdf-writer` dep creates version-skew risk. (per export-architecture v1.2) |
-| HTML | Native: CSS `background: linear-gradient(to bottom, #RRGGBB, #RRGGBB)` on the shape div |
+| HTML | Native (SVG): `<defs><linearGradient id="sf-grad-..." x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#RRGGBB"/><stop offset="100%" stop-color="#RRGGBB"/></linearGradient></defs>` referenced by `fill="url(#sf-grad-...)"` on the shape `<rect>`. CSS `background` is NOT used — CSS background does not paint SVG geometry. |
 
 Gradient direction in v1.0 is fixed as top-to-bottom (vertical linear). Arbitrary
 angle gradients are deferred to v2.
@@ -167,7 +180,7 @@ does not change the alt-text contract.
 - [ ] Update `layout::run()` shape pass to pass `FillSpec::Gradient` through to `ShapeFrame` (likely already correct — passthrough logic in STORY-028 should be variant-agnostic)
 - [ ] Implement PPTX gradient: use ooxmlsdk `=0.6.1` typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` — typed API, not raw XML
 - [ ] Implement PDF gradient via krilla `=0.6.0`: call `Surface::set_fill(Some(Fill { paint: paint::LinearGradient { x1, y1, x2, y2, spread_method: SpreadMethod::Pad, stops: vec![Stop { offset: 0.0, color: from_color }, Stop { offset: 1.0, color: to_color }] }.into(), rule: FillRule::NonZero, opacity: NormalizedF32::ONE }))` then `draw_path(rect)`. Do NOT add `pdf-writer` as a direct dep — krilla exposes the full gradient API.
-- [ ] Implement HTML gradient: emit `background: linear-gradient(to bottom, ...)` CSS
+- [ ] Implement HTML gradient: emit SVG-native `<defs><linearGradient id="sf-grad-...">` with two `<stop>` elements (top→bottom, `y1="0" y2="1"`) inside the slide's `<svg role="presentation">` layer; reference via `fill="url(#sf-grad-...)"` on the shape `<rect>`. Do NOT use CSS `background: linear-gradient(...)` — CSS background does not paint SVG geometry.
 - [ ] Implement DOCX fallback: solid `from` color + lint warning
 - [ ] Write unit tests:
   - Parser: `fill gradient "#FF0000" to "#0000FF"` → AST `ShapeNode.fill = "gradient \"#FF0000\" to \"#0000FF\""` then decoded to `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`
@@ -225,7 +238,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 | `crates/slideforge-layout/src/shapes.rs` | Modify | Verify gradient passthrough (should be no-op if match is exhaustive-safe) |
 | `crates/slideforge-pptx/src/shape.rs` (or equivalent) | Modify | Emit `<a:gradFill>` for `FillSpec::Gradient` |
 | `crates/slideforge-pdf/src/shape.rs` (or equivalent) | Modify | Emit krilla `paint::LinearGradient` via `Surface::set_fill` + `draw_path` for `FillSpec::Gradient` (per export-architecture v1.2) |
-| `crates/slideforge-html/src/shape.rs` (or equivalent) | Modify | Emit CSS `linear-gradient` for `FillSpec::Gradient` |
+| `crates/slideforge-html/src/shape.rs` (or equivalent) | Modify | Emit SVG-native `<linearGradient>` def + `fill="url(#sf-grad-...)"` on shape `<rect>` for `FillSpec::Gradient` (not CSS background) |
 | `crates/slideforge-docx/src/shape.rs` (or equivalent) | Modify | Emit solid fallback + lint warning for `FillSpec::Gradient` |
 | `crates/slideforge-layout/tests/gradient_integration.rs` | Create | End-to-end test: gradient shape in Deck → LaidOutDeck |
 
@@ -254,7 +267,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 - **Constructed-ShapeSpec integration test**: Directly construct
   `ShapeSpec { fill: FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }, ... }`
   and drive it through `layout::run()` → exporter → `.pptx` output (assert `<a:gradFill>`);
-  `.html` output (assert `linear-gradient` CSS); `.pdf` output (no panics); `.docx` output
+  `.html` output (assert SVG `<linearGradient>` def + `fill="url(#sf-grad-...)"` on `<rect>` — NOT CSS `background`); `.pdf` output (no panics); `.docx` output
   (assert solid fallback + lint warning). Note: an end-to-end `.sf` source file integration
   test (DSL → output) requires the shape-pipeline-wiring story (FU-SHAPE-PIPELINE-WIRING)
   and is out of STORY-072's scope.
@@ -287,3 +300,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml`.
 | 1.1 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-001): removed false "ALREADY exists / placeholder" claims — FillSpec::Gradient is NOT in v1.0 codebase per BC-3.04.001 v1.4.2 and code audit; rewrote Dependency Anchor, Summary, Previous Story Intelligence to describe ADDING the variant as the first task; updated E-PAR-014 references to E-PAR-016 and E-PAR-013 references to E-PAR-015 per F-P9-HIGH-002 namespace collision resolution; corrected file path from specs.rs → shape_types.rs |
 | 1.2 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: removed pdf-writer direct dep (krilla=0.6.0 wraps it; direct dep causes version-skew risk per export-architecture v1.2); updated AC-004 PDF row and PDF task to use krilla paint::LinearGradient + Surface::set_fill + draw_path API; updated AC-004 PPTX row and PPTX task to use ooxmlsdk=0.6.1 typed builders for a:gradFill/a:gsLst/a:gs/a:lin; changed thiserror to {workspace=true} form (=2.0.18 per ADR-022). |
 | 1.3 | 2026-06-08 | product-owner | Adversary Pass-1 MED-001/MED-002/OBS-072-P1-001 fixes: (MED-002) corrected ALL unquoted gradient hex examples to quoted form (`"#FF0000"` not `#FF0000`) — lexer treats `#` as line-comment when unquoted, making unquoted examples unparseable; fixed in AC-001 DSL block, AC-001 prose, Tasks unit-test bullet, Test Strategy unit-test line, Test Strategy integration-test line; (MED-001) rewrote AC-002 to accurately describe two-step AST→IR reality: parser stores interim string in `ShapeNode.fill`, structural `FillSpec::Gradient` is constructed at the `ShapeNode→ShapeSpec` decode boundary; (OBS-001) added shape-pipeline-wiring dependency note in AC-002 clarifying STORY-072 scope (parser branch + structural FillSpec + 5 exporter renderers verified via constructed-ShapeSpec tests) vs. end-to-end DSL path blocked by pre-existing FU-SHAPE-PIPELINE-WIRING gap; updated Test Strategy integration-test to constructed-ShapeSpec form. |
+| 1.4 | 2026-06-08 | product-owner | Adversary Pass-2 MED-001 + AC-004 HTML correction: (MED-001 / TD-VSDD-059) AC-002 pipeline-wiring note rewritten to explicitly retract the claim that STORY-072 delivers item (b) the ShapeNode→ShapeSpec decode — exhaustive grep confirmed no production decoder exists for gradient or solid fills (`build_fill_spec` is `#[cfg(test)]` only); decode folded into FU-SHAPE-PIPELINE-WIRING deferral; clarified that constructed-ShapeSpec test verification BYPASSES the decode and does not exercise a production path. (AC-004 HTML) corrected HTML gradient output from CSS `background: linear-gradient(...)` to SVG-native `<defs><linearGradient>` + `fill="url(#sf-grad-...)"` on shape `<rect>` — CSS background does not paint SVG geometry; fixed in AC-004 table, Tasks HTML bullet, File Structure HTML row, and Test Strategy HTML assertion. |
