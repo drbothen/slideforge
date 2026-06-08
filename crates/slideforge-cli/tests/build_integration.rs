@@ -712,63 +712,10 @@ fn test_BC_1_15_003_format_selection_pptx_html_writes_only_those_two() {
 }
 
 // ── AC-011: six tracing spans emitted ────────────────────────────────────────
-
-/// AC-011 / NFR-032: all 6 pipeline stage spans emitted per build.
-///
-/// Uses `tracing_test` to capture span events during `run_build`.
-/// Expected span names: "parse", "evaluate", "brand", "validate", "layout", "export".
-#[test]
-#[tracing_test::traced_test]
-fn test_BC_1_15_003_ac_011_all_6_tracing_spans_emitted_per_build() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let src_path = tmp.path().join("deck.sf");
-    let out_dir = tmp.path().join("dist");
-    write_valid_sf(&src_path);
-    // Brand discovery: CLI looks for brand.toml next to the source file.
-    write_brand_toml(tmp.path());
-
-    let args = BuildArgs {
-        source: src_path,
-        output_dir: out_dir,
-        format: vec![OutputFormat::Pptx],
-        variant: None,
-    };
-    let global = default_global();
-
-    let code = run_build(&args, &global);
-
-    assert_eq!(
-        code,
-        ExitCode::SUCCESS,
-        "AC-011: successful build must exit 0 (tracing span test)"
-    );
-
-    // Assert each of the 6 canonical pipeline stage span names is present.
-    assert!(
-        logs_contain("parse"),
-        "AC-011: 'parse' span must be emitted"
-    );
-    assert!(
-        logs_contain("evaluate"),
-        "AC-011: 'evaluate' span must be emitted"
-    );
-    assert!(
-        logs_contain("brand"),
-        "AC-011: 'brand' span must be emitted"
-    );
-    assert!(
-        logs_contain("validate"),
-        "AC-011: 'validate' span must be emitted"
-    );
-    assert!(
-        logs_contain("layout"),
-        "AC-011: 'layout' span must be emitted"
-    );
-    assert!(
-        logs_contain("export"),
-        "AC-011: 'export' span must be emitted"
-    );
-}
+// NOTE: The `#[traced_test]` span-emission test is in `tests/tracing_spans.rs`,
+// which compiles to a separate binary from `build_integration.rs`.  Keeping it
+// separate prevents the `#[tracing_test::traced_test]` global-subscriber setup
+// from conflicting with `init_tracing` calls in this file (LESSON-16).
 
 // ── AC-012: exit code reflects earliest pipeline-stage failure ────────────────
 
@@ -990,25 +937,24 @@ fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
 // ── AC-015: otel feature gate ─────────────────────────────────────────────────
 
 /// AC-015 (otel feature): `--otel-endpoint` flag is accepted and OTel layer
-/// constructed without panicking, under any global subscriber state.
+/// constructed; `init_tracing` returns `Ok` without panicking.
 ///
 /// This test is gated behind `#[cfg(feature = "otel")]`. It asserts that when
 /// the `otel` feature is compiled in, `GlobalFlags.otel_endpoint` is `Some` and
-/// `init_tracing` returns without panicking.
+/// `init_tracing` returns `Ok` without panicking.
 ///
-/// **Isolation-robust:** under `cargo test` shared-process execution, another
-/// test may have already installed a global tracing dispatcher before this test
-/// runs.  Both outcomes are acceptable:
-/// - `Ok(_)` → OTel layer constructed and subscriber installed (clean environment).
-/// - `Err(e)` → dispatcher already set; idempotent return without panic.
+/// **Isolation-robust (LESSON-16):** `init_tracing` now treats "a global
+/// dispatcher is already set" as success (`Ok(noop)`) rather than propagating
+/// an `Err`.  Under `cargo test` shared-process execution, another test may have
+/// already installed the global dispatcher; `init_tracing` now returns `Ok` in
+/// all cases (subscriber installed, or already-set detected, or OnceLock noop).
 ///
-/// The test fails only if `init_tracing` panics (which is the real AC-015
-/// defect: "no reactor running" panic from `opentelemetry_sdk` rt-tokio).
 /// The dedicated unit test `test_BC_1_15_003_ac_015_otel_init_path_no_panic_no_reactor_required`
-/// in `tracing_setup.rs` exercises the OTel code path directly and is the
-/// primary regression guard for the reactor-panic defect.
+/// in `tracing_setup.rs` exercises the OTel code path (runtime construction +
+/// exporter build) directly and is the primary regression guard for the
+/// "no reactor running" panic defect.
 ///
-/// Does NOT require a live OTLP endpoint — we only assert no panic occurs.
+/// Does NOT require a live OTLP endpoint — we only assert `Ok` + no panic.
 #[cfg(feature = "otel")]
 #[test]
 fn test_BC_1_15_003_ac_015_otel_endpoint_flag_accepted_and_layer_constructed() {
@@ -1019,19 +965,12 @@ fn test_BC_1_15_003_ac_015_otel_endpoint_flag_accepted_and_layer_constructed() {
         ..default_global()
     };
 
-    // Must not panic — accept Ok (fresh environment) or Err (dispatcher already
-    // installed by another test in the shared-process cargo test run).
     let result = init_tracing(&global);
-    match &result {
-        Ok(_) => {},
-        Err(e) => assert!(
-            e.contains("already") || e.contains("dispatcher"),
-            "AC-015: init_tracing with --otel-endpoint returned unexpected error \
-             (expected Ok or already-initialized conflict); got: {e}"
-        ),
-    }
-    // Reaching here without panic satisfies AC-015.
-    let _ = result;
+    assert!(
+        result.is_ok(),
+        "AC-015: init_tracing with --otel-endpoint must return Ok (subscriber \
+         installed or already-set detected); got: {result:?}"
+    );
 }
 
 // ── AC-009: stderr byte-level ANSI scan via output.rs ────────────────────────
@@ -1175,57 +1114,47 @@ fn test_BC_1_15_002_invariant_error_count_matches_actual_independent_errors() {
 
 // ── Tracing setup ─────────────────────────────────────────────────────────────
 
-/// AC-011 / NFR-032: `init_tracing` must not panic on second call, under any
-/// global subscriber state.
+/// AC-011 / NFR-032: `init_tracing` must not panic and must return `Ok` on
+/// repeated calls, regardless of global subscriber state.
 ///
-/// **Contract (isolation-robust):** `init_tracing` must never panic, regardless
-/// of whether a global tracing dispatcher was already installed — by this test,
-/// by a concurrent test in the same `cargo test` process, or by any prior call
-/// via `init_tracing` or `tracing_subscriber::try_init()` directly.
+/// **Contract:** `init_tracing` must:
+/// 1. Never panic — even when a global tracing dispatcher is already set.
+/// 2. Always return `Ok(_)` — either by installing a new subscriber (clean
+///    environment) or by detecting an already-installed subscriber and returning
+///    a no-op guard (idempotent).
 ///
-/// Under `cargo nextest` each test runs in its own process, so the subscriber
-/// is always virgin.  Under `cargo test` (used by the `snapshots` CI job) all
-/// tests share one process, so the dispatcher may already be set when this test
-/// runs.  Both outcomes are valid; the only invariant is NO PANIC.
+/// This covers three scenarios:
+/// - **Clean process (nextest):** first call installs subscriber → `Ok(guard)`.
+///   Second call sees `TRACING_INIT` set → `Ok(noop)`.
+/// - **Pre-initialized process (cargo test / CI):** another test (e.g.,
+///   `#[traced_test]`) already installed the global dispatcher.  First call
+///   detects "already been set" → `Ok(noop)`.  Second call → `Ok(noop)`.
+/// - **Concurrent initialization:** two threads race to call `init_tracing`;
+///   the loser detects the conflict and returns `Ok(noop)` without panicking.
 ///
-/// - `Ok(_)` → subscriber installed successfully (clean environment).
-/// - `Err(e)` → subscriber already installed by another test; idempotent return
-///   with no panic.
-///
-/// The test fails only if either call panics (which is the actual defect being
-/// guarded against).
+/// The `init_tracing` fix (LESSON-16): "already been set" is now treated as
+/// success (`Ok(noop)`) rather than propagated as `Err`.
 #[test]
 fn test_BC_1_15_003_ac_011_init_tracing_idempotent_no_panic_on_second_call() {
     use slideforge_cli::tracing_setup::init_tracing;
 
     let global = default_global();
 
-    // Both calls must return without panicking.  Accept Ok (clean environment)
-    // or Err (dispatcher already set by another test in the shared process).
-    // We intentionally do NOT assert result1.is_ok() — that assertion is
-    // order-dependent under shared-process `cargo test` and is NOT part of the
-    // AC-011 contract.  The contract is no-panic-on-any-call.
+    // Both calls must return Ok without panicking.
     let result1 = init_tracing(&global);
     let result2 = init_tracing(&global);
 
-    // Verify both calls returned a valid Result (Ok or Err — either is fine).
-    // The test itself panicking is the load-bearing failure mode we guard against.
-    match &result1 {
-        Ok(_) => {},
-        Err(e) => assert!(
-            e.contains("already") || e.contains("dispatcher"),
-            "AC-011: first init_tracing call returned unexpected error: {e}"
-        ),
-    }
-    match &result2 {
-        Ok(_) => {},
-        Err(e) => assert!(
-            e.contains("already") || e.contains("dispatcher"),
-            "AC-011: second init_tracing call returned unexpected error: {e}"
-        ),
-    }
-    // If we reach this point, neither call panicked — the AC-011 invariant holds.
-    let _ = (result1, result2);
+    assert!(
+        result1.is_ok(),
+        "AC-011: first init_tracing call must return Ok (either installed subscriber \
+         or detected existing one); got: {result1:?}"
+    );
+    assert!(
+        result2.is_ok(),
+        "AC-011: second init_tracing call must return Ok (OnceLock noop path); \
+         got: {result2:?}"
+    );
+    // If we reach this point, neither call panicked — the no-panic invariant holds.
 }
 
 // ── MED-001: all-or-nothing atomicity on multi-format export ─────────────────

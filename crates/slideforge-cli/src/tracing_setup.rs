@@ -188,21 +188,34 @@ impl Default for TracingGuard {
 /// Returns an error string if the subscriber could not be installed (rare —
 /// only happens if another subscriber was installed outside this function).
 pub fn init_tracing(global: &GlobalFlags) -> Result<TracingGuard, String> {
-    // If already initialized, return a no-op guard.
+    // If already initialized via this function, return a no-op guard immediately.
     if TRACING_INIT.get().is_some() {
         return Ok(TracingGuard::noop());
     }
 
     let result = init_tracing_inner(global);
 
-    if result.is_ok() {
-        // Mark as initialized. Ignore the error from set() — it can only fail
-        // if another thread raced us here and already set the lock, which is
-        // exactly the idempotency case we want to handle gracefully.
-        let _ = TRACING_INIT.set(());
+    match result {
+        Ok(guard) => {
+            // Our subscriber was installed.  Mark as initialized so subsequent
+            // calls short-circuit above.
+            let _ = TRACING_INIT.set(());
+            Ok(guard)
+        },
+        Err(ref e) if e.contains("already been set") || e.contains("already initialized") => {
+            // A global dispatcher was already installed by another component
+            // (e.g., a test framework subscriber, another call on a racing
+            // thread).  Tracing infrastructure IS operational — we just did
+            // not install our own subscriber on top of an existing one.
+            // Treat this as success: mark initialized, return a no-op guard.
+            // This prevents `init_tracing` from competing with `#[traced_test]`
+            // in test environments and from returning `Err` when another
+            // subscriber is legitimately present.
+            let _ = TRACING_INIT.set(());
+            Ok(TracingGuard::noop())
+        },
+        Err(e) => Err(e),
     }
-
-    result
 }
 
 /// Inner initialization logic — separated from the `OnceLock` guard so that
