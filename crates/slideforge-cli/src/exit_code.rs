@@ -42,7 +42,7 @@ pub const EXIT_EXPORT_ERROR: u8 = 3;
 /// layer additionally differentiates E-PAR vs E-EXP at the `BuildError`
 /// variant level (both map to `Fatal` in `ParseSeverity`, but exit code 1
 /// vs 3 respectively).  For the full three-tier mapping see
-/// [`exit_code_for_build_error`] in `commands/build.rs`.
+/// `commands::build::exit_code_for_build_error`.
 ///
 /// | Severity | Exit code |
 /// |----------|-----------|
@@ -63,6 +63,7 @@ pub fn exit_code_for_severity(sev: Option<ParseSeverity>) -> ExitCode {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(non_snake_case)]
 mod tests {
     use std::process::ExitCode;
 
@@ -84,10 +85,7 @@ mod tests {
             ExitCode::SUCCESS,
             "BC-1.15.003: empty diagnostic sink must produce exit 0"
         );
-        assert_eq!(
-            EXIT_SUCCESS, 0,
-            "EXIT_SUCCESS constant must be 0"
-        );
+        assert_eq!(EXIT_SUCCESS, 0, "EXIT_SUCCESS constant must be 0");
     }
 
     /// BC-1.15.003 postcondition 5: warnings-only → exit 0.
@@ -122,16 +120,13 @@ mod tests {
             ExitCode::from(EXIT_PARSE_ERROR),
             "BC-1.15.003: Fatal severity (parse) must produce exit 1"
         );
-        assert_eq!(
-            EXIT_PARSE_ERROR, 1,
-            "EXIT_PARSE_ERROR constant must be 1"
-        );
+        assert_eq!(EXIT_PARSE_ERROR, 1, "EXIT_PARSE_ERROR constant must be 1");
     }
 
     /// BC-1.15.003 postcondition 4: export errors are distinct from parse errors.
     ///
-    /// The EXIT_EXPORT_ERROR constant must be 3, distinct from EXIT_PARSE_ERROR (1)
-    /// and EXIT_VALIDATION_ERROR (2). This is a constant invariant test.
+    /// The `EXIT_EXPORT_ERROR` constant must be 3, distinct from `EXIT_PARSE_ERROR` (1)
+    /// and `EXIT_VALIDATION_ERROR` (2). This is a constant invariant test.
     #[test]
     fn test_BC_1_15_003_invariant_export_exit_code_is_three() {
         assert_eq!(
@@ -148,8 +143,8 @@ mod tests {
         );
     }
 
-    /// BC-1.15.003 invariant: exit_code_for_build_error (in build.rs) correctly
-    /// maps BuildError variants to exit codes.
+    /// BC-1.15.003 invariant: `exit_code_for_build_error` (in build.rs) correctly
+    /// maps `BuildError` variants to exit codes.
     ///
     /// This test exercises the build.rs stub — it panics (todo!()), which is the
     /// Red Gate failure.

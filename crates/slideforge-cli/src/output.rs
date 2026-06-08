@@ -87,8 +87,7 @@ impl OutputWriter {
         let final_path = self.final_path();
 
         // Write to the tmp file.  On any error, attempt cleanup and propagate.
-        let write_result = std::fs::File::create(&tmp)
-            .and_then(|mut f| f.write_all(bytes));
+        let write_result = std::fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes));
 
         if let Err(e) = write_result {
             // Best-effort removal of the partial tmp file.

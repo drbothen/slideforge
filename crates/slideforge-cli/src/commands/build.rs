@@ -21,7 +21,7 @@
 //!
 //! # Traceability
 //!
-//! - BC-1.15.001: all errors carry file:line:col span and correction hint
+//! - BC-1.15.001: all errors carry `file:line:col` span and correction hint
 //! - BC-1.15.002: all errors accumulated in single pass (no fail-on-first)
 //! - BC-1.15.003: three-tier exit code model
 //! - AC-001 through AC-015
@@ -30,7 +30,7 @@ use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
 use slideforge::error::BuildError;
-use slideforge::{BrandSource, BuildOptions, SourceMap};
+use slideforge::{BrandSource, BuildOptions};
 
 use crate::cli::{BuildArgs, GlobalFlags, OutputFormat};
 use crate::exit_code::{EXIT_EXPORT_ERROR, EXIT_PARSE_ERROR, EXIT_VALIDATION_ERROR};
@@ -65,10 +65,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 
     // EC-002: validate that the source file exists before reading.
     if !args.source.exists() {
-        let msg = format!(
-            "Error: source file not found: {}",
-            args.source.display()
-        );
+        let msg = format!("Error: source file not found: {}", args.source.display());
         render_plain_error(&msg);
         return ExitCode::from(EXIT_PARSE_ERROR);
     }
@@ -83,20 +80,23 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
             );
             render_plain_error(&msg);
             return ExitCode::from(EXIT_PARSE_ERROR);
-        }
+        },
     };
 
     // EC-006: variant validation.
     // The root `slideforge::build()` API does not yet support variant selection.
     // When `--variant` is specified, validate that the variant is declared in
     // the source.  This is a CLI-layer check (E-VAR-004).
-    if let Some(ref variant_name) = args.variant {
+    // clippy::collapsible_if: the outer guard is `Some` and the inner guard is
+    // the variant existence check — they cannot be collapsed without losing the
+    // binding of `variant_name`.
+    #[allow(clippy::collapsible_if)]
+    if let Some(variant_name) = args.variant.as_deref() {
         if !source_declares_variant(&source_text, variant_name) {
-            let msg = format!(
+            render_plain_error(&format!(
                 "Error: undefined variant '{variant_name}' (E-VAR-004); \
                  use `variant:` in your .sf source to declare it"
-            );
-            render_plain_error(&msg);
+            ));
             return ExitCode::from(EXIT_VALIDATION_ERROR);
         }
     }
@@ -107,7 +107,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
         Err(msg) => {
             render_plain_error(&msg);
             return ExitCode::from(EXIT_PARSE_ERROR);
-        }
+        },
     };
 
     // Determine strict mode: warn_only demotes validation errors to warnings.
@@ -117,8 +117,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     let stem = args
         .source
         .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "output".to_owned());
+        .map_or_else(|| "output".to_owned(), |s| s.to_string_lossy().into_owned());
 
     // Run the pipeline for each selected format.
     // Parse errors are fatal and stop processing immediately.
@@ -131,9 +130,9 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
         let format_str = format_to_str(*format);
         let options = BuildOptions {
             format: Some(format_str.to_owned()),
-            brand_source: Some(BrandSource::TomlFile(
-                std::sync::Arc::from(brand_toml_path.as_str()),
-            )),
+            brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
+                brand_toml_path.as_str(),
+            ))),
             strict,
         };
 
@@ -142,7 +141,10 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
                 // Write output atomically.
                 let writer = OutputWriter::new(&args.output_dir, &stem, &output.extension);
                 if let Err(e) = writer.write_atomic(&output.bytes) {
-                    let msg = format!("Error writing output file {}: {e}", writer.final_path().display());
+                    let msg = format!(
+                        "Error writing output file {}: {e}",
+                        writer.final_path().display()
+                    );
                     render_plain_error(&msg);
                     let code = EXIT_EXPORT_ERROR;
                     if code > worst_exit_code {
@@ -150,14 +152,11 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
                     }
                 } else {
                     if !global.quiet {
-                        eprintln!(
-                            "  written: {}",
-                            writer.final_path().display()
-                        );
+                        eprintln!("  written: {}", writer.final_path().display());
                     }
                     any_success = true;
                 }
-            }
+            },
             Err(err) => {
                 // Render the error diagnostics.
                 render_build_error(&err, use_color, global);
@@ -173,7 +172,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
                 if code_u8 > worst_exit_code {
                     worst_exit_code = code_u8;
                 }
-            }
+            },
         }
     }
 
@@ -209,11 +208,12 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 #[must_use]
 pub fn exit_code_for_build_error(err: &BuildError) -> ExitCode {
     match err {
-        BuildError::ParseFailed { .. } => ExitCode::from(EXIT_PARSE_ERROR),
-        BuildError::EvalFailed { .. } => ExitCode::from(EXIT_VALIDATION_ERROR),
-        BuildError::ValidationFailed { .. } => ExitCode::from(EXIT_VALIDATION_ERROR),
+        // EvalFailed and ValidationFailed both map to exit 2 (validation error tier).
+        BuildError::EvalFailed { .. } | BuildError::ValidationFailed { .. } => {
+            ExitCode::from(EXIT_VALIDATION_ERROR)
+        },
         BuildError::Export(_) => ExitCode::from(EXIT_EXPORT_ERROR),
-        // Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
+        // ParseFailed, Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
         // UnknownFormat — all treated as fatal parse-category errors (exit 1).
         _ => ExitCode::from(EXIT_PARSE_ERROR),
     }
@@ -321,23 +321,20 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
                 let _ = std::io::Write::write_all(&mut stderr, rendered.as_bytes());
                 let _ = std::io::Write::write_all(&mut stderr, b"\n");
             }
-        }
+        },
         BuildError::ValidationFailed { diagnostics, .. } => {
             // ValidationFailed holds plugin-api Diagnostics (not boxed).
             // Render them as plain text with hint.
             for diag in diagnostics {
-                eprintln!(
-                    "[{}] {}: {}",
-                    diag.severity, diag.code, diag.message
-                );
+                eprintln!("[{}] {}: {}", diag.severity, diag.code, diag.message);
                 if let Some(ref hint) = diag.hint {
                     eprintln!("  hint: {hint}");
                 }
             }
-        }
+        },
         other => {
             eprintln!("Error: {other}");
-        }
+        },
     }
 }
 
@@ -365,7 +362,10 @@ fn render_build_error_json(err: &BuildError) {
         "exit_code": exit_code,
     });
     // Use eprintln! — JSON output goes to stderr.
-    eprintln!("{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string()));
+    eprintln!(
+        "{}",
+        serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+    );
 }
 
 /// Print a plain error message to stderr.
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(eval_code, ExitCode::from(2), "EvalFailed must → exit 2");
     }
 
-    /// BC-1.15.003 postcondition 5: run_build on nonexistent source exits 1 (not 0).
+    /// BC-1.15.003 postcondition 5: `run_build` on nonexistent source exits 1 (not 0).
     #[test]
     #[allow(non_snake_case)]
     fn test_BC_1_15_003_run_build_nonexistent_source_exits_1_not_0() {

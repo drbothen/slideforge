@@ -29,6 +29,7 @@
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::pedantic)]
+#![allow(non_snake_case)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -125,8 +126,8 @@ fn write_multi_error_sf(path: &std::path::Path) {
     // Two tab characters on lines 2 and 3, and an undefined var on line 5.
     let content = concat!(
         "slideforge_version \"1\"\n",
-        "\tlang \"en-US\"\n",      // E-PAR-003 at line 2 col 1
-        "\tslide title:\n",         // E-PAR-003 at line 3 col 1
+        "\tlang \"en-US\"\n", // E-PAR-003 at line 2 col 1
+        "\tslide title:\n",   // E-PAR-003 at line 3 col 1
         "slide title:\n",
         "  title {{ undef_var }}\n", // E-EVL-001 at line 5
     );
@@ -141,8 +142,8 @@ fn write_ordered_error_sf(path: &std::path::Path) {
     // Error at line 2 (tab) and line 3 (tab) — output must be line 2 first.
     let content = concat!(
         "slideforge_version \"1\"\n",
-        "\tlang \"en-US\"\n",       // E-PAR-003 at line 2
-        "\tslide title:\n",          // E-PAR-003 at line 3
+        "\tlang \"en-US\"\n", // E-PAR-003 at line 2
+        "\tslide title:\n",   // E-PAR-003 at line 3
     );
     std::fs::write(path, content).expect("write ordered-error .sf fixture");
 }
@@ -260,7 +261,11 @@ fn test_BC_1_15_003_build_parse_error_exits_1_no_output_files() {
         "AC-002: no .pptx must be written when parse error occurs"
     );
     assert!(
-        !out_dir.exists() || out_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true),
+        !out_dir.exists()
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
         "AC-002: dist/ must be empty (no output on parse error)"
     );
 }
@@ -300,7 +305,11 @@ fn test_BC_1_15_003_build_eval_error_strict_exits_2_no_output() {
         "AC-003 / BC-1.15.003: eval error (strict) must produce exit 2"
     );
     assert!(
-        !out_dir.exists() || out_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true),
+        !out_dir.exists()
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
         "AC-003: no output files must be written on eval error in strict mode"
     );
 }
@@ -523,7 +532,11 @@ fn test_BC_1_15_003_format_selection_pptx_only_writes_only_pptx() {
     // run_build is todo!() → panics → Red Gate FAIL.
     let code = run_build(&args, &global);
 
-    assert_eq!(code, ExitCode::SUCCESS, "AC-010: pptx-only build must exit 0");
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "AC-010: pptx-only build must exit 0"
+    );
     assert!(
         out_dir.join("deck.pptx").exists(),
         "AC-010: dist/deck.pptx must exist with --format pptx"
@@ -725,7 +738,10 @@ fn test_BC_1_15_003_ec_002_missing_source_file_exits_1() {
     );
     assert!(
         !out_dir.exists()
-            || out_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true),
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
         "EC-002: no output files must be written when source file does not exist"
     );
 }
@@ -765,7 +781,10 @@ fn test_BC_1_15_003_ec_004_warn_only_does_not_demote_parse_errors() {
     );
     assert!(
         !out_dir.exists()
-            || out_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true),
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
         "EC-004: no output files must be written when parse error occurs, even with --warn-only"
     );
 }
@@ -802,7 +821,10 @@ fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
     );
     assert!(
         !out_dir.exists()
-            || out_dir.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true),
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
         "EC-006: no output files when --variant references undefined variant"
     );
 }
@@ -959,8 +981,8 @@ fn test_BC_1_15_002_invariant_error_count_matches_actual_independent_errors() {
     // Exactly 2 independent tab errors.
     let content = concat!(
         "slideforge_version \"1\"\n",
-        "\tlang \"en-US\"\n",   // E-PAR-003 at line 2
-        "\tslide title:\n",      // E-PAR-003 at line 3
+        "\tlang \"en-US\"\n", // E-PAR-003 at line 2
+        "\tslide title:\n",   // E-PAR-003 at line 3
     );
     std::fs::write(&src_path, content).expect("write two-tab-error fixture");
 

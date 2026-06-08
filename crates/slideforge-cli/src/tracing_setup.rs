@@ -11,7 +11,7 @@
 //! CLI verbosity level (`-v`, `-vv`) sets a fallback filter level when
 //! `RUST_LOG` is absent.
 //!
-//! # OTel behavior (`otel` feature enabled)
+//! # `OTel` behavior (`otel` feature enabled)
 //!
 //! When `--otel-endpoint <url>` is provided and the binary was compiled with
 //! the `otel` feature, an additional `tracing-opentelemetry` layer is
@@ -38,7 +38,7 @@
 //!
 //! - NFR-032: `tracing` instrumentation throughout the pipeline
 //! - AC-011: six pipeline stage spans emitted per build
-//! - AC-015: OTel export via `--otel-endpoint` + `otel` feature gate
+//! - AC-015: `OTel` export via `--otel-endpoint` + `otel` feature gate
 
 use std::sync::OnceLock;
 
@@ -92,8 +92,6 @@ pub fn init_tracing(global: &GlobalFlags) -> Result<(), String> {
 /// paths.
 fn init_tracing_inner(global: &GlobalFlags) -> Result<(), String> {
     use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::layer::SubscriberExt as _;
-    use tracing_subscriber::util::SubscriberInitExt as _;
 
     // Build the `EnvFilter`.  `RUST_LOG` takes precedence; if absent, the CLI
     // verbosity level sets the fallback.
@@ -103,8 +101,8 @@ fn init_tracing_inner(global: &GlobalFlags) -> Result<(), String> {
         2 => "debug",
         _ => "trace",
     };
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     #[cfg(feature = "otel")]
     if let Some(ref endpoint) = global.otel_endpoint {
@@ -115,7 +113,7 @@ fn init_tracing_inner(global: &GlobalFlags) -> Result<(), String> {
     init_tracing_fmt(global, env_filter)
 }
 
-/// Initialize a plain `tracing_subscriber::fmt` subscriber (no OTel).
+/// Initialize a plain `tracing_subscriber::fmt` subscriber (no `OTel`).
 ///
 /// The `--json` flag controls *diagnostic* rendering (via `DiagnosticRenderer`),
 /// not the tracing subscriber format.  The tracing subscriber always uses the
@@ -148,6 +146,12 @@ fn init_tracing_with_otel(
     env_filter: tracing_subscriber::EnvFilter,
     endpoint: &str,
 ) -> Result<(), String> {
+    // Required trait imports for method resolution with the `OTel` 0.32 builder API.
+    // `WithExportConfig` provides `with_endpoint`; `TracerProvider` provides `tracer`.
+    // These are NOT deprecated — use of `new_pipeline()` / `set_text_map_propagator()`
+    // IS deprecated and must NOT be used (AC-015).
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_otlp::WithExportConfig as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
 
@@ -155,7 +159,7 @@ fn init_tracing_with_otel(
         .with_tonic()
         .with_endpoint(endpoint)
         .build()
-        .map_err(|e| format!("OTel OTLP exporter init failed: {e}"))?;
+        .map_err(|e| format!("`OTel` OTLP exporter init failed: {e}"))?;
 
     let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_batch_exporter(exporter)

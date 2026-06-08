@@ -13,9 +13,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
-use crate::commands::{
-    extract_brand::ExtractBrandArgs, init::InitArgs, watch::WatchArgs,
-};
+use crate::commands::{extract_brand::ExtractBrandArgs, init::InitArgs, watch::WatchArgs};
 
 // ── Cli ──────────────────────────────────────────────────────────────────────
 
@@ -31,7 +29,11 @@ use crate::commands::{
 /// slideforge --json build deck.sf
 /// ```
 #[derive(Debug, Parser)]
-#[command(name = "slideforge", version, about = "Compile .sf files into branded presentations")]
+#[command(
+    name = "slideforge",
+    version,
+    about = "Compile .sf files into branded presentations"
+)]
 pub struct Cli {
     /// Global flags shared across all subcommands.
     #[command(flatten)]
@@ -48,6 +50,9 @@ pub struct Cli {
 ///
 /// These flags must be provided before the subcommand name on the command line,
 /// or after it when the flag is declared `global = true` in clap.
+// The struct holds 5 boolean flags because the CLI spec (STORY-055) defines
+// exactly these global flags.  Using a bitfield or enum would break clap derive.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Args, Clone)]
 pub struct GlobalFlags {
     /// Emit diagnostics as JSON on stderr instead of human-readable text.
@@ -147,13 +152,13 @@ pub struct BuildArgs {
 /// Output format selection for the `--format` flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
 pub enum OutputFormat {
-    /// Microsoft PowerPoint `.pptx`.
+    /// Microsoft `PowerPoint` `.pptx` format.
     Pptx,
-    /// Microsoft Word `.docx`.
+    /// Microsoft Word `.docx` format.
     Docx,
     /// Portable Document Format `.pdf`.
     Pdf,
-    /// HyperText Markup Language `.html`.
+    /// `HyperText` Markup Language `.html` format.
     Html,
 }
 
