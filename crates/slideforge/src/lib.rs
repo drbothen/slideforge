@@ -2469,6 +2469,7 @@ mod tests {
                 heading: Arc::from("Arial"),
                 body: Arc::from("Arial"),
                 mono: Arc::from("Courier"),
+                font_size_emu: 457_200,
             },
             layouts: vec![],
             span: SourceSpan::default(),

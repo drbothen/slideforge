@@ -1736,6 +1736,7 @@ mod tests {
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
                 body: Arc::from("Calibri"),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: None,
@@ -1841,6 +1842,7 @@ mod tests {
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
                 body: Arc::from("Calibri"),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: None,
@@ -1936,6 +1938,7 @@ mod tests {
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
                 body: Arc::from("Calibri"),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: None,
@@ -2069,6 +2072,7 @@ mod tests {
             fonts: BrandFonts {
                 heading: Arc::from("Calibri Light"),
                 body: Arc::from("Calibri"),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: None,
@@ -2154,6 +2158,7 @@ mod tests {
             fonts: BrandFonts {
                 heading: Arc::from(heading_with_special),
                 body: Arc::from(body_with_special),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: Some(Arc::from(footer_with_special)),

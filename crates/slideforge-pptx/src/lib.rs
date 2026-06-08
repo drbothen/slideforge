@@ -424,6 +424,7 @@ mod layout_index_tests {
             fonts: BrandFonts {
                 heading: Arc::from("Calibri"),
                 body: Arc::from("Calibri"),
+                font_size_emu: 457_200,
             },
             logo: None,
             footer_text: None,

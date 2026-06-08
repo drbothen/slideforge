@@ -305,6 +305,7 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
             heading: Arc::from("NoSuchFont_AC009"),
             body: Arc::from("NoSuchFont_AC009"),
             mono: Arc::from("Courier"),
+            font_size_emu: 457_200,
         },
         layouts: vec![],
         span: SourceSpan::default(),
