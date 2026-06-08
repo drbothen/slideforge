@@ -1,8 +1,8 @@
 ---
-current_wave: 4
+current_wave: 5
 current_phase: 3
 pipeline_status: IN_PROGRESS
-last_updated: 2026-05-31
+last_updated: 2026-06-08
 wave_1_gate: PASS
 wave_1_gate_date: 2026-05-27
 wave_1_gate_passes: 3
@@ -59,9 +59,48 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "030dec6c"
-develop_pr_count: 61
-last_updated: 2026-06-06
+develop_sha: "3e3a978f"
+develop_pr_count: 69
+last_updated: 2026-06-08
+wave_4_gate: PASS
+wave_4_gate_date: 2026-06-07
+wave_4_stories_merged: 23
+wave_4_followups_closed: 6
+wave_5_started: 2026-06-07
+wave_5_total_stories: 21
+wave_5_total_points: 114
+wave_5_stories_merged: 1
+wave_5_stories_merged_list: [STORY-089]
+wave_5_dep_prep_pr: 69
+wave_5_dep_prep_commit: "3e3a978f"
+wave_5_dep_prep_merged: 2026-06-08
+wave_5_dep_prep_scope: "workspace.dependencies centralized + ADR-022: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14 + INERT Wave-5 catalog"
+wave_5_uncertainty_pass: COMPLETE
+wave_5_uncertainty_pass_date: 2026-06-08
+wave_5_uncertainty_pass_commits: ["7df72268", "277fc481", "b353613a"]
+wave_5_fan_out_authorized: 2026-06-07
+wave_5_max_parallel: 8
+wave_5_dependency_levels:
+  L0_ready_now:
+    stories: [STORY-046, STORY-055, STORY-082, STORY-088, STORY-072, STORY-074, STORY-079, STORY-080]
+    count: 8
+    points: 41
+    note: "No intra-wave deps. Start NOW."
+  L1_unlock_after_046_and_055:
+    stories: [STORY-047, STORY-057, STORY-058, STORY-060, STORY-064, STORY-081]
+    count: 6
+    deps: {STORY-047: [STORY-046], STORY-057: [STORY-055], STORY-058: [STORY-055], STORY-060: [STORY-055], STORY-064: [STORY-055], STORY-081: [STORY-046]}
+  L2:
+    stories: [STORY-048, STORY-056, STORY-061, STORY-062, STORY-063, STORY-065]
+    count: 6
+    deps: {STORY-048: [STORY-047], STORY-056: [STORY-047, STORY-055], STORY-061: [STORY-060], STORY-062: [STORY-060], STORY-063: [STORY-060], STORY-065: [STORY-064]}
+  L3:
+    stories: [STORY-059]
+    count: 1
+    deps: {STORY-059: [STORY-056]}
+wave_5_critical_path: "046→047→056→059 (4 deep)"
+wave_5_unlock_keys: "STORY-055 (gates 5 downstream), STORY-046 (gates 4 downstream)"
+wave_5_open_followup: "FU-SEC-001-GIT2-OPENSSL (MEDIUM) — resolve before STORY-060/061"
 ---
 
 stories:
@@ -416,11 +455,11 @@ stories:
     security_review: "CLEAN (2 LOW only — SEC-040-001 URL safety verified via test; SEC-040-002 deferred)"
     notes: "PPTX Speaker Notes + notesMaster1.xml + handoutMaster1.xml (BC-4.01.003 Half A, BC-4.01.006). Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (human-authorized 2026-06-04). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. Missing slide→notesSlide rel fixed; NotesMasterSerializer dead-code issue resolved; lossy+insecure notes links fixed; schema-invalid grpSpPr fixed. Batch B pptx chain 037→038→039→040 COMPLETE."
   STORY-082:
-    status: draft
+    status: ready
     wave: 5
     priority: P0
     points: 5
-    notes: "PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter. BC-4.01.003 Half B + BC-1.14.003. Split from STORY-040 (human-authorized 2026-06-04). EPIC-08."
+    notes: "PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter. BC-4.01.003 Half B + BC-1.14.003. Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. Spec reconciled 2026-06-07 (BC-4.01.003 v1.3, export-arch v1.1, taxonomy v2.24). L0 — no intra-wave deps."
   STORY-041:
     status: merged
     wave: 4

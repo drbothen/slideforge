@@ -1,6 +1,6 @@
 ---
 purpose: Durable task list — zero-context session resume source
-updated: 2026-06-07
+updated: 2026-06-08
 ---
 
 # Slideforge Factory — Durable Backlog
@@ -16,7 +16,7 @@ milestone (merge, gate pass, follow-up resolution).
 2. Verify `git rev-parse develop` == `git rev-parse origin/develop`. Canonical SHA in STATE.md frontmatter (`develop_sha`).
 3. Read `.factory/STATE.md` — current phase, position, standing rules, open blockers.
 4. Read this BACKLOG.md — create one in-session Task per OPEN item in the Active Work table below.
-5. Confirm workspace tests green: `cargo nextest run --workspace --no-fail-fast` (expect 3393+ pass, 0 fail, 18 skip).
+5. Confirm workspace tests green: `cargo nextest run --workspace --no-fail-fast` (expect 3497 pass, 0 fail, 18 skip).
 6. Await human go-ahead before picking the next story — do NOT auto-start delivery.
 
 ---
@@ -26,7 +26,8 @@ milestone (merge, gate pass, follow-up resolution).
 | id | item | status | priority | source / anchor |
 |----|------|--------|----------|----------------|
 | WAVE5-UNCERTAINTY-PASS | Wave-5 remove-uncertainty pass COMPLETE (Stages 1-2 done; NFR-002 sweep done). Stage 1 (2026-06-07): ADR-021/022 authored, NFR-002 deferred (nfr-catalog v1.3, prd v1.1, BC-3.06.002 v1.3), export-arch v1.2, dep-graph v1.1. Stage 2 (2026-06-07): 17 stories realigned to registry-verified pins; NFR-002 <50ms incremental gate deferred to v1.x in system-overview.md, cicd-setup.md, ux-spec (FLOW-003/SCR-002/SCR-008/UX-INDEX), epics.md, wave-schedule.md. STORY-082 spec reconciled separately (prior commit 7df72268). Wave-5 delivery may now begin. | complete | P0 | vsdd-factory:remove-uncertainty output; WAVE5-UNCERTAINTY-S2 decisions log |
-| WAVE5-DELIVERY | Deliver 21 remaining Wave-5 stories (per sprint-state.yaml + dependency-graph.md). Order: STORY-082 (EPIC-08, P0), STORY-081 (EPIC-18, P0), STORY-088 (EPIC-02, P1) first (P0/P1 independents); then chains: EPIC-14: 046→047→048; EPIC-15: 055→056→057/058/059 (056 also needs 047); EPIC-16: 060→061+062+063; EPIC-17: 064→065; P2 independents: STORY-072, STORY-074, STORY-079, STORY-080. STORY-089 is the 1 merged story (PR #68, c722c28b). | in_progress — 1 of 22 done (STORY-089) | P0 | STORY-INDEX.md, sprint-state.yaml, dependency-graph.md, wave-schedule.md |
+| WAVE5-DEP-PREP | Wave-5 dependency prep PR #69 (3e3a978f). [workspace.dependencies] centralized + ADR-022 major-version migrations (toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14) + INERT Wave-5 catalog entries. ADR-022 migration tasks DONE. | complete | P0 | PR #69, develop 3e3a978f |
+| WAVE5-DELIVERY | Deliver 21 remaining Wave-5 stories. Full-width fan-out (up to 8 parallel) AUTHORIZED 2026-06-07. STORY-089 MERGED PR #68 (c722c28b). Dep-prep MERGED PR #69 (3e3a978f). **Dependency levels (topological):** **L0 — ready NOW (8 stories, 41 pts, no intra-wave deps):** STORY-046 (EPIC-14/E14, P0, 8pt), STORY-055 (EPIC-15/E15, P0, 8pt), STORY-082 (EPIC-08/E08, P0, 5pt), STORY-088 (EPIC-02/E02, P1, 8pt), STORY-072 (EPIC-07/E07, P2, 3pt), STORY-074 (EPIC-07/E07, P2, 3pt), STORY-079 (EPIC-12/E12, P2, 3pt), STORY-080 (EPIC-19/E19, P2, 3pt). **L1 — unlock after 046 AND 055 merge (6 stories):** STORY-047 (P1,8pt)←046; STORY-057 (P0,5pt)←055; STORY-058 (P0,5pt)←055; STORY-060 (P1,8pt)←055; STORY-064 (P1,5pt)←055; STORY-081 (P0,13pt)←046. **L2 (6 stories):** STORY-048 (P1,8pt)←047; STORY-056 (P0,8pt)←047+055; STORY-061 (P1,5pt)←060; STORY-062 (P1,3pt)←060; STORY-063 (P1,3pt)←060; STORY-065 (P1,5pt)←064. **L3 (1 story):** STORY-059 (P0,5pt)←056. **Critical path (4 deep):** 046→047→056→059. **Unlock keys:** STORY-055 (gates 5 L1 stories), STORY-046 (gates 4 L1 stories). **Max parallel width:** 8 (L0). **CAUTION:** resolve FU-SEC-001-GIT2-OPENSSL BEFORE launching STORY-060/061. | in_progress — 1 of 22 done (STORY-089); dep-prep done | P0 | STORY-INDEX.md, sprint-state.yaml, dependency-graph.md, wave-schedule.md |
 
 ---
 
@@ -34,6 +35,7 @@ milestone (merge, gate pass, follow-up resolution).
 
 | id | item | status | severity | anchor |
 |----|------|--------|----------|--------|
+| FU-SEC-001-GIT2-OPENSSL | Inert `git2 = {features=["https"]}` catalog entry in [workspace.dependencies] will pull `openssl-sys` (banned by deny.toml) when first consumed. Inert now (git2 absent from Cargo.lock). MUST resolve before STORY-060/061: either drop `https` feature and route package HTTPS via reqwest+rustls (already in catalog), OR add `vendored-openssl` + a scoped deny.toml exception. Architecture decision for package-manager story. | pending | MEDIUM | Anchored to STORY-060; discovered during PR #69 review (pr-reviewer NIT escalated). |
 | FU-SEC-001-HARDENING | ImagePathValidator residual string-layer bypass vectors (percent-encoding, whitespace, unicode dots) + OS path canonicalization as primary defense. | pending | low (defense-in-depth) | Anchored to future image-loading story; SEC-001-HARDENING label in STATE.md. |
 | FU-SEC-001-DIAG-HARDENING | Unbounded user-authored strings embedded verbatim in diagnostic messages (E-VAL-104 T2 + W-VAL-103 pattern); truncate to ~512 chars to bound memory amplification. | pending | low | Anchored to future validator/diagnostic-hardening story. |
 | FU-STORY003-CLEANUP | Stale todo!() doc-comments in STORY-003-era #[cfg(test)] modules (e.g. registry.rs ~449-1001) assert validate_fields/suggest are todo!() — now false since STORY-089; sweep STORY-003-era test modules. | pending | low (OBS, out of STORY-089 scope) | Maintenance sweep or quick docs PR; not a story blocker. |
@@ -51,6 +53,8 @@ milestone (merge, gate pass, follow-up resolution).
 
 ## Recently Completed (audit trail)
 
+- **Wave-5 dep-prep PR #69** (3e3a978f, 2026-06-08) — [workspace.dependencies] centralized + ADR-022 migrations done (toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14) + INERT Wave-5 catalog entries. Security CLEAN; CI green. ADR-022 migration tasks DONE. FU-SEC-001-GIT2-OPENSSL identified (MEDIUM, anchored STORY-060).
+- **Wave-5 uncertainty pass COMPLETE** (2026-06-08) — all 21 stories spec-accurate. 3 factory-artifacts commits: 7df72268+277fc481+b353613a. ADR-021/022 authored; NFR-002 deferred; dep-graph v1.1; 17 stories realigned. Full-width fan-out authorized.
 - **STORY-082 spec reconciliation** (2026-06-07) — BC-4.01.003 v1.3 (EC-010/EC-011, PC 7/8, Inv 5); error-taxonomy v2.24 (E-PAR-023/W-PAR-002); export-architecture v1.1 (p14 ext sectionLst, raw quick-xml injection, sha2+quick-xml prod deps); STORY-082 body realigned (AC-010/AC-011). STORY-082 now ready for delivery.
 - **Wave-4 follow-up PR #65** (0d0113a2) — SEC-002 CLOSED: split a11y arm, AltText::Unspecified → tracing::warn!.
 - **Wave-4 follow-up PR #66** (23f09c62) — SEC-001 (E-VAL-012, error-taxonomy v2.19, BC-1.16.001 EC-012) + diag-span CLOSED. +15 tests.
