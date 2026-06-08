@@ -50,6 +50,7 @@ milestone (merge, gate pass, follow-up resolution).
 
 ## Recently Completed (audit trail)
 
+- **STORY-082 spec reconciliation** (2026-06-07) — BC-4.01.003 v1.3 (EC-010/EC-011, PC 7/8, Inv 5); error-taxonomy v2.24 (E-PAR-023/W-PAR-002); export-architecture v1.1 (p14 ext sectionLst, raw quick-xml injection, sha2+quick-xml prod deps); STORY-082 body realigned (AC-010/AC-011). STORY-082 now ready for delivery.
 - **Wave-4 follow-up PR #65** (0d0113a2) — SEC-002 CLOSED: split a11y arm, AltText::Unspecified → tracing::warn!.
 - **Wave-4 follow-up PR #66** (23f09c62) — SEC-001 (E-VAL-012, error-taxonomy v2.19, BC-1.16.001 EC-012) + diag-span CLOSED. +15 tests.
 - **Wave-4 follow-up PR #67** (df207b84) — OBS-P6-001 (status slide RegionRole::Title frame) + OBS-P6-002 (canonical ColorBar percent:u8 in FrameContent) CLOSED. +5 tests.

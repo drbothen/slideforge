@@ -257,7 +257,7 @@ traces_to: domain-spec/L2-INDEX.md
 |-------|-------|----------|--------|------|
 | BC-4.01.001 | Serialize LaidOutDeck to valid .pptx with correct placeholder inheritance | P0 | active | [BC-4.01.001.md](BC-4.01.001.md) |
 | BC-4.01.002 | PPTX output passes multi-renderer fidelity: SSIM≥0.99 AND PSNR≥35dB vs reference | P0 | active | [BC-4.01.002.md](BC-4.01.002.md) |
-| BC-4.01.003 | PPTX Contains Speaker Notes and Master/Layout/Theme System; Slide Sections Deferred to Follow-Up Story | P0 | active | [BC-4.01.003.md](BC-4.01.003.md) |
+| BC-4.01.003 | PPTX Contains Speaker Notes and Master/Layout/Theme System; Slide Sections Deferred to Follow-Up Story | P0 | active | [BC-4.01.003.md](BC-4.01.003.md) | v1.3 (EC-010/EC-011, PC 7/8, Inv 5; STORY-082 spec recon 2026-06-07) |
 | BC-4.01.004 | PPTX contains accessibility metadata (alt text, lang, and WCAG contrast) | P0 | active | [BC-4.01.004.md](BC-4.01.004.md) |
 | BC-4.01.005 | Slide IDs start at 256; master IDs at 2^31; all 11 standard + 20 custom layouts present | P0 | active | [BC-4.01.005.md](BC-4.01.005.md) |
 | BC-4.01.006 | PPTX contains notesMaster1.xml and handoutMaster1.xml even if empty | P0 | active | [BC-4.01.006.md](BC-4.01.006.md) |

@@ -31,7 +31,7 @@ wave_4_merged: 23
 wave_5_status: "IN_PROGRESS — 21 stories remain / 114 pts. STORY-089 MERGED PR #68 (c722c28b)."
 develop_sha: "c722c28b"
 develop_pr_count: 68
-error_taxonomy_version: "v2.23"
+error_taxonomy_version: "v2.24"
 workspace_tests: "3393+/3393+ (develop c722c28b; + STORY-089 field-validation suite (~54 tests) + e2e; FieldSchemaValidator live at build; 18 skipped; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080)"
 workspace_test_failures: 0
 ---
@@ -51,7 +51,7 @@ workspace_test_failures: 0
 
 **Wave 5 — 21 stories / 114 pts remaining:**
 
-- **STORY-089 MERGED:** field-value type validation (BC-1.18.001 v1.5, ADR-020, error-taxonomy v2.23, E-VAL-104 T1/T2). FieldSchemaValidator wired live. Latent dead-letter bug closed. 3-CLEAN (~11-pass cascade). PR #68 c722c28b.
+- **STORY-089 MERGED:** field-value type validation (BC-1.18.001 v1.5, ADR-020, error-taxonomy v2.23→v2.24, E-VAL-104 T1/T2). FieldSchemaValidator wired live. Latent dead-letter bug closed. 3-CLEAN (~11-pass cascade). PR #68 c722c28b. STORY-082 spec reconciled (BC-4.01.003 v1.3, export-arch v1.1, taxonomy v2.24 — see STORY-082-SPEC-RECON).
 - **Next P0 stories:** STORY-082 (EPIC-14), STORY-081 (EPIC-15), STORY-088 (EPIC-17).
 - **Dependency chains:** EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; independents: 072/074/079/080/081/082/088.
 - **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story. Severity: SUGGESTION.
@@ -127,7 +127,7 @@ STORY-089 delivered: FieldType enum + type_matches() + E-VAL-104 (T1 type-mismat
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-07 |
-| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). FieldSchemaValidator live; error-taxonomy v2.23; BC-1.18.001 v1.5; ADR-020 Decision 8 closed. 21 stories/114 pts remain. |
+| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). FieldSchemaValidator live; error-taxonomy v2.24 (v2.23 at STORY-089; v2.24 at STORY-082 spec recon); BC-1.18.001 v1.5; ADR-020 Decision 8 closed. STORY-082 spec reconciled (BC-4.01.003 v1.3, export-arch v1.1). 21 stories/114 pts remain. |
 | **develop SHA** | `c722c28b` (68 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Active worktrees** | none |
 | **Workspace tests** | 3393+ + ~54 field-validation tests + e2e (18 skipped; known flaky: cold_budget STORY-080) |
@@ -176,6 +176,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-07 | STORY-082-SPEC-RECON | Spec-first reconciliation before STORY-082 implementation. BC-4.01.003 v1.3 (EC-010/EC-011, PC 7/8, Inv 5). error-taxonomy v2.24 (E-PAR-023 empty section name; W-PAR-002 duplicate name). export-architecture v1.1 (authoritative p14 ext sectionLst structure — bare p:sectionLst was wrong; ooxmlsdk can't emit p14 → raw quick-xml injection; sha2+quick-xml promoted to prod deps). STORY-082 body realigned (AC-010/AC-011 added). |
 | 2026-06-07 | STORY-089-MERGE | PR #68 merged → develop c722c28b. Field-value type validation: FieldType enum + type_matches() + E-VAL-104 (T1 type-mismatch, T2 OneOf violation); FieldSchemaValidator wired into Stage-5 (closes validate_fields dead-letter — latent bug; ADR-020 Decision 8); 8 Priority-1 annotations; chart.data optional; BC-1.18.001 v1.5; BC-1.17.002 v1.3 (ValueRangeValidator range-only); error-taxonomy v2.23 (E-VAL-104 formal + E-VAL-101/102/W-VAL-103). LOCAL 3-CLEAN converged (~11 passes — sibling-artifact propagation gaps drove cascade). Security CLEAN (2 LOW). pr-reviewer APPROVE. CI green. |
 | 2026-06-07 | WAVE-5-START | Human authorized Wave 5 start. (d) folded as STORY-089 (BC-1.18.001, ADR-020, E-VAL-104, error-taxonomy v2.20). Wave-4 follow-up fix-burst cycle CLOSED. factory-artifacts advanced: def8bb74 (PO BC/taxonomy) → 32fddb9a (ADR-020) → 9f01b8bf (STORY-089 + indexes). Wave 5 = 22 stories / 130 pts. STORY-089 delivery starting. |
 | 2026-06-07 | PR-C-MERGE | PR #67 merged → develop df207b84. OBS-P6-001 (status slide RegionRole::Title frame) + OBS-P6-002 (canonical ColorBar percent:u8 in FrameContent; DOCX reads directly — fixes double-floor off-by-one) CLOSED. Both confirmed real defects. +5 tests (3 status-title + 2 docx-percent). Security CLEAN, pr-reviewer APPROVE, CI green. Wave-4 follow-up fix-bursts 5/6 done; (d) feature story remains. |

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -25,6 +25,12 @@ modified:
     2026-06-04). Reaffirmed slide sections as v1.0 per q1-decision-final.md Section 7
     (overriding pptx-element-taxonomy.md v1.x suggestion; planning reconciliation
     recorded in planning/decisions-reconciliation.md)."
+  - "2026-06-07: v1.3 — STORY-082 spec reconciliation burst. Added EC-010 (empty section
+    group name → E-PAR-023 fatal) and EC-011 (duplicate section group names → W-PAR-002
+    warning, both emitted with same deterministic GUID) to the slide-sections edge-case
+    table. Added postcondition 7 (non-empty name validation) and invariant 5
+    (duplicate-name behavior: warning + deterministic identical GUID). Error codes
+    E-PAR-023 and W-PAR-002 allocated in error-taxonomy.md v2.24 in the same burst."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -129,6 +135,20 @@ Multi-renderer parity tests for this element are EXPLICITLY EXCLUDED.
    The element is present in `<p:presentation><p:ext>` (extension namespace). The
    element is silently absent when no slide-grouping sections are declared.
 
+**Postconditions 7-8 (owned by STORY-082 / slide-grouping follow-up):**
+
+7. A `section "":` construct (empty quoted name) is rejected at parse time with
+   `E-PAR-023` (`ParseError::EmptySectionGroupName`), exit 2. No `SectionGroupNode`
+   is produced for the rejected block. The error is accumulated; the parser continues
+   past the rejected block to find additional errors. (EC-010)
+
+8. Two or more `section "Name":` blocks sharing an identical quoted name are both
+   emitted to the IR without error. A non-fatal `W-PAR-002` warning
+   (`ParseWarning::DuplicateSectionGroupName`) is emitted for the second and subsequent
+   occurrences. Each section receives the same GUID value (derived deterministically
+   from the identical name via sha2 hash). The build exits 0 unless a separate fatal
+   error is also present. (EC-011)
+
 ## Invariants
 
 1. Speaker notes are NEVER placed in slide body content — they route exclusively to
@@ -140,6 +160,12 @@ Multi-renderer parity tests for this element are EXPLICITLY EXCLUDED.
    for the `<p:sectionLst>` structure (BC-1.14.003 non-interference). [STORY-08x]
 4. `<p:sectionLst>` is omitted entirely when no `section "Name":` groupings exist in
    the deck. [STORY-08x]
+5. Section group names MUST be non-empty. An empty-string quoted name (`""`) triggers
+   `E-PAR-023` at parse time; no `SectionGroupNode` is constructed for the offending
+   block. Duplicate names (two blocks sharing the same non-empty name) are permitted
+   with a `W-PAR-002` warning; the deterministic GUID derivation (sha2 hash of name)
+   guarantees identical names always produce identical GUIDs — this is intentional and
+   does not constitute a collision that must be rejected. [STORY-082]
 
 ## Edge Cases
 
@@ -158,6 +184,8 @@ Multi-renderer parity tests for this element are EXPLICITLY EXCLUDED.
 | EC-004 | Section name contains XML special characters (<, >, &) | Section name XML-escaped in `<p:sectionLst>` attribute |
 | EC-005 | Two sections containing a single slide each | Both sections present; each slide assigned to its section; no overlap |
 | EC-006 | `section "Name":` construct present but deck built for non-PPTX format | sectionLst logic skipped; DOCX/HTML/PDF unaffected (PPT-only element) |
+| EC-010 | Section name that is an empty string `""` — e.g. `section "":` | Fatal parse error E-PAR-023 (`ParseError::EmptySectionGroupName`); exit 2 (strict). Error accumulated; no `SectionGroupNode` produced; build halts after error reporting. Span on the opening `"` of the empty name. [STORY-082] |
+| EC-011 | Two `section "Name":` blocks with identical quoted names | Non-fatal parse warning W-PAR-002 (`ParseWarning::DuplicateSectionGroupName`) emitted for the second (and subsequent) occurrence(s); exit 0. Both sections are emitted to the IR and included in `LaidOutDeck.slide_sections`. Each receives the same deterministic GUID (sha2 hash of the name — identical names → identical GUIDs). No crash; no section is dropped. The `<name>` and `<file>:<line>:<col>` placeholders identify the duplicate occurrence. [STORY-082] |
 
 ## Canonical Test Vectors
 
