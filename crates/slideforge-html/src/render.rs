@@ -28,7 +28,7 @@
 //! as `href` attributes.
 
 use slideforge_layout::{Frame, FrameContent, LaidOutSlide};
-use slideforge_types::{AltText, Brand, InlineNode};
+use slideforge_types::{AltText, Brand, ContentBlock, InlineNode};
 
 use crate::exporter::is_safe_link_scheme;
 
@@ -119,6 +119,90 @@ fn render_inline_node(node: &InlineNode) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ContentBlock rendering (F-003)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Render a single [`ContentBlock`] to an HTML string.
+///
+/// Dispatches on the block variant:
+/// - `Text` → `<p>` element containing rendered inline nodes
+/// - `Bullets` → `<ul><li>` structure with nested sub-bullets
+/// - `Math` → `<code class="math">` (full MathML is STORY-045 scope)
+/// - `Chart` / `Diagram` / `Image` → these are handled via `FrameContent`
+///   variants before reaching `Body`; here we emit a placeholder note
+/// - `Table` → `<table>` (basic rendering)
+/// - `ColorBar` → placeholder text (full bar is via `FrameContent::ColorBar`)
+/// - `Shape` → placeholder (shapes are handled via `FrameContent::Shape`)
+///
+/// F-003: MUST NOT use `format!("{block:?}")` — all variants must render
+/// semantic HTML, never Rust debug output.
+#[must_use]
+pub fn render_content_block(block: &ContentBlock) -> String {
+    match block {
+        ContentBlock::Text(text_block) => {
+            // Render a text paragraph as <p> with inline nodes.
+            format!("<p>{}</p>", render_inline_nodes(&text_block.inlines))
+        },
+        ContentBlock::Bullets(items) => {
+            // Render a bullet list as <ul>.
+            let mut list = String::from("<ul>\n");
+            for item in items {
+                list.push_str(&render_bullet_item(item, 0));
+            }
+            list.push_str("</ul>");
+            list
+        },
+        ContentBlock::Math(math_node) => {
+            // Math block — render as code (full MathML is STORY-045 scope).
+            format!(
+                "<code class=\"math\">{}</code>",
+                html_escape::encode_text(&math_node.latex)
+            )
+        },
+        ContentBlock::Chart(_) | ContentBlock::Diagram(_) | ContentBlock::Image(_) => {
+            // These variants appear as FrameContent (not Body) after layout.
+            // If they somehow appear in a Body block, render as empty (no debug).
+            String::new()
+        },
+        ContentBlock::Table(_) => {
+            // Table rendering — placeholder (full table renderer is a future story).
+            // Emit a semantic <table> element (even if empty) rather than debug text.
+            String::from("<table></table>")
+        },
+        ContentBlock::ColorBar(spec) => {
+            // ColorBar in Body context — render accessible text label for the percent.
+            // The visual bar is handled via FrameContent::ColorBar at the slide level.
+            format!(
+                r#"<span role="progressbar" aria-valuenow="{pct}" aria-valuemin="0" aria-valuemax="100">{pct}%</span>"#,
+                pct = spec.percent
+            )
+        },
+        ContentBlock::Shape(_) => {
+            // Shape in Body context — shapes are handled via FrameContent::Shape.
+            String::new()
+        },
+    }
+}
+
+/// Render a single [`slideforge_types::BulletItem`] and its children to HTML.
+///
+/// Produces `<li>` elements with nested `<ul>` for sub-bullets.
+#[must_use]
+fn render_bullet_item(item: &slideforge_types::BulletItem, _depth: u32) -> String {
+    let content = render_inline_nodes(&item.inlines);
+    if item.children.is_empty() {
+        format!("<li>{content}</li>\n")
+    } else {
+        let mut nested = String::from("<ul>\n");
+        for child in &item.children {
+            nested.push_str(&render_bullet_item(child, _depth + 1));
+        }
+        nested.push_str("</ul>");
+        format!("<li>{content}\n{nested}</li>\n")
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -189,15 +273,15 @@ pub fn render_element_to_html(frame: &Frame) -> String {
             format!("<h2>{}</h2>", html_escape::encode_text(text))
         },
         FrameContent::Body(blocks) => {
-            use std::fmt::Write as _;
-            let mut items = String::new();
+            // F-003: render each ContentBlock variant properly via render_content_block.
+            // MUST NOT use format!("{block:?}") — Rust debug output is forbidden in
+            // production rendering.
+            let mut body_html = String::new();
             for block in blocks {
-                // Render each content block as a list item.
-                // ContentBlock is from slideforge-types; render text content.
-                let block_text = format!("{block:?}");
-                let _ = writeln!(items, "<li>{}</li>", html_escape::encode_text(&block_text));
+                body_html.push_str(&render_content_block(block));
+                body_html.push('\n');
             }
-            format!("<ul>\n{items}</ul>")
+            body_html
         },
         FrameContent::Image { alt } => render_image(alt),
         FrameContent::Chart { alt } => {
@@ -1114,6 +1198,85 @@ mod tests {
     }
 
         // ─────────────────────────────────────────────────────────────────────────
+    // F-003 — FrameContent::Body must render ContentBlock variants properly
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-003: Body frame with a Text block must render a <p> element containing
+    /// the text content — NOT the Rust Debug representation like
+    /// "Text(TextBlock { inlines: [...] })".
+    #[test]
+    fn test_F003_body_text_block_renders_as_p_not_debug() {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+        let frame = Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("Hello world"))],
+                tag: TextTag::Body,
+                span: SourceSpan::default(),
+            })]),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_element_to_html(&frame);
+        assert!(
+            !result.contains("TextBlock"),
+            "F-003: Body must NOT render debug output (TextBlock); got: {result}"
+        );
+        assert!(
+            !result.contains("inlines:"),
+            "F-003: Body must NOT render debug output (inlines:); got: {result}"
+        );
+        assert!(
+            result.contains("Hello world"),
+            "F-003: Body text must appear in rendered output; got: {result}"
+        );
+        assert!(
+            result.contains("<p>"),
+            "F-003: Body Text block must render as <p>; got: {result}"
+        );
+    }
+
+    /// F-003: Body frame with a Bullets block must render a <ul><li> structure.
+    #[test]
+    fn test_F003_body_bullets_block_renders_as_ul_li() {
+        use slideforge_types::{BulletItem, ContentBlock, InlineNode, SourceSpan};
+        let frame = Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Body(vec![ContentBlock::Bullets(vec![
+                BulletItem {
+                    inlines: vec![InlineNode::Plain(Arc::from("First item"))],
+                    children: vec![],
+                    span: SourceSpan::default(),
+                },
+                BulletItem {
+                    inlines: vec![InlineNode::Plain(Arc::from("Second item"))],
+                    children: vec![],
+                    span: SourceSpan::default(),
+                },
+            ])]),
+            text_flow: None,
+            region_role: None,
+        };
+        let result = render_element_to_html(&frame);
+        assert!(
+            !result.contains("BulletItem"),
+            "F-003: Bullets must NOT render debug output; got: {result}"
+        );
+        assert!(
+            result.contains("<ul>") || result.contains("<li>"),
+            "F-003: Bullets must render as <ul>/<li>; got: {result}"
+        );
+        assert!(
+            result.contains("First item"),
+            "F-003: Bullet item text must appear; got: {result}"
+        );
+        assert!(
+            result.contains("Second item"),
+            "F-003: Bullet item text must appear; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // F-005 — SVG sanitization: strip <script>, <foreignObject>, event handlers
     // ─────────────────────────────────────────────────────────────────────────
 
