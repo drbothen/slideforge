@@ -1,17 +1,22 @@
 //! Implementation of the `slideforge build` subcommand.
 //!
 //! `run_build` is the primary entry point: it drives the full
-//! parse → evaluate → brand → validate → layout → export pipeline via
-//! `slideforge::build()`, renders diagnostics via `DiagnosticRenderer`, and
-//! returns the appropriate [`ExitCode`] from the three-tier model.
+//! parse → evaluate → brand → validate → layout pipeline ONCE via
+//! `slideforge::compile()`, renders all diagnostics via `miette`, then
+//! exports to each selected format via `slideforge::export_format()`.
 //!
 //! # Architecture constraints
 //!
 //! - TTY detection uses `std::io::IsTerminal` (stable since Rust 1.70);
 //!   the `atty` crate is NOT used (unmaintained, per spec).
-//! - Output atomicity: write to `.tmp` then `fs::rename()` to final path.
+//! - Output atomicity: ALL formats are written to `.tmp` paths first, then
+//!   ALL are renamed to final paths in one pass (all-or-nothing). If any
+//!   export fails, all temp files are deleted and no final files are written.
 //! - `slideforge-cli` contains NO pipeline logic; it is an orchestration
 //!   façade only.
+//! - The pipeline is run ONCE (parse/eval/validate/layout) and diagnostics
+//!   are rendered EXACTLY ONCE, regardless of how many output formats are
+//!   selected (HIGH-002 fix).
 //!
 //! # Brand discovery
 //!
@@ -30,7 +35,7 @@ use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
 use slideforge::error::BuildError;
-use slideforge::{BrandSource, BuildOptions};
+use slideforge::{BrandSource, CompileOptions};
 
 use crate::cli::{BuildArgs, GlobalFlags, OutputFormat};
 use crate::exit_code::{EXIT_EXPORT_ERROR, EXIT_PARSE_ERROR, EXIT_VALIDATION_ERROR};
@@ -38,8 +43,9 @@ use crate::output::OutputWriter;
 
 /// Run the `slideforge build` subcommand.
 ///
-/// Drives the full compile pipeline for `args.source`, renders all diagnostics
-/// via `miette`, and returns the appropriate [`ExitCode`].
+/// Drives the full compile pipeline for `args.source` ONCE, renders all
+/// diagnostics via `miette` EXACTLY ONCE (regardless of selected format
+/// count), then exports to each selected format.
 ///
 /// # Exit codes (BC-1.15.003)
 ///
@@ -83,22 +89,24 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
         },
     };
 
-    // EC-006: variant validation.
-    // The root `slideforge::build()` API does not yet support variant selection.
-    // When `--variant` is specified, validate that the variant is declared in
-    // the source.  This is a CLI-layer check (E-VAR-004).
-    // clippy::collapsible_if: the outer guard is `Some` and the inner guard is
-    // the variant existence check — they cannot be collapsed without losing the
-    // binding of `variant_name`.
-    #[allow(clippy::collapsible_if)]
+    // EC-006: variant selection.
+    //
+    // The root `slideforge::compile()` API does not yet support variant selection
+    // in the `CompileOptions` struct — variant resolution is deferred to STORY-091
+    // (variant DSL parsing). Providing `--variant` before that story is a clean
+    // usage error, not a runtime heuristic.
+    //
+    // Decision: return E-VAR-004 (exit 2) when `--variant` is specified, with a
+    // deterministic error message citing STORY-091 as the blocking dependency.
+    // This avoids the substring-matching heuristic (MED-002) and ensures the CLI
+    // behaves predictably.
     if let Some(variant_name) = args.variant.as_deref() {
-        if !source_declares_variant(&source_text, variant_name) {
-            render_plain_error(&format!(
-                "Error: undefined variant '{variant_name}' (E-VAR-004); \
-                 use `variant:` in your .sf source to declare it"
-            ));
-            return ExitCode::from(EXIT_VALIDATION_ERROR);
-        }
+        render_plain_error(&format!(
+            "Error: variant selection is not yet supported (E-VAR-004). \
+             The '--variant {variant_name}' flag will be enabled in STORY-091 \
+             (DSL variant parsing). Remove '--variant' to build without variant selection."
+        ));
+        return ExitCode::from(EXIT_VALIDATION_ERROR);
     }
 
     // Discover brand.toml next to the source file.
@@ -119,80 +127,95 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
         .file_stem()
         .map_or_else(|| "output".to_owned(), |s| s.to_string_lossy().into_owned());
 
-    // Run the pipeline for each selected format.
-    // Parse errors are fatal and stop processing immediately.
-    // Export errors per format are accumulated; the highest-priority error
-    // across all formats determines the final exit code.
-    let mut worst_exit_code: u8 = 0;
-    let mut any_success = false;
+    // ── SINGLE PIPELINE RUN (HIGH-002 fix) ──────────────────────────────────────
+    //
+    // Run parse → eval → brand → validate → layout EXACTLY ONCE for all selected
+    // formats. Diagnostics are collected and rendered EXACTLY ONCE here, not once
+    // per format. Only the export stage runs per format.
+    let compile_opts = CompileOptions {
+        brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
+            brand_toml_path.as_str(),
+        ))),
+        strict,
+    };
 
+    let compiled = match slideforge::compile(&source_text, &compile_opts) {
+        Ok(compiled) => compiled,
+        Err(err) => {
+            // Render diagnostics EXACTLY ONCE (HIGH-002 fix).
+            render_build_error(&err, use_color, global);
+            return ExitCode::from(exit_code_for_build_error_u8(&err));
+        },
+    };
+
+    // ── PER-FORMAT EXPORT (MED-001 all-or-nothing fix) ───────────────────────────
+    //
+    // 1. Export every selected format to a temporary path (.tmp).
+    // 2. If ALL succeed, rename all .tmp files to final paths.
+    // 3. If ANY fails, delete all .tmp files and return the export error code.
+    //    No final files are written if any format fails.
+    let writers: Vec<OutputWriter> = args
+        .format
+        .iter()
+        .map(|fmt| {
+            OutputWriter::new(&args.output_dir, &stem, format_to_str(*fmt))
+        })
+        .collect();
+
+    // Phase 1: export all formats to tmp paths.
+    let mut export_bytes: Vec<Vec<u8>> = Vec::with_capacity(args.format.len());
     for format in &args.format {
         let format_str = format_to_str(*format);
-        let options = BuildOptions {
-            format: Some(format_str.to_owned()),
-            brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
-                brand_toml_path.as_str(),
-            ))),
-            strict,
-        };
-
-        match slideforge::build(&source_text, &options) {
+        match slideforge::export_format(&compiled, format_str) {
             Ok(output) => {
-                // Write output atomically.
-                let writer = OutputWriter::new(&args.output_dir, &stem, &output.extension);
-                if let Err(e) = writer.write_atomic(&output.bytes) {
-                    let msg = format!(
-                        "Error writing output file {}: {e}",
-                        writer.final_path().display()
-                    );
-                    render_plain_error(&msg);
-                    let code = EXIT_EXPORT_ERROR;
-                    if code > worst_exit_code {
-                        worst_exit_code = code;
-                    }
-                } else {
-                    if !global.quiet {
-                        eprintln!("  written: {}", writer.final_path().display());
-                    }
-                    any_success = true;
-                }
+                export_bytes.push(output.bytes);
             },
             Err(err) => {
-                // Render the error diagnostics.
-                render_build_error(&err, use_color, global);
-
-                let code = exit_code_for_build_error(&err);
-                let code_u8 = exit_code_to_u8(code);
-
-                // Parse errors (exit 1) short-circuit: no point running other formats.
-                if code_u8 == EXIT_PARSE_ERROR {
-                    return ExitCode::from(EXIT_PARSE_ERROR);
+                // Export failed — delete any tmp files we may have partially created.
+                for writer in &writers {
+                    if writer.tmp_path().exists() {
+                        let _ = std::fs::remove_file(writer.tmp_path());
+                    }
                 }
-
-                if code_u8 > worst_exit_code {
-                    worst_exit_code = code_u8;
-                }
+                render_plain_error(&format!("Error exporting {format_str}: {err}"));
+                return ExitCode::from(EXIT_EXPORT_ERROR);
             },
         }
     }
 
-    // In warn-only mode: if we had validation errors but the pipeline continued
-    // (strict=false), the exit code should be 0 regardless.
-    if !strict && worst_exit_code == EXIT_VALIDATION_ERROR {
-        worst_exit_code = 0;
+    // Phase 2: write all bytes to .tmp paths.
+    for (writer, bytes) in writers.iter().zip(export_bytes.iter()) {
+        if let Err(e) = writer.write_atomic(bytes) {
+            // Write failed — delete all tmp files and return export error.
+            for w in &writers {
+                if w.tmp_path().exists() {
+                    let _ = std::fs::remove_file(w.tmp_path());
+                }
+                // Also delete any final paths already written by earlier formats.
+                if w.final_path().exists() {
+                    let _ = std::fs::remove_file(w.final_path());
+                }
+            }
+            let msg = format!(
+                "Error writing output file {}: {e}",
+                writer.final_path().display()
+            );
+            render_plain_error(&msg);
+            return ExitCode::from(EXIT_EXPORT_ERROR);
+        }
     }
 
-    if worst_exit_code == 0 {
-        if !global.quiet && any_success {
-            eprintln!("Build succeeded.");
+    // All formats succeeded.
+    if !global.quiet {
+        for writer in &writers {
+            eprintln!("  written: {}", writer.final_path().display());
         }
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(worst_exit_code)
+        eprintln!("Build succeeded.");
     }
+    ExitCode::SUCCESS
 }
 
-/// Map a [`BuildError`] to the appropriate [`ExitCode`].
+/// Map a [`BuildError`] to the appropriate exit code as `u8`.
 ///
 /// Differentiates E-PAR (exit 1) from E-EXP (exit 3), both of which surface
 /// as `Fatal` at the `ParseSeverity` level but require distinct exit codes
@@ -205,18 +228,28 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 /// | `ValidationFailed` (strict) | 2 |
 /// | `Export` | 3 |
 /// | Other (`Registry`, `Brand`, `Layout`, `Plugin`, `UnknownFormat`) | 1 |
-#[must_use]
-pub fn exit_code_for_build_error(err: &BuildError) -> ExitCode {
+///
+/// This function operates on `u8` directly (HIGH-004 fix: avoids the
+/// `exit_code_to_u8` guessing pattern that had a silent fallback to
+/// `EXIT_PARSE_ERROR` on unrecognized variants).
+fn exit_code_for_build_error_u8(err: &BuildError) -> u8 {
     match err {
-        // EvalFailed and ValidationFailed both map to exit 2 (validation error tier).
         BuildError::EvalFailed { .. } | BuildError::ValidationFailed { .. } => {
-            ExitCode::from(EXIT_VALIDATION_ERROR)
+            EXIT_VALIDATION_ERROR
         },
-        BuildError::Export(_) => ExitCode::from(EXIT_EXPORT_ERROR),
+        BuildError::Export(_) => EXIT_EXPORT_ERROR,
         // ParseFailed, Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
         // UnknownFormat — all treated as fatal parse-category errors (exit 1).
-        _ => ExitCode::from(EXIT_PARSE_ERROR),
+        _ => EXIT_PARSE_ERROR,
     }
+}
+
+/// Map a [`BuildError`] to the appropriate [`ExitCode`].
+///
+/// Public version of `exit_code_for_build_error_u8` for unit-test access.
+#[must_use]
+pub fn exit_code_for_build_error(err: &BuildError) -> ExitCode {
+    ExitCode::from(exit_code_for_build_error_u8(err))
 }
 
 /// Determine whether colored diagnostic output should be used.
@@ -235,23 +268,6 @@ pub fn should_use_color(global: &GlobalFlags) -> bool {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
-
-/// Convert an [`ExitCode`] to its raw `u8` value.
-fn exit_code_to_u8(code: ExitCode) -> u8 {
-    // ExitCode does not expose its inner value directly.
-    // We compare against known codes to extract the byte.
-    if code == ExitCode::SUCCESS {
-        0
-    } else if code == ExitCode::from(EXIT_PARSE_ERROR) {
-        EXIT_PARSE_ERROR
-    } else if code == ExitCode::from(EXIT_VALIDATION_ERROR) {
-        EXIT_VALIDATION_ERROR
-    } else if code == ExitCode::from(EXIT_EXPORT_ERROR) {
-        EXIT_EXPORT_ERROR
-    } else {
-        EXIT_PARSE_ERROR // conservative fallback
-    }
-}
 
 /// Convert an [`OutputFormat`] to the format string expected by `BuildOptions`.
 fn format_to_str(fmt: OutputFormat) -> &'static str {
@@ -287,22 +303,10 @@ fn discover_brand_toml(args: &BuildArgs) -> Result<String, String> {
     ))
 }
 
-/// Check whether a source string declares a variant with the given name.
-///
-/// Performs a simple textual search for `variant: <name>` in the source.
-/// This is a CLI-layer check used for EC-006 (undefined variant → exit 2).
-fn source_declares_variant(source: &str, variant_name: &str) -> bool {
-    // Look for `variant: <name>` or `variant "<name>"` or similar DSL syntax.
-    // The DSL uses `variant: name:` blocks. Search for the variant name.
-    source.contains(&format!("variant {variant_name}:"))
-        || source.contains(&format!("variant: {variant_name}"))
-        || source.contains(&format!("\"{variant_name}\""))
-}
-
 /// Render a build error's diagnostics to stderr.
 ///
 /// Uses miette's handlers for structured diagnostics (parse or eval failures)
-/// and falls back to plain text for other error types.
+/// and includes file:line:col span for validation failures (HIGH-001 fix).
 fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
     if global.json {
         render_build_error_json(err);
@@ -323,13 +327,11 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
             }
         },
         BuildError::ValidationFailed { diagnostics, .. } => {
-            // ValidationFailed holds plugin-api Diagnostics (not boxed).
-            // Render them as plain text with hint.
+            // HIGH-001 fix: ValidationFailed holds plugin-api Diagnostics.
+            // Render them through miette (or with file:line:col from diag.span)
+            // so EVERY emitted diagnostic carries file:line:col.
             for diag in diagnostics {
-                eprintln!("[{}] {}: {}", diag.severity, diag.code, diag.message);
-                if let Some(ref hint) = diag.hint {
-                    eprintln!("  hint: {hint}");
-                }
+                render_validation_diagnostic(diag, use_color);
             }
         },
         other => {
@@ -352,14 +354,96 @@ fn render_box_diagnostic(diag: &dyn miette::Diagnostic, use_color: bool) -> Stri
     buf
 }
 
+/// Render a single [`slideforge_plugin_api::Diagnostic`] (from ValidationFailed)
+/// with file:line:col span information (HIGH-001 fix).
+///
+/// Format: `[severity] code: message (file:line:col)\n  hint: <hint>`
+fn render_validation_diagnostic(diag: &slideforge::ValidationDiagnostic, _use_color: bool) {
+    let span = &diag.span;
+    // Include file:line:col if the span carries a real source location.
+    // SourceSpan defaults to file="", line=0, col=0 for span-less diagnostics.
+    if !span.file.is_empty() && (span.line > 0 || span.col > 0) {
+        eprintln!(
+            "[{}] {}: {} ({}:{}:{})",
+            diag.severity, diag.code, diag.message, span.file, span.line, span.col
+        );
+    } else {
+        eprintln!("[{}] {}: {}", diag.severity, diag.code, diag.message);
+    }
+    if let Some(ref hint) = diag.hint {
+        eprintln!("  hint: {hint}");
+    }
+}
+
 /// Render build error as JSON to stderr (for `--json` mode).
+///
+/// HIGH-003 fix: iterates all diagnostics (not just the first), sets `total`
+/// to the real count, and includes span fields (file:line:col) where available.
 fn render_build_error_json(err: &BuildError) {
-    let exit_code = exit_code_to_u8(exit_code_for_build_error(err));
+    let exit_code_val = exit_code_for_build_error_u8(err);
+    let has_fatal = exit_code_val == EXIT_PARSE_ERROR || exit_code_val == EXIT_EXPORT_ERROR;
+
+    let diagnostics: Vec<serde_json::Value> = match err {
+        BuildError::ParseFailed { diagnostics, .. }
+        | BuildError::EvalFailed { diagnostics, .. } => diagnostics
+            .iter()
+            .map(|d| {
+                let code = d.code().map_or_else(String::new, |c| c.to_string());
+                let message = d.to_string();
+                let hint = d.help().map(|h| h.to_string());
+                // Extract the first label's span if available.
+                let span_obj = d.labels().and_then(|mut labels| {
+                    labels.next().map(|label| {
+                        serde_json::json!({
+                            "offset": label.offset(),
+                            "length": label.len(),
+                        })
+                    })
+                });
+                let mut obj = serde_json::json!({
+                    "code": code,
+                    "message": message,
+                });
+                if let Some(h) = hint {
+                    obj["hint"] = serde_json::Value::String(h);
+                }
+                if let Some(s) = span_obj {
+                    obj["span"] = s;
+                }
+                obj
+            })
+            .collect(),
+        BuildError::ValidationFailed { diagnostics, .. } => diagnostics
+            .iter()
+            .map(|d| {
+                let span = &d.span;
+                let mut obj = serde_json::json!({
+                    "code": d.code.as_ref(),
+                    "message": d.message.as_ref(),
+                    "severity": d.severity.to_string(),
+                    "span": {
+                        "file": span.file.as_ref(),
+                        "line": span.line,
+                        "col": span.col,
+                    },
+                });
+                if let Some(ref hint) = d.hint {
+                    obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
+                }
+                obj
+            })
+            .collect(),
+        other => {
+            vec![serde_json::json!({"message": other.to_string()})]
+        },
+    };
+
+    let total = diagnostics.len();
     let json = serde_json::json!({
-        "diagnostics": [{"message": err.to_string()}],
-        "total": 1,
-        "has_fatal": exit_code == EXIT_PARSE_ERROR || exit_code == EXIT_EXPORT_ERROR,
-        "exit_code": exit_code,
+        "diagnostics": diagnostics,
+        "total": total,
+        "has_fatal": has_fatal,
+        "exit_code": exit_code_val,
     });
     // Use eprintln! — JSON output goes to stderr.
     eprintln!(

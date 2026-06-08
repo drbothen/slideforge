@@ -45,9 +45,10 @@ miette = { workspace = true }
 # Structured logging — pipeline stage diagnostics (CLAUDE.md: no println! in library crates)
 tracing = { workspace = true }
 
-[dev-dependencies]
-# External plugin test (STORY-049 AC-007) needs slideforge-types for test Value instances.
+# Core domain types: Deck, Brand, LaidOutDeck (exposed through CompileOptions / CompiledDeck)
 slideforge-types = { workspace = true }
+
+[dev-dependencies]
 # Plugin API trait access for external plugin dog-fooding test and STORY-050 E2E tests.
 slideforge-plugin-api = { workspace = true }
 

@@ -207,6 +207,18 @@ pub use slideforge_plugin_api::RegistryError;
 /// CLI/root crate boundary per STORY-055 architecture compliance rule 3).
 pub use slideforge_plugin_api::BrandSource;
 
+/// Re-export of [`slideforge_plugin_api::Diagnostic`].
+///
+/// The CLI uses this type when rendering `ValidationFailed` diagnostics
+/// (which carry `Vec<Diagnostic>`).
+pub use slideforge_plugin_api::Diagnostic as ValidationDiagnostic;
+
+/// Re-export of [`slideforge_types::SourceSpan`].
+///
+/// The CLI uses this when rendering file:line:col span information from
+/// [`ValidationDiagnostic::span`].
+pub use slideforge_types::SourceSpan;
+
 // ── Public pipeline types ─────────────────────────────────────────────────────
 
 /// Options passed to [`build`].
@@ -270,6 +282,293 @@ pub struct BuildOutput {
 
     /// The file extension for the rendered output (e.g., `"pptx"`, `"pdf"`).
     pub extension: String,
+}
+
+/// Options passed to [`compile`].
+///
+/// Analogous to [`BuildOptions`] but without a `format` field — the format is
+/// not needed for the compile phase (parse → eval → brand → validate → layout).
+/// Export is driven by a separate call to [`export_format`].
+#[derive(Debug, Clone)]
+pub struct CompileOptions {
+    /// Brand configuration source.
+    ///
+    /// The compile pipeline requires a [`slideforge_plugin_api::BrandSource`]
+    /// to load brand colors, fonts, and layout geometry. If `None`, `compile()`
+    /// returns [`error::BuildError::NoBrandSource`].
+    pub brand_source: Option<slideforge_plugin_api::BrandSource>,
+
+    /// If `true` (the default), any Error-severity validation diagnostic fails
+    /// the compile with [`error::BuildError::ValidationFailed`].
+    pub strict: bool,
+}
+
+impl Default for CompileOptions {
+    fn default() -> Self {
+        Self {
+            brand_source: None,
+            strict: true,
+        }
+    }
+}
+
+/// The output of the [`compile`] phase: a pre-rendered deck ready for export.
+///
+/// Contains the semantic `Deck`, the resolved `Brand`, and the `LaidOutDeck`
+/// produced by the layout engine. Exporters consume this struct directly.
+///
+/// Unlike [`BuildOutput`] (which contains final file bytes), `CompiledDeck`
+/// is format-independent — the same `CompiledDeck` can be exported to multiple
+/// formats by calling [`export_format`] once per format.
+pub struct CompiledDeck {
+    /// The semantic deck IR (post-eval, post-threading).
+    pub deck: slideforge_types::Deck,
+    /// The resolved brand configuration.
+    pub brand: slideforge_types::Brand,
+    /// The geometric deck IR (post-layout).
+    pub laid_out: slideforge_layout::LaidOutDeck,
+    /// The assembled plugin registry, retained for export dispatch.
+    pub(crate) registry: PluginRegistry,
+}
+
+/// Run the compile phase (parse → eval → brand → validate → layout) and return
+/// a [`CompiledDeck`] ready for export.
+///
+/// Unlike [`build`], this function does NOT run the exporter — it stops after
+/// layout so that multiple formats can be exported from a single compile run
+/// (avoiding redundant re-parsing and re-evaluation).
+///
+/// ## Brand configuration
+///
+/// A brand source must be supplied via [`CompileOptions::brand_source`].
+/// If none is provided, `compile()` returns [`error::BuildError::NoBrandSource`].
+///
+/// ## Errors
+///
+/// Returns [`error::BuildError`] if any pipeline stage fails.
+pub fn compile(
+    source: &str,
+    options: &CompileOptions,
+) -> Result<CompiledDeck, error::BuildError> {
+    let registry = registry::default_registry()?;
+    compile_inner(source, options, registry)
+}
+
+/// Export a [`CompiledDeck`] to a single format.
+///
+/// Runs only the export stage (Stage 7) of the pipeline against the pre-compiled
+/// deck. The `format` string selects the exporter by its registered id
+/// (e.g., `"pptx"`, `"docx"`, `"pdf"`, `"html"`).
+///
+/// ## Errors
+///
+/// Returns [`error::BuildError`] if:
+/// - The format is not registered (`BuildError::UnknownFormat`).
+/// - The exporter plugin panics or returns an error (`BuildError::Export`).
+pub fn export_format(
+    compiled: &CompiledDeck,
+    format: &str,
+) -> Result<BuildOutput, error::BuildError> {
+    use slideforge_plugin_api::ExportOptions;
+
+    let _span = tracing::info_span!("export", stage = "export", format).entered();
+    tracing::info!("pipeline stage: export");
+    let exporter = compiled
+        .registry
+        .lookup_exporter(format)
+        .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
+    let exporter_id = exporter.id().to_owned();
+    let file_extension = exporter.extension().to_owned();
+    let export_opts = ExportOptions::default();
+    let bytes = dispatch::dispatch_plugin(&exporter_id, || {
+        exporter.export(&compiled.deck, &compiled.laid_out, &compiled.brand, &export_opts)
+    })
+    .map_err(error::BuildError::Plugin)?
+    .map_err(error::BuildError::Export)?;
+    Ok(BuildOutput {
+        bytes,
+        extension: file_extension,
+    })
+}
+
+/// Core compile-phase implementation (parse → eval → brand → validate → layout).
+///
+/// Does NOT run the exporter — that is handled by [`export_format`].
+/// The `registry` is consumed and stored in the returned [`CompiledDeck`] so
+/// that [`export_format`] can look up exporters without re-assembling the registry.
+#[allow(clippy::too_many_lines)]
+fn compile_inner(
+    source: &str,
+    options: &CompileOptions,
+    registry: PluginRegistry,
+) -> Result<CompiledDeck, error::BuildError> {
+    use slideforge_eval::{EvalConfig, eval_deck, thread_fields_to_blocks};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ValidatorOptions};
+    use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
+
+    tracing::info!(
+        strict = options.strict,
+        "compile_inner: starting pipeline (parse → eval → brand → validate → layout)"
+    );
+
+    // Stage 3 (physical: brand is loaded first for I/O efficiency): load brand.
+    let brand_source = options
+        .brand_source
+        .as_ref()
+        .ok_or(error::BuildError::NoBrandSource)?;
+    let brand = {
+        let _span = tracing::info_span!("brand", stage = "brand").entered();
+        tracing::info!("pipeline stage: brand");
+        let provider_id: &str = match brand_source {
+            BrandSource::TomlFile(_) => "slideforge-brand-synthesizer",
+            _ => "slideforge-brand/default",
+        };
+        let brand_provider = registry
+            .lookup_brand_provider(provider_id)
+            .ok_or(error::BuildError::NoBrandProvider)?;
+        let brand_provider_id = brand_provider.id();
+        dispatch::dispatch_plugin(brand_provider_id, || brand_provider.load(brand_source))
+            .map_err(error::BuildError::Plugin)?
+            .map_err(error::BuildError::Brand)?
+    };
+
+    // Stage 2: parse.
+    let deck_node = {
+        let _span =
+            tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
+        tracing::info!("pipeline stage: parse");
+        let mut source_map = SourceMap::new();
+        let file_id = source_map.add_file(
+            std::sync::Arc::from("<build>"),
+            std::sync::Arc::from(source),
+        );
+        let mut sink = DiagnosticSink::new();
+        parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
+            let diagnostics = diag_util::collect_diagnostics(sink.errors(), "E-PAR-???");
+            let count = diagnostics.len();
+            error::BuildError::ParseFailed { diagnostics, count }
+        })?
+    };
+
+    // Stage 2a: evaluate.
+    let mut deck = {
+        let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
+        tracing::info!("pipeline stage: evaluate");
+        let eval_config = EvalConfig::default();
+        let mut eval_sink = DiagnosticSink::new();
+        eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
+            let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
+            let count = diagnostics.len();
+            error::BuildError::EvalFailed { diagnostics, count }
+        })?
+    };
+
+    // Stage 2b: field-to-block threading.
+    tracing::info!("compile_inner: Stage 2b — field-to-block threading (ADR-019)");
+    thread_fields_to_blocks(&mut deck);
+
+    // Stage 5: validate pre-layout.
+    let validator_opts = ValidatorOptions::default();
+    let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
+    {
+        let _span =
+            tracing::info_span!("validate", stage = "validate", strict = options.strict).entered();
+        tracing::info!("pipeline stage: validate");
+        for validator in registry.iter_validators() {
+            let validator_id = validator.id().to_owned();
+            let diags = dispatch::dispatch_plugin(&validator_id, || {
+                validator.validate(&deck, &validator_opts)
+            })
+            .map_err(error::BuildError::Plugin)?;
+            for diag in &diags {
+                tracing::warn!(
+                    validator = %validator_id,
+                    code = %diag.code,
+                    severity = %diag.severity,
+                    message = %diag.message,
+                    "validator diagnostic"
+                );
+            }
+            all_validator_diagnostics.extend(diags);
+        }
+    }
+
+    // Inject lang default post-validation.
+    tracing::info!("compile_inner: injecting lang default (post-validate)");
+    slideforge_validate::inject_lang_default(&mut deck);
+
+    // Stage 6: layout.
+    let layout_result = {
+        let _span = tracing::info_span!("layout", stage = "layout").entered();
+        tracing::info!("pipeline stage: layout");
+        layout_run(&deck, &brand)
+    };
+    let laid_out = match layout_result {
+        Ok(lo) => lo,
+        Err(layout_err) => {
+            if options.strict {
+                let pre_layout_errors: Vec<slideforge_plugin_api::Diagnostic> =
+                    all_validator_diagnostics
+                        .iter()
+                        .filter(|d| d.severity == DiagnosticSeverity::Error)
+                        .cloned()
+                        .collect();
+                if !pre_layout_errors.is_empty() {
+                    let count = pre_layout_errors.len();
+                    return Err(error::BuildError::ValidationFailed {
+                        diagnostics: all_validator_diagnostics,
+                        count,
+                    });
+                }
+            }
+            return Err(error::BuildError::Layout(layout_err));
+        },
+    };
+
+    // Stage 6b: post-layout validation.
+    tracing::info!("compile_inner: running post-layout validators (Stage 6b)");
+    for validator in registry.iter_validators() {
+        let validator_id = validator.id().to_owned();
+        let post_diags = dispatch::dispatch_plugin(&validator_id, || {
+            validator.validate_post_layout(&laid_out, &validator_opts)
+        })
+        .map_err(error::BuildError::Plugin)?;
+        for diag in &post_diags {
+            tracing::warn!(
+                validator = %validator_id,
+                code = %diag.code,
+                severity = %diag.severity,
+                message = %diag.message,
+                "post-layout validator diagnostic"
+            );
+        }
+        all_validator_diagnostics.extend(post_diags);
+    }
+
+    // Combined strict-mode gate.
+    if options.strict {
+        let has_error = all_validator_diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error);
+        if has_error {
+            let error_count = all_validator_diagnostics
+                .iter()
+                .filter(|d| d.severity == DiagnosticSeverity::Error)
+                .count();
+            return Err(error::BuildError::ValidationFailed {
+                diagnostics: all_validator_diagnostics,
+                count: error_count,
+            });
+        }
+    }
+
+    Ok(CompiledDeck {
+        deck,
+        brand,
+        laid_out,
+        registry,
+    })
 }
 
 // ── Public pipeline entry point ───────────────────────────────────────────────
