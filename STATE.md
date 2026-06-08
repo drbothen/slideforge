@@ -29,11 +29,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "IN_PROGRESS — STORY-089 MERGED PR #68 (c722c28b); STORY-046 MERGED PR #70 (fa85d1136). 2 of 22 done. 20 stories / 106 pts remain. STORY-047 + STORY-081 UNLOCKED (←046). STORY-055 LOCAL CONVERGED (L0, P0, 8pt) — 3/3 strict-CLEAN (passes 5,6,7 of 7), HEAD fcdd1c55; demo + PR pending."
-develop_sha: "fa85d1136"
-develop_pr_count: 70
+wave_5_status: "3 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71). Both unlock keys (046+055) merged → L1 unlocked. 19 stories / 98 pts remain."
+develop_sha: "cbebfd57"
+develop_pr_count: 71
 error_taxonomy_version: "v2.24"
-workspace_tests: "~3629 pass / 18 skip (develop fa85d1136); slideforge-html added: ~132 html tests; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080"
+workspace_tests: "~3690+ pass / 18 skip (develop cbebfd57); slideforge-cli added: slideforge build command + unified compile()/export_format() API; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080"
 workspace_test_failures: 0
 ---
 
@@ -44,24 +44,25 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `fa85d1136` (70 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `cbebfd57` (71 merged PRs, 0 open PRs).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04). Fresh machines: `git clone <repo> && git worktree add .factory factory-artifacts`.
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-046 MERGED PR #70 (fa85d1136). STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN, passes 5-6-7 of 7; HEAD fcdd1c55) — demo + PR pending. 20 stories / 106 pts remain.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-046 MERGED PR #70 (fa85d1136). STORY-055 MERGED PR #71 (cbebfd57). Both unlock keys done. 19 stories / 98 pts remain.
 
-**Wave 5 — 2 of 22 done; 20 stories / 106 pts remaining:**
+**Wave 5 — 3 of 22 done; 19 stories / 98 pts remaining:**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation. FieldSchemaValidator live. error-taxonomy v2.24. ADR-020. STORY-082 spec reconciled (BC-4.01.003 v1.3, export-arch v1.1).
 - **STORY-046 MERGED** PR #70 (fa85d1136): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. ADR-008 amended (P4 — real positioned HTML text layer + sibling `<svg role="presentation">` graphics; outer SVG NOT aria-hidden). BC-4.03.003 v1.4 (4-step heading chain + synthetic visually-hidden h1). HtmlExporter registered in root registry. 23-pass LOCAL cascade; 3/3 strict-CLEAN (passes 21-22-23). slideforge-html crate adds ~132 new tests. STORY-047 + STORY-081 UNLOCKED (←046).
+- **STORY-055 MERGED** PR #71 (cbebfd57): `slideforge build` CLI command + miette diagnostics; unified compile pipeline (compile_core single source; build_inner = compile_core + export_format; new public API compile()/export_format()/CompileOptions/CompiledDeck; BuildError::MultistageFailed). 7-pass LOCAL 3-CLEAN + 4 post-convergence CI-fix cycles. Security CLEAN (2 LOW follow-ups Phase 6). STORY-057/058/060/064 UNLOCKED (←055). STORY-056 UNLOCKED (←047+055).
 - **DEP-PREP MERGED** PR #69 (3e3a978f): [workspace.dependencies] centralized + ADR-022 major-version migrations + INERT Wave-5 catalog. ADR-022 migration tasks DONE.
-- **Uncertainty pass COMPLETE:** all 21 (now 20 remaining) stories spec-accurate. Ready to deliver.
-- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 055 (LOCAL CONVERGED — demo+PR pending)/082/088/072/074/079/080. Unlock key 055 gates 5 downstream (on merge). Critical path: 047→056→059 (3 deep from current; 046 already merged). **STORY-055 LOCAL CONVERGED** — 3/3 strict-CLEAN (passes 5-6-7 of 7); unified pipeline: compile_core + export_format; HEAD fcdd1c55.
+- **Uncertainty pass COMPLETE:** all stories spec-accurate. Ready to deliver.
+- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 082/088/072/074/079/080. Both unlock keys merged → L1 UNLOCKED. Critical path: 047→056→059. **CAUTION:** resolve FU-SEC-001-GIT2-OPENSSL before STORY-060/061.
 - **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story.
 - **SEC-001-DIAG-HARDENING (OPEN, non-blocking LOW):** unbounded user-authored strings in diagnostics. ANCHORED to future validator/diagnostic-hardening story.
-- **FU-SEC-001-GIT2-OPENSSL (OPEN, MEDIUM — NEW):** inert `git2` catalog entry with `features=["https"]` will pull `openssl-sys` (banned by deny.toml) when first consumed. MUST resolve before STORY-060/061. Anchored to STORY-060. See BACKLOG.md.
+- **FU-SEC-001-GIT2-OPENSSL (OPEN, MEDIUM):** inert `git2` catalog entry with `features=["https"]` will pull `openssl-sys` (banned by deny.toml) when first consumed. MUST resolve before STORY-060/061. Anchored to STORY-060. See BACKLOG.md.
 
-**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3629 pass, 18 skip; slideforge-html crate added ~132 tests in PR #70) (4) read `.factory/BACKLOG.md` and TaskCreate one task per OPEN item (5) read NEXT ACTIONS below (6) await human go-ahead before picking a story.
+**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3690+ pass, 18 skip; slideforge-cli (build command + unified compile()/export_format() API) added in PR #71; known flaky: cold_budget tracked STORY-080) (4) read `.factory/BACKLOG.md` and TaskCreate one task per OPEN item (5) read NEXT ACTIONS below (6) await human go-ahead before picking a story.
 
 **Durable task source:** `.factory/BACKLOG.md` — rebuild in-session tasks from OPEN items there on every session start. State-manager mirrors it alongside STATE.md at every milestone.
 
@@ -73,23 +74,24 @@ workspace_test_failures: 0
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 MERGED PR #68; STORY-046 MERGED PR #70; dep-prep MERGED PR #69. 20 stories / 106 pts remain. 89 stories / 553 pts total.
+Phase 3, **Wave 5 IN PROGRESS** (develop `cbebfd57`, 71 merged PRs). STORY-089 MERGED PR #68; STORY-046 MERGED PR #70; STORY-055 MERGED PR #71; dep-prep MERGED PR #69. 19 stories / 98 pts remain. 89 stories / 553 pts total.
 
-- Active worktrees: STORY-055 (LOCAL CONVERGED — demo + PR pending). Open PRs: 0.
-- Workspace: ~3629 pass, 18 skip (slideforge-html added ~132 html tests; known flaky: cold_budget tracked STORY-080).
-- Uncertainty pass: COMPLETE (all 21 stories spec-accurate; STORY-046 now delivered).
-- ADR-022 dep-centralization migrations: DONE (in develop). ADR-008 P4 amendment: DONE (in develop via STORY-046).
+- Active worktrees: none. Open PRs: 0.
+- Workspace: ~3690+ pass, 18 skip (slideforge-cli added: build command + unified compile()/export_format() API; known flaky: cold_budget tracked STORY-080).
+- Uncertainty pass: COMPLETE (all stories spec-accurate).
+- ADR-022 dep-centralization migrations: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE (wired in STORY-055 otel feature).
 
 ---
 
 ## NEXT ACTIONS
 
-**STATUS: Wave 5 IN PROGRESS. STORY-046 MERGED (PR #70, fa85d1136). STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN; demo + PR pending). 20 stories / 106 pts remain. Full-width fan-out (up to 8 parallel) AUTHORIZED. DO NOT auto-pick — orchestrator/human decides launch order.**
+**STATUS: Wave 5 IN PROGRESS. STORY-046 MERGED (PR #70, fa85d1136). STORY-055 MERGED (PR #71, cbebfd57). Both unlock keys done. 19 stories / 98 pts remain. Full-width fan-out (up to 8 parallel) AUTHORIZED. DO NOT auto-pick — orchestrator/human decides launch order.**
 
 **Dependency levels — full table in BACKLOG.md WAVE5-DELIVERY:**
-- **L0 remaining (no intra-wave deps):** STORY-055 (E15,P0,8pt — LOCAL CONVERGED; demo+PR pending), STORY-082 (E08,P0,5pt), STORY-088 (E02,P1,8pt), STORY-072 (E07,P2,3pt), STORY-074 (E07,P2,3pt), STORY-079 (E12,P2,3pt), STORY-080 (E19,P2,3pt).
-- **UNLOCKED by STORY-046 MERGE:** STORY-047 (P1,8pt,←046), STORY-081 (P0,13pt,←046) — ready to start in parallel with remaining L0.
-- **Unlock key remaining:** STORY-055 gates 5 L1 stories (057/058/060/064 + 056 via 047+055). Prioritize demo+PR to unblock.
+- **L0 remaining (no intra-wave deps):** STORY-082 (E08,P0,5pt), STORY-088 (E02,P1,8pt), STORY-072 (E07,P2,3pt), STORY-074 (E07,P2,3pt), STORY-079 (E12,P2,3pt), STORY-080 (E19,P2,3pt — also fixes cold_budget flake).
+- **L1 UNLOCKED — by STORY-046:** STORY-047 (P1,8pt,←046), STORY-081 (P0,13pt,←046).
+- **L1 UNLOCKED — by STORY-055:** STORY-057 (P0,5pt,←055), STORY-058 (P0,5pt,←055), STORY-060 (P1,8pt,←055), STORY-064 (P1,5pt,←055).
+- **L2 UNLOCKED — by 047+055:** STORY-056 (P0,8pt,←047+055).
 - **Critical path:** 047→056→059 (3 deep from here). See BACKLOG.md for L1/L2/L3 full breakdown.
 - **BEFORE STORY-060/061:** resolve FU-SEC-001-GIT2-OPENSSL (openssl-sys ban — see BACKLOG.md).
 
@@ -112,7 +114,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS — 2/22 done (STORY-089 PR #68, STORY-046 PR #70); 20 stories/106 pts remain. STORY-055 IN PROGRESS. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS — 3/22 done (STORY-089 PR #68, STORY-046 PR #70, STORY-055 PR #71); 19 stories/98 pts remain. Both unlock keys (046+055) merged → L1 unlocked. | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status (summary)
@@ -127,17 +129,17 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop fa85d1136 (70 merged PRs). STORY-046 MERGED PR #70. STORY-055 LOCAL CONVERGED — demo + PR pending. 20 stories / 106 pts remain.**
+**Wave 5 IN PROGRESS. develop cbebfd57 (71 merged PRs). STORY-046 + STORY-055 MERGED. Both unlock keys done. 19 stories / 98 pts remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-08 |
-| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). STORY-046 MERGED PR #70 (fa85d1136): Static HTML exporter, P4 Composite Rendering Model, ADR-008 P4 amendment, BC-4.03.003 v1.4, HtmlExporter registered. slideforge-html ~132 new tests. STORY-047 + STORY-081 UNLOCKED. STORY-055 LOCAL CONVERGED (L0, P0, 8pt) — 3/3 strict-CLEAN (passes 5-6-7 of 7); HEAD fcdd1c55 rebased onto fa85d1136; unified pipeline (compile_core + export_format); demo + PR pending. Dep-prep MERGED PR #69 (3e3a978f). Uncertainty pass COMPLETE. 20 stories/106 pts remain. |
-| **develop SHA** | `fa85d1136` (70 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Active worktrees** | STORY-055 (LOCAL CONVERGED — demo + PR pending) |
-| **Workspace tests** | ~3629 pass / 18 skip (slideforge-html ~132 new tests; known flaky: cold_budget STORY-080) |
+| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). STORY-046 MERGED PR #70 (fa85d1136): Static HTML exporter, P4 Composite Rendering Model, ADR-008 P4 amendment, BC-4.03.003 v1.4, HtmlExporter registered. slideforge-html ~132 new tests. STORY-047 + STORY-081 UNLOCKED. STORY-055 MERGED PR #71 (cbebfd57): slideforge build CLI command + miette diagnostics; unified compile pipeline (compile_core single source; build_inner = compile_core + export_format; public API compile()/export_format()/CompileOptions/CompiledDeck; BuildError::MultistageFailed). 7-pass LOCAL 3-CLEAN + 4 CI-fix cycles. STORY-057/058/060/064/056 UNLOCKED. Dep-prep MERGED PR #69 (3e3a978f). Uncertainty pass COMPLETE. 19 stories/98 pts remain. |
+| **develop SHA** | `cbebfd57` (71 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Active worktrees** | none |
+| **Workspace tests** | ~3690+ pass / 18 skip (slideforge-cli build command + unified API added in PR #71; known flaky: cold_budget STORY-080) |
 | **factory-artifacts** | PUSHED to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-055 LOCAL CONVERGED (3/3 strict-CLEAN; HEAD fcdd1c55 on feature/STORY-055; rebased onto fa85d1136). Next: dispatch demo-recorder then pr-manager for STORY-055. STORY-047 + STORY-081 UNLOCKED (←046), ready to start in parallel. L0 remaining: 055 (demo+PR)/082/088/072/074/079/080. STORY-055 merge unlocks 5 L1 downstream (057/058/060/064 + 056 via 047+055). Full dep-graph L0–L3 in BACKLOG.md WAVE5-DELIVERY. BEFORE 060/061: resolve FU-SEC-001-GIT2-OPENSSL. New follow-ups: FU-055-OFFLINE-FLAG (anchored STORY-021), FU-055-VARIANT-NOTE (traceability only), FU-055-JSON-HASFATAL-DOC (trivial prose). Phases 4-7 remain for v1.0. |
+| **RESUME INSTRUCTION** | Both unlock keys merged. L0 remaining: 082/088/072/074/079/080. L1 UNLOCKED (←046): 047/081. L1 UNLOCKED (←055): 057/058/060/064. L2 UNLOCKED (←047+055): 056. Full dep-graph L0–L3 in BACKLOG.md WAVE5-DELIVERY. BEFORE 060/061: resolve FU-SEC-001-GIT2-OPENSSL. Security follow-ups from STORY-055: FU-055-SEC-001-TMPFILE (anchor Phase 6), FU-055-SEC-002-OTEL-ENDPOINT (anchor Phase 6). Existing: FU-055-OFFLINE-FLAG (anchored STORY-021), FU-055-JSON-HASFATAL-DOC (trivial prose). Phases 4-7 remain for v1.0. |
 
 ---
 
@@ -164,6 +166,8 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `fa85d1136`, 70 merged PRs). STORY-089 
 | LESSON-18 (WORKTREE-SYNC) | After `gh pr merge --squash`, run `git fetch && git merge --ff-only origin/develop` OR `git restore --source=HEAD --staged --worktree .` to sync working tree. `git update-ref` alone leaves working tree STALE. Include disk-presence check before any gate agent dispatch. |
 | LESSON-19 (SIBLING-SWEEP) | When a fix-burst changes a canonical VALUE, TEXT, COUNT, or ANCHOR (error code, message template, site count, ADR/BC/PC citation, stale-state comment), it MUST sweep ALL sibling artifacts in ONE burst: production code + every consuming spec (BC/ADR/taxonomy/story) + test files + doc-comments + fixtures — verified by exhaustive grep BEFORE re-running the adversary. Partial propagation repeatedly reset STORY-089 3-CLEAN streak (~11 passes). Orchestrator must grep-map every occurrence itself and dispatch ONE coordinated exhaustive fix, not per-file partial fixes. Full narrative: `.factory/cycles/STORY-089/lessons.md`. REINFORCED by STORY-046 cascade (passes 14/17/20 all partial-propagation recurrences). |
 | LESSON-20 (ADVERSARY-SPEC-PATHS) | Per-story LOCAL adversary dispatches MUST include ABSOLUTE `.factory/` spec paths (story file, traced BCs, traced ADRs, export-architecture or equivalent spec) in the task. The per-story worktree (`.worktrees/STORY-NNN`) does NOT contain the `.factory/` mount — adversary cannot read specs without absolute paths. Discovered: STORY-046 Pass-4 OBS-1. Full narrative: `.factory/cycles/STORY-046/convergence-summary.md`. |
+| LESSON-21 (LOCAL-GATE-MIRRORS-CI-MATRIX) | The per-story LOCAL exit gate and the pre-push gate MUST mirror CI's FULL invocation matrix, not a narrower subset. STORY-055 incurred FOUR post-convergence CI-fix cycles, ALL because the local gate used `cargo nextest` (process-isolated) on macOS only with `-p`-targeted doc, while CI runs: (a) `cargo insta test`/`cargo test` SHARED-PROCESS (caught a global-tracing-subscriber test-isolation panic nextest masked); (b) `--all-features` (caught the otel no-Tokio-runtime panic); (c) `RUSTDOCFLAGS="-D warnings" cargo doc --workspace` (caught a cross-crate intra-doc link); (d) the Windows test matrix (caught Unix-only failure-injection in filesystem tests). Going forward, implementer exit-gate + pre-push instructions MUST include: `cargo test --workspace --all-features` (shared-process) in addition to nextest; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps`; and tests touching filesystem/global-state must use cross-platform/process-isolation-robust techniques (no `/nonexistent` Unix-root paths; no virgin-global-state assumptions). Windows can't run on the dev mac — expect the Windows CI job as the validator and write portable tests. Discovered: STORY-055 post-convergence CI-fix cycles B1-B4. |
+| LESSON-22 (ORCHESTRATOR-VERIFY-UPSTREAM-CLAIMS) | Before routing a deferral/"not supported" based on an implementer's claim of an upstream gap, VERIFY the claim against the actual upstream code, and confirm any cited story ID EXISTS. STORY-055 initially shipped a false "variant selection not supported (STORY-091)" — STORY-091 was fabricated and `eval_deck_with_variant` WAS implemented; the adversary caught it. Reinforces SID-1 real-story-citation rule. Implementer self-disclosure of capability gaps is NOT authoritative — orchestrator independently verifies before accepting a deferral. Discovered: STORY-055 Pass-1 C-1 finding. |
 
 ---
 
@@ -182,6 +186,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-08 | STORY-055-MERGE | PR #71 squash-merged → develop cbebfd57. slideforge build CLI command + miette diagnostics; UNIFIED compile pipeline (compile_core single source; build_inner = compile_core + export_format; new public API compile()/export_format()/CompileOptions/CompiledDeck; BuildError::MultistageFailed for cross-stage eval+validator accumulation). 7-pass LOCAL 3-CLEAN + 4 post-convergence CI-fix cycles (B1 cross-crate intra-doc link; B2 otel rt-tokio needed a Tokio runtime — wired TracingGuard owning a runtime gated on `otel` feature, ADR-021; snapshots-job shared-process test-isolation — init_tracing already-set→Ok(noop) + moved traced_test to own binary; Windows cross-platform export-error test injection — portable blocker-file technique). Security CLEAN (2 LOW follow-ups SEC-001 tmp-file symlink, SEC-002 otel endpoint → Phase 6). pr-reviewer APPROVE. adversary 3-CLEAN. CI all-green incl windows+macos+snapshots+docs+bench. Convergence: `.factory/cycles/STORY-055/convergence-summary.md`. |
 | 2026-06-08 | STORY-055-LOCAL-CONVERGED | STORY-055 (CLI: `slideforge build` + miette error rendering, EPIC-15, slideforge-cli) LOCAL adversarial cascade CONVERGED: 3/3 strict-CLEAN (passes 5, 6, 7); 7 total passes. Feature branch `feature/STORY-055` HEAD `fcdd1c55`, rebased onto develop `fa85d1136`. NOT YET MERGED — demo + PR pending. Key findings: CRIT-HTML (resolved by rebasing onto fa85d1136 — HtmlExporter now registered, 4-format default restored); C-1 (fabricated "STORY-091" deferral — adversary caught that `eval_deck_with_variant` IS implemented; `--variant` threaded through `CompileOptions`); HIGH-001 (validator span threading); HIGH-002 (multi-format duplicate diagnostics — unified pipeline); HIGH-003 (`--json total:1` hardcoded); HIGH-004 (`exit_code_to_u8` silent fallback); F-P2-MED-001 (non-fatal eval errors swallowed — `MultistageFailed` variant); MED-001 (all-or-nothing output atomicity); HIGH-P3-001/MED-P3-002 (source-order interleave — `diag_util` sort/dedup helper); OBS-P4-001..004 (eval dedup symmetry, JSON severity fidelity, pure `render_build_error_to_json_value`); LOW-001 (watch/init/extract-brand graceful not-implemented citing STORY-056/057). STRUCTURAL IMPROVEMENT: unified pipeline — `compile_core`/`compile_inner` is single canonical pipeline (parse→eval→brand→validate→layout); `build()`/`build_inner()` is thin adapter = `compile_core` + `export_format`. New public API: `compile()`, `export_format()`, `CompileOptions`, `CompiledDeck`. PROCESS LESSON (S-7.02 candidate, [process-gap]): orchestrator MUST independently verify implementer upstream-gap claims before accepting a deferral — fabricated "STORY-091" caught only by adversary absolute-path grep. Implementer self-disclosure of capability gaps is NOT authoritative. Open follow-ups (non-blocking): FU-055-OFFLINE-FLAG (--offline flag not threaded; anchor STORY-021), FU-055-VARIANT-NOTE (traceability), FU-055-JSON-HASFATAL-DOC (non-binding prose). Full detail: `.factory/cycles/STORY-055/convergence-summary.md`. |
 | 2026-06-08 | STORY-046-MERGE | PR #70 squash-merged → develop fa85d1136. Static HTML exporter (slideforge-html crate) via P4 Composite Rendering Model. 23-pass LOCAL adversarial convergence incl. rendering-model pivot: ADR-008 P4 amendment (slide text as positioned HTML; graphical frames in sibling `<svg role="presentation">`; Pass-3 ARIA correction — outer svg NOT aria-hidden), BC-4.03.003 v1.4 (Inv2, PC-6, PC-7 4-step heading chain + synthetic visually-hidden h1), STORY-046 v1.3. HtmlExporter REGISTERED in root registry (human-authorized HTML-seam decision). Fixed CI axe-core gate module-resolution bug. Security CLEAN (2 LOW follow-ups → STORY-047/048: SEC-001 data: scheme in SVG href, SEC-002 npm pin). pr-reviewer APPROVE. CI all-green (cold_budget flake re-run passed). Convergence detail: `.factory/cycles/STORY-046/convergence-summary.md`. |
 | 2026-06-08 | STORY-046-LOCAL-CONVERGED | STORY-046 (Static HTML Exporter, P4 Composite Rendering Model) LOCAL adversarial cascade CONVERGED: 3/3 strict-CLEAN (passes 21, 22, 23); 23 total passes. Feature branch `feature/STORY-046` HEAD `93cef9fb`. Key resolutions: ADR-008 amended (P4 model); BC-4.03.003 → v1.4; STORY-046 → v1.3; export-architecture updated; HtmlExporter registered in registry.rs (human-authorized HTML-seam decision 2026-06-08). LESSON-20 added (adversary spec paths). See `.factory/cycles/STORY-046/convergence-summary.md`. |
