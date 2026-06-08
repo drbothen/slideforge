@@ -2567,4 +2567,181 @@ mod tests {
             "DEFAULT_EM_IN_EMU must remain 457_200 (AC-002 backward compat guard)"
         );
     }
+
+    // STORY-072 — FillSpec::Gradient unit tests (AC-002 / AC-003 / AC-005)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-002 (STORY-072) — `build_shape_frame` with `FillSpec::Gradient` stores
+    /// the gradient fill verbatim on the output `ShapeFrame.fill`.
+    ///
+    /// The layout stage is a pure passthrough for all `FillSpec` variants.
+    /// No normalization, no downgrade — the gradient is passed as-is.
+    #[test]
+    fn test_BC_3_04_001_ac002_story072_build_shape_frame_gradient_fill_passthrough() {
+        let from = Rgb { r: 255, g: 0, b: 0 };
+        let to = Rgb { r: 0, g: 0, b: 255 };
+        let fill = FillSpec::Gradient { from, to };
+        let frame = build_shape_frame(
+            ShapeType::Rect,
+            fill.clone(),
+            None,
+            Some(Arc::from("Gradient background")),
+            false,
+            0,
+            &SourceSpan::default(),
+        )
+        .expect("build_shape_frame must succeed for gradient fill with alt text");
+
+        assert_eq!(
+            frame.fill,
+            fill,
+            "ShapeFrame.fill must match the input FillSpec::Gradient exactly; got: {:?}",
+            frame.fill
+        );
+    }
+
+    /// AC-003 (STORY-072) — `layout_shapes` with a `FillSpec::Gradient` shape
+    /// passes the gradient through to `ShapeFrame.fill` in `LaidOutDeck` verbatim.
+    ///
+    /// Canonical test vector (BC-3.04.001 / STORY-072 AC-003):
+    ///   `fill gradient #FF0000 to #0000FF` → `ShapeFrame.fill = FillSpec::Gradient { from: Rgb{255,0,0}, to: Rgb{0,0,255} }`
+    #[test]
+    fn test_BC_3_04_001_ac003_story072_layout_shapes_gradient_passthrough() {
+        let from = Rgb { r: 255, g: 0, b: 0 };
+        let to = Rgb { r: 0, g: 0, b: 255 };
+        let st = ShapeType::from_keyword("rect")
+            .expect("rect must be valid");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: default_position(),
+            fill: FillSpec::Gradient { from, to },
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("Gradient background"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let shapes = vec![spec];
+        let output = layout_shapes(&shapes, default_page(), 0, DEFAULT_EM_IN_EMU, 0)
+            .expect("layout_shapes must succeed for gradient shape");
+
+        assert_eq!(output.frames.len(), 1);
+        match &output.frames[0].content {
+            crate::types::FrameContent::Shape(sf) => {
+                assert!(
+                    matches!(
+                        &sf.fill,
+                        FillSpec::Gradient {
+                            from: f,
+                            to: t,
+                        } if *f == from && *t == to
+                    ),
+                    "layout_shapes must pass FillSpec::Gradient through verbatim; got: {:?}",
+                    sf.fill
+                );
+            },
+            other => panic!("expected FrameContent::Shape for gradient shape; got: {other:?}"),
+        }
+    }
+
+    /// AC-005 (STORY-072) — A gradient shape without `alt` or `decorative: true`
+    /// produces `LayoutError::MissingAlt` (same contract as solid shapes, EC-001).
+    ///
+    /// The `FillSpec` variant does NOT exempt a shape from the alt requirement.
+    #[test]
+    fn test_BC_3_04_001_ac005_story072_gradient_shape_without_alt_returns_missing_alt() {
+        let st = ShapeType::from_keyword("rect").expect("rect must be valid");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: default_position(),
+            fill: FillSpec::Gradient {
+                from: Rgb { r: 255, g: 0, b: 0 },
+                to: Rgb { r: 0, g: 0, b: 255 },
+            },
+            text: None,
+            alt: None,
+            decorative: false, // no alt, no decorative → MissingAlt
+            span: SourceSpan::default(),
+        };
+        let result = layout_shapes(&[spec], default_page(), 0, DEFAULT_EM_IN_EMU, 0);
+        assert!(
+            result.is_err(),
+            "gradient shape without alt must return Err(MissingAlt)"
+        );
+        match result.unwrap_err() {
+            LayoutError::Multiple { inner } => {
+                assert!(
+                    inner
+                        .iter()
+                        .any(|e| matches!(e, LayoutError::MissingAlt { .. })),
+                    "Multiple must contain MissingAlt for gradient shape without alt; got: {inner:?}"
+                );
+            },
+            other => panic!("expected LayoutError::Multiple with MissingAlt; got: {other:?}"),
+        }
+    }
+
+    /// EC-006 (STORY-072) — `decorative: true` gradient shape produces
+    /// `AltText::Decorative` in the output frame.
+    ///
+    /// The gradient fill variant does not affect the decorative semantics contract.
+    #[test]
+    fn test_BC_3_04_001_ec006_story072_gradient_decorative_shape_produces_decorative_alt() {
+        let st = ShapeType::from_keyword("ellipse").expect("ellipse must be valid");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: default_position(),
+            fill: FillSpec::Gradient {
+                from: Rgb { r: 0, g: 255, b: 0 },
+                to: Rgb { r: 0, g: 0, b: 255 },
+            },
+            text: None,
+            alt: None,
+            decorative: true,
+            span: SourceSpan::default(),
+        };
+        let output = layout_shapes(&[spec], default_page(), 0, DEFAULT_EM_IN_EMU, 0)
+            .expect("decorative gradient shape must succeed");
+
+        match &output.frames[0].content {
+            crate::types::FrameContent::Shape(sf) => {
+                assert!(
+                    matches!(sf.alt, slideforge_types::AltText::Decorative),
+                    "decorative gradient shape must produce AltText::Decorative; got: {:?}",
+                    sf.alt
+                );
+            },
+            other => panic!("expected FrameContent::Shape; got: {other:?}"),
+        }
+    }
+
+    /// EC-005 (STORY-072) — Same `from` and `to` gradient color (flat gradient) is
+    /// valid; `layout_shapes` must not error.
+    #[test]
+    fn test_BC_3_04_001_ec005_story072_gradient_same_from_to_is_valid() {
+        let same = Rgb { r: 255, g: 0, b: 0 };
+        let st = ShapeType::from_keyword("rect").expect("rect must be valid");
+        let spec = ShapeSpec {
+            shape_type: st,
+            position: default_position(),
+            fill: FillSpec::Gradient { from: same, to: same },
+            text: None,
+            alt: Some(AltText::Provided(Arc::from("Flat gradient"))),
+            decorative: false,
+            span: SourceSpan::default(),
+        };
+        let output = layout_shapes(&[spec], default_page(), 0, DEFAULT_EM_IN_EMU, 0)
+            .expect("flat gradient (same from==to) must succeed");
+
+        assert_eq!(output.frames.len(), 1, "flat gradient must produce 1 frame");
+        match &output.frames[0].content {
+            crate::types::FrameContent::Shape(sf) => {
+                assert!(
+                    matches!(&sf.fill, FillSpec::Gradient { from, to } if from == to),
+                    "flat gradient must be preserved as FillSpec::Gradient; got: {:?}",
+                    sf.fill
+                );
+            },
+            other => panic!("expected FrameContent::Shape; got: {other:?}"),
+        }
+    }
 }

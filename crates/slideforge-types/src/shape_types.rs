@@ -54,10 +54,6 @@ pub struct Rgb {
 ///
 /// ## v1.0 scope
 ///
-/// `Gradient` fill is deferred to STORY-072 and is NOT present in this enum.
-/// Any future attempt to add gradient support must add the `Gradient` variant
-/// and update all exhaustive matches.
-///
 /// Implements `Hash + Eq + Clone + Debug` for comemo compatibility (AC-010).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FillSpec {
@@ -65,11 +61,23 @@ pub enum FillSpec {
     SolidColor(Rgb),
     /// No fill (transparent background).
     None,
-    // NOTE: Gradient variant deferred to STORY-072 — not in v1.0.
-    // When added, the DSL parser path that produces FillSpec (slideforge-syntax
-    // shape parser) must handle the new keyword; build_fill_spec is a test-only
-    // helper and not part of the production fill path. See STORY-072 for gradient
-    // implementation scope.
+    /// A linear gradient fill (top-to-bottom, vertical, v1.0).
+    ///
+    /// Added by STORY-072. `from` is the top color, `to` is the bottom color.
+    /// Both colors follow the same hex-parsing rules as `SolidColor`.
+    /// Gradient direction in v1.0 is fixed as top-to-bottom (vertical linear);
+    /// arbitrary-angle gradients are deferred to v2.
+    ///
+    /// PPTX: `a:gradFill` / `a:gsLst` / `a:lin ang="5400000"` (ooxmlsdk typed builders).
+    /// PDF: krilla `paint::LinearGradient` + `Surface::set_fill` + `draw_path`.
+    /// HTML: CSS `background: linear-gradient(to bottom, #RRGGBB, #RRGGBB)`.
+    /// DOCX: solid fallback to `from` color with lint warning.
+    Gradient {
+        /// Top (start) color of the linear gradient.
+        from: Rgb,
+        /// Bottom (end) color of the linear gradient.
+        to: Rgb,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,6 +420,108 @@ mod tests {
         let v = FillSpec::None;
         let v2 = v.clone();
         assert_eq!(v, v2);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STORY-072: FillSpec::Gradient — AC-002
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-002 (BC-3.04.001 postcondition 1 — STORY-072): `FillSpec::Gradient` variant
+    /// is constructable with `from` and `to` `Rgb` fields.
+    ///
+    /// Canonical test vector: `fill gradient #FF0000 to #0000FF` →
+    /// `FillSpec::Gradient { from: Rgb { r: 255, g: 0, b: 0 }, to: Rgb { r: 0, g: 0, b: 255 } }`
+    #[test]
+    fn test_BC_3_04_001_ac002_gradient_variant_constructable() {
+        let grad = FillSpec::Gradient {
+            from: Rgb { r: 255, g: 0, b: 0 },
+            to: Rgb { r: 0, g: 0, b: 255 },
+        };
+        // Verify both field accessors.
+        let (from_color, to_color) = match &grad {
+            FillSpec::Gradient { from, to } => (*from, *to),
+            _ => panic!("expected FillSpec::Gradient"),
+        };
+        assert_eq!(from_color, Rgb { r: 255, g: 0, b: 0 }, "from must be red");
+        assert_eq!(to_color, Rgb { r: 0, g: 0, b: 255 }, "to must be blue");
+    }
+
+    /// AC-002: `FillSpec::Gradient` implements `Debug + Clone + PartialEq + Eq + Hash`
+    /// for comemo compatibility (DI-010 / BC-3.04.001 postcondition 1).
+    #[test]
+    fn test_BC_3_04_001_ac002_gradient_implements_hash_eq_clone() {
+        let g1 = FillSpec::Gradient {
+            from: Rgb { r: 255, g: 0, b: 0 },
+            to: Rgb { r: 0, g: 0, b: 255 },
+        };
+        let g2 = g1.clone();
+        assert_eq!(g1, g2, "cloned Gradient must equal original");
+
+        let mut set = HashSet::new();
+        set.insert(g1.clone());
+        set.insert(g1);
+        assert_eq!(set.len(), 1, "duplicate Gradient must deduplicate in HashSet");
+    }
+
+    /// AC-002: Two `FillSpec::Gradient` with different colors are NOT equal.
+    #[test]
+    fn test_BC_3_04_001_ac002_gradient_inequality() {
+        let g1 = FillSpec::Gradient {
+            from: Rgb { r: 255, g: 0, b: 0 },
+            to: Rgb { r: 0, g: 0, b: 255 },
+        };
+        let g2 = FillSpec::Gradient {
+            from: Rgb { r: 0, g: 255, b: 0 },
+            to: Rgb { r: 0, g: 0, b: 255 },
+        };
+        assert_ne!(g1, g2, "Gradients with different from-colors must not be equal");
+    }
+
+    /// AC-002: `FillSpec::Gradient` is distinct from `FillSpec::SolidColor` and
+    /// `FillSpec::None` in the type system.
+    #[test]
+    fn test_BC_3_04_001_ac002_gradient_distinct_from_solid_and_none() {
+        let grad = FillSpec::Gradient {
+            from: Rgb { r: 255, g: 0, b: 0 },
+            to: Rgb { r: 0, g: 0, b: 255 },
+        };
+        let solid = FillSpec::SolidColor(Rgb { r: 255, g: 0, b: 0 });
+        let none = FillSpec::None;
+        assert_ne!(grad, solid, "Gradient must not equal SolidColor");
+        assert_ne!(grad, none, "Gradient must not equal None");
+    }
+
+    /// EC-005 (STORY-072): Same `from` and `to` color is valid — equivalent to a flat
+    /// gradient (visually solid). No error or panic.
+    #[test]
+    fn test_BC_3_04_001_ec005_same_from_and_to_is_valid() {
+        let same_color = Rgb { r: 255, g: 0, b: 0 };
+        let grad = FillSpec::Gradient {
+            from: same_color,
+            to: same_color,
+        };
+        // Matching both fields must succeed.
+        assert!(
+            matches!(grad, FillSpec::Gradient { from, to } if from == to),
+            "same from==to gradient must be constructable and match-able"
+        );
+    }
+
+    /// AC-002 invariant: `FillSpec::Gradient` `from` and `to` carry integer `u8` channels —
+    /// no `f64` anywhere (DI-010 / CLAUDE.md "no f64 in IR" rule).
+    ///
+    /// This is a compile-time test: if `Rgb.r/g/b` were `f64`, the literal `255_u8`
+    /// assignment below would fail to compile.
+    #[test]
+    fn test_BC_3_04_001_ac002_gradient_rgb_channels_are_u8_not_f64() {
+        let r: u8 = 255;
+        let g: u8 = 0;
+        let b: u8 = 0;
+        let _ = FillSpec::Gradient {
+            from: Rgb { r, g, b },
+            to: Rgb { r: 0, g: 0, b },
+        };
+        // If this compiles, channels are u8 (not f64). Test passes vacuously on compile success.
     }
 
     // ─────────────────────────────────────────────────────────────────────────
