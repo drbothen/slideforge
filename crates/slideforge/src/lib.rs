@@ -218,6 +218,66 @@ mod diag_util {
             ka.cmp(&kb)
         });
     }
+
+    /// Dedup three parallel eval vecs (diagnostics, sort keys, severities) on
+    /// `(code, position_key, message)`.
+    ///
+    /// Two eval diagnostics are considered exact duplicates when they share the
+    /// same `code`, `(file, line, col)` sort key, and `Display` message.
+    /// Distinct diagnostics at the same location (different code or message)
+    /// are NOT duplicates.
+    ///
+    /// Returns the three parallel vecs with first occurrences preserved and
+    /// duplicates removed (BC-1.15.002 invariant 1 / EC-004 / OBS-P4-002 fix).
+    ///
+    /// All three output vecs are always the same length (1:1 alignment
+    /// maintained, zip/unzip discipline).
+    pub(crate) fn dedup_eval_diagnostics(
+        diags: Vec<slideforge_syntax::BoxDiagnostic>,
+        positions: Vec<(String, u32, u32)>,
+        severities: Vec<crate::ParseSeverity>,
+    ) -> (
+        Vec<slideforge_syntax::BoxDiagnostic>,
+        Vec<(String, u32, u32)>,
+        Vec<crate::ParseSeverity>,
+    ) {
+        use std::collections::HashSet;
+
+        // diags, positions, severities must always be the same length — enforced
+        // by DiagnosticSink's push invariant.
+        debug_assert_eq!(
+            diags.len(),
+            positions.len(),
+            "dedup_eval_diagnostics: diags and positions vecs must be the same length"
+        );
+        debug_assert_eq!(
+            diags.len(),
+            severities.len(),
+            "dedup_eval_diagnostics: diags and severities vecs must be the same length"
+        );
+
+        let mut seen: HashSet<(String, String, u32, u32, String)> = HashSet::new();
+        let mut out_diags: Vec<slideforge_syntax::BoxDiagnostic> = Vec::new();
+        let mut out_positions: Vec<(String, u32, u32)> = Vec::new();
+        let mut out_severities: Vec<crate::ParseSeverity> = Vec::new();
+
+        for ((d, pos), sev) in diags.into_iter().zip(positions).zip(severities) {
+            let key = (
+                d.code().map_or_else(String::new, |c| c.to_string()),
+                pos.0.clone(),
+                pos.1,
+                pos.2,
+                d.to_string(),
+            );
+            if seen.insert(key) {
+                out_diags.push(d);
+                out_positions.push(pos);
+                out_severities.push(sev);
+            }
+        }
+
+        (out_diags, out_positions, out_severities)
+    }
 }
 
 // ── Re-export the plugin registry API ─────────────────────────────────────────
@@ -608,9 +668,18 @@ fn compile_inner(
     // accumulated_eval_diags: all BoxDiagnostic entries from eval stage (Error + Warning).
     // accumulated_eval_positions: source positions parallel to accumulated_eval_diags,
     //   used to build eval_sort_keys for MultistageFailed (HIGH-P3-001 fix).
+    // accumulated_eval_severities: per-diagnostic ParseSeverity parallel to
+    //   accumulated_eval_diags and accumulated_eval_positions (OBS-P4-003 fix).
+    //   Allows JSON renderer to emit actual "severity" per eval entry.
     // eval_error_count: count of Error-and-Fatal severity items in accumulated_eval_diags,
     // used by the combined strict gate to detect eval errors without re-scanning the vec.
-    let (mut deck, accumulated_eval_diags, accumulated_eval_positions, eval_error_count) = {
+    let (
+        mut deck,
+        accumulated_eval_diags,
+        accumulated_eval_positions,
+        accumulated_eval_severities,
+        eval_error_count,
+    ) = {
         let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
         let eval_config = EvalConfig::default();
@@ -656,10 +725,22 @@ fn compile_inner(
         // build eval_sort_keys for MultistageFailed construction below.
         let positions: Vec<(String, u32, u32)> = eval_sink.positions().to_vec();
 
+        // OBS-P4-003: capture per-diagnostic severities parallel to positions so
+        // that the JSON renderer can emit the actual severity of each eval diagnostic
+        // rather than hardcoding "error".
+        let severities: Vec<ParseSeverity> = eval_sink.severities().to_vec();
+
         // Collect all eval diagnostics (Error + Warning) into BoxDiagnostic vec.
         // This is reached only when maybe_deck was Some (no Fatal).
         let eval_diag_boxes =
             diag_util::collect_diagnostics(eval_sink.errors(), eval_sink.positions(), "E-EVL-???");
+
+        // OBS-P4-002: dedup eval diagnostics on (code, position, message) — symmetric
+        // with the validator dedup applied above (BC-1.15.002 invariant 1 / EC-004).
+        // Keeps eval_diagnostics, accumulated_eval_positions, and severities 1:1 aligned
+        // after dedup (zip/unzip discipline, TD-VSDD-060).
+        let (eval_diag_boxes, positions, severities) =
+            diag_util::dedup_eval_diagnostics(eval_diag_boxes, positions, severities);
 
         // Emit tracing events for eval diagnostics (mirrors validator diagnostic tracing).
         for diag in &eval_diag_boxes {
@@ -684,7 +765,7 @@ fn compile_inner(
         // returned and the pipeline continues. The eval_diag_boxes are passed back for
         // the combined strict gate below.
 
-        (deck, eval_diag_boxes, positions, err_count)
+        (deck, eval_diag_boxes, positions, severities, err_count)
     };
 
     // Stage 2b: field-to-block threading (ADR-019).
@@ -841,23 +922,39 @@ fn compile_inner(
                 // Case (c): MultistageFailed — both eval and validator errors present.
                 // BC-1.15.002 TV-13.1 — the cross-stage accumulation case.
                 //
-                // HIGH-P3-001: sort both eval_diagnostics and eval_sort_keys together
-                // by (file, line, col) so the render side can merge-sort with the
-                // (already-sorted) validator_diagnostics. The parallel positions were
-                // captured from eval_sink.positions() above as accumulated_eval_positions.
-                let mut indexed_eval: Vec<((String, u32, u32), slideforge_syntax::BoxDiagnostic)> =
-                    accumulated_eval_positions
-                        .into_iter()
-                        .zip(accumulated_eval_diags)
-                        .collect();
-                indexed_eval.sort_by(|(ka, _), (kb, _)| ka.cmp(kb));
-                let (eval_sort_keys, eval_diags): (
-                    Vec<(String, u32, u32)>,
-                    Vec<slideforge_syntax::BoxDiagnostic>,
-                ) = indexed_eval.into_iter().unzip();
+                // HIGH-P3-001: sort all three parallel eval vecs together by
+                // (file, line, col) so the render side can merge-sort with the
+                // (already-sorted) validator_diagnostics. The parallel positions and
+                // severities were captured from eval_sink above.
+                //
+                // OBS-P4-003: eval_severities is the third parallel vec — it travels
+                // with eval_sort_keys and eval_diagnostics through the sort so 1:1
+                // alignment is maintained (zip/unzip discipline, TD-VSDD-060).
+                let mut indexed_eval: Vec<(
+                    (String, u32, u32),
+                    slideforge_syntax::BoxDiagnostic,
+                    ParseSeverity,
+                )> = accumulated_eval_positions
+                    .into_iter()
+                    .zip(accumulated_eval_diags)
+                    .zip(accumulated_eval_severities)
+                    .map(|((pos, diag), sev)| (pos, diag, sev))
+                    .collect();
+                indexed_eval.sort_by(|(ka, _, _), (kb, _, _)| ka.cmp(kb));
+                let mut eval_sort_keys: Vec<(String, u32, u32)> =
+                    Vec::with_capacity(indexed_eval.len());
+                let mut eval_diags: Vec<slideforge_syntax::BoxDiagnostic> =
+                    Vec::with_capacity(indexed_eval.len());
+                let mut eval_sevs: Vec<ParseSeverity> = Vec::with_capacity(indexed_eval.len());
+                for (k, d, s) in indexed_eval {
+                    eval_sort_keys.push(k);
+                    eval_diags.push(d);
+                    eval_sevs.push(s);
+                }
                 return Err(error::BuildError::MultistageFailed {
                     eval_diagnostics: eval_diags,
                     eval_sort_keys,
+                    eval_severities: eval_sevs,
                     validator_diagnostics: all_validator_diagnostics,
                     eval_count: eval_error_count,
                     validator_count: validator_error_count,

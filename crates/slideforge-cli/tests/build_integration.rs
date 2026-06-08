@@ -1681,6 +1681,11 @@ fn test_BC_1_15_002_p3_cross_stage_interleave_by_source_position() {
     let err = BuildError::MultistageFailed {
         eval_diagnostics,
         eval_sort_keys,
+        // OBS-P4-003: provide parallel severities for the two eval entries.
+        eval_severities: vec![
+            slideforge::ParseSeverity::Error,
+            slideforge::ParseSeverity::Error,
+        ],
         validator_diagnostics,
         eval_count: 2,
         validator_count: 1,

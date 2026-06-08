@@ -368,6 +368,7 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
         BuildError::MultistageFailed {
             eval_diagnostics,
             eval_sort_keys,
+            eval_severities,
             validator_diagnostics,
             ..
         } => {
@@ -384,12 +385,13 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
             let interleaved = interleave_multistage_diagnostics(
                 eval_diagnostics,
                 eval_sort_keys,
+                eval_severities,
                 validator_diagnostics,
             );
             for item in &interleaved {
                 let rendered = match item {
-                    MultiDiag::Eval(d) => {
-                        let mut s = render_box_diagnostic(d.as_ref(), use_color);
+                    MultiDiag::Eval { diag, .. } => {
+                        let mut s = render_box_diagnostic(diag.as_ref(), use_color);
                         s.push('\n');
                         s
                     },
@@ -461,7 +463,16 @@ fn sort_and_dedup_validator_diags_for_render(
 /// Borrowing refs to avoid cloning the entire `BoxDiagnostic` vector.
 enum MultiDiag<'a> {
     /// A diagnostic from the eval stage (a `BoxDiagnostic` / `OwnedDiag`).
-    Eval(&'a slideforge::BoxDiagnostic),
+    ///
+    /// `severity` is the ACTUAL [`slideforge::ParseSeverity`] captured at push
+    /// time — used by the JSON renderer to emit the real `"severity"` field
+    /// instead of hardcoding `"error"` (OBS-P4-003 fix).
+    Eval {
+        /// The type-erased diagnostic.
+        diag: &'a slideforge::BoxDiagnostic,
+        /// The actual severity of this eval diagnostic.
+        severity: slideforge::ParseSeverity,
+    },
     /// A diagnostic from the validator stage (`slideforge_plugin_api::Diagnostic`).
     Validator(&'a slideforge::ValidationDiagnostic),
 }
@@ -469,21 +480,35 @@ enum MultiDiag<'a> {
 /// Merge-sort eval and validator diagnostics by source position.
 ///
 /// Both input slices must already be individually sorted by `(file, line, col)`.
-/// This function performs a standard two-pointer merge.
+/// This function performs a stable full sort (not a two-pointer merge) so that
+/// tests that construct `MultistageFailed` directly (without going through
+/// `compile_inner`) also produce correct output regardless of input order.
 ///
 /// `eval_sort_keys` is the parallel sort-key vec from
 /// `BuildError::MultistageFailed.eval_sort_keys` — index `i` of `eval_sort_keys`
-/// is the `(file, line, col)` key for `eval_diags[i]`. The validator sort key
-/// is derived from `slideforge::validator_diag_sort_key(d)`.
+/// is the `(file, line, col)` key for `eval_diags[i]`.
+///
+/// `eval_severities` is the parallel severity vec from
+/// `BuildError::MultistageFailed.eval_severities` — index `i` is the
+/// [`slideforge::ParseSeverity`] for `eval_diags[i]`. Used to populate
+/// `MultiDiag::Eval { severity }` so the JSON renderer emits the actual
+/// `"severity"` field (OBS-P4-003 fix).
+///
+/// The validator sort key is derived from `slideforge::validator_diag_sort_key(d)`.
+/// Validator entries are deduped on `(code, file, line, col, message)` using the
+/// shared `sort_and_dedup_validator_diags_for_render` helper (OBS-P4-001 fix /
+/// TD-VSDD-060: single dedup helper, no drift site).
 ///
 /// This is the SINGLE canonical merge helper for `MultistageFailed` rendering.
 /// It is used by both `render_build_error_to_string` (text) and
-/// `render_build_error_json` (JSON) to avoid a third drift site (TD-VSDD-060).
+/// `render_build_error_to_json_value` (JSON) to avoid a third drift site
+/// (TD-VSDD-060).
 ///
 /// BC-1.15.002 PC2 / HIGH-P3-001.
 fn interleave_multistage_diagnostics<'a>(
     eval_diags: &'a [slideforge::BoxDiagnostic],
     eval_sort_keys: &'a [(String, u32, u32)],
+    eval_severities: &'a [slideforge::ParseSeverity],
     validator_diags: &'a [slideforge::ValidationDiagnostic],
 ) -> Vec<MultiDiag<'a>> {
     // BC-1.15.002 PC2 / HIGH-P3-001: merge eval and validator diagnostics in
@@ -502,9 +527,21 @@ fn interleave_multistage_diagnostics<'a>(
             .get(i)
             .cloned()
             .unwrap_or_else(|| ("<unknown>".to_owned(), 0u32, 0u32));
-        combined.push((key, MultiDiag::Eval(d)));
+        // OBS-P4-003: thread actual severity rather than hardcoding Error.
+        let severity = eval_severities
+            .get(i)
+            .copied()
+            .unwrap_or(slideforge::ParseSeverity::Error);
+        combined.push((key, MultiDiag::Eval { diag: d, severity }));
     }
-    for d in validator_diags {
+
+    // OBS-P4-001: dedup validator entries on (code, file, line, col, message)
+    // using the shared helper (TD-VSDD-060: single source, no drift).
+    // This makes the render path robust regardless of whether compile_inner's
+    // pre-dedup ran (guards against direct MultistageFailed construction in tests
+    // or future callers that bypass the pipeline).
+    let deduped_validators = sort_and_dedup_validator_diags_for_render(validator_diags);
+    for d in deduped_validators {
         let key = slideforge::validator_diag_sort_key(d);
         combined.push((key, MultiDiag::Validator(d)));
     }
@@ -559,11 +596,48 @@ fn render_validation_diagnostic_to_string(
     buf
 }
 
-/// Render build error as JSON to stderr (for `--json` mode).
+/// Render a [`BuildError`] to a [`serde_json::Value`] (pure, side-effect-free).
 ///
-/// HIGH-003 fix: iterates all diagnostics (not just the first), sets `total`
-/// to the real count, and includes span fields (`file:line:col`) where available.
-fn render_build_error_json(err: &BuildError) {
+/// OBS-P4-004 fix: extracted from `render_build_error_json` so that the JSON
+/// rendering logic is testable without spawning a subprocess or capturing stderr.
+/// `render_build_error_json` is the sole call site that writes the result to stderr.
+///
+/// ## Schema
+///
+/// ```json
+/// {
+///   "diagnostics": [ { "code": "…", "message": "…", "severity": "…", … }, … ],
+///   "total": N,
+///   "has_fatal": true,
+///   "exit_code": 1
+/// }
+/// ```
+///
+/// Each diagnostic entry carries at minimum `"code"`, `"message"`, and
+/// `"severity"`. Validator and `MultistageFailed` entries also carry a `"span"`
+/// object with `"file"`, `"line"`, and `"col"` fields.
+///
+/// ## Severity fidelity (OBS-P4-003 fix)
+///
+/// `MultistageFailed` eval entries emit the ACTUAL severity from `eval_severities`
+/// (e.g. `"warning"` for a warning-severity eval diagnostic) rather than
+/// hardcoding `"error"` for all eval entries.
+///
+/// ## Dedup and order (OBS-P4-001 / OBS-P4-002)
+///
+/// Validator entries are deduped inside `interleave_multistage_diagnostics`.
+/// Eval entries were deduped at accumulation time in `compile_inner`.
+/// `MultistageFailed` entries are emitted in ascending `(file, line, col)` order
+/// (via the shared `interleave_multistage_diagnostics` helper).
+///
+/// ## Traceability
+///
+/// - OBS-P4-003: eval severity fidelity
+/// - OBS-P4-004: testability via pure function
+/// - BC-1.15.002 PC2 / HIGH-P3-001: source-order interleaving
+/// - TD-VSDD-060: single sort+dedup site
+#[must_use]
+pub fn render_build_error_to_json_value(err: &BuildError) -> serde_json::Value {
     let exit_code_val = exit_code_for_build_error_u8(err);
     let has_fatal = exit_code_val == EXIT_PARSE_ERROR || exit_code_val == EXIT_EXPORT_ERROR;
 
@@ -623,20 +697,24 @@ fn render_build_error_json(err: &BuildError) {
         BuildError::MultistageFailed {
             eval_diagnostics,
             eval_sort_keys,
+            eval_severities,
             validator_diagnostics,
             ..
         } => {
             // HIGH-P3-001: interleave eval + validator in source order using the
             // single canonical merge helper (same as the text renderer — TD-VSDD-060).
+            // OBS-P4-001: validator dedup applied inside the helper.
+            // OBS-P4-003: eval_severities threaded for actual severity per entry.
             let interleaved = interleave_multistage_diagnostics(
                 eval_diagnostics,
                 eval_sort_keys,
+                eval_severities,
                 validator_diagnostics,
             );
             interleaved
                 .iter()
                 .map(|item| match item {
-                    MultiDiag::Eval(d) => {
+                    MultiDiag::Eval { diag: d, severity } => {
                         let code = d.code().map_or_else(String::new, |c| c.to_string());
                         let message = d.to_string();
                         let hint = d.help().map(|h| h.to_string());
@@ -648,10 +726,12 @@ fn render_build_error_json(err: &BuildError) {
                                 })
                             })
                         });
+                        // OBS-P4-003: emit ACTUAL severity instead of hardcoding "error".
+                        let severity_str = parse_severity_to_str(*severity);
                         let mut obj = serde_json::json!({
                             "code": code,
                             "message": message,
-                            "severity": "error",
+                            "severity": severity_str,
                         });
                         if let Some(h) = hint {
                             obj["hint"] = serde_json::Value::String(h);
@@ -687,12 +767,37 @@ fn render_build_error_json(err: &BuildError) {
     };
 
     let total = diagnostics.len();
-    let json = serde_json::json!({
+    serde_json::json!({
         "diagnostics": diagnostics,
         "total": total,
         "has_fatal": has_fatal,
         "exit_code": exit_code_val,
-    });
+    })
+}
+
+/// Convert a [`slideforge::ParseSeverity`] to the lowercase string used in JSON output.
+///
+/// `"fatal"` is treated the same as `"error"` in the JSON output because
+/// `MultistageFailed` carries only non-fatal eval diagnostics (the fatal path
+/// takes a different code path through `EvalFailed`). A defensive fallback to
+/// `"error"` is appropriate for all Error/Fatal variants.
+fn parse_severity_to_str(sev: slideforge::ParseSeverity) -> &'static str {
+    match sev {
+        slideforge::ParseSeverity::Warning => "warning",
+        slideforge::ParseSeverity::Error | slideforge::ParseSeverity::Fatal => "error",
+    }
+}
+
+/// Render build error as JSON to stderr (for `--json` mode).
+///
+/// HIGH-003 fix: iterates all diagnostics (not just the first), sets `total`
+/// to the real count, and includes span fields (`file:line:col`) where available.
+///
+/// OBS-P4-004 fix: this function is now a thin wrapper around the pure
+/// `render_build_error_to_json_value` function so that the JSON content is
+/// directly testable without capturing stderr.
+fn render_build_error_json(err: &BuildError) {
+    let json = render_build_error_to_json_value(err);
     // Use eprintln! — JSON output goes to stderr.
     eprintln!(
         "{}",
@@ -713,7 +818,9 @@ mod tests {
     use std::path::PathBuf;
     use std::process::ExitCode;
 
-    use super::{exit_code_for_build_error, run_build, should_use_color};
+    use super::{
+        exit_code_for_build_error, render_build_error_to_json_value, run_build, should_use_color,
+    };
     use crate::cli::{BuildArgs, GlobalFlags, OutputFormat};
     use slideforge::error::BuildError;
 
@@ -930,6 +1037,242 @@ mod tests {
         assert!(
             !should_use_color(&global),
             "BC-1.15.001: --json must suppress color output"
+        );
+    }
+
+    // ── OBS-P4-004: render_build_error_to_json_value tests ───────────────────
+    //
+    // Four load-bearing tests for the pure JSON render function extracted by
+    // OBS-P4-004. These tests assert CONTENT+ORDER (not just "is JSON"), per
+    // LESSON-14.
+
+    /// OBS-P4-004 (a): `MultistageFailed` JSON entries are emitted in ascending
+    /// `(file, line, col)` order — validator error interleaved between two eval errors.
+    ///
+    /// Fixture: eval at line 3, validator at line 5, eval at line 7.
+    /// Input order is deliberately wrong (line 7 before line 3) to prove the
+    /// interleave sorts correctly.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_OBS_P4_004_a_multistage_json_entries_ascending_order() {
+        use slideforge::ParseSeverity;
+        use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let eval_diag_line7 = slideforge::make_test_owned_diag("E-EVL-001", "eval error at line 7");
+        let eval_diag_line3 = slideforge::make_test_owned_diag("E-EVL-001", "eval error at line 3");
+
+        let err = BuildError::MultistageFailed {
+            eval_diagnostics: vec![eval_diag_line7, eval_diag_line3],
+            eval_sort_keys: vec![("deck.sf".to_owned(), 7, 1), ("deck.sf".to_owned(), 3, 1)],
+            eval_severities: vec![ParseSeverity::Error, ParseSeverity::Error],
+            validator_diagnostics: vec![Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: Arc::from("E-VAL-001"),
+                message: Arc::from("validator error at line 5"),
+                span: SourceSpan {
+                    file: Arc::from("deck.sf"),
+                    line: 5,
+                    col: 1,
+                    ..SourceSpan::default()
+                },
+                hint: None,
+            }],
+            eval_count: 2,
+            validator_count: 1,
+        };
+
+        let json = render_build_error_to_json_value(&err);
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array");
+        assert_eq!(arr.len(), 3, "must have 3 entries (2 eval + 1 validator)");
+
+        // Entries must be in source order: line 3, line 5, line 7.
+        // Eval entries use OwnedDiag which doesn't carry span info in the span field,
+        // but the messages contain the line numbers.
+        let msg0 = arr[0]["message"].as_str().unwrap_or("");
+        let msg1 = arr[1]["message"].as_str().unwrap_or("");
+        let msg2 = arr[2]["message"].as_str().unwrap_or("");
+
+        assert!(
+            msg0.contains("line 3"),
+            "OBS-P4-004a: first entry must be eval error at line 3; got: {msg0}"
+        );
+        assert!(
+            msg1.contains("line 5"),
+            "OBS-P4-004a: second entry must be validator error at line 5; got: {msg1}"
+        );
+        assert!(
+            msg2.contains("line 7"),
+            "OBS-P4-004a: third entry must be eval error at line 7; got: {msg2}"
+        );
+    }
+
+    /// OBS-P4-004 (b): eval warning entries carry `"severity":"warning"` in JSON.
+    ///
+    /// This is the core OBS-P4-003 regression test: a Warning-severity eval
+    /// diagnostic must emit `"severity":"warning"`, NOT `"severity":"error"`.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_OBS_P4_004_b_eval_warning_carries_warning_severity_in_json() {
+        use slideforge::ParseSeverity;
+        use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        // One eval Warning + one validator Error — MultistageFailed requires both.
+        // (In practice, eval_count tracks only Error+Fatal, but we test the JSON
+        // severity field regardless of the count gating.)
+        let eval_warning = slideforge::make_test_owned_diag("E-EVL-099", "eval warning diagnostic");
+
+        let err = BuildError::MultistageFailed {
+            eval_diagnostics: vec![eval_warning],
+            eval_sort_keys: vec![("deck.sf".to_owned(), 2, 1)],
+            eval_severities: vec![ParseSeverity::Warning],
+            validator_diagnostics: vec![Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: Arc::from("E-VAL-001"),
+                message: Arc::from("validator error"),
+                span: SourceSpan {
+                    file: Arc::from("deck.sf"),
+                    line: 10,
+                    col: 1,
+                    ..SourceSpan::default()
+                },
+                hint: None,
+            }],
+            eval_count: 0, // warning doesn't count as error
+            validator_count: 1,
+        };
+
+        let json = render_build_error_to_json_value(&err);
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array");
+        assert_eq!(arr.len(), 2, "must have 2 entries");
+
+        // First entry is the eval warning (line 2 < line 10).
+        let eval_sev = arr[0]["severity"].as_str().unwrap_or("");
+        assert_eq!(
+            eval_sev, "warning",
+            "OBS-P4-003 / OBS-P4-004b: eval warning entry must carry severity='warning', \
+             not 'error'; got: {eval_sev}"
+        );
+
+        // Second entry is the validator error.
+        let val_sev = arr[1]["severity"].as_str().unwrap_or("");
+        assert_eq!(
+            val_sev, "error",
+            "OBS-P4-004b: validator error entry must carry severity='error'; got: {val_sev}"
+        );
+    }
+
+    /// OBS-P4-004 (c): `total` in JSON equals the post-dedup diagnostic count.
+    ///
+    /// Fixture: `ValidationFailed` with 2 identical diagnostics — dedup must
+    /// collapse them to 1, and `total` must be 1 (not 2).
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_OBS_P4_004_c_total_equals_post_dedup_count() {
+        use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let span = SourceSpan {
+            file: Arc::from("deck.sf"),
+            line: 5,
+            col: 3,
+            ..SourceSpan::default()
+        };
+        let diag = Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-VAL-001"),
+            message: Arc::from("duplicate diagnostic"),
+            span: span.clone(),
+            hint: None,
+        };
+        // Two identical entries — dedup must collapse to 1.
+        let err = BuildError::ValidationFailed {
+            diagnostics: vec![diag.clone(), diag],
+            count: 2,
+        };
+
+        let json = render_build_error_to_json_value(&err);
+        let total = json["total"].as_u64().expect("total must be a number");
+        assert_eq!(
+            total, 1,
+            "OBS-P4-004c: total must be 1 after dedup of 2 identical diagnostics; got: {total}"
+        );
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array");
+        assert_eq!(
+            arr.len(),
+            1,
+            "OBS-P4-004c: diagnostics array must have 1 entry after dedup; got: {}",
+            arr.len()
+        );
+    }
+
+    /// OBS-P4-004 (d): dedup collapses exact duplicates in `MultistageFailed`
+    /// validator entries.
+    ///
+    /// Fixture: two identical validator entries on the validator side of a
+    /// `MultistageFailed` — the render path's internal dedup (OBS-P4-001) must
+    /// collapse them to 1 and `total` must reflect the deduped count.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_OBS_P4_004_d_multistage_validator_dedup_collapses_duplicate() {
+        use slideforge::ParseSeverity;
+        use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let span = SourceSpan {
+            file: Arc::from("deck.sf"),
+            line: 8,
+            col: 1,
+            ..SourceSpan::default()
+        };
+        let dup_val_diag = Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-VAL-001"),
+            message: Arc::from("duplicate validator diagnostic"),
+            span: span.clone(),
+            hint: None,
+        };
+
+        let err = BuildError::MultistageFailed {
+            eval_diagnostics: vec![slideforge::make_test_owned_diag(
+                "E-EVL-001",
+                "eval error at line 2",
+            )],
+            eval_sort_keys: vec![("deck.sf".to_owned(), 2, 1)],
+            eval_severities: vec![ParseSeverity::Error],
+            // Two identical validator entries — render path dedup must collapse to 1.
+            validator_diagnostics: vec![dup_val_diag.clone(), dup_val_diag],
+            eval_count: 1,
+            validator_count: 2,
+        };
+
+        let json = render_build_error_to_json_value(&err);
+        let arr = json["diagnostics"]
+            .as_array()
+            .expect("diagnostics must be array");
+        // Expected: 1 eval + 1 deduped validator = 2 total.
+        assert_eq!(
+            arr.len(),
+            2,
+            "OBS-P4-004d: 2 duplicate validator entries must collapse to 1 after dedup; \
+             expected 2 total (1 eval + 1 validator), got: {}",
+            arr.len()
+        );
+        let total = json["total"].as_u64().expect("total must be a number");
+        assert_eq!(
+            total, 2,
+            "OBS-P4-004d: total must be 2 (1 eval + 1 deduped validator); got: {total}"
         );
     }
 }

@@ -183,6 +183,11 @@ pub enum BuildError {
     /// source-file order (ascending `(file, line, col)`) at render time.
     /// This satisfies BC-1.15.002 PC2 (HIGH-P3-001 fix).
     ///
+    /// `eval_severities` (parallel to `eval_diagnostics`) carries the ACTUAL
+    /// [`slideforge_syntax::ParseSeverity`] of each eval diagnostic. The JSON
+    /// renderer uses this to emit the correct `"severity"` field instead of
+    /// hardcoding `"error"` for all eval entries (OBS-P4-003 fix).
+    ///
     /// ## Exit code
     ///
     /// Exit code 2 — same as `EvalFailed` and `ValidationFailed`.
@@ -192,6 +197,7 @@ pub enum BuildError {
     /// - BC-1.15.002 PC1, PC2, invariant 3
     /// - STORY-055 AC-006 / F-P2-MED-001 fix
     /// - HIGH-P3-001 fix (source-order interleaving)
+    /// - OBS-P4-003 fix (eval severity fidelity in JSON output)
     #[error(
         "build failed with {eval_count} eval error(s) and {validator_count} validator \
          error(s); run with --warn-only to demote to warnings"
@@ -214,6 +220,17 @@ pub enum BuildError {
         ///
         /// Avoids the need to downcast `BoxDiagnostic` at render time.
         eval_sort_keys: Vec<(String, u32, u32)>,
+
+        /// Per-diagnostic severity parallel to `eval_diagnostics`.
+        ///
+        /// `eval_severities[i]` is the [`slideforge_syntax::ParseSeverity`] for
+        /// `eval_diagnostics[i]`, captured at push time from the `DiagnosticSink`.
+        /// Always the same length as `eval_diagnostics` and `eval_sort_keys`.
+        ///
+        /// Used by the JSON renderer to emit the ACTUAL `"severity"` field (e.g.
+        /// `"warning"`, `"error"`) for each eval entry rather than hardcoding
+        /// `"error"` (OBS-P4-003 fix).
+        eval_severities: Vec<slideforge_syntax::ParseSeverity>,
 
         /// Validator-stage diagnostics (from all registered `Validator` plugins).
         ///
