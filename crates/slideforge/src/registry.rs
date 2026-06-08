@@ -26,9 +26,9 @@ use slideforge_data::{FileDataSource, HttpDataSource, SqliteDataSource, XlsxData
 
 // ── Surface 2: Exporter ───────────────────────────────────────────────────────
 use slideforge_docx::DocxExporter;
+use slideforge_html::HtmlExporter;
 use slideforge_pdf::PdfExporter;
 use slideforge_pptx::PptxExporter;
-// Note: HtmlExporter is deferred to STORY-050 (slideforge-html excluded from workspace, Phase 4).
 
 // ── Surface 3: ChartRenderer ──────────────────────────────────────────────────
 use slideforge_charts::ChartRendererImpl;
@@ -99,10 +99,12 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     builder.register_data_source(Box::new(XlsxDataSource::new("")));
     builder.register_data_source(Box::new(SqliteDataSource::new("", "")));
 
-    // ── Surface 2: Exporter (3 bundled implementations; HTML deferred to STORY-050) ──
+    // ── Surface 2: Exporter (4 bundled implementations — PPTX, DOCX, PDF, HTML) ──
+    // STORY-046 AC-001 / Dependency Anchor: HtmlExporter registered here.
     builder.register_exporter(Box::new(PptxExporter::new()));
     builder.register_exporter(Box::new(DocxExporter));
     builder.register_exporter(Box::new(PdfExporter::new()));
+    builder.register_exporter(Box::new(HtmlExporter::new()));
 
     // ── Surface 3: ChartRenderer (1 bundled implementation — plotters-backed) ──
     builder.register_chart_renderer(Box::new(ChartRendererImpl::new()));

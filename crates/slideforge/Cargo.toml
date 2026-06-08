@@ -32,7 +32,9 @@ slideforge-charts = { workspace = true }
 slideforge-diagrams = { workspace = true }
 slideforge-math = { workspace = true }
 slideforge-brand = { workspace = true }
-# slideforge-html is excluded from workspace (Phase 4) — registered in STORY-050
+# slideforge-html: STORY-046 AC-001 — registered here per Dependency Anchor Justification.
+# HtmlExporter is the Exporter implementation for the "html" format.
+slideforge-html = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

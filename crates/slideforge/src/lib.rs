@@ -754,6 +754,41 @@ mod tests {
         );
     }
 
+    // ── STORY-046 AC-001 / Registration — HtmlExporter in default registry ────
+
+    /// STORY-046 AC-001 / Dependency Anchor: HtmlExporter must be registered in
+    /// the default plugin registry so `slideforge::build(..., format="html")` resolves.
+    /// Without this, slideforge-html is dead code and STORY-055 cannot produce HTML.
+    #[test]
+    fn test_story_046_html_exporter_registered_in_default_registry() {
+        let registry = registry::default_registry().expect("default_registry() must succeed");
+        let html_exporter = registry.lookup_exporter("html");
+        assert!(
+            html_exporter.is_some(),
+            "STORY-046 AC-001: HtmlExporter must be registered with id='html' in the \
+             default plugin registry; got None — add HtmlExporter registration to registry.rs"
+        );
+    }
+
+    /// STORY-046: HtmlExporter registered with correct id and extension.
+    #[test]
+    fn test_story_046_html_exporter_correct_id_and_extension() {
+        let registry = registry::default_registry().expect("default_registry() must succeed");
+        let html_exporter = registry
+            .lookup_exporter("html")
+            .expect("HtmlExporter must be registered");
+        assert_eq!(
+            html_exporter.id(),
+            "html",
+            "STORY-046: HtmlExporter.id() must return 'html'"
+        );
+        assert_eq!(
+            html_exporter.extension(),
+            "html",
+            "STORY-046: HtmlExporter.extension() must return 'html'"
+        );
+    }
+
     // ── C3: validate stage — strict and warn-only ─────────────────────────────
 
     /// Test stub: a validator that always emits one Error-severity diagnostic.
