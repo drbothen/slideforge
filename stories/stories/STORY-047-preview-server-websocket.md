@@ -9,6 +9,7 @@ points: 8
 priority: P1
 tdd_mode: strict
 status: draft
+version: "1.1"
 behavioral_contracts: [BC-4.03.004]
 verification_properties: []
 nfr_refs: [NFR-002, NFR-021, NFR-022, NFR-023, NFR-024]
@@ -173,7 +174,9 @@ success wraps the `JoinHandle<()>` for lifecycle management.
     `serde = { workspace = true }` (=1.0.228 per ADR-022),
     `serde_json = { workspace = true }` (=1.0.150 per ADR-022),
     `thiserror = { workspace = true }` (=2.0.18 per ADR-022),
-    `slideforge-html` (workspace), `slideforge-types` (workspace)
+    `slideforge-html` (workspace),
+    `slideforge-layout` (workspace) — provides `LaidOutDeck` (defined in `crates/slideforge-layout/src/types.rs`),
+    `slideforge-types` (workspace) — provides `Brand`, `BrandFonts`, `BrandPalette`, `Emu`, `SourceSpan`
   - Dev deps: `tokio-tungstenite = "=0.29.0"` (test WebSocket client only — NOT a runtime dep;
     axum 0.8 built-in WebSocket replaces tungstenite at runtime)
 - [ ] Create `crates/slideforge-preview/src/lib.rs` — re-export `PreviewServer`
@@ -185,7 +188,9 @@ success wraps the `JoinHandle<()>` for lifecycle management.
   - Internal: axum router with `GET /` and `GET /live`
   - Internal: broadcast channel for WebSocket message dispatch
 - [ ] Create `crates/slideforge-preview/src/ws_handler.rs` — WebSocket upgrade + message loop
-- [ ] Create `crates/slideforge-preview/src/messages.rs` — `WebSocketMessage` enum + serde
+- [ ] Create `crates/slideforge-preview/src/messages.rs` — `WebSocketMessage` enum + serde;
+  also defines `DiagnosticMessage` as the browser-facing wire DTO (NOT from `slideforge-types`;
+  this is a local struct carrying `file`, `line`, `col`, `message` fields for the WebSocket wire format)
 - [ ] Create `crates/slideforge-preview/src/debounce.rs` — 100ms debounce logic
 - [ ] Create `crates/slideforge-preview/src/error.rs` — `PreviewError` enum
 - [ ] Add `slideforge-preview` to workspace `Cargo.toml`
@@ -242,7 +247,8 @@ to be extensible from the start: use a `type` discriminator field.
 | `serde` | `{ workspace = true }` = `=1.0.228` (ADR-022) | JSON message serialization |
 | `serde_json` | `{ workspace = true }` = `=1.0.150` (ADR-022) | JSON encoding of WebSocket messages |
 | `slideforge-html` | workspace | `render_slide_to_html()` for initial page and updates |
-| `slideforge-types` | workspace | `LaidOutDeck`, `DiagnosticMessage` |
+| `slideforge-layout` | workspace | `LaidOutDeck` — defined in `crates/slideforge-layout/src/types.rs`; the geometric post-layout IR consumed by the preview server |
+| `slideforge-types` | workspace | `Brand`, `BrandFonts`, `BrandPalette`, `Emu`, `SourceSpan` — core domain types used by `make_preview_brand()`; does NOT provide `LaidOutDeck` or `DiagnosticMessage` |
 | `thiserror` | `{ workspace = true }` = `=2.0.18` (ADR-022) | `PreviewError` enum |
 
 All workspace-pinned crates centralized in `[workspace.dependencies]` per ADR-022.
@@ -305,3 +311,10 @@ Context budget: ~11% of a 100k-token context window. Within limit.
 - `tokio-tungstenite` as a runtime (non-dev) dependency — axum 0.8 built-in WebSocket
   (`axum::extract::ws::WebSocketUpgrade`) is the server-side implementation; tungstenite
   is allowed ONLY as a dev-dependency for test clients (`=0.29.0`)
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-06-06 | story-writer | Initial story decomposition |
+| 1.1 | 2026-06-08 | story-writer | Adversary Pass-2 fix: correct crate attributions — `LaidOutDeck` is from `slideforge-layout` (not `slideforge-types`); `DiagnosticMessage` is a local browser wire DTO defined in `crates/slideforge-preview/src/messages.rs` (not from `slideforge-types`); `slideforge-types` purpose corrected to `Brand`/`BrandFonts`/`BrandPalette`/`Emu`/`SourceSpan`; `slideforge-layout` added as explicit row to Library table and dep list |
