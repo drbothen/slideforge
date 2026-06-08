@@ -403,6 +403,8 @@ fn build_initial_html(deck: &slideforge_layout::LaidOutDeck) -> String {
     }} else if (msg.type === "error") {{
       var overlay = document.getElementById("sf-error-overlay") || document.createElement("div");
       overlay.id = "sf-error-overlay";
+      overlay.setAttribute("role", "alert");
+      overlay.setAttribute("aria-live", "assertive");
       overlay.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:1rem;font-family:monospace;z-index:9999;white-space:pre-wrap;";
       overlay.textContent = msg.errors.map(function(e) {{ return e.file + ":" + e.line + ":" + e.col + " " + e.message; }}).join("\n");
       if (!document.getElementById("sf-error-overlay")) {{
