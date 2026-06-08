@@ -147,18 +147,35 @@ where
         move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
             match &item {
                 // Template strings and (structurally possible) nested lists are valid.
-                FieldValue::Template(_) | FieldValue::List(_) => {},
+                FieldValue::Template(_) | FieldValue::List(_) => (item, item_span),
                 _ => {
+                    // Non-string item: map to a human-readable type name and emit
+                    // E-PAR-024 with the actual type substituted for <type>
+                    // (error-taxonomy v2.27 §E-PAR-024 binding format).
+                    let type_name = match &item {
+                        FieldValue::Num(_) => "integer",
+                        FieldValue::Float(_) => "decimal number",
+                        FieldValue::Bool(_) => "boolean",
+                        FieldValue::Ident(_) => "bare word",
+                        FieldValue::Shape(_) => "shape block",
+                        // Error sentinel from a nested recovery path — already reported.
+                        FieldValue::Error => "error sentinel",
+                        // Template and List are matched in the outer arm above.
+                        FieldValue::Template(_) | FieldValue::List(_) => unreachable!(),
+                    };
                     emitter.emit(Rich::custom(
                         item_span,
-                        "E-PAR-024: non-string list item. \
-                         List items must be quoted string literals; got non-string value. \
-                         Wrap the value in quotes to use it as a string."
-                            .to_string(),
+                        format!(
+                            "E-PAR-024: non-string list item. \
+                             List items must be quoted string literals; got {type_name}. \
+                             Wrap the value in quotes to use it as a string."
+                        ),
                     ));
+                    // Substitute FieldValue::Error so the evaluator's --warn-only
+                    // path skips this item rather than coercing it to a wrong value.
+                    (FieldValue::Error, item_span)
                 },
             }
-            (item, item_span)
         },
     );
 
@@ -1466,5 +1483,81 @@ mod tests {
         let result = parse_str(&src);
         let deck = result.expect("template_expr.sf must parse without errors");
         insta::assert_debug_snapshot!("template_expr_ast", deck);
+    }
+
+    // ── MED-001 (Pass-2): per-type <type> substitution in E-PAR-024 ──────────
+    //
+    // These load-bearing tests verify that E-PAR-024 emits the human-readable
+    // type name (error-taxonomy v2.27 §E-PAR-024 binding format) rather than
+    // the hardcoded string "non-string value".
+    //
+    // These tests exercise the field_line_cf / control_flow path (slide body
+    // list literal), complementing the deck.rs tests that exercise the
+    // vars-block / @var / field_line_parser path.
+
+    /// Helper: parse source string and return raw error reason strings.
+    fn parse_get_errors_cf(src: &str) -> Vec<String> {
+        match parse_str(src) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        }
+    }
+
+    /// MED-001 (a, cf path) — `bullets [42]` inside a slide body → E-PAR-024
+    /// message contains "integer" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001a_cf_integer_item_produces_e_par_024_with_type_integer() {
+        let src = concat!("slide content:\n", "  bullets [42]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001a (cf): bullets [42] must produce ≥1 parse error; got 0"
+        );
+        let has_integer = errors.iter().any(|msg| msg.contains("integer"));
+        assert!(
+            has_integer,
+            "MED-001a (cf): E-PAR-024 message for bullets [42] must contain 'integer' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (b, cf path) — `bullets [true]` inside a slide body → E-PAR-024
+    /// message contains "boolean" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001b_cf_boolean_item_produces_e_par_024_with_type_boolean() {
+        let src = concat!("slide content:\n", "  bullets [true]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001b (cf): bullets [true] must produce ≥1 parse error; got 0"
+        );
+        let has_boolean = errors.iter().any(|msg| msg.contains("boolean"));
+        assert!(
+            has_boolean,
+            "MED-001b (cf): E-PAR-024 message for bullets [true] must contain 'boolean' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (c, cf path) — `bullets [someident]` inside a slide body → E-PAR-024
+    /// message contains "bare word" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001c_cf_bare_word_item_produces_e_par_024_with_type_bare_word() {
+        // `someident` parsed as FieldValue::Ident (unquoted bare identifier).
+        let src = concat!("slide content:\n", "  bullets [someident]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001c (cf): bullets [someident] must produce ≥1 parse error; got 0"
+        );
+        let has_bare_word = errors.iter().any(|msg| msg.contains("bare word"));
+        assert!(
+            has_bare_word,
+            "MED-001c (cf): E-PAR-024 message for bullets [someident] must contain 'bare word' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
     }
 }
