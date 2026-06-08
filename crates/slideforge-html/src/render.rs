@@ -220,7 +220,8 @@ fn render_bullet_item(item: &slideforge_types::BulletItem, _depth: u32) -> Strin
 /// - Every non-decorative image/chart/diagram has a non-empty `alt` (img) or
 ///   `<title>` (svg) attribute.
 /// - Every decorative element has `alt="" role="presentation"`.
-/// - Heading hierarchy starts at `<h1>` for the slide title.
+/// - Heading hierarchy starts at `<h1>` for the slide title — no skipped levels
+///   (F-004 / BC-4.03.003 postcondition 7 / axe-core heading-order).
 /// - No `<canvas>` elements in the output.
 ///
 /// # Security (AC-010 / CWE-601)
@@ -228,12 +229,37 @@ fn render_bullet_item(item: &slideforge_types::BulletItem, _depth: u32) -> Strin
 /// All inline `Link`/`Xref` nodes are validated via
 /// [`crate::exporter::is_safe_link_scheme`] before becoming `href` attributes.
 #[must_use]
-pub fn render_slide_to_html(slide: &LaidOutSlide, _brand: &Brand) -> String {
+pub fn render_slide_to_html(slide: &LaidOutSlide, brand: &Brand) -> String {
+    // F-004 (BC-4.03.003 PC-7): Compute heading state before rendering.
+    // If the slide has no Title frame, a Subtitle frame becomes h1 (not h2),
+    // guaranteeing no <h2> without a preceding <h1> in document order.
+    let has_title_frame = slide
+        .frames
+        .iter()
+        .any(|f| matches!(&f.content, FrameContent::Title(_)));
+
     let mut frames_html = String::new();
+    // Track whether h1 has been emitted — if the first heading-like frame is
+    // Subtitle and no Title precedes it, render it as h1.
+    let mut h1_emitted = false;
+
     for frame in &slide.frames {
-        frames_html.push_str(&render_element_to_html(frame));
+        let frame_html = match &frame.content {
+            FrameContent::Subtitle(text) if !has_title_frame && !h1_emitted => {
+                // No Title frame on this slide — Subtitle becomes h1.
+                h1_emitted = true;
+                format!("<h1>{}</h1>", html_escape::encode_text(text))
+            },
+            FrameContent::Title(_) => {
+                h1_emitted = true;
+                render_element_to_html(frame)
+            },
+            _ => render_element_to_html(frame),
+        };
+        frames_html.push_str(&frame_html);
         frames_html.push('\n');
     }
+    let _ = brand; // Brand used by future template rendering.
 
     let slide_index = slide.source_index + 1;
     format!(
@@ -1198,6 +1224,75 @@ mod tests {
     }
 
         // ─────────────────────────────────────────────────────────────────────────
+    // F-004 — heading hierarchy: <h2> must not appear without a preceding <h1>
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-004: A slide that starts with Subtitle only (no Title frame) must NOT
+    /// produce a bare <h2> without a preceding <h1>. The exporter must ensure
+    /// heading levels start at h1 (axe-core heading-order rule / BC-4.03.003 PC-7).
+    #[test]
+    fn test_F004_subtitle_only_slide_must_not_produce_bare_h2() {
+        // A slide with ONLY a Subtitle frame (no Title) — simulates the bug path.
+        let slide = make_slide(vec![Frame {
+            bbox: make_bbox_full(),
+            content: FrameContent::Subtitle(Arc::from("Just a subtitle")),
+            text_flow: None,
+            region_role: None,
+        }]);
+        let brand = make_brand();
+        let result = render_slide_to_html(&slide, &brand);
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid selector");
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        if doc.select(&sel_h2).count() > 0 {
+            assert!(
+                doc.select(&sel_h1).count() > 0,
+                "F-004: heading hierarchy violation — h2 present without h1; \
+                 axe-core heading-order would fail; got: {result}"
+            );
+        }
+    }
+
+    /// F-004: A slide with Title then Subtitle must produce h1 before h2 (valid).
+    #[test]
+    fn test_F004_title_then_subtitle_produces_h1_then_h2() {
+        let slide = make_slide(vec![
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Title(Arc::from("Main Title")),
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: make_bbox_full(),
+                content: FrameContent::Subtitle(Arc::from("Sub heading")),
+                text_flow: None,
+                region_role: None,
+            },
+        ]);
+        let brand = make_brand();
+        let result = render_slide_to_html(&slide, &brand);
+        let doc = scraper::Html::parse_document(&result);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid selector");
+        assert!(
+            doc.select(&sel_h1).count() > 0,
+            "F-004: Title must produce h1; got: {result}"
+        );
+        assert!(
+            doc.select(&sel_h2).count() > 0,
+            "F-004: Subtitle after Title must produce h2; got: {result}"
+        );
+        // Verify h1 comes before h2 in document order.
+        let h1_pos = result.find("<h1>").unwrap_or(usize::MAX);
+        let h2_pos = result.find("<h2>").unwrap_or(usize::MAX);
+        assert!(
+            h1_pos < h2_pos,
+            "F-004: h1 must appear before h2 in document order; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // F-003 — FrameContent::Body must render ContentBlock variants properly
     // ─────────────────────────────────────────────────────────────────────────
 
