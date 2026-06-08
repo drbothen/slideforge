@@ -43,6 +43,9 @@ slideforge-html = { workspace = true }
 # Core IR types: LaidOutDeck, LaidOutSlide, etc.
 slideforge-layout = { workspace = true }
 
+# Core domain types: Brand, Emu, etc.
+slideforge-types = { workspace = true }
+
 # Plugin API: Diagnostic type for error messages.
 slideforge-plugin-api = { workspace = true }
 
@@ -56,14 +59,11 @@ tracing = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
 # reqwest for HTTP integration tests (AC-001: GET / → 200 OK).
-# NOTE: The workspace reqwest entry uses `features = ["rustls-tls", ...]` but
-# reqwest 0.13.4 renamed this feature to `rustls`. The workspace Cargo.toml
-# needs the feature corrected from "rustls-tls" → "rustls" before reqwest
-# can be activated as a workspace dep. Tracked as a workspace bug to fix at
-# implementation time. The `{ workspace = true }` form inherits the broken
-# feature name, so we bypass the workspace entry and pin directly here.
-# See: https://docs.rs/reqwest/0.13.4/reqwest/#optional-features
-reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "charset", "http2"] }
+# NOTE: The workspace reqwest entry previously used `features = ["rustls-tls", ...]` but
+# reqwest 0.13.4 renamed this feature to `rustls`. The workspace Cargo.toml was corrected
+# from "rustls-tls" → "rustls" at implementation time (in-scope fix per production-grade
+# default principle). Now using the workspace entry directly.
+reqwest = { workspace = true }
 
 # Async test support (feature flags already included in runtime dep; repeated for clarity).
 tokio = { version = "=1.52.3", features = [
@@ -73,3 +73,13 @@ tokio = { version = "=1.52.3", features = [
     "net",
     "sync",
 ] }
+
+# futures-util for StreamExt on WebSocket streams (tokio-tungstenite test client).
+# Transitive dep of tokio-tungstenite 0.29.0; pinned to the version in the lock file.
+futures-util = "=0.3.32"
+
+# Temp directory for AC-006 no-output-files test.
+tempfile = { workspace = true }
+
+# JSON assertions in integration tests.
+serde_json = { workspace = true }

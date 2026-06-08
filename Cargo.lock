@@ -3760,12 +3760,15 @@ name = "slideforge-preview"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",
  "slideforge-html",
  "slideforge-layout",
  "slideforge-plugin-api",
+ "slideforge-types",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-tungstenite",

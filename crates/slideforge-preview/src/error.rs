@@ -9,14 +9,14 @@
 ///
 /// [`PreviewError::PortInUse`] is returned by [`crate::PreviewServer::start`] when
 /// the requested port is already bound. The error message includes the hint:
-/// "Use --port <N> to specify a different port."
+/// `"Use --port <N> to specify a different port."`
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
     /// The requested port is already in use.
     ///
     /// # Hint
     ///
-    /// The error message includes: "Use --port <N> to specify a different port."
+    /// The error message includes `"Use --port <N> to specify a different port."`.
     #[error("Port {port} is already in use. Use --port <N> to specify a different port.")]
     PortInUse {
         /// The port that was requested but could not be bound.

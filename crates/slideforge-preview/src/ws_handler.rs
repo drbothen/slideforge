@@ -17,7 +17,7 @@
 //! WebSocket text frame. Lagged receivers (slow clients) receive
 //! `RecvError::Lagged` which is logged and recovered gracefully.
 
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use tokio::sync::broadcast;
 
@@ -28,11 +28,8 @@ use tokio::sync::broadcast;
 /// The upgrade must complete within 1 second of server start. axum's
 /// `WebSocketUpgrade::on_upgrade` is non-blocking and delegates to the async
 /// runtime, so this constraint is trivially satisfied.
-pub async fn ws_upgrade_handler(
-    _ws: WebSocketUpgrade,
-    _rx: broadcast::Receiver<String>,
-) -> Response {
-    todo!("implement ws_upgrade_handler: call ws.on_upgrade(|socket| handle_ws_connection(socket, rx))")
+pub async fn ws_upgrade_handler(ws: WebSocketUpgrade, rx: broadcast::Receiver<String>) -> Response {
+    ws.on_upgrade(move |socket| handle_ws_connection(socket, rx))
 }
 
 /// Drive a single WebSocket connection, forwarding broadcast messages to the client.
@@ -42,7 +39,28 @@ pub async fn ws_upgrade_handler(
 /// 1. Subscribe to the broadcast receiver.
 /// 2. Loop: await the next broadcast message; forward it as a WebSocket Text frame.
 /// 3. Exit when the client disconnects or the broadcast channel is closed.
-#[allow(dead_code)]
-async fn handle_ws_connection(_socket: WebSocket, _rx: broadcast::Receiver<String>) {
-    todo!("implement handle_ws_connection: recv loop forwarding JSON text frames")
+async fn handle_ws_connection(mut socket: WebSocket, mut rx: broadcast::Receiver<String>) {
+    loop {
+        match rx.recv().await {
+            Ok(json) => {
+                if socket.send(Message::Text(json.into())).await.is_err() {
+                    // Client disconnected — stop forwarding.
+                    tracing::debug!("WebSocket client disconnected during send");
+                    break;
+                }
+            },
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                // Client is slow — log and continue; do not disconnect.
+                tracing::warn!(
+                    skipped,
+                    "WebSocket client lagged behind broadcast channel; skipped messages"
+                );
+            },
+            Err(broadcast::error::RecvError::Closed) => {
+                // Broadcast channel closed (server shutting down).
+                tracing::debug!("Broadcast channel closed — closing WebSocket connection");
+                break;
+            },
+        }
+    }
 }

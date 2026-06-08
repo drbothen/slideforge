@@ -85,7 +85,7 @@ tar = "=0.4.46"
 
 # Networking / async runtime (inert until a member consumes them)
 axum = { version = "=0.8.9", features = ["ws"] }
-reqwest = { version = "=0.13.4", default-features = false, features = ["rustls-tls", "charset", "http2"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "charset", "http2"] }
 tokio = { version = "=1.52.3", default-features = false }
 tokio-tungstenite = "=0.29.0"
 

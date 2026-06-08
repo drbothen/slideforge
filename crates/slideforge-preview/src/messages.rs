@@ -82,44 +82,101 @@ impl WebSocketMessage {
 }
 
 #[cfg(test)]
+#[allow(clippy::doc_markdown)] // prose references to type names and BC IDs in test docs
 mod tests {
     use super::*;
 
     /// BC-4.03.004 postcondition 3b — reload message serializes to correct JSON shape.
     #[test]
-    fn test_BC_4_03_004_reload_message_json_shape() {
-        todo!("implement: verify reload message serializes to {{\"type\":\"reload\",\"slides\":[...]}}")
+    fn test_bc_4_03_004_reload_message_json_shape() {
+        let msg = WebSocketMessage::Reload {
+            slides: vec!["<article>slide1</article>".to_string()],
+        };
+        let json = msg.to_json();
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(v["type"], "reload");
+        assert!(v["slides"].is_array());
+        assert_eq!(v["slides"][0], "<article>slide1</article>");
     }
 
     /// BC-4.03.004 postcondition 3c — error message serializes to correct JSON shape.
     #[test]
-    fn test_BC_4_03_004_error_message_json_shape() {
-        todo!("implement: verify error message serializes to {{\"type\":\"error\",\"errors\":[...]}}")
+    fn test_bc_4_03_004_error_message_json_shape() {
+        let msg = WebSocketMessage::Error {
+            errors: vec![DiagnosticMessage {
+                file: "deck.sf".to_string(),
+                line: 5,
+                col: 3,
+                message: "E-PAR-001".to_string(),
+            }],
+        };
+        let json = msg.to_json();
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(v["type"], "error");
+        assert!(v["errors"].is_array());
+        assert_eq!(v["errors"][0]["file"], "deck.sf");
     }
 
     /// BC-4.03.004 invariant 2 — type discriminator field is present and lowercase.
     #[test]
-    fn test_BC_4_03_004_invariant_type_discriminator_present() {
-        todo!("implement: verify 'type' field present in both reload and error JSON")
+    fn test_bc_4_03_004_invariant_type_discriminator_present() {
+        let reload = WebSocketMessage::Reload { slides: vec![] };
+        let error = WebSocketMessage::Error { errors: vec![] };
+        let reload_json: serde_json::Value =
+            serde_json::from_str(&reload.to_json()).expect("valid json");
+        let error_json: serde_json::Value =
+            serde_json::from_str(&error.to_json()).expect("valid json");
+        assert_eq!(reload_json["type"], "reload");
+        assert_eq!(error_json["type"], "error");
     }
 
     /// BC-4.03.004 — DiagnosticMessage serializes all four required fields.
     #[test]
-    fn test_BC_4_03_004_diagnostic_message_all_fields_present() {
-        todo!(
-            "implement: verify DiagnosticMessage serializes file/line/col/message fields"
-        )
+    fn test_bc_4_03_004_diagnostic_message_all_fields_present() {
+        let dm = DiagnosticMessage {
+            file: "test.sf".to_string(),
+            line: 10,
+            col: 5,
+            message: "E-PAR-001: unexpected token".to_string(),
+        };
+        let json = serde_json::to_string(&dm).expect("valid json");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert!(v.get("file").is_some(), "file field missing");
+        assert!(v.get("line").is_some(), "line field missing");
+        assert!(v.get("col").is_some(), "col field missing");
+        assert!(v.get("message").is_some(), "message field missing");
+        assert_eq!(v["file"], "test.sf");
+        assert_eq!(v["line"], 10);
+        assert_eq!(v["col"], 5);
     }
 
     /// Round-trip: serialize then deserialize reload message produces identical value.
     #[test]
-    fn test_BC_4_03_004_reload_message_roundtrip() {
-        todo!("implement: serialize reload message, deserialize back, assert eq")
+    fn test_bc_4_03_004_reload_message_roundtrip() {
+        let original = WebSocketMessage::Reload {
+            slides: vec![
+                "<article>slide1</article>".to_string(),
+                "<article>slide2</article>".to_string(),
+            ],
+        };
+        let json = original.to_json();
+        let deserialized: WebSocketMessage = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(original, deserialized);
     }
 
     /// Round-trip: serialize then deserialize error message produces identical value.
     #[test]
-    fn test_BC_4_03_004_error_message_roundtrip() {
-        todo!("implement: serialize error message, deserialize back, assert eq")
+    fn test_bc_4_03_004_error_message_roundtrip() {
+        let original = WebSocketMessage::Error {
+            errors: vec![DiagnosticMessage {
+                file: "deck.sf".to_string(),
+                line: 5,
+                col: 3,
+                message: "E-PAR-001: syntax error".to_string(),
+            }],
+        };
+        let json = original.to_json();
+        let deserialized: WebSocketMessage = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(original, deserialized);
     }
 }
