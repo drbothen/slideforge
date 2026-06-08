@@ -26,15 +26,17 @@ slideforge-layout     = { workspace = true }
 # serialize_theme_to_xml, serialize_layout_to_xml). No brand computation is called —
 # the exporter consumes pre-serialized bytes only.
 slideforge-brand      = { workspace = true }
+# STORY-082: promoted from dev-dep to production dep.
+# SectionListBuilder uses quick-xml to build p:extLst/p14:sectionLst XML block
+# via raw-XML injection (ooxmlsdk has no typed p14 structs — W2 post-processing pattern).
+quick-xml = { workspace = true }
+# STORY-082: promoted from dev-dep to production dep (deferred from STORY-040 scope split).
+# SectionListBuilder uses sha2 for deterministic GUID derivation from section names.
+sha2 = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 # slideforge-eval with test-utils feature exposes BleedChecker for AC-010 bleed tests.
 slideforge-eval = { workspace = true, features = ["test-utils"] }
-# sha2 for AC-007 determinism test (SHA-256 byte-identical comparison).
-sha2 = { workspace = true }
 # tracing-test for load-bearing warn-capture tests (F-P5-LOW-001 partial-reuse warn).
 tracing-test = "=0.2.5"
-# quick-xml for parsing core.xml and slide XML in a11y tests (BC-4.01.004 / BC-5.01.005).
-# Using workspace version (=0.36.0) to avoid a second resolution entry in Cargo.lock.
-quick-xml = { workspace = true }

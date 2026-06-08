@@ -160,7 +160,7 @@ fn main() {
         slides: vec![slide1, slide2],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
 
     // ── Run the exporter ──────────────────────────────────────────────────────
     let opts = ExportOptions::default();

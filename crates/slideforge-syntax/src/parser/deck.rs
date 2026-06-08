@@ -685,6 +685,10 @@ fn expand_block_item(item: BlockItem, reg: &AliasRegistry) -> BlockItem {
             BlockItem::If(Spanned::new(if_node, span))
         },
         BlockItem::Section(_) => item, // sections don't contain slides
+        // SectionGroup ("Name": form) — slide children are not alias-expanded here.
+        // The section group itself is returned unchanged; slide children inside it
+        // are expanded during the STORY-082 eval pass.
+        BlockItem::SectionGroup(_) => item,
     }
 }
 

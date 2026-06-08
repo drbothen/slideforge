@@ -3653,6 +3653,7 @@ dependencies = [
  "miette",
  "ordered-float",
  "quick-xml 0.36.0",
+ "slideforge-layout",
  "slideforge-syntax",
  "slideforge-types",
  "thiserror",

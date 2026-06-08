@@ -53,6 +53,7 @@ pub mod notes_master;
 pub mod notes_slide;
 pub mod presentation;
 pub mod rels;
+pub mod sections;
 pub mod slide_ids;
 pub mod slide_serializer;
 pub mod xml_escape;
@@ -73,6 +74,7 @@ mod tests {
     mod core_tests;
     mod layout_tests;
     mod notes_tests;
+    mod sections_tests;
     mod story_072_gradient_tests;
 }
 

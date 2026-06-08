@@ -190,7 +190,7 @@ fn make_deck_laid_out() -> LaidOutDeck {
         ],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 // ─── ZIP helpers ─────────────────────────────────────────────────────────────

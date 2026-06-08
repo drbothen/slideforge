@@ -1637,7 +1637,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        }
+            slide_sections: vec![],        }
     }
 
     /// Build a 1-slide `LaidOutDeck` with a Title frame + an Image figure frame.
@@ -1687,7 +1687,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        }
+            slide_sections: vec![],        }
     }
 
     /// Build a minimal `Brand` for export tests.
@@ -1984,7 +1984,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let opts = ExportOptions::default();
 
         // Must NOT panic — this is the core assertion.
@@ -2105,7 +2105,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
 
         let exporter = PdfExporter::new();
         let deck = minimal_deck();
@@ -2333,7 +2333,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let brand = Brand {
             name: Arc::from("TestBrand"),
             palette: BrandPalette {
@@ -2437,7 +2437,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let brand = minimal_brand();
         let opts = ExportOptions::default();
 
@@ -2835,7 +2835,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let opts = ExportOptions::default();
 
         // Export with uncompressed content streams so color operators are scannable.

@@ -575,6 +575,10 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         slides: laid_out_slides,
         sections,
         warnings: deck_warnings,
+        // STORY-082: slide_sections populated by eval pass (slideforge-eval::section_groups).
+        // The layout engine does not populate this field — it is filled by the evaluator
+        // after mapping SectionGroupNode children to their PPTX slide IDs.
+        slide_sections: vec![],
     })
 }
 

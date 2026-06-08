@@ -214,7 +214,7 @@ fn make_deck_laid_out() -> LaidOutDeck {
         ],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 // ─── ZIP helpers ─────────────────────────────────────────────────────────────
@@ -510,7 +510,7 @@ fn check_ac009() -> bool {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
             Ok(b) => b,
             Err(e) => {
@@ -583,7 +583,7 @@ fn check_ac010() -> bool {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let pptx = match exporter.export(&deck, &laid_out, &brand, &opts) {
             Ok(b) => b,
             Err(e) => {
@@ -671,7 +671,7 @@ fn check_ac012() -> bool {
         slides: vec![],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let deck = make_deck(0);
     let brand = make_brand();
     let opts = ExportOptions::default();
@@ -729,7 +729,7 @@ fn check_s1() -> bool {
         slides: vec![slide_with_neg],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let deck = make_deck(1);
     let brand = make_brand();
     let opts = ExportOptions::default();
@@ -768,7 +768,7 @@ fn check_s3(pptx: &[u8]) -> bool {
         slides: vec![subtitle_slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let deck = make_deck(1);
     let brand = make_brand();
     let opts = ExportOptions::default();

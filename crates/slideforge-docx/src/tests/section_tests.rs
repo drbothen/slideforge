@@ -186,7 +186,7 @@ fn make_laid_out_deck(slides: Vec<LaidOutSlide>, sections: Vec<GeneratedSection>
         slides,
         sections,
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Call `DocxExporter::export` and return the raw `.docx` bytes.

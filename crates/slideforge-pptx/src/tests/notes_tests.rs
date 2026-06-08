@@ -166,7 +166,7 @@ fn make_laid_out_deck_with_notes(notes_per_slide: &[Option<&str>]) -> LaidOutDec
         slides,
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Run the full `PptxExporter::export` path and return the ZIP bytes.
@@ -801,7 +801,7 @@ fn test_f040_p1_003_rich_notes_bold_and_italic_runs() {
         slides: vec![slide_with_rich_notes],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
@@ -860,7 +860,7 @@ fn test_f040_p1_003_multi_entry_notes_all_emitted() {
         slides: vec![slide_with_two_notes],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
@@ -954,7 +954,7 @@ fn test_f040_p2_001_unsafe_scheme_javascript_no_external_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     // The notesSlide1.xml.rels must NOT contain the javascript: URL.
@@ -1021,7 +1021,7 @@ fn test_f040_p2_001_unsafe_schemes_data_file_no_external_rel() {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-        };
+            slide_sections: vec![],        };
         let pptx = export_pptx(&deck, &laid_out);
 
         let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -1083,7 +1083,7 @@ fn test_f040_p2_002_single_safe_https_link_has_hlinkclick_and_external_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     // notesSlide1.xml must contain <a:hlinkClick r:id="rId3"/>
@@ -1155,7 +1155,7 @@ fn test_f040_p2_002_two_distinct_links_stable_deterministic_rids() {
         slides: vec![make_slide_with_two_links()],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx_1 = export_pptx(&deck, &laid_out_1);
 
     // Second export (same inputs)
@@ -1164,7 +1164,7 @@ fn test_f040_p2_002_two_distinct_links_stable_deterministic_rids() {
         slides: vec![make_slide_with_two_links()],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx_2 = export_pptx(&deck, &laid_out_2);
 
     // Both exports must be byte-identical (determinism).
@@ -1233,7 +1233,7 @@ fn test_f040_p2_002_duplicate_url_deduped_to_single_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -1390,7 +1390,7 @@ fn test_f040_p3_001_nested_link_in_display_text_no_orphan_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     // Parse the notesSlide1.xml.rels — count External rels.
@@ -1514,7 +1514,7 @@ fn test_sec040_001_ampersand_in_url_query_string_is_xml_escaped_in_rels() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     // Open the real ZIP and read the .rels file for this notesSlide.
@@ -1809,7 +1809,7 @@ fn test_bc_5_02_002_ac006_notes_xml_output_pinned_plain_text() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -1854,7 +1854,7 @@ fn test_bc_5_02_002_ac006_notes_xml_output_pinned_bold_italic() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -1893,7 +1893,7 @@ fn test_bc_5_02_002_ac006_notes_xml_output_pinned_xml_escape() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2053,7 +2053,7 @@ fn test_f003_ac006_notes_code_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2097,7 +2097,7 @@ fn test_f003_ac006_notes_xref_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2143,7 +2143,7 @@ fn test_f003_ac006_notes_superscript_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2193,7 +2193,7 @@ fn test_f003_ac006_notes_subscript_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2238,7 +2238,7 @@ fn test_f003_ac006_notes_strikethrough_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2283,7 +2283,7 @@ fn test_f003_ac006_notes_highlight_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2329,7 +2329,7 @@ fn test_f003_ac006_notes_footnote_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2377,7 +2377,7 @@ fn test_f003_ac006_notes_math_variant_in_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2445,7 +2445,7 @@ fn test_f006_registry_routing_notes_produces_same_ooxml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
@@ -2560,7 +2560,7 @@ fn test_obs1_empty_display_text_link_no_orphan_external_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -2647,7 +2647,7 @@ fn test_obs1_non_empty_display_text_link_still_produces_rel_and_hlinkclick() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -2746,7 +2746,7 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_plain() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -2825,7 +2825,7 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_bold_empty() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -2915,7 +2915,7 @@ fn test_f085_p6_001_bold_wrapping_link_no_orphan_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -2986,7 +2986,7 @@ fn test_f085_p6_001_italic_wrapping_link_no_orphan_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -3050,7 +3050,7 @@ fn test_f085_p6_001_strikethrough_wrapping_link_no_orphan_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -3115,7 +3115,7 @@ fn test_f085_p6_001_deeply_nested_bold_italic_link_no_orphan_rel() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -3191,7 +3191,7 @@ fn test_f085_p6_001_mixed_toplevel_and_nested_link_exactly_one_rel_one_click() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");

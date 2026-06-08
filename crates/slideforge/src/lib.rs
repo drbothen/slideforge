@@ -2482,7 +2482,7 @@ mod tests {
             page_size: slideforge_layout::PageSize::default(),
             sections: vec![],
             warnings: vec![],
-        }
+            slide_sections: vec![],        }
     }
 
     // ── C-2 regression: eval Error diagnostics gated in strict mode ───────────

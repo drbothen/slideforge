@@ -223,7 +223,7 @@ mod tests {
             slides,
             sections: vec![],
             warnings: vec![],
-        }
+            slide_sections: vec![],        }
     }
 
     // ── F-045-P1-004: 3-slide titled deck → exactly 3 entries in source order ─

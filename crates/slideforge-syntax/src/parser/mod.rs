@@ -30,6 +30,7 @@ pub mod control_flow;
 pub mod deck;
 pub mod expr;
 pub mod section;
+pub mod section_group;
 pub mod shape;
 pub mod slide;
 pub mod template;
@@ -49,6 +50,12 @@ mod section_tests;
 // Currently fails because template_value() does not yet recognize these delimiters.
 #[cfg(test)]
 mod template_inline_markup_tests;
+
+// STORY-082 Red Gate: failing test suite for section group parser (AC-001, AC-002,
+// AC-010, AC-011). Tests drive: SectionGroupNode, BlockItem::SectionGroup,
+// section_group_parser, E-PAR-023 (empty name), W-PAR-002 (duplicate name).
+#[cfg(test)]
+mod section_group_tests;
 
 use std::sync::Arc;
 

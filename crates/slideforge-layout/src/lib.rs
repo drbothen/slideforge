@@ -67,7 +67,8 @@ pub use layout::run;
 pub use sections::{GeneratedSection, OutputFormat, SectionItem, SectionKind, SectionSource};
 pub use types::{
     BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, LayoutWarning, PageSize,
-    RegionRole, RegisterSet, RegisterTag, Rgb, ShapeFrame, ShapeType, TextFlow, TextOverflow,
+    RegionRole, RegisterSet, RegisterTag, Rgb, ShapeFrame, ShapeType, SlideSectionEntry, TextFlow,
+    TextOverflow,
 };
 
 #[cfg(test)]

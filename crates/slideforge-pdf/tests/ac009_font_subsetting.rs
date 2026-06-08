@@ -277,7 +277,7 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
         }],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
 
     let deck = Deck {
         slides: vec![],

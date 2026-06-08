@@ -54,8 +54,9 @@ pub mod token;
 // Re-export the public API surface at the crate root for ergonomic use.
 
 pub use ast::{
-    AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionNode, SetRule,
-    SetRuleValue, ShapeNode, SlideNode, TemplateValue, VariantNode, VariantsBlock, VarsBlock,
+    AliasNode, BlockItem, DeckNode, FieldNode, FieldValue, ForNode, IfNode, SectionGroupNode,
+    SectionNode, SetRule, SetRuleValue, ShapeNode, SlideNode, TemplateValue, VariantNode,
+    VariantsBlock, VarsBlock,
 };
 pub use error::{ParseSeverity, SyntaxError};
 pub use expr::{BinOpKind, Expr, UnaryOpKind};

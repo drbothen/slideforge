@@ -28,6 +28,40 @@ pub use slideforge_types::{AltText, FillSpec, LayoutWarning, Rgb, ShapeType};
 
 use crate::sections::GeneratedSection;
 
+/// A single slide-grouping section for PPTX `<p14:sectionLst>` (STORY-082).
+///
+/// `SlideSectionEntry` maps a user-declared `section "Name":` DSL block to the
+/// PPTX slide IDs that fall within it. The PPTX exporter reads this field to
+/// build the `<p14:sectionLst>` extension block in `presentation.xml`.
+///
+/// ## Invariants
+///
+/// - `name` must be non-empty (enforced at parse time by E-PAR-023).
+/// - `slide_ids` must be non-empty (a section with no slides is not emitted
+///   by the eval pass).
+/// - IDs are PPTX slide IDs (start at 256), NOT zero-based indices.
+///
+/// ## Separation from `GeneratedSection`
+///
+/// `SlideSectionEntry` is a NEW, DISTINCT type from `GeneratedSection`.
+/// `GeneratedSection` carries DOCX/PDF document section data (e.g.,
+/// `ExecutiveSummary`, `RiskRegister`). `SlideSectionEntry` carries PPTX-only
+/// slide grouping data. They MUST NOT be conflated or reused for each other.
+///
+/// ## STORY-082
+///
+/// Introduced in STORY-082 (PPTX: Slide-Grouping Sections).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SlideSectionEntry {
+    /// The section group name as declared in the DSL (`section "Name":`).
+    pub name: std::sync::Arc<str>,
+    /// The PPTX slide IDs that belong to this section group, in deck order.
+    ///
+    /// IDs start at 256 (PPTX convention). An empty list means the section
+    /// has no slides and should not be emitted.
+    pub slide_ids: Vec<u32>,
+}
+
 /// The default canvas width for the layout engine (10 inches = 9,144,000 EMU).
 ///
 /// This is the canvas width used by the layout engine when the active `Brand`
@@ -140,6 +174,23 @@ pub struct LaidOutDeck {
     /// (BC-3.04.001 EC-002) and the inline validation pass
     /// (BC-3.05.001 EC-002 / AC-007).
     pub warnings: Vec<LayoutWarning>,
+
+    /// PPTX slide-grouping sections from `section "Name":` DSL blocks.
+    ///
+    /// Populated by the eval pass (STORY-082 / BC-4.01.003). Each entry maps
+    /// a named section group to the PPTX slide IDs (starting at 256) of slides
+    /// that fall within it.
+    ///
+    /// An empty `Vec` means no `section "Name":` grouping blocks were present.
+    /// When empty, `SectionListBuilder` returns `presentation.xml` bytes
+    /// unchanged — no `<p:extLst>` or `<p14:sectionLst>` is emitted.
+    ///
+    /// ## Invariant (BC-4.01.003 invariant 4)
+    ///
+    /// This field is populated ONLY from slide-grouping sections.
+    /// It MUST NOT alias or draw from [`LaidOutDeck::sections`]
+    /// (`GeneratedSection` entries for DOCX/PDF — a distinct concept).
+    pub slide_sections: Vec<SlideSectionEntry>,
 }
 
 /// Slide page dimensions in EMU.
@@ -738,6 +789,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],            slide_sections: vec![],
         };
         let deck2 = deck.clone();
         assert_eq!(deck, deck2);

@@ -437,7 +437,7 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                             );
                             slides.extend(generated);
                         },
-                        BlockItem::Slide(_) | BlockItem::Section(_) => {
+                        BlockItem::Slide(_) | BlockItem::Section(_) | BlockItem::SectionGroup(_) => {
                             // Nested slides inside a slide body are not valid;
                             // silently ignored (parser guards against this).
                         },
@@ -468,6 +468,12 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
             },
             BlockItem::Section(_spanned_section) => {
                 // Section blocks generate no slides at the eval level.
+            },
+            BlockItem::SectionGroup(_spanned_group) => {
+                // SectionGroup ("Name": form) generates no slides directly here.
+                // Slide children are handled by the STORY-082 eval pass
+                // (slideforge-eval::section_groups) which populates
+                // LaidOutDeck.slide_sections.
             },
         }
     }

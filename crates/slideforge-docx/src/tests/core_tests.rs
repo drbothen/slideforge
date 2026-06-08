@@ -132,7 +132,7 @@ fn make_laid_out_deck(slides: Vec<LaidOutSlide>) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Call `DocxExporter::export` and return the raw `.docx` bytes.
@@ -1657,7 +1657,7 @@ fn make_progress_bar_deck_with_colorbar(percent_input: u8, total_width_emu: i64)
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// OBS-P6-002 — DOCX exporter percent double-floor: value=75 at a

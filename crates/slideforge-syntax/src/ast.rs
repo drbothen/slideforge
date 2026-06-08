@@ -317,6 +317,40 @@ pub struct SectionNode {
     pub fields: Vec<FieldNode>,
 }
 
+// ─── SectionGroupNode ────────────────────────────────────────────────────────
+
+/// A `section "Name":` slide-grouping block (STORY-082).
+///
+/// ```sf
+/// section "Background":
+///   slide title:
+///     title "Background"
+///   slide content:
+///     title "Details"
+/// ```
+///
+/// This is syntactically DISTINCT from [`SectionNode`] (which uses a bare
+/// identifier after `section`). `SectionGroupNode` carries a quoted name and
+/// child slide nodes. It is used by the PPTX exporter to populate
+/// `<p14:sectionLst>` in `presentation.xml`.
+///
+/// # STORY-082
+///
+/// Introduced in STORY-082 (PPTX: Slide-Grouping Sections).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SectionGroupNode {
+    /// The section group name as declared in the DSL (quoted string).
+    ///
+    /// Must be non-empty (enforced at parse time via E-PAR-023). An empty
+    /// name is rejected and no `SectionGroupNode` is produced for it.
+    pub name: Spanned<std::sync::Arc<str>>,
+    /// The slide children of this section group, in source order.
+    ///
+    /// Each entry is a [`BlockItem::Slide`] (or nested control-flow block).
+    /// After evaluation, the PPTX exporter maps these to slide IDs.
+    pub slides: Vec<BlockItem>,
+}
+
 // ─── ForNode ──────────────────────────────────────────────────────────────────
 
 /// An `@for item in collection:` iteration block.
@@ -396,7 +430,8 @@ pub struct IfNode {
 /// | `Slide` | `slide <type>: ...` |
 /// | `For`   | `@for x in coll: ...` |
 /// | `If`    | `@if cond: ... @elif ... @else ...` |
-/// | `Section` | `section <type>: ...` (future, STORY-008+) |
+/// | `Section` | `section <type>: ...` (STORY-078) |
+/// | `SectionGroup` | `section "Name": ...` (STORY-082) |
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BlockItem {
     /// A `slide <type>:` block.
@@ -405,8 +440,13 @@ pub enum BlockItem {
     For(Spanned<ForNode>),
     /// An `@if/@elif/@else` conditional block.
     If(Spanned<IfNode>),
-    /// A `section <type>:` block (STORY-008+ placeholder).
+    /// A `section <type>:` block (STORY-078).
     Section(Spanned<SectionNode>),
+    /// A `section "Name":` slide-grouping block (STORY-082).
+    ///
+    /// Syntactically distinct from [`BlockItem::Section`]: the name is a
+    /// quoted string (not a bare identifier). Children are slide blocks.
+    SectionGroup(Spanned<SectionGroupNode>),
 }
 
 // ─── VariantNode ─────────────────────────────────────────────────────────────

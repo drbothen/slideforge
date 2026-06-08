@@ -137,7 +137,7 @@ fn make_laid_out_deck(notes_per_slide: &[Option<&str>]) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Export the given `Deck` + `LaidOutDeck` through `PptxExporter` and return raw PPTX bytes.
@@ -673,7 +673,7 @@ fn evidence_rich(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
@@ -770,7 +770,7 @@ fn evidence_safeurl(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let rels = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
@@ -875,7 +875,7 @@ fn evidence_link(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-    };
+        slide_sections: vec![],    };
     let pptx = export_pptx(&deck, &laid_out);
 
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");

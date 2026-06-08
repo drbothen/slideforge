@@ -111,7 +111,7 @@ fn make_laid_out_deck_image(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Build a single-slide `LaidOutDeck` whose only frame is a `Chart` with the
@@ -134,7 +134,7 @@ fn make_laid_out_deck_chart(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Build a single-slide `LaidOutDeck` whose only frame is a `Diagram` with the
@@ -164,7 +164,7 @@ fn make_laid_out_deck_diagram(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 /// Build a single-slide `LaidOutDeck` with a plain title frame (no visual
@@ -187,7 +187,7 @@ fn make_laid_out_deck_lang_only() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-    }
+        slide_sections: vec![],    }
 }
 
 // ─── ZIP helpers ──────────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ test-utils = ["dep:zip", "dep:quick-xml"]
 [dependencies]
 slideforge-types = { workspace = true }
 slideforge-syntax = { workspace = true }
+slideforge-layout = { workspace = true }
 thiserror = { workspace = true }
 miette = { workspace = true }
 indexmap = { workspace = true }
