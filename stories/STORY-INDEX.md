@@ -13,8 +13,8 @@ traces_to:
 total_stories: 90
 stories_written: 90
 stories_ready: 0
-stories_in_progress: 1
-stories_merged: 67
+stories_in_progress: 4
+stories_merged: 68
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -35,10 +35,10 @@ stories_merged: 67
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
 | Wave 4 | 23 | 0 | 0 | 0 | 23 | 0 |
-| Wave 5 | 22 | 15 | 0 | 1 | 6 | 0 |
+| Wave 5 | 22 | 11 | 0 | 4 | 7 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
 | Wave TBD | 1 | 1 | 0 | 0 | 0 | 0 |
-| **Total** | **90** | **22** | **0** | **1** | **67** | **0** |
+| **Total** | **90** | **18** | **0** | **4** | **68** | **0** |
 
 ---
 
@@ -145,7 +145,7 @@ stories_merged: 67
 |----------|------|-------|-----|---------|--------|---------|--------|
 | [STORY-089](stories/STORY-089-field-value-type-validation.md) | EPIC-01 | FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement | BC-1.18.001 | P0 | 8 | strict | merged |
 | [STORY-046](stories/STORY-046-html-exporter-wcag.md) | EPIC-14 | Static HTML Exporter: WCAG AA via axe-core | BC-4.03.003 | P0 | 8 | strict | merged |
-| [STORY-047](stories/STORY-047-preview-server-websocket.md) | EPIC-14 | Web Preview Server: axum + WebSocket + SVG Canvas | BC-4.03.004 | P1 | 8 | strict | in-progress |
+| [STORY-047](stories/STORY-047-preview-server-websocket.md) | EPIC-14 | Web Preview Server: axum + WebSocket + SVG Canvas | BC-4.03.004 | P1 | 8 | strict | merged |
 | [STORY-048](stories/STORY-048-preview-live-reload-a11y.md) | EPIC-14 | Web Preview: Live Reload + Accessibility | BC-5.05.005 | P1 | 8 | strict | draft |
 | [STORY-055](stories/STORY-055-cli-build-command.md) | EPIC-15 | CLI: build command + miette error rendering | BC-1.15.001-003 | P0 | 8 | strict | merged |
 | [STORY-056](stories/STORY-056-cli-watch-mode.md) | EPIC-15 | CLI: watch mode + notify integration + incremental rebuild | BC-5.05.001-004 | P0 | 8 | strict | draft |
@@ -158,13 +158,13 @@ stories_merged: 67
 | [STORY-063](stories/STORY-063-pkg-verify-integrity.md) | EPIC-16 | Package: verify (SHA-256 checksum audit) | BC-5.03.006 | P1 | 3 | strict | draft |
 | [STORY-064](stories/STORY-064-workspace-build.md) | EPIC-17 | Workspace: slideforge.toml [workspace] + build --workspace | BC-5.04.001 | P1 | 5 | strict | draft |
 | [STORY-065](stories/STORY-065-workspace-sfconfig-explain.md) | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | BC-5.04.002-003 | P1 | 5 | strict | draft |
-| [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
+| [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | in-progress |
 | [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | merged |
 | [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | merged |
 | [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | merged |
-| [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
-| [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |
-| [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | draft |
+| [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | in-progress |
+| [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | in-progress |
+| [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | in-progress |
 
 **Wave 5 total points: 130** _(122 prior + 8 STORY-089 added [human-authorized 2026-06-07, Wave-4 follow-up (d) folded into Wave 5 slot 1])_
 

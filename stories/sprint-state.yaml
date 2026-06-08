@@ -59,8 +59,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "3f7f99ed"
-develop_pr_count: 74
+develop_sha: "95f23df3"
+develop_pr_count: 75
 last_updated: 2026-06-08
 wave_4_gate: PASS
 wave_4_gate_date: 2026-06-07
@@ -69,8 +69,8 @@ wave_4_followups_closed: 6
 wave_5_started: 2026-06-07
 wave_5_total_stories: 22
 wave_5_total_points: 130
-wave_5_stories_merged: 6
-wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079, STORY-080, STORY-074]
+wave_5_stories_merged: 7
+wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079, STORY-080, STORY-074, STORY-047]
 wave_5_dep_prep_pr: 69
 wave_5_dep_prep_commit: "3e3a978f"
 wave_5_dep_prep_merged: 2026-06-08
@@ -458,12 +458,34 @@ stories:
     converged: true
     security_review: "CLEAN (2 LOW only — SEC-040-001 URL safety verified via test; SEC-040-002 deferred)"
     notes: "PPTX Speaker Notes + notesMaster1.xml + handoutMaster1.xml (BC-4.01.003 Half A, BC-4.01.006). Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (human-authorized 2026-06-04). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. Missing slide→notesSlide rel fixed; NotesMasterSerializer dead-code issue resolved; lossy+insecure notes links fixed; schema-invalid grpSpPr fixed. Batch B pptx chain 037→038→039→040 COMPLETE."
+  STORY-047:
+    status: merged
+    wave: 5
+    priority: P1
+    points: 8
+    pr: 75
+    merge_commit: "95f23df3"
+    merged: 2026-06-08
+    adversary_convergence: "3/3 strict-CLEAN (passes 4-6)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "CLEAN"
+    pr_reviewer: "APPROVE"
+    ci_status: "all-green (disk-space infra flake on snapshots job on first run — re-run cleared; NOT a code defect; FU-047-DEPS-AWSLC)"
+    unlocks: [STORY-048, STORY-056]
+    notes: "Web Preview Server: axum WS endpoint + CSP nonce security hardening. BC-4.03.004. EPIC-14. Follow-ups: FU-047-SEC005-PATH (DiagnosticMessage.file path normalization), FU-047-DF1-CLIENT-RECONCILE (BC-5.05.005 client JS overlap with STORY-048), FU-047-DF2-SCR007-CHROME (SCR-007 chrome elements deferred to STORY-048), FU-047-ADR008-AXUM (ADR-008 pin stale 0.8.1 vs 0.8.9), FU-047-DEADFN (dead pub ws_upgrade_handler), FU-047-DEPS-AWSLC (reqwest aws-lc-sys/ring disk pressure in CI)."
   STORY-082:
     status: in-progress
     wave: 5
     priority: P0
     points: 5
-    notes: "PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter. BC-4.01.003 Half B + BC-1.14.003. Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. Spec reconciled 2026-06-07 (BC-4.01.003 v1.3, export-arch v1.1, taxonomy v2.24). L0 — no intra-wave deps."
+    worktree: ".worktrees/STORY-082"
+    branch: "feature/STORY-082"
+    head_commit: "d161715d"
+    adversary_streak: "0/3"
+    adversary_passes_done: 3
+    next_action: "Run adversary Pass 4 — need 3 consecutive strict-CLEAN for convergence"
+    notes: "PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter. BC-4.01.003 Half B + BC-1.14.003. Split from STORY-040 (human-authorized 2026-06-04). EPIC-08. Spec reconciled 2026-06-07 (BC-4.01.003 v1.3, export-arch v1.1, taxonomy v2.24). L0 — no intra-wave deps. HISTORY: Pass-1 NON-FUNCTIONAL end-to-end (dead wiring + silent slide-drop) → full re-impl (genuine parse→eval→layout→export wiring + keystone e2e). Pass-2 CRIT-A (section slide-IDs diverged from Deck.slides under @for/@if) → fixed via single-pass section membership. Pass-3 HIGH-1 (dead rescue paper-fix contradicting E-PAR always-fatal) → removed; message templates + AC-008 full-pipeline test + CRIT-A disjoint+complete assertions strengthened. 1404 tests pass."
   STORY-041:
     status: merged
     wave: 4
@@ -615,11 +637,20 @@ stories:
     drift_critical_2_resolved: true
     notes: "E2E Integration Suite + PDF/a11y/observability pipeline fixes. 3 critical pipeline gaps in already-merged code FIXED: Gap 1 (PDF title derivation eval.rs); Gap 2 (post-layout validation pass ADR-018); Gap 3 (observability info_span! stage= fields). SEC-050-001 (CWE-116 XMP title control-char injection) fixed in-scope. ADR-018 v1.1, BC-5.02.001 v1.5, BC-5.01.001 v1.2, error-taxonomy v2.15, STORY-050 spec v1.3. Wave 4 = 21/21 COMPLETE. Next: vsdd-factory:wave-gate."
   STORY-072:
-    status: draft
+    status: in-progress
     wave: 5
     priority: P2
     points: 3
-    notes: "gradient fills follow-up from STORY-028 cascade; deferred P2 to Wave 5 (requires exporters)"
+    worktree: ".worktrees/STORY-072"
+    branch: "feature/STORY-072"
+    head_commit: "ad13830d"
+    adversary_streak: "2/3"
+    adversary_passes_done: 5
+    strict_clean_passes: "4, 5"
+    next_action: "Run adversary Pass 6 (convergence attempt — no code change since Pass 4). If strict-CLEAN → 3/3 CONVERGED → demo-recorder (per-AC) → rebase onto 95f23df3 → pr-manager 9-step → merge"
+    spec_versions: "Story v1.5, BC-3.04.001 v1.8"
+    caution: "Shape-DSL→exporter pipeline unwired pre-existing (FU-SHAPE-PIPELINE-WIRING). Gradient verified via constructed-ShapeSpec tests, NOT end-to-end DSL. Do NOT re-flag — it is a known, scoped deferral."
+    notes: "Shape gradient fills (FillSpec::Gradient). BC-3.04.001. EPIC-07. HISTORY: Passes 1-3 found+fixed: PDF paper-fix, DOCX warn test, PPTX ordering, HTML CSS-background-paints-nothing → SVG linearGradient fix, AC-002 paper-deliverable, type-doc/AC-prose drift."
   STORY-073:
     status: merged
     wave: 4
@@ -752,8 +783,22 @@ stories:
     closes_findings: [F-G3-HIGH-003]
     adversary_convergence: "3/3 strict-CLEAN (10-pass total cascade)"
     notes: "Color-Coded Slide Types: status + progress_bar + weighted_composite. Registration in SLIDE_TYPE_KEYWORDS (keywords.rs PHF) + regions.rs region map + SlideType impls in slideforge-plugin-api/src/slide_types/ + LabelCheck component-iteration extension for weighted_composite. Authorized 2026-06-05 per ADR-019 human_gate_resolved. E-A11-002 enforcement via LabelCheckValidator (Stage 5 pre-layout, reads Slide.fields directly — NO Stage 2b dependency). Closes F-G3-HIGH-003 (COLOR_CODED_TYPES dead-guard eliminated). 4-crate change: slideforge-plugin-api (3 new SlideType impls), slideforge-syntax (3 keywords), slideforge-layout (3 region map entries), slideforge-validate (weighted_composite component iteration)."
+  STORY-081:
+    status: in-progress
+    wave: 5
+    priority: P0
+    points: 13
+    worktree: ".worktrees/STORY-081"
+    branch: "feature/STORY-081"
+    head_commit: "c11d6468"
+    adversary_streak: "0/3"
+    adversary_passes_done: 1
+    next_action: "Run adversary Pass 2 (re-review the full rebuild after Pass-1 triggered complete re-implementation)"
+    open_risk: "HTML/PDF title-inline rendering deferred as follow-on (DOCX rich title done; AC-006(3) requires HTML+PDF+DOCX). Adversary must judge if partial AC-006(3) is acceptable or needs fix before convergence."
+    tests_passing: 1190
+    notes: "Slide-Level Inline Markup: eval + layout + all-exporter structural formatting. BC-3.02.002. EPIC-18. 13 pts. FULL RE-IMPLEMENTATION after Pass-1 found 4 CRIT dead-wiring (dead PDF path, body/subtitle markup dropped at threading seam, PPTX Body flattens, no e2e test). Rebuilt: eval threads FieldValue::Inlines; PPTX inline runs + Code/Super/Sub/Highlight; DOCX highlight + rich title; PDF ActualText via slide_to_krilla_runs; keystone e2e test (build() → b=1/<w:b/>/<strong>/PDF ActualText, no literal **)."
   STORY-088:
-    status: draft
+    status: in-progress
     wave: 5
     priority: P1
     points: 8
@@ -762,8 +807,16 @@ stories:
     depends_on: [STORY-006, STORY-086]
     blocks: []
     bcs: [BC-1.01.002]
-    closes_findings: []
-    notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Scope expanded 2026-06-06 (adversary pass-5 D5 correction): @var/vars-block list-literal does NOT parse at time of STORY-086 (parser gap discovered); STORY-088 now covers BOTH bullets DSL forms (direct list-literal AND @var/vars-block binding). Points bumped 5→8, estimated_days 2→3. Adds `[...]` list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs AND @var/vars-block binding form. TextTag follow-up story was absorbed into STORY-086 (not created here). EPIC-02 (parser)."
+    worktree: ".worktrees/STORY-088"
+    branch: "feature/STORY-088"
+    head_commit: "3b0c6295"
+    adversary_streak: "0/3"
+    adversary_passes_done: 3
+    next_action: "Run adversary Pass 4 — need 3 consecutive strict-CLEAN for convergence"
+    tests_passing: 792
+    has_e2e_test: true
+    e2e_test_desc: "Real .sf → slideforge::build() → assert <a:r> + bullet text in slide XML"
+    notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Covers BOTH bullets DSL forms (direct list-literal AND @var/vars-block binding). Points bumped 5→8, estimated_days 2→3. Adds [...] list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs AND @var/vars-block binding form. HISTORY: Pass-1 CRIT E-PAR-015 mis-anchor→E-PAR-024 (new code, taxonomy v2.27, dsl-spec v1.1). Pass-2 <type> interpolation + FieldValue::Error substitution. Pass-3 MED-P3-001 nested-list silent-drop→errors + MED-P3-002 Float test."
   STORY-089:
     status: merged
     wave: 5
