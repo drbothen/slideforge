@@ -2076,16 +2076,87 @@ mod tests {
     /// Currently stubs with `todo!()` (STORY-080 Red Gate). The implementer
     /// replaces `todo!()` with the real implementation.
     fn spawn_deterministic_counting_server_404(
-        _max_connections: usize,
+        max_connections: usize,
     ) -> (
         std::net::SocketAddr,
         std::sync::mpsc::Receiver<usize>,
         thread::JoinHandle<()>,
     ) {
-        todo!(
-            "STORY-080: implement deterministic mpsc-channel-based 404 counting server \
-             (replaces set_nonblocking poll loop; AC-001 fix)"
-        )
+        use std::net::TcpStream;
+        use std::sync::mpsc;
+
+        // Bind in blocking mode — `set_nonblocking` is the root cause of the
+        // Windows connection-count race (EC-001 / STORY-080 AC-001).
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("failed to bind deterministic 404 server");
+        let addr = listener.local_addr().expect("failed to get local addr");
+
+        // Watchdog thread: after a 3-second grace period (well beyond the
+        // ~10ms HTTP round-trip to loopback), opens a "poison" TCP connection
+        // to unblock the server thread's blocking `accept()` call.
+        //
+        // This sleep is NOT a race-masking delay — the connection-count race
+        // is eliminated by the mpsc channel (count is only read after the
+        // server thread sends it, i.e., after all I/O is complete).  The
+        // sleep here is pure lifecycle management: give the HTTP test 3 seconds
+        // to finish, then trigger a graceful server shutdown.
+        let watchdog_addr = addr;
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(3));
+            // Connect and immediately drop — sends EOF (read() returns 0)
+            // which the server detects as the shutdown signal.
+            let _ = TcpStream::connect(watchdog_addr);
+        });
+
+        let (tx, rx) = mpsc::channel::<usize>();
+
+        let handle = thread::spawn(move || {
+            let mut count = 0usize;
+            loop {
+                if count >= max_connections {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        // Drain the request headers.
+                        let mut buf = [0u8; 4096];
+                        let n = stream.read(&mut buf).unwrap_or(0);
+
+                        if n == 0 {
+                            // Zero-byte read: this is the watchdog's poison
+                            // connection (immediate EOF).  Do not count it.
+                            // Exit the accept loop.
+                            break;
+                        }
+
+                        // A real HTTP request: count it and serve 404.
+                        count += 1;
+
+                        // Minimal 404 response.  `Connection: close` signals
+                        // the client to tear down the connection after reading
+                        // the response — no keep-alive probes.
+                        let response = b"HTTP/1.1 404 Not Found\r\n\
+                            Content-Type: text/plain\r\n\
+                            Content-Length: 9\r\n\
+                            Connection: close\r\n\
+                            \r\n\
+                            not found";
+                        let _ = stream.write_all(response);
+                        // `stream` is dropped here — FIN is sent, connection
+                        // is fully closed before the counter is incremented
+                        // further.
+                    },
+                    // Any I/O error on accept: stop accepting.
+                    Err(_) => break,
+                }
+            }
+            // Send the final, authoritative connection count.  The main thread
+            // blocks on `count_rx.recv()` until this send completes, which
+            // means it reads the count only AFTER all server-side I/O is done.
+            let _ = tx.send(count);
+        });
+
+        (addr, rx, handle)
     }
 
     // -----------------------------------------------------------------------
@@ -2145,8 +2216,7 @@ mod tests {
         // Exactly 1 connection — 4xx responses are NOT retried.
         // AC-003: this assertion MUST NOT be weakened to `<= 2` or removed.
         assert_eq!(
-            connection_count,
-            1,
+            connection_count, 1,
             "HTTP 4xx must result in exactly 1 connection (no retry); got: {connection_count}"
         );
     }

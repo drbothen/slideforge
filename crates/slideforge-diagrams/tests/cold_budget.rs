@@ -43,7 +43,36 @@ use slideforge_diagrams::{DiagramRendererImpl, SfDiagramLang as DiagramLang};
 /// binary), so `FONT_DB` is uninitialized at the start — the cold path is
 /// genuine. On developer machines with many system fonts the cost is typically
 /// 50–150ms; the 200ms gate matches the NFR-003 CI budget.
+///
+/// ## Why `#[ignore]`?
+///
+/// This is a **timing gate**, not a correctness gate.  Under full-workspace
+/// `cargo nextest run` with CPU contention from parallel test jobs, the font
+/// DB scan (`fontdb::Database::load_system_fonts()`) can exceed the budget on
+/// shared GitHub Actions runners even when the algorithm is correct.
+///
+/// Timing gates are inherently platform-dependent and must be run on-demand,
+/// not as part of the default CI matrix — exactly like Criterion benchmarks.
+/// The Criterion bench (`benches/cold_render.rs`) is the **authoritative**
+/// NFR-003 perf gate; this test is a supplementary on-demand cross-check.
+///
+/// Correctness (non-timing) coverage is preserved unconditionally by
+/// `test_BC_1_12_003_cold_render_correctness` in this same file.
+///
+/// To run explicitly:
+/// ```
+/// cargo nextest run -p slideforge-diagrams -- --include-ignored cold_budget
+/// ```
+///
+/// Root cause of flake: STORY-080 (CPU-contention wall-clock gate under CI load).
+/// Authoritative perf gate: `benches/cold_render.rs` (Criterion, unaffected).
+// STORY-080: wall-clock timing gate moved to on-demand (#[ignore]) to eliminate
+// spurious CI failures under CPU contention.  Correctness is covered by the
+// companion test `test_BC_1_12_003_cold_render_correctness` which has no timing
+// assertion and always runs in the default matrix.
 #[test]
+#[ignore = "timing-sensitive NFR-003 gate — run with: cargo nextest run \
+            -p slideforge-diagrams -- --include-ignored cold_budget"]
 fn test_cold_budget_under_200ms() {
     let start = Instant::now();
     let result = DiagramRendererImpl::render_diagram(
