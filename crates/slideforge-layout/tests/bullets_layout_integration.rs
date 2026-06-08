@@ -112,6 +112,7 @@ fn make_brand() -> Brand {
             heading: Arc::from("Calibri"),
             body: Arc::from("Calibri"),
             mono: Arc::from("Courier New"),
+            font_size_emu: 457_200,
         },
         layouts: vec![],
         span: SourceSpan::default(),

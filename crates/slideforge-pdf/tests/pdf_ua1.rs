@@ -86,6 +86,7 @@ fn minimal_brand() -> Brand {
             heading: Arc::from("Helvetica"),
             body: Arc::from("Helvetica"),
             mono: Arc::from("Courier"),
+            font_size_emu: 457_200,
         },
         layouts: vec![],
         span: SourceSpan::default(),

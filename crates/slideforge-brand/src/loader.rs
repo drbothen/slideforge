@@ -282,6 +282,7 @@ fn brand_from_template(template: &BrandTemplate, source_path: &str) -> Brand {
         heading: Arc::clone(&template.fonts.heading),
         body: Arc::clone(&template.fonts.body),
         mono: Arc::from("Courier New"),
+        font_size_emu: 457_200,
     };
 
     Brand {

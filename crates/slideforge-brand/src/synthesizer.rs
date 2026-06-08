@@ -431,6 +431,7 @@ impl BrandProvider for BrandSynthesizer {
                         heading: Arc::clone(&template.fonts.heading),
                         body: Arc::clone(&template.fonts.body),
                         mono: Arc::from("Courier New"),
+                        font_size_emu: 457_200,
                     },
                     layouts: vec![],
                     span: slideforge_types::SourceSpan::default(),

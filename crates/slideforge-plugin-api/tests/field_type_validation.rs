@@ -1610,6 +1610,7 @@ fn test_BC_1_18_001_regression_no_false_positives_on_34_registered_types() {
             heading: Arc::from("Calibri"),
             body: Arc::from("Calibri"),
             mono: Arc::from("Courier New"),
+            font_size_emu: 457_200,
         },
         layouts: vec![],
         span: SourceSpan::default(),

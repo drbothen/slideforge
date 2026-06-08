@@ -80,7 +80,7 @@ const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
 use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
-use crate::shapes::{DEFAULT_EM_IN_EMU, layout_shapes};
+use crate::shapes::layout_shapes;
 use crate::text_flow::compute_text_flow;
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
@@ -258,12 +258,13 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // unreachable here — ShapeSpec.shape_type is a resolved ShapeType enum,
         // so unknown keywords are rejected at the parse stage (E-PAR-012) before
         // a ShapeSpec is ever constructed.
-        // DEFERRED: brand-aware em conversion requires a `BrandFonts.font_size_emu`
-        // field that does not yet exist on the type. `DEFAULT_EM_IN_EMU` (457_200 EMU
-        // = 0.5 inch at 36pt) is used as a safe constant until that field is added.
-        // Tracked: STORY-074 (brand-em-sizing) will add `BrandFonts.font_size_emu`
-        // and wire it here. BC-3.04.001 PC-2 mandates brand-aware em resolution;
-        // this deferral is structural (missing type field), not a design choice.
+        //
+        // STORY-074 (brand-em-sizing) CLOSED: `BrandFonts.font_size_emu` is now
+        // wired here (BC-3.04.001 PC-2 — brand-aware em resolution). The historical
+        // `DEFAULT_EM_IN_EMU` constant (457_200 EMU = 36pt body font = 0.5 inch at 914_400 EMU/inch) is no longer
+        // used in production code; `BrandFonts::default()` carries the same value for
+        // backward compatibility (AC-003).
+        //
         // Pass frames.len() as base_index so InvalidBoundingBox.frame_index is
         // slide-wide (region frames + shape-list position) rather than a local
         // sub-list index (F-P20-LOW-002 / BC-3.06.003).
@@ -271,7 +272,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             &shape_specs,
             page_size,
             source_index,
-            DEFAULT_EM_IN_EMU,
+            brand.fonts.font_size_emu,
             frames.len(),
         )?;
 

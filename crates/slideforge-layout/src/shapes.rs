@@ -17,7 +17,7 @@
 //! | User unit | EMU conversion |
 //! |-----------|---------------|
 //! | `1in`     | `914_400 EMU` |
-//! | `1em`     | `brand.font_size_emu` (default: `457_200` = 0.5 inch at 36pt) |
+//! | `1em`     | `brand.font_size_emu` (default: `457_200` = 36pt body font = 0.5 inch at `914_400` EMU/inch) |
 //!
 //! ## Off-canvas detection (AC-003 / BC-3.04.001 EC-002)
 //!
@@ -42,10 +42,17 @@ use crate::types::{BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, ShapeF
 /// EMU per inch: 914,400 (canonical DSL unit definition, DI-010).
 pub const EMU_PER_INCH: i64 = 914_400;
 
-/// Default em-to-EMU conversion: 457,200 EMU = 0.5 inch at 36pt brand default.
+/// Default em-to-EMU conversion: 457,200 EMU (36pt body font = 0.5 inch at 914,400 EMU/inch).
 ///
-/// Used when `brand.font_size_emu` is not overridden.
-pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
+/// # Test-only constant (AC-002 / STORY-074)
+///
+/// This constant is **not part of the public API** and is only compiled in test
+/// builds. Production code uses `BrandFonts::default().font_size_emu` (which
+/// carries this same value for backward compatibility — AC-003). This constant
+/// is retained solely for in-crate unit tests that need to call low-level helpers
+/// (`from_em`, `unit_to_emu`, `layout_shapes`) with the historical default value.
+#[cfg(test)]
+const DEFAULT_EM_IN_EMU: i64 = 457_200;
 
 /// Convert a [`slideforge_types::ShapeUnit`] measurement to integer EMU.
 ///
@@ -55,7 +62,7 @@ pub const DEFAULT_EM_IN_EMU: i64 = 457_200;
 /// # Arguments
 ///
 /// * `unit` — the measurement in user units.
-/// * `em_in_emu` — the brand's em-to-EMU resolution (default [`DEFAULT_EM_IN_EMU`]).
+/// * `em_in_emu` — the brand's em-to-EMU resolution (default: `457_200` EMU = 36pt body font = 0.5 inch at `914_400` EMU/inch).
 ///
 /// # Returns
 ///
@@ -92,8 +99,8 @@ pub fn from_inches(milliinches: i64) -> Option<Emu> {
 
 /// Convert em units (as a rational `numerator/1000`) to EMU.
 ///
-/// For example, `from_em(1000, DEFAULT_EM_IN_EMU)` converts `1em` →
-/// `Some(Emu(457_200))`.
+/// For example, `from_em(1000, 457_200)` converts `1em` →
+/// `Some(Emu(457_200))` (using the default brand em size of 457,200 EMU).
 ///
 /// Returns `None` when `milliem * em_in_emu` overflows `i64`
 /// (VP-048 / BC-3.04.001 Invariant 8 / interface-definitions.md §9.4).
@@ -579,7 +586,7 @@ mod tests {
 
     /// AC-001 — `from_em(1000, DEFAULT_EM_IN_EMU)` converts 1em → `Some(Emu(457_200))`.
     ///
-    /// Default brand em: 457_200 EMU = 0.5 inch at 36pt.
+    /// Default brand em: `457_200` EMU = 36pt body font = 0.5 inch at `914_400` EMU/inch.
     #[test]
     fn test_bc_3_04_001_ac001_one_em_to_emu() {
         assert_eq!(
@@ -771,15 +778,12 @@ mod tests {
     /// Red Gate: panics with `todo!()` inside `layout_shapes`.
     #[test]
     fn test_bc_3_04_001_ac003_layout_shapes_emits_offcanvas_warning_and_produces_frame() {
-        // A shape at x=-0.5in, y=1.0in, width=2.0in, height=1.0in
-        // The ShapeSpec carries position via the position_emu field injected
-        // by a future extended ShapeSpec; for now we use a test-only approach
-        // that calls layout_shapes with a standard ShapeSpec and verifies that
-        // the function detects off-canvas via a pre-computed BoundingBox path.
-        //
-        // Since ShapeSpec does not yet carry position fields, we test is_off_canvas
-        // directly and assert the warning type — the full layout_shapes integration
-        // test is in test_bc_3_04_001_ac003_layout_shapes_full_off_canvas_warning.
+        // A shape at x=-0.5in, y=1.0in, width=2.0in, height=1.0in.
+        // ShapeSpec carries a `position: ShapePosition` field (shipped in STORY-028);
+        // this test verifies the off-canvas detection path via `is_off_canvas` directly
+        // and asserts the LayoutWarning variant can be constructed as expected.
+        // The full layout_shapes integration test exercising the warning-emission path
+        // end-to-end is in test_bc_3_04_001_ac003_layout_shapes_full_off_canvas_warning.
         let off_canvas_bbox = BoundingBox {
             x: Emu(-457_200),
             y: Emu(914_400),
@@ -2538,6 +2542,29 @@ mod tests {
             ShapeUnit::Em(1000),
             ShapeUnit::Em(i64::MAX), // overflows checked_mul in from_em
             "height",
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-002 — DEFAULT_EM_IN_EMU backward-compat guard (STORY-074)
+    //
+    // DEFAULT_EM_IN_EMU is no longer pub (AC-002 / adversary P1 MED-001).
+    // This in-crate test is the only place that can assert its value, since
+    // the external integration test can no longer import it.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// AC-002 / STORY-074 — `DEFAULT_EM_IN_EMU` must remain `457_200`.
+    ///
+    /// This const is test-private (AC-002: "not pub or referenced by production code").
+    /// The value must never change — it is the historical default that `BrandFonts::default()`
+    /// mirrors for backward compatibility (AC-003).
+    ///
+    /// Load-bearing: changing the value to anything other than 457_200 MUST fail this test.
+    #[test]
+    fn test_bc_3_04_001_ac002_default_em_in_emu_is_457200() {
+        assert_eq!(
+            DEFAULT_EM_IN_EMU, 457_200_i64,
+            "DEFAULT_EM_IN_EMU must remain 457_200 (AC-002 backward compat guard)"
         );
     }
 }
