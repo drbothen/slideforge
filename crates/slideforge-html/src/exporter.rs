@@ -1,0 +1,2905 @@
+//! [`HtmlExporter`] — implements the [`Exporter`] plugin trait for static HTML
+//! output (BC-4.03.003, STORY-046).
+//!
+//! The exporter converts a [`LaidOutDeck`] + [`Deck`] + [`Brand`] triple into a
+//! single UTF-8 HTML5 document (or a directory of per-slide HTML files).
+//! Output passes WCAG AA validation via `@axe-core/playwright` in CI.
+//!
+//! ## Security note (AC-010 / CWE-601)
+//!
+//! All `Link` and `Xref` inline nodes are validated against the URL scheme
+//! allowlist before rendering to `<a href="...">`. Disallowed schemes are
+//! dropped; a `tracing::warn!` is emitted for each rejection.
+
+use slideforge_layout::{BoundingBox, FrameContent, LaidOutDeck, LaidOutSlide};
+use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
+use slideforge_types::{Brand, ContentBlock, Deck};
+
+use crate::render::{HeadingLevel, render_slide_to_html};
+
+/// Returns `true` iff the bounding box has strictly positive width AND height.
+///
+/// This is the **single source of truth** for the degeneracy condition used in
+/// two places (TD-VSDD-060):
+/// - The exporter pre-pass (`slide_has_promotable_text_frame`) — to decide
+///   whether a frame can be considered promotable to `<h1>`.
+/// - The render-time loop (`render.rs` MED-B5 guard) — to decide whether a
+///   frame can actually emit HTML (frames with zero/negative bbox are skipped).
+///
+/// A frame is non-degenerate when `width.0 > 0 && height.0 > 0`.  Negative
+/// values are also degenerate (they can arise from pathological layout input
+/// and the layout engine's MED-B5 guards treat them identically to zero).
+#[inline]
+#[must_use]
+pub(crate) fn is_non_degenerate_bbox(bbox: &BoundingBox) -> bool {
+    bbox.width.0 > 0 && bbox.height.0 > 0
+}
+
+/// Result of the heading-level pre-pass.
+///
+/// The `levels` vec is parallel to the slides slice. `needs_synthetic_h1` is
+/// `true` when no slide has a Title frame AND no slide has a promotable text
+/// frame (step 4 path): the exporter must synthesize a visually-hidden `<h1>`
+/// at the document level from `deck.metadata.title`.
+struct HeadingAssignment {
+    /// Heading level per slide, parallel to the slides slice.
+    levels: Vec<HeadingLevel>,
+    /// `true` iff step 4 fired: no Title frame and no promotable text frame.
+    needs_synthetic_h1: bool,
+}
+
+/// Returns `true` if a `FrameContent::Body` contains at least one promotable
+/// content block.
+///
+/// Promotable blocks (LOW-1 / HIGH-1): `Text` (with `>=1` inline node), `Bullets`
+/// (with `>=1` item), or `Math`. `Table` / `ColorBar` / `Shape` / `Chart` / `Diagram` /
+/// `Image` are NOT promotable — they should not be wrapped in a heading element.
+fn body_has_promotable_content(blocks: &[ContentBlock]) -> bool {
+    blocks.iter().any(|block| match block {
+        ContentBlock::Text(tb) => !tb.inlines.is_empty(),
+        ContentBlock::Bullets(items) => !items.is_empty(),
+        ContentBlock::Math(_) => true,
+        // Table, ColorBar, Shape, Chart, Diagram, Image — NOT promotable (LOW-1)
+        ContentBlock::Table(_)
+        | ContentBlock::ColorBar(_)
+        | ContentBlock::Shape(_)
+        | ContentBlock::Chart(_)
+        | ContentBlock::Diagram(_)
+        | ContentBlock::Image(_) => false,
+    })
+}
+
+/// Returns `true` if the slide has at least one promotable text frame.
+///
+/// Promotable text frames (HIGH-1 / LOW-1 / Pass-10):
+/// - `FrameContent::Body` whose blocks contain at least one `Text`/`Bullets`/`Math`
+///   block with non-empty content **AND** whose bbox is non-degenerate
+///   (`width.0 > 0 && height.0 > 0`).
+/// - `FrameContent::TextRun` (always promotable) **AND** whose bbox is non-degenerate.
+///
+/// The bbox condition mirrors the render-time MED-B5 degeneracy guard in
+/// `render.rs` — both use [`is_non_degenerate_bbox`] as the **single source of
+/// truth** (TD-VSDD-060).  A frame the render loop would skip (degenerate bbox)
+/// must not be considered promotable by the pre-pass, because the render loop
+/// would not actually emit an `<h1>` for it, leaving the document without any
+/// heading element (axe-core `page-has-heading-one` violation).
+///
+/// Non-promotable: `Title` (handled in step 1/2), `Subtitle`, `Image`, `Chart`,
+/// `Diagram`, `Shape`, `ColorBar`, `ErrorSlidePlaceholder`, `Empty`, and any
+/// frame with a degenerate bbox.
+fn slide_has_promotable_text_frame(slide: &LaidOutSlide) -> bool {
+    slide.frames.iter().any(|f| {
+        // Pass-10 / MED-B5: bbox must be non-degenerate — same condition used by
+        // the render-time loop (single source of truth via is_non_degenerate_bbox).
+        if !is_non_degenerate_bbox(&f.bbox) {
+            return false;
+        }
+        match &f.content {
+            FrameContent::TextRun(nodes) => !nodes.is_empty(),
+            FrameContent::Body(blocks) => body_has_promotable_content(blocks),
+            _ => false,
+        }
+    })
+}
+
+/// Determine the [`HeadingLevel`] for each slide in the deck.
+///
+/// Implements the canonical heading-assignment algorithm
+/// (CRITICAL-B1 / HIGH-1 / MED-1 / LOW-1 / BC-4.03.003 postcondition 6):
+///
+/// 1. Find the first slide with `slide_type_keyword == "title"` that also has a
+///    `FrameContent::Title` frame → that slide's Title frame emits `<h1>`.
+/// 2. If no title-type slide: find the first slide with any `FrameContent::Title`
+///    frame → that frame gets `<h1>`.
+/// 3. If no Title frame anywhere (body/graphical deck): find the FIRST slide
+///    that has a PROMOTABLE text frame (`Body` with non-empty `Text`/`Bullets`/`Math`
+///    content, or a `TextRun`). That slide's first promotable frame gets `<h1>`.
+///    Only text-bearing blocks are promotable — Table/ColorBar/Shape are NOT.
+///    Emits `tracing::warn!` for this promotion path.
+/// 4. If no Title frame AND no promotable text frame (e.g., chart-only or
+///    image-only deck): returns `needs_synthetic_h1 = true`. The exporter
+///    injects a visually-hidden `<h1>` at the document level from
+///    `deck.metadata.title`. Emits `tracing::warn!` about this synthesis.
+///
+/// Empty deck (0 slides): returns all-H2 vec + `needs_synthetic_h1 = false`.
+/// No warn is emitted (nothing to promote from an empty deck).
+///
+/// All non-H1 slides receive `HeadingLevel::H2`.
+///
+/// Returns a [`HeadingAssignment`] containing the per-slide levels and the
+/// `needs_synthetic_h1` flag.
+fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
+    let len = slides.len();
+    let mut levels = vec![HeadingLevel::H2; len];
+
+    // Step 1: first slide with slide_type == "title" AND a renderable Title frame.
+    // Pass-14 / CRIT-1: the Title frame must be non-degenerate (is_non_degenerate_bbox)
+    // so that step 1 only selects a frame the render loop will actually emit.
+    // A degenerate-bbox Title frame is invisible; selecting it would assign H1 to a
+    // frame that render_text_frame silently skips → zero <h1> in the document.
+    let h1_idx = slides.iter().position(|s| {
+        s.slide_type_keyword.as_ref() == "title"
+            && s.frames.iter().any(|f| {
+                matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox)
+            })
+    });
+    if let Some(idx) = h1_idx {
+        levels[idx] = HeadingLevel::H1;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
+    }
+
+    // Step 2: first slide with any renderable Title frame (regardless of slide_type).
+    // Pass-14 / CRIT-1: same non-degenerate guard as step 1 (TD-VSDD-060).
+    let h1_idx = slides.iter().position(|s| {
+        s.frames
+            .iter()
+            .any(|f| matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox))
+    });
+    if let Some(idx) = h1_idx {
+        levels[idx] = HeadingLevel::H1;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
+    }
+
+    // Step 3: no Title frames anywhere.
+    // Find the FIRST slide with a promotable text frame (Body with non-empty
+    // Text/Bullets/Math blocks, or a TextRun).
+    // Table/ColorBar/Shape/empty-Body are NOT promotable (LOW-1).
+    let h1_idx = slides.iter().position(slide_has_promotable_text_frame);
+    if let Some(idx) = h1_idx {
+        tracing::warn!(
+            slide_index = idx,
+            "HtmlExporter: no Title frame found in any slide — \
+             promoting first promotable text frame on slide {idx} to <h1> to satisfy \
+             page-has-heading-one (axe-core). \
+             Add a slide with slide_type=\"title\" or a Title frame to fix this."
+        );
+        levels[idx] = HeadingLevel::H1;
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: false,
+        };
+    }
+
+    // Step 4: no Title frame AND no promotable text frame (chart/image-only deck).
+    // The exporter must synthesize a visually-hidden <h1> at the document level.
+    // We only do this for non-empty decks — empty decks get no h1 at all.
+    if !slides.is_empty() {
+        tracing::warn!(
+            "HtmlExporter: no Title or text frame found; synthesizing visually-hidden \
+             <h1> from deck title to satisfy page-has-heading-one (axe-core). \
+             Add a slide with a Title frame or text content to fix this."
+        );
+        return HeadingAssignment {
+            levels,
+            needs_synthetic_h1: true,
+        };
+    }
+
+    // Empty deck — no slides, no h1, no warn.
+    HeadingAssignment {
+        levels,
+        needs_synthetic_h1: false,
+    }
+}
+
+/// Allowlist of URL schemes permitted in rendered `<a href="...">` attributes.
+///
+/// All other schemes (e.g., `javascript:`, `data:`, `vbscript:`, `blob:`)
+/// are rejected and the `href` attribute is omitted. A `tracing::warn!` is
+/// emitted for each rejected scheme. (AC-010 / CWE-601)
+pub const ALLOWED_URL_SCHEMES: &[&str] = &["http", "https", "mailto", "tel"];
+
+/// Returns `true` if the given URL has an allowed scheme per AC-010.
+///
+/// URLs with no scheme (relative references) are permitted by default.
+/// URLs with disallowed schemes are rejected.
+///
+/// The HTML exporter differs from `slideforge-pptx`'s `is_safe_link_scheme` in
+/// one important respect: **relative URLs (no `:`) are ALLOWED** here, because
+/// HTML documents commonly use relative paths like `/slides/2` or `#section`.
+/// The PPTX exporter rejects no-scheme URLs because OOXML external relationships
+/// require an absolute URI; HTML does not have that constraint.
+///
+/// Comparison is case-insensitive so `HTTPS://example.com` and `https://example.com`
+/// both pass.
+///
+/// # Examples
+///
+/// ```rust
+/// use slideforge_html::exporter::is_safe_link_scheme;
+///
+/// assert!(is_safe_link_scheme("https://example.com"));
+/// assert!(is_safe_link_scheme("mailto:user@example.com"));
+/// assert!(is_safe_link_scheme("/relative/path"));
+/// assert!(!is_safe_link_scheme("javascript:alert(1)"));
+/// assert!(!is_safe_link_scheme("data:text/html,<h1>xss</h1>"));
+/// assert!(!is_safe_link_scheme("vbscript:foo"));
+/// ```
+#[must_use]
+pub fn is_safe_link_scheme(url: &str) -> bool {
+    // F-008 (CWE-601): reject protocol-relative URLs (// or \\) regardless of
+    // the absence of a colon. Browsers resolve these as scheme-relative, enabling
+    // open-redirect even when the author intended a relative path.
+    if url.starts_with("//") || url.starts_with('\\') {
+        tracing::warn!(
+            url = %url,
+            "AC-010: protocol-relative or backslash-prefix URL rejected (CWE-601)"
+        );
+        return false;
+    }
+
+    let Some(colon_pos) = url.find(':') else {
+        // No scheme separator — this is a path/fragment relative URL; allow it.
+        return true;
+    };
+    let scheme = url[..colon_pos].to_ascii_lowercase();
+    // Check whether the scheme is in the allowlist.
+    if ALLOWED_URL_SCHEMES.contains(&scheme.as_str()) {
+        true
+    } else {
+        // Emit tracing::warn! with the rejected scheme.
+        // NOTE: this is the SINGLE warn per rejection (F-006). Callers (render.rs)
+        // must NOT emit an additional warn — this function is the sole log site.
+        tracing::warn!(
+            rejected_scheme = %scheme,
+            url = %url,
+            "AC-010: link URL with disallowed scheme rejected (CWE-601)"
+        );
+        false
+    }
+}
+
+/// Static HTML exporter — implements the [`Exporter`] plugin trait.
+///
+/// `HtmlExporter` converts a [`LaidOutDeck`] into an HTML5 document that passes
+/// WCAG AA validation via `@axe-core/playwright` in CI. SVG-based canvas
+/// rendering (not `<canvas>`), correct ARIA landmarks, and non-hardcoded
+/// `<html lang>` are enforced by this exporter (BC-4.03.003).
+///
+/// Register via `PluginRegistry::register_exporter(Box::new(HtmlExporter::new()))`.
+#[derive(Debug, Default)]
+pub struct HtmlExporter;
+
+impl HtmlExporter {
+    /// Creates a new `HtmlExporter` instance.
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Exporter for HtmlExporter {
+    /// Returns the unique plugin identifier: `"html"`.
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn id(&self) -> &str {
+        "html"
+    }
+
+    /// Returns the default file extension for HTML output: `"html"`.
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn extension(&self) -> &str {
+        "html"
+    }
+
+    /// Produce an HTML5 document from the slideforge IR.
+    ///
+    /// # Output format
+    ///
+    /// The output is a well-formed UTF-8 HTML5 document beginning with
+    /// `<!DOCTYPE html>`. Each slide is rendered as an `<article>` landmark
+    /// containing frame elements for the slide content. No `<canvas>` elements
+    /// are emitted.
+    ///
+    /// # Accessibility invariants (BC-4.03.003)
+    ///
+    /// - `<html lang="...">` is always set from `deck.lang` (never hardcoded).
+    /// - Non-decorative SVG elements have `role="img"` + `<title>alt text</title>`.
+    /// - Decorative images have `alt="" role="presentation"`.
+    /// - Heading hierarchy is correct and non-skipped (h1 → h2 → ...).
+    ///
+    /// # Security (AC-010 / CWE-601)
+    ///
+    /// All `Link`/`Xref` URLs are validated via [`is_safe_link_scheme`] before
+    /// being emitted as `href` attributes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExportError`] when the HTML document cannot be produced.
+    fn export(
+        &self,
+        deck: &Deck,
+        laid_out: &LaidOutDeck,
+        brand: &Brand,
+        _opts: &ExportOptions,
+    ) -> Result<Vec<u8>, ExportError> {
+        // Derive the lang attribute from deck.lang (AC-002 / BC-4.03.003 invariant 3).
+        // NEVER hardcode lang — must come from deck metadata.
+        let lang = deck.metadata.lang.as_ref().map_or("en-US", |l| l.as_ref());
+
+        // Derive the document title from deck.metadata.title.
+        let title = deck
+            .metadata
+            .title
+            .as_ref()
+            .map_or("Presentation", |t| t.as_ref());
+
+        // CRITICAL-B1: exporter-level pre-pass to assign exactly one <h1> per document.
+        // compute_heading_levels returns a HeadingAssignment with per-slide levels
+        // and a flag indicating whether a synthetic visually-hidden <h1> is needed.
+        let assignment = compute_heading_levels(&laid_out.slides);
+
+        // Render all slides (MED-3: thread page_size; B1: thread pre-computed heading_level).
+        let page_size = &laid_out.page_size;
+        let mut slides_html = String::new();
+        for (slide, &heading_level) in laid_out.slides.iter().zip(assignment.levels.iter()) {
+            slides_html.push_str(&render_slide_to_html(
+                slide,
+                brand,
+                heading_level,
+                page_size,
+            ));
+            slides_html.push('\n');
+        }
+
+        // Step 4 (HIGH-1): if no Title frame and no promotable text frame, the
+        // exporter synthesizes a visually-hidden <h1> from deck.metadata.title.
+        // The synthetic_h1 text is guaranteed non-empty (fallback to "Presentation").
+        let synthetic_h1: Option<String> = if assignment.needs_synthetic_h1 {
+            let raw = deck
+                .metadata
+                .title
+                .as_ref()
+                .map_or("", std::convert::AsRef::as_ref)
+                .trim();
+            let text = if raw.is_empty() { "Presentation" } else { raw };
+            Some(html_escape::encode_text(text).into_owned())
+        } else {
+            None
+        };
+
+        // Render via minijinja template.
+        let page_html = render_page_template(lang, title, &slides_html, synthetic_h1.as_deref())?;
+
+        Ok(page_html.into_bytes())
+    }
+}
+
+/// Render the full page HTML using the `page.html.jinja` template.
+///
+/// Uses `minijinja` for Jinja2-compatible HTML templating. The `.html` suffix
+/// on the template name enables HTML autoescape automatically (ADR-022).
+///
+/// `synthetic_h1` is `Some(text)` when the heading pre-pass determines that
+/// no Title frame and no promotable text frame exists (step 4 / HIGH-1). The
+/// template emits a visually-hidden `<h1 class="sf-visually-hidden">` with the
+/// given text before the slide list. The text is pre-escaped HTML-safe.
+fn render_page_template(
+    lang: &str,
+    title: &str,
+    slides_html: &str,
+    synthetic_h1: Option<&str>,
+) -> Result<String, ExportError> {
+    use minijinja::{Environment, Value, context};
+
+    let mut env = Environment::new();
+
+    // Load the page template. The template is embedded at compile time to
+    // avoid filesystem path issues in tests and cross-platform deployments.
+    let page_template = include_str!("../templates/page.html.jinja");
+
+    env.add_template("page.html", page_template)
+        .map_err(|e| ExportError::RenderError {
+            message: format!("failed to load page.html.jinja template: {e}"),
+        })?;
+
+    let tmpl = env
+        .get_template("page.html")
+        .map_err(|e| ExportError::RenderError {
+            message: format!("failed to get page.html template: {e}"),
+        })?;
+
+    // Build individual slide HTML values for the template loop.
+    // The slides_html is already rendered; we split it into individual slides
+    // for the template's `{% for slide_html in slides %}` loop.
+    // However, the current template expects an iterable of slide HTML strings.
+    // We pass the pre-rendered combined HTML as a single "slides" value.
+    //
+    // For simplicity and correctness, we render the page wrapper directly
+    // rather than trying to split the slides HTML.
+    // The template loop `{% for slide_html in slides %}` iterates over Vec<String>.
+    let slides_vec: Vec<&str> = vec![slides_html.trim_end()];
+
+    // synthetic_h1 is Some(escaped_text) when step 4 fires, None otherwise.
+    // Pass as a string value or empty string; template checks `{% if synthetic_h1 %}`.
+    let synthetic_h1_val: Value = match synthetic_h1 {
+        Some(text) => Value::from(text),
+        None => Value::from(""),
+    };
+
+    let output = tmpl
+        .render(context! {
+            lang => lang,
+            title => title,
+            slides => slides_vec,
+            synthetic_h1 => synthetic_h1_val,
+        })
+        .map_err(|e| ExportError::RenderError {
+            message: format!("template rendering failed: {e}"),
+        })?;
+
+    Ok(output)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-046 Red Gate Tests — exporter.rs
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::doc_markdown, // test doc comments use fn names and HTML that trigger doc_markdown
+    non_snake_case
+)]
+mod tests {
+    use std::sync::Arc;
+
+    use slideforge_layout::{
+        BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+    };
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_types::{
+        AltText, Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, OrderedMap, SourceSpan,
+    };
+
+    use super::{ALLOWED_URL_SCHEMES, HtmlExporter, is_safe_link_scheme};
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test fixtures
+    // ─────────────────────────────────────────────────────────────────────────
+
+    fn make_brand() -> Brand {
+        Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        }
+    }
+
+    fn make_deck(lang: &str) -> Deck {
+        Deck {
+            slides: vec![],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Test Deck")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from(lang)),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    fn make_laid_out_deck_single_slide(slide: LaidOutSlide) -> LaidOutDeck {
+        LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        }
+    }
+
+    fn make_title_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(457_200),
+                    y: slideforge_types::Emu(1_600_200),
+                    width: slideforge_types::Emu(8_229_600),
+                    height: slideforge_types::Emu(1_143_000),
+                },
+                content: FrameContent::Title(Arc::from("Hello World")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    fn make_decorative_image_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Image {
+                    alt: AltText::Decorative,
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    fn make_non_decorative_image_slide(alt_text: &str) -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Image {
+                    alt: AltText::Provided(Arc::from(alt_text)),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-001: HtmlExporter implements Exporter; export returns bytes beginning
+    // with <!DOCTYPE html>
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 1 — `HtmlExporter` implements the `Exporter`
+    /// plugin trait: correct id/extension AND export produces valid output.
+    #[test]
+    fn test_BC_4_03_003_html_exporter_implements_exporter_trait() {
+        let exporter: Box<dyn Exporter> = Box::new(HtmlExporter::new());
+        assert_eq!(exporter.id(), "html");
+        assert_eq!(exporter.extension(), "html");
+        // AC-001: export must return Ok.
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        assert!(!bytes.is_empty(), "export must produce non-empty output");
+    }
+
+    /// AC-001 — `HtmlExporter::export` returns bytes whose UTF-8 string begins
+    /// with `<!DOCTYPE html>`.
+    #[test]
+    fn test_BC_4_03_003_export_starts_with_doctype_html() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed for a valid title slide");
+        let html = String::from_utf8(bytes).expect("output must be valid UTF-8");
+        assert!(
+            html.trim_start().starts_with("<!DOCTYPE html>"),
+            "exported HTML must begin with '<!DOCTYPE html>', got: {:?}",
+            &html[..html.len().min(80)]
+        );
+    }
+
+    /// AC-001 — `HtmlExporter::export` output is non-empty.
+    #[test]
+    fn test_BC_4_03_003_export_produces_non_empty_output() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        assert!(!bytes.is_empty(), "export output must not be empty");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-002: html[lang] derived from deck.lang, never hardcoded "en"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 3 / invariant 3 — two fixture decks with lang
+    /// "en-US" and "ja" must produce HTML with matching `lang` attributes.
+    #[test]
+    fn test_BC_4_03_003_html_lang_attribute_matches_deck_lang_en_us() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            html.contains(r#"lang="en-US""#),
+            "output must contain lang=\"en-US\" for deck.lang=\"en-US\", got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+    }
+
+    /// BC-4.03.003 postcondition 3 / invariant 3 — deck.lang "ja" produces
+    /// `<html lang="ja">`.
+    #[test]
+    fn test_BC_4_03_003_html_lang_attribute_matches_deck_lang_ja() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("ja");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            html.contains(r#"lang="ja""#),
+            "output must contain lang=\"ja\" for deck.lang=\"ja\", got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+    }
+
+    /// BC-4.03.003 invariant 3 — the lang attribute is NEVER the hardcoded
+    /// string "en" when the deck declares "ja".
+    #[test]
+    fn test_BC_4_03_003_lang_attribute_never_hardcoded_as_en() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("ja");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            !html.contains(r#"lang="en""#),
+            "output must NOT contain hardcoded lang=\"en\" when deck.lang is \"ja\""
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-006: No <canvas>, no <foreignObject>, <article> container present
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 invariant 2 — no `<canvas>` elements appear in the HTML
+    /// output. Uses `scraper::Selector::parse("canvas")` per AC-006 note.
+    #[test]
+    fn test_BC_4_03_003_no_canvas_elements_in_output() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse("canvas").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "output must contain ZERO <canvas> elements — slide visuals must use <svg>"
+        );
+    }
+
+    /// BC-4.03.003 invariant 2 (P4) — no `<foreignObject>` elements in output.
+    /// usvg drops foreignObject silently; its presence is a rendering regression.
+    #[test]
+    fn test_BC_4_03_003_no_foreign_object_in_output() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse("foreignObject").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "P4: output must contain ZERO <foreignObject> elements"
+        );
+    }
+
+    /// BC-4.03.003 invariant 2 (P4) — at least one `<article>` slide container.
+    #[test]
+    fn test_BC_4_03_003_article_container_present() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse("article").expect("valid selector");
+        assert!(
+            doc.select(&sel).count() > 0,
+            "P4: output must contain at least one <article> slide container"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-003: Non-decorative images have non-empty alt / <title> (P4 SVG layer)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 4 — non-decorative images have non-empty accessible name.
+    ///
+    /// P4: Images go to the SVG graphics layer. Non-decorative images use
+    /// `<g role="img" aria-labelledby><title>alt text</title>...</g>`.
+    #[test]
+    fn test_BC_4_03_003_non_decorative_image_has_non_empty_alt() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_non_decorative_image_slide("A revenue chart");
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // P4: image is in SVG layer, not bare <img>
+        assert!(
+            !html.contains("<img "),
+            "P4: non-decorative image must not be bare <img>; got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+
+        // Assert: the alt text "A revenue chart" appears in the output (in <title>)
+        assert!(
+            html.contains("A revenue chart"),
+            "non-decorative image alt text must appear in HTML output (in <title>)"
+        );
+        // Must have role="img" on the <g> wrapper in the SVG layer.
+        assert!(
+            html.contains(r#"role="img""#),
+            "non-decorative image must have role=\"img\" on the <g> wrapper in SVG layer"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-004: Decorative images have aria-hidden="true" in SVG layer (P4)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 5 — decorative images are hidden from AT.
+    ///
+    /// P4: Decorative images go to the SVG graphics layer with
+    /// `<g aria-hidden="true">` — NOT `role="presentation"` on an `<img>`.
+    #[test]
+    fn test_BC_4_03_003_decorative_image_has_empty_alt_and_role_presentation() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_decorative_image_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // P4: decorative image is hidden via aria-hidden="true" on the <g> group
+        assert!(
+            !html.contains("<img "),
+            "P4: decorative image must not render as bare <img>; got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+
+        // Decorative element must have aria-hidden="true" (P4 SVG layer pattern)
+        assert!(
+            html.contains(r#"aria-hidden="true""#),
+            "decorative image must have aria-hidden=\"true\" in the SVG layer (P4)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-008: Heading hierarchy — slide_type drives heading level (P4)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 postcondition 7 — title-slide at index 0 maps title frame to `<h1>`.
+    /// (AC-008 P4: heading level from slide_type_keyword, not content heuristics.)
+    #[test]
+    fn test_BC_4_03_003_slide_title_maps_to_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert!(
+            doc.select(&sel_h1).count() > 0,
+            "title-slide at index 0 must produce at least one <h1> element in the HTML output"
+        );
+    }
+
+    /// BC-4.03.003 postcondition 7 (P4) — in a 2-slide deck where slide 0 is the
+    /// title-slide (h1) and slide 1 is a content slide with Title + Subtitle,
+    /// the content slide produces h2 → h3 (no skipped levels).
+    /// Heading order: h2 before h3.
+    #[test]
+    fn test_BC_4_03_003_heading_hierarchy_no_skipped_levels() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Slide 0: title-type → gets H1 from pre-pass
+        let title_slide = make_title_slide(); // title-type slide
+
+        // Slide 1: content slide with Title (→ h2) and Subtitle (→ h3)
+        let content_slide = LaidOutSlide {
+            source_index: 1,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![
+                Frame {
+                    bbox: BoundingBox {
+                        x: slideforge_types::Emu(0),
+                        y: slideforge_types::Emu(0),
+                        width: slideforge_types::Emu(9_144_000),
+                        height: slideforge_types::Emu(1_000_000),
+                    },
+                    content: FrameContent::Title(Arc::from("Main Title")),
+                    text_flow: None,
+                    region_role: None,
+                },
+                Frame {
+                    bbox: BoundingBox {
+                        x: slideforge_types::Emu(0),
+                        y: slideforge_types::Emu(1_000_000),
+                        width: slideforge_types::Emu(9_144_000),
+                        height: slideforge_types::Emu(4_143_500),
+                    },
+                    content: FrameContent::Subtitle(Arc::from("Section Heading")),
+                    text_flow: None,
+                    region_role: None,
+                },
+            ],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![title_slide, content_slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Content-type slide (non-h1): Title → h2, Subtitle → h3.
+        // No heading levels are skipped: h2 before h3 is valid.
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid selector");
+        let sel_h3 = scraper::Selector::parse("h3").expect("valid selector");
+        assert!(
+            doc.select(&sel_h2).count() > 0,
+            "content slide Title must produce h2; P4 heading hierarchy rule"
+        );
+        assert!(
+            doc.select(&sel_h3).count() > 0,
+            "content slide Subtitle must produce h3 (below h2, no level skip)"
+        );
+        // h2 must appear before h3 in document order (no skip).
+        let h2_pos = html.find("<h2").expect("h2 must be present");
+        let h3_pos = html.find("<h3").expect("h3 must be present");
+        assert!(
+            h2_pos < h3_pos,
+            "h2 must appear before h3 in document order (no level skip); got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AC-010: URL scheme allowlist — CWE-601 / XSS prevention
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 / AC-010 — `is_safe_link_scheme` allows http, https, mailto,
+    /// tel, and relative URLs.
+    #[test]
+    fn test_BC_4_03_003_is_safe_link_scheme_allows_http() {
+        assert!(
+            is_safe_link_scheme("http://example.com"),
+            "http:// must be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("https://example.com"),
+            "https:// must be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("mailto:user@example.com"),
+            "mailto: must be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("tel:+15551234567"),
+            "tel: must be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("/relative/path"),
+            "relative path must be allowed (no scheme)"
+        );
+        assert!(
+            is_safe_link_scheme(""),
+            "empty URL must be allowed (no scheme = relative)"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `is_safe_link_scheme` rejects javascript:.
+    #[test]
+    fn test_BC_4_03_003_is_safe_link_scheme_rejects_javascript() {
+        assert!(
+            !is_safe_link_scheme("javascript:alert(1)"),
+            "javascript: must be rejected (CWE-601 / XSS)"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `is_safe_link_scheme` rejects data:.
+    #[test]
+    fn test_BC_4_03_003_is_safe_link_scheme_rejects_data_uri() {
+        assert!(
+            !is_safe_link_scheme("data:text/html,<h1>xss</h1>"),
+            "data: must be rejected"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `is_safe_link_scheme` rejects vbscript:.
+    #[test]
+    fn test_BC_4_03_003_is_safe_link_scheme_rejects_vbscript() {
+        assert!(
+            !is_safe_link_scheme("vbscript:foo"),
+            "vbscript: must be rejected"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — the `ALLOWED_URL_SCHEMES` constant contains exactly
+    /// the four approved schemes.
+    #[test]
+    fn test_BC_4_03_003_allowed_url_schemes_constant_content() {
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"http"),
+            "http must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"https"),
+            "https must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"mailto"),
+            "mailto must be in allowlist"
+        );
+        assert!(
+            ALLOWED_URL_SCHEMES.contains(&"tel"),
+            "tel must be in allowlist"
+        );
+        assert!(
+            !ALLOWED_URL_SCHEMES.contains(&"javascript"),
+            "javascript must NOT be in allowlist"
+        );
+        assert!(
+            !ALLOWED_URL_SCHEMES.contains(&"data"),
+            "data must NOT be in allowlist"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `is_safe_link_scheme` emits a `tracing::warn!` for
+    /// each rejected scheme. Uses `tracing_test::traced_test` to capture logs.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_BC_4_03_003_rejected_scheme_emits_tracing_warn() {
+        let _ = is_safe_link_scheme("javascript:alert(1)");
+        assert!(
+            logs_contain("javascript"),
+            "a tracing::warn! must be emitted containing the rejected scheme 'javascript'"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `tracing::warn!` is emitted for data: rejection.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_BC_4_03_003_data_uri_rejection_emits_tracing_warn() {
+        let _ = is_safe_link_scheme("data:text/html,<h1>xss</h1>");
+        assert!(
+            logs_contain("data"),
+            "a tracing::warn! must be emitted containing the rejected scheme 'data'"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — `tracing::warn!` is emitted for vbscript: rejection.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_BC_4_03_003_vbscript_rejection_emits_tracing_warn() {
+        let _ = is_safe_link_scheme("vbscript:foo");
+        assert!(
+            logs_contain("vbscript"),
+            "a tracing::warn! must be emitted containing the rejected scheme 'vbscript'"
+        );
+    }
+
+    /// BC-4.03.003 / AC-010 — a link with javascript: scheme produces HTML with
+    /// NO href attribute (or rendered as <span> rather than <a>).
+    #[test]
+    fn test_BC_4_03_003_javascript_href_dropped_in_export() {
+        use slideforge_layout::FrameContent;
+        use slideforge_types::InlineNode;
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // A slide whose TextRun contains a Link node with a javascript: URL
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::TextRun(vec![InlineNode::Link {
+                    url: Arc::from("javascript:alert(1)"),
+                    // text is Vec<InlineNode> per inline.rs
+                    text: vec![InlineNode::Plain(Arc::from("click me"))],
+                }]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The rendered HTML must NOT contain href="javascript:..." in any form
+        assert!(
+            !html.contains("href=\"javascript:"),
+            "javascript: href must be dropped from rendered HTML (CWE-601 / AC-010)"
+        );
+        assert!(
+            !html.contains("href='javascript:"),
+            "javascript: href (single-quoted) must be dropped from rendered HTML"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EC-001: Slide with only decorative images
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 EC-001 — a slide with ONLY decorative images must produce
+    /// aria-hidden elements; no accessible names exposed to AT.
+    ///
+    /// P4: Decorative images in the SVG layer use `<g aria-hidden="true">`.
+    /// No bare `<img>` in output.
+    #[test]
+    fn test_BC_4_03_003_ec_001_only_decorative_images_all_have_empty_alt() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_decorative_image_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // P4: No bare <img> elements — images are in SVG graphics layer.
+        assert!(
+            !html.contains("<img "),
+            "EC-001 / P4: decorative images must not render as bare <img>; \
+             got snippet: {:?}",
+            &html[..html.len().min(500)]
+        );
+
+        // P4: Decorative image groups must have aria-hidden="true".
+        assert!(
+            html.contains(r#"aria-hidden="true""#),
+            "EC-001 / P4: decorative image group must have aria-hidden=\"true\""
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // EC-003: Deck with lang "de"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// BC-4.03.003 EC-003 — deck with lang "de" produces `<html lang="de">`.
+    #[test]
+    fn test_BC_4_03_003_ec_003_lang_de_propagates_to_html() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("de");
+        let slide = make_title_slide();
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(
+            html.contains(r#"lang="de""#),
+            "EC-003: output must contain lang=\"de\" for deck.lang=\"de\""
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-008 (CWE-601) — protocol-relative and backslash URLs must be rejected
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-008: `//evil.com` (protocol-relative) must be REJECTED — not treated as
+    /// a relative path. Without a colon these look "relative" but browsers resolve
+    /// them as scheme-relative (same scheme as the page), enabling open-redirect.
+    #[test]
+    fn test_F008_protocol_relative_url_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("//evil.com"),
+            "F-008: protocol-relative URL '//evil.com' must be rejected (CWE-601)"
+        );
+    }
+
+    /// F-008: `//evil.com/path` must also be rejected.
+    #[test]
+    fn test_F008_protocol_relative_with_path_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("//evil.com/path"),
+            "F-008: '//evil.com/path' must be rejected"
+        );
+    }
+
+    /// F-008: backslash-prefix `\\evil.com` must be rejected.
+    #[test]
+    fn test_F008_backslash_url_is_rejected() {
+        assert!(
+            !is_safe_link_scheme("\\\\evil.com"),
+            "F-008: backslash-prefix URL must be rejected"
+        );
+    }
+
+    /// F-008: safe relative paths (path/fragment only) are still allowed.
+    #[test]
+    fn test_F008_path_only_relative_url_still_allowed() {
+        assert!(
+            is_safe_link_scheme("/slides/2"),
+            "F-008: path-only relative URL '/slides/2' must still be allowed"
+        );
+        assert!(
+            is_safe_link_scheme("#section"),
+            "F-008: fragment-only URL '#section' must still be allowed"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-006 — exactly ONE tracing::warn! per rejected link (no double-logging)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-006: when a javascript: Link is rendered, EXACTLY ONE warn! is emitted —
+    /// not two (not once in is_safe_link_scheme AND once in render_inline_node).
+    /// LOW-1: count == 1, not just >= 1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_F006_rejected_link_emits_exactly_one_warn() {
+        use slideforge_layout::FrameContent;
+        use slideforge_types::InlineNode;
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::TextRun(vec![InlineNode::Link {
+                    url: Arc::from("javascript:alert(1)"),
+                    text: vec![InlineNode::Plain(Arc::from("click"))],
+                }]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = make_laid_out_deck_single_slide(slide);
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let _ = exporter.export(&deck, &laid_out, &brand, &opts);
+
+        // LOW-1: EXACTLY one warn containing "javascript" must appear in the log
+        // (not two — one from is_safe_link_scheme, NOT a second from render_inline_node).
+        logs_assert(|lines| {
+            let matching: Vec<&&str> = lines
+                .iter()
+                .filter(|line| line.contains("javascript"))
+                .collect();
+            if matching.len() == 1 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "F-006 / LOW-1: expected exactly 1 warn containing 'javascript', \
+                     got {}. Lines: {:?}",
+                    matching.len(),
+                    matching
+                ))
+            }
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CRITICAL-B1 + MED-B4 — exporter-level single <h1> invariant
+    // ─────────────────────────────────────────────────────────────────────────
+
+    fn make_content_slide_with_title(title: &str) -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(1_000_000),
+                },
+                content: FrameContent::Title(Arc::from(title)),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    fn make_body_only_slide(body_text: &str) -> LaidOutSlide {
+        use slideforge_types::{ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag};
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(body_text))],
+                    tag: TextTag::Body,
+                    span: SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// B1/B4: 3 content-type slides (no title-slide) → exactly one <h1>.
+    /// The pre-pass must pick the first slide with a Title frame and promote it.
+    #[test]
+    fn test_B1_three_content_slides_no_title_type_produces_exactly_one_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![
+                make_content_slide_with_title("Slide One"),
+                make_content_slide_with_title("Slide Two"),
+                make_content_slide_with_title("Slide Three"),
+            ],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "B1: 3 content-type slides (no title-slide) must produce exactly one <h1>; got: {html}"
+        );
+    }
+
+    /// B1/B4: title-slide at index 2 (not 0) → exactly one <h1> on that slide.
+    #[test]
+    fn test_B1_title_slide_at_index_2_produces_exactly_one_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // First two slides are content-type, third is title-type
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![
+                make_content_slide_with_title("Intro"),
+                make_content_slide_with_title("Overview"),
+                make_title_slide(), // title-type at index 2
+            ],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "B1: title-slide at index 2 must produce exactly one <h1> in the document; got: {html}"
+        );
+        // The h1 must be the title-slide (third article).
+        // Verify: the slide at index 0 (content) produces h2, not h1.
+        let sel_h2 = scraper::Selector::parse("h2").expect("valid selector");
+        assert!(
+            doc.select(&sel_h2).count() >= 2,
+            "B1: first two content-type slides must produce h2 headings; got: {html}"
+        );
+    }
+
+    /// B1/B4 (c): body-only deck (no Title frames anywhere) → exactly one <h1>
+    /// on the first body frame (promoted) AND a tracing::warn! emitted.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_body_only_deck_promotes_first_body_frame_to_h1_and_warns() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![
+                make_body_only_slide("First body"),
+                make_body_only_slide("Second body"),
+            ],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "B1 (c): body-only deck must produce exactly one <h1> (promoted from first body frame); got: {html}"
+        );
+        assert!(
+            logs_contain("no Title frame"),
+            "B1 (c): body-only deck must emit tracing::warn! about missing Title frame; got logs"
+        );
+    }
+
+    /// B1/B4 (d): multi title-slide deck → still exactly one <h1>.
+    #[test]
+    fn test_B1_multi_title_slide_deck_still_exactly_one_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_title_slide(), make_title_slide(), make_title_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "B1 (d): multi title-slide deck must produce exactly one <h1>; got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-B2 — aria-hidden suppression bug
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B2: The outer graphics <svg> must carry role="presentation", NOT aria-hidden="true".
+    /// Non-decorative <g role="img"> must have NO aria-hidden="true" ancestor.
+    #[test]
+    fn test_B2_outer_svg_has_role_presentation_not_aria_hidden() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue chart")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The outer SVG graphics layer must have role="presentation"
+        assert!(
+            html.contains(r#"role="presentation""#),
+            "B2: outer graphics <svg> must carry role=\"presentation\"; got: {html}"
+        );
+
+        // The outer SVG must NOT carry aria-hidden="true" at the svg element level
+        // (aria-hidden on ancestor hides whole subtree including <g role="img"> children).
+        // Find the outer svg tag and assert it does NOT have aria-hidden="true".
+        let svg_start = html.find("<svg").expect("must contain svg");
+        let svg_tag_end = html[svg_start..].find('>').expect("svg must close");
+        let outer_svg_tag = &html[svg_start..=(svg_start + svg_tag_end)];
+        assert!(
+            !outer_svg_tag.contains(r#"aria-hidden="true""#),
+            "B2: outer graphics <svg> must NOT have aria-hidden=\"true\" \
+             (hides non-decorative <g role=\"img\"> from AT); got outer svg tag: {outer_svg_tag}"
+        );
+    }
+
+    /// B2: Decorative <g> carries aria-hidden="true" individually.
+    #[test]
+    fn test_B2_decorative_frame_g_carries_aria_hidden() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_decorative_image_slide();
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The decorative <g> must carry aria-hidden="true"
+        assert!(
+            html.contains(r#"<g aria-hidden="true""#),
+            "B2: decorative frame <g> must carry aria-hidden=\"true\"; got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-B3 — canonical id format sf-{slide_id}-{frame_index}
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B3: chart frame id must match sf-slide-{n}-{idx} (no doubled slide_id).
+    #[test]
+    fn test_B3_chart_frame_id_canonical_format_no_doubling() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // Must contain sf-slide-1-0 (0-based frame index)
+        assert!(
+            html.contains("sf-slide-1-0"),
+            "B3: chart frame id must be 'sf-slide-1-0' (0-based frame index); got: {html}"
+        );
+        // Must NOT contain doubled slide_id like sf-slide-1-slide-1-...
+        assert!(
+            !html.contains("sf-slide-1-slide-1"),
+            "B3: doubled slide_id pattern 'sf-slide-1-slide-1' must not appear; got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MED-B5 — negative/degenerate geometry
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B5: negative width in text frame must be skipped (no emit width="-N").
+    #[test]
+    fn test_B5_negative_width_text_frame_is_skipped() {
+        use crate::render::render_text_frame;
+        use slideforge_layout::BoundingBox;
+        use slideforge_types::Emu;
+
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(-500_000),
+                height: Emu(1_000_000),
+            },
+            content: FrameContent::Title(Arc::from("Negative width")),
+            text_flow: None,
+            region_role: None,
+        };
+        // has_title_frame=true: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2, true);
+        assert!(
+            result.is_none(),
+            "B5: negative-width frame must return None from render_text_frame; got: {result:?}"
+        );
+    }
+
+    /// B5: negative height in text frame must be skipped.
+    #[test]
+    fn test_B5_negative_height_text_frame_is_skipped() {
+        use crate::render::render_text_frame;
+        use slideforge_layout::BoundingBox;
+        use slideforge_types::Emu;
+
+        let frame = Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(9_144_000),
+                height: Emu(-500_000),
+            },
+            content: FrameContent::Title(Arc::from("Negative height")),
+            text_flow: None,
+            region_role: None,
+        };
+        // has_title_frame=false: irrelevant (returns None on degenerate bbox before Subtitle arm).
+        let result = render_text_frame(&frame, crate::render::HeadingLevel::H2, false);
+        assert!(
+            result.is_none(),
+            "B5: negative-height frame must return None from render_text_frame; got: {result:?}"
+        );
+    }
+
+    /// B5: negative width in graphics layer frame is skipped (no crash, no negative CSS).
+    #[test]
+    fn test_B5_negative_width_graphics_frame_is_skipped() {
+        use crate::render::render_graphics_layer;
+        use slideforge_layout::BoundingBox;
+        use slideforge_types::Emu;
+
+        let frames = vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(-9_144_000),
+                height: Emu(5_143_500),
+            },
+            content: FrameContent::Chart {
+                alt: AltText::Provided(Arc::from("Broken chart")),
+            },
+            text_flow: None,
+            region_role: None,
+        }];
+        let page_size = slideforge_layout::PageSize::default();
+        let result = render_graphics_layer(&frames, "slide-1", &page_size);
+        // Skipped frame → empty graphics layer
+        assert!(
+            result.is_empty(),
+            "B5: negative-width graphics frame must be skipped; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HIGH-1 / MED-1 / LOW-1 — P4 heading-assignment tail-case fixes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Makes a chart-only slide (single Chart frame, no Title, no Body text).
+    fn make_chart_only_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Chart {
+                    alt: AltText::Provided(Arc::from("Revenue chart")),
+                },
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// Makes a slide with an empty Body (Body(vec![]) — no ContentBlocks).
+    fn make_empty_body_slide() -> LaidOutSlide {
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// Makes a slide with a Table body block (non-promotable).
+    fn make_table_body_slide() -> LaidOutSlide {
+        use slideforge_types::{ContentBlock, TableSpec};
+        LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Table(TableSpec {
+                    headers: vec![],
+                    rows: vec![],
+                    alt: None,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        }
+    }
+
+    /// HIGH-1: chart-only single-slide deck → step 4 path: exactly one NON-EMPTY
+    /// `<h1>` synthesized from deck.metadata.title, with `.sf-visually-hidden` class.
+    /// The honest `tracing::warn!` must be emitted about synthesizing a visually-hidden h1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_HIGH1_chart_only_deck_synthesizes_visually_hidden_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US"); // deck.metadata.title == "Test Deck"
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "HIGH-1: chart-only deck must produce exactly one <h1>; got: {html}"
+        );
+        // The h1 must be NON-EMPTY (must contain deck title text)
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "HIGH-1: synthesized <h1> must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+        // The h1 must have the sf-visually-hidden class
+        let h1_class = h1_elements[0].value().attr("class").unwrap_or_default();
+        assert!(
+            h1_class.contains("sf-visually-hidden"),
+            "HIGH-1: synthesized <h1> must have class 'sf-visually-hidden'; got class: {h1_class:?}, html: {html}"
+        );
+        // Must emit the honest warn about synthesizing
+        assert!(
+            logs_contain("synthesizing"),
+            "HIGH-1: must emit tracing::warn! mentioning 'synthesizing'; chart-only deck triggers step 4"
+        );
+    }
+
+    /// HIGH-1: graphical (chart) slide first, then body slide second →
+    /// h1 must land on the BODY slide (slide index 1), not slide 0.
+    #[test]
+    fn test_HIGH1_graphical_first_then_body_second_h1_on_body_slide() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let mut chart_slide = make_chart_only_slide();
+        chart_slide.source_index = 0;
+        let mut body_slide = make_body_only_slide("Body text on slide 1");
+        body_slide.source_index = 1;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![chart_slide, body_slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "HIGH-1: graphical+body deck must produce exactly one <h1>; got: {html}"
+        );
+
+        // The h1 must be INSIDE the second article (slide-2), not the first (slide-1).
+        // slide-2 is the body slide (source_index=1 → slide number 2).
+        let sel_article1_h1 =
+            scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
+        let sel_article2_h1 =
+            scraper::Selector::parse("article#slide-2 h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_article1_h1).count(),
+            0,
+            "HIGH-1: chart slide (slide-1) must NOT have h1; the body slide gets it; got: {html}"
+        );
+        assert_eq!(
+            doc.select(&sel_article2_h1).count(),
+            1,
+            "HIGH-1: body slide (slide-2) must have the h1; got: {html}"
+        );
+    }
+
+    /// HIGH-1 / LOW-1: empty-Body first frame (Body(vec![])) must NOT be promoted to
+    /// an empty <h1>. The h1 must land on the NEXT eligible slide or be synthetic.
+    #[test]
+    fn test_HIGH1_empty_body_not_promoted_h1_falls_to_next_eligible() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // Slide 0: empty Body (not promotable)
+        let mut empty_body = make_empty_body_slide();
+        empty_body.source_index = 0;
+        // Slide 1: body with text (promotable)
+        let mut text_body = make_body_only_slide("Actual content");
+        text_body.source_index = 1;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![empty_body, text_body],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        // Must have exactly one h1 and it must be non-empty
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "HIGH-1: exactly one <h1> must exist; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "HIGH-1 / LOW-1: <h1> from promotion must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+
+        // The h1 must NOT be inside slide-1 (the empty-body slide).
+        let sel_slide1_h1 = scraper::Selector::parse("article#slide-1 h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_slide1_h1).count(),
+            0,
+            "HIGH-1: empty-Body slide (slide-1) must NOT get promoted to <h1>; got: {html}"
+        );
+    }
+
+    /// LOW-1: Table body block in the first frame must NOT be wrapped in <h1>.
+    /// A deck with only Table/ColorBar body content must fall through to step 4
+    /// and emit a synthetic visually-hidden h1 from deck metadata.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_LOW1_table_body_not_wrapped_in_h1_falls_through_to_synthetic() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US"); // deck title = "Test Deck"
+        let mut table_slide = make_table_body_slide();
+        table_slide.source_index = 0;
+
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![table_slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+
+        // The h1 must NOT wrap a <table> element (table is not promotable).
+        // We check: no <h1> containing a <table> child.
+        let sel_h1_with_table = scraper::Selector::parse("h1 table").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1_with_table).count(),
+            0,
+            "LOW-1: Table body must NOT be wrapped in <h1>; got: {html}"
+        );
+
+        // The document must still have exactly one h1 (the synthetic visually-hidden one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "LOW-1: deck with table-only body must still have exactly one (synthetic) <h1>; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "LOW-1: synthetic <h1> must be non-empty; got text: {h1_text:?}, html: {html}"
+        );
+
+        // Must emit the synthesizing warn (not the body-promotion warn)
+        assert!(
+            logs_contain("synthesizing"),
+            "LOW-1: table-only body deck must emit 'synthesizing' warn for step 4 path; got logs"
+        );
+    }
+
+    /// MED-1: zero-slide deck must not emit promotion warn (no slides to promote).
+    /// Export must not panic.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_MED1_zero_slide_deck_no_promotion_warn_no_panic() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(result.is_ok(), "zero-slide deck must not panic on export");
+
+        // Must NOT emit a promotion warn (no slides = nothing to promote or synthesize)
+        assert!(
+            !logs_contain("promoting"),
+            "MED-1: zero-slide deck must NOT emit promoting warn; got logs"
+        );
+        assert!(
+            !logs_contain("synthesizing"),
+            "MED-1: zero-slide deck must NOT emit synthesizing warn; got logs"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-1 (MED) — empty/whitespace deck-title → "Presentation" fallback
+    // AC-008 check (d); BC-4.03.003 PC-7 / canonical test vector
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: build a deck with an arbitrary title value (possibly empty / whitespace).
+    fn make_deck_with_title(title: Option<&str>) -> Deck {
+        Deck {
+            slides: vec![],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: title.map(Arc::from),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    /// B-1 (d): chart-only deck with `deck.metadata.title = Some("")` → step-4 path:
+    /// synthetic `<h1 class="sf-visually-hidden">` text is exactly "Presentation"
+    /// (empty string falls back to the hardcoded default) and the synthesizing warn
+    /// is emitted.
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_empty_title_falls_back_to_Presentation() {
+        let exporter = HtmlExporter::new();
+        // Empty string title triggers the "" → "Presentation" fallback in step 4.
+        let deck = make_deck_with_title(Some(""));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1: empty-title deck must produce exactly one <h1 class=\"sf-visually-hidden\">; \
+             got {count} h1 elements in: {html}",
+            count = h1_elements.len()
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Presentation",
+            "B-1: empty deck title must fall back to 'Presentation'; got h1 text: {h1_text:?}"
+        );
+
+        // The synthesizing warn must be emitted (step 4 path).
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1: empty-title chart-only deck must emit tracing::warn! about synthesizing"
+        );
+    }
+
+    /// B-1: chart-only deck with `deck.metadata.title = Some("   ")` (whitespace-only)
+    /// → synthetic h1 text is exactly "Presentation" (trimmed whitespace falls back).
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_whitespace_only_title_falls_back_to_Presentation() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("   "));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1: whitespace-only-title deck must produce exactly one \
+             <h1 class=\"sf-visually-hidden\">; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Presentation",
+            "B-1: whitespace-only deck title must fall back to 'Presentation'; \
+             got h1 text: {h1_text:?}"
+        );
+
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1: whitespace-only-title chart-only deck must emit synthesizing warn"
+        );
+    }
+
+    /// B-1 (sanity): chart-only deck with `deck.metadata.title = Some("Q3 Charts")` →
+    /// synthetic h1 text is exactly "Q3 Charts" (non-empty title is used verbatim).
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_non_empty_title_used_verbatim_in_synthetic_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("Q3 Charts"));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1 sanity: \"Q3 Charts\" deck must produce exactly one \
+             <h1 class=\"sf-visually-hidden\">; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Q3 Charts",
+            "B-1 sanity: non-empty deck title must appear verbatim in synthetic h1; \
+             got h1 text: {h1_text:?}"
+        );
+
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1 sanity: chart-only deck with any title must emit synthesizing warn"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-2 (MED) — empty-deck must have h1 count == 0 (AC-008 check (e);
+    // BC-4.03.003 PC-7 empty-deck exception)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B-2: zero-slide deck must produce NO `<h1>` elements in the exported HTML
+    /// (empty-deck exception: no slides, no headings, no synthetic h1).
+    ///
+    /// Strengthens `test_MED1_zero_slide_deck_no_promotion_warn_no_panic` which
+    /// only checked result.is_ok() and warn absence. This test uses scraper to
+    /// assert h1 count == 0.
+    ///
+    /// AC-008 check (e) / BC-4.03.003 PC-7 empty-deck exception / STORY-046 Pass-5 B-2.
+    #[test]
+    fn test_B2_P5_zero_slide_deck_has_zero_h1_elements() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("zero-slide export must not fail");
+        let html = String::from_utf8(bytes).expect("output must be valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            0,
+            "B-2: zero-slide deck must have h1 count == 0 in exported HTML; got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-3 (OBS) — synthetic-h1 XSS-escape invariant
+    // The template uses `{{ synthetic_h1 | safe }}` relying on Rust-side
+    // html_escape::encode_text. A future drop of the escape would be a stored-XSS
+    // sink.  This test pins the escape so any regression is caught.
+    // STORY-046 Pass-5 B-3.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B-3: chart-only deck with `deck.metadata.title = Some("<script>alert(1)</script>")`
+    /// → the exported HTML must contain `&lt;script&gt;` and must NOT contain a literal
+    /// `<script>` inside the synthetic h1.
+    ///
+    /// This pins the Rust-side `html_escape::encode_text` invariant. If a future change
+    /// drops the escape before passing to the `| safe` filter the XSS would be caught here.
+    ///
+    /// STORY-046 Pass-5 B-3 / AC-008 / CWE-79.
+    #[test]
+    fn test_B3_P5_synthetic_h1_xss_escaped() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("<script>alert(1)</script>"));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The synthetic h1 must contain the escaped form.
+        assert!(
+            html.contains("&lt;script&gt;"),
+            "B-3: synthetic h1 title must be HTML-escaped; \
+             expected '&lt;script&gt;' to appear in output; got snippet: {:?}",
+            &html[..html.len().min(2000)]
+        );
+
+        // Find the h1 element and assert no literal <script> appears inside it.
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-3: must have exactly one synthetic h1; got: {html}"
+        );
+        // scraper text() returns decoded text — the tag should not appear as a script element
+        // because it is encoded as HTML entities. The best check is on the raw HTML string:
+        // confirm that there is no <script> child inside the h1's raw HTML span.
+        let h1_outer = h1_elements[0].html();
+        assert!(
+            !h1_outer.contains("<script>"),
+            "B-3: h1 outer HTML must NOT contain a literal <script> element; \
+             got h1 outer HTML: {h1_outer}"
+        );
+        // Belt-and-suspenders: the decoded text that scraper sees should be the raw
+        // string (since html_escape turns < to &lt; the browser decodes it as text,
+        // not as a tag — scraper also decodes &lt; back to <, so text() will contain '<').
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            h1_text.contains("<script>"),
+            "B-3: scraper-decoded h1 text must contain literal '<script>' \
+             (the entity-decoded text string, NOT a real tag); got: {h1_text:?}"
+        );
+    }
+
+    /// HIGH-1 / SF-VISUALLY-HIDDEN: the page template must include the
+    /// `.sf-visually-hidden` CSS rule (position:absolute; width:1px; ...).
+    #[test]
+    fn test_HIGH1_page_template_includes_sf_visually_hidden_css() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // Use a chart-only deck to trigger step 4 (synthetic h1 with .sf-visually-hidden)
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The CSS must define .sf-visually-hidden
+        assert!(
+            html.contains("sf-visually-hidden"),
+            "HIGH-1: page template must include .sf-visually-hidden CSS rule; got snippet: {:?}",
+            &html[..html.len().min(2000)]
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOW-B7 — empty <nav> must not appear in page output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pass-10 — bbox-aware text-frame promotability
+    //
+    // A Body/TextRun frame is "promotable" for heading purposes ONLY if it has
+    // both (a) non-empty promotable content AND (b) a non-degenerate bbox
+    // (width.0 > 0 && height.0 > 0).  This mirrors the render-time guard
+    // (render.rs MED-B5) so the pre-pass and the render loop agree on which
+    // frames can actually emit an <h1>.
+    //
+    // If the ONLY text frame has a degenerate bbox, step 3 must NOT fire;
+    // step 4 must fire instead → synthetic visually-hidden <h1>.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Pass-10 / AC-007 / AC-008 / PC-7:
+    /// A step-3 deck (no Title frame) whose ONLY promotable text frame has a
+    /// degenerate bbox (zero width) must fall through to step 4 → exactly one
+    /// NON-EMPTY `<h1>` with `.sf-visually-hidden` is emitted; no `<h1>` appears
+    /// inside any `<article>` (the h1 is the synthetic one before the slides);
+    /// the "synthesizing" warn is emitted.
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_degenerate_zero_width_body_frame_falls_to_step4_synthesizes_h1() {
+        use slideforge_types::{ContentBlock, InlineNode, TextBlock, TextTag};
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // One slide: one Body frame with real text but ZERO width (degenerate bbox).
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate — zero width
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Degenerate frame text"))],
+                    tag: TextTag::Body,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> in the whole document (the synthetic one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "P10: degenerate-bbox deck must produce exactly one <h1> (synthetic); got {}: {html}",
+            h1s.len()
+        );
+
+        // The synthetic <h1> must be NON-EMPTY.
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "P10: synthetic <h1> must be non-empty; got: {h1_text:?}"
+        );
+
+        // The synthetic <h1> must carry .sf-visually-hidden.
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            h1_classes.contains("sf-visually-hidden"),
+            "P10: synthetic <h1> must carry class sf-visually-hidden; got class={h1_classes:?}"
+        );
+
+        // The "synthesizing" warn must be emitted (step 4 path).
+        assert!(
+            logs_contain("synthesizing"),
+            "P10: synthesizing visually-hidden <h1> warn must be emitted for degenerate-bbox deck"
+        );
+    }
+
+    /// Pass-10 / AC-007 / AC-008 / PC-7:
+    /// Same as above but with a ZERO HEIGHT bbox (negative dimension variant).
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_degenerate_zero_height_body_frame_falls_to_step4_synthesizes_h1() {
+        use slideforge_types::{ContentBlock, InlineNode, TextBlock, TextTag};
+
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(0), // degenerate — zero height
+                },
+                content: FrameContent::Body(vec![ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from("Zero height text"))],
+                    tag: TextTag::Body,
+                    span: slideforge_types::SourceSpan::default(),
+                })]),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "P10: zero-height-bbox deck must produce exactly one <h1> (synthetic); got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "P10: synthesizing warn must be emitted for zero-height degenerate bbox"
+        );
+    }
+
+    /// Pass-10 regression: a non-degenerate step-3 body-only deck still promotes
+    /// (no synthetic h1 — real h1 from promoted body frame, no sf-visually-hidden).
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_P10_non_degenerate_step3_body_still_promotes_real_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        // make_body_only_slide has non-degenerate bbox (9_144_000 × 5_143_500)
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_body_only_slide("Real content")],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> (real, promoted from body frame).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            1,
+            "P10 regression: non-degenerate body deck must produce exactly one real <h1>; got: {html}"
+        );
+
+        // The <h1> must NOT be .sf-visually-hidden (it's a real promoted body h1).
+        let h1 = doc.select(&sel_h1).next().expect("h1 exists");
+        let classes = h1.value().attr("class").unwrap_or("");
+        assert!(
+            !classes.contains("sf-visually-hidden"),
+            "P10 regression: real promoted body <h1> must not have sf-visually-hidden class; got class={classes:?}"
+        );
+
+        // The "synthesizing" warn must NOT be emitted (step 3, not step 4).
+        assert!(
+            !logs_contain("synthesizing"),
+            "P10 regression: step-3 promote path must not emit synthesizing warn"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Pass-14 / CRIT-1 — degenerate-bbox Title frame must NOT be selected as H1 source
+    //
+    // The heading-assignment steps 1 and 2 must apply the SAME non-degenerate-bbox
+    // guard that the render loop applies (is_non_degenerate_bbox).  A Title frame
+    // the render loop will skip (zero/negative width or height) must NOT be selected
+    // in step 1 or step 2.  If such a deck has NO other renderable Title frame and
+    // NO promotable text frame, it must fall through to step 4 → synthetic
+    // visually-hidden <h1>.
+    //
+    // has_title_frame (render.rs) must also use the renderable predicate so that
+    // the Subtitle / body-promotion logic is consistent with what the render loop
+    // actually emits.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Pass-14 / CRIT-1 / AC-008 / BC-4.03.003 PC-7:
+    ///
+    /// A title-type slide whose ONLY Title frame has a degenerate bbox (zero
+    /// width) must NOT be selected by step 1.  With no other renderable Title
+    /// frame and no promotable text frame, step 4 fires → exactly one NON-EMPTY
+    /// `<h1 class="sf-visually-hidden">` is synthesized; the synthesizing warn
+    /// is emitted.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_zero_width_title_frame_step1_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Title-type slide with a Title frame that has ZERO width (degenerate).
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate — zero width
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Title(Arc::from("Degenerate Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly one <h1> in the whole document (the synthetic one).
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1: degenerate-Title (zero width) deck must produce exactly one <h1> (synthetic); \
+             got {}: {html}",
+            h1s.len()
+        );
+
+        // The synthetic <h1> must be NON-EMPTY.
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            !h1_text.trim().is_empty(),
+            "CRIT-1: synthetic <h1> must be non-empty; got: {h1_text:?}"
+        );
+
+        // The synthetic <h1> must carry .sf-visually-hidden.
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            h1_classes.contains("sf-visually-hidden"),
+            "CRIT-1: synthetic <h1> must carry class sf-visually-hidden; got class={h1_classes:?}"
+        );
+
+        // The "synthesizing" warn must be emitted (step 4 path fired).
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1: synthesizing visually-hidden <h1> warn must be emitted for degenerate-Title deck"
+        );
+    }
+
+    /// Pass-14 / CRIT-1:
+    /// Same scenario but using a NEGATIVE HEIGHT Title frame — still degenerate.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_negative_height_title_frame_step1_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(-100_000), // degenerate — negative height
+                },
+                content: FrameContent::Title(Arc::from("Negative Height Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1: degenerate-Title (neg height) deck must produce exactly one <h1> (synthetic); \
+             got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1: synthesizing warn must be emitted for negative-height degenerate Title"
+        );
+    }
+
+    /// Pass-14 / CRIT-1 / Step-2 path:
+    ///
+    /// A non-title-type slide whose ONLY Title frame has a degenerate bbox (zero
+    /// height) must NOT be selected by step 2.  With no other renderable Title or
+    /// promotable text, step 4 fires → synthetic <h1>.
+    #[test]
+    #[tracing_test::traced_test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_degenerate_zero_height_title_frame_step2_falls_to_step4_synthesizes_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Content-type (not "title") slide with a degenerate Title frame.
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(9_144_000),
+                    height: slideforge_types::Emu(0), // degenerate — zero height
+                },
+                content: FrameContent::Title(Arc::from("Degenerate Step2 Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1 step2: degenerate-Title (zero height) content-type slide must produce \
+             exactly one synthetic <h1>; got {}: {html}",
+            h1s.len()
+        );
+        assert!(
+            logs_contain("synthesizing"),
+            "CRIT-1 step2: synthesizing warn must be emitted when only Title frame is degenerate"
+        );
+    }
+
+    /// Pass-14 / CRIT-1 / Multi-slide: first Title frame degenerate, second renderable.
+    ///
+    /// A two-slide deck where slide 0's Title frame is degenerate but slide 1's Title
+    /// frame is renderable: step 2 must select slide 1's Title frame as h1 source.
+    /// Slide 0 gets H2.  No synthetic h1.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_CRIT1_multi_slide_first_title_degenerate_second_renderable_h1_on_second() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+
+        // Slide 0: content-type, degenerate Title frame.
+        let slide0 = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(0),
+                    y: slideforge_types::Emu(0),
+                    width: slideforge_types::Emu(0), // degenerate
+                    height: slideforge_types::Emu(5_143_500),
+                },
+                content: FrameContent::Title(Arc::from("Degenerate First")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        // Slide 1: content-type, renderable Title frame.
+        let slide1 = LaidOutSlide {
+            source_index: 1,
+            slide_type_keyword: Arc::from("content"),
+            frames: vec![Frame {
+                bbox: BoundingBox {
+                    x: slideforge_types::Emu(457_200),
+                    y: slideforge_types::Emu(1_600_200),
+                    width: slideforge_types::Emu(8_229_600),
+                    height: slideforge_types::Emu(1_143_000),
+                },
+                content: FrameContent::Title(Arc::from("Renderable Second")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide0, slide1],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+        let doc = scraper::Html::parse_document(&html);
+
+        // Exactly ONE <h1> in the document, and it must contain "Renderable Second".
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        let h1s: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1s.len(),
+            1,
+            "CRIT-1 multi: exactly one <h1> expected; got {}: {html}",
+            h1s.len()
+        );
+        let h1_text: String = h1s[0].text().collect();
+        assert!(
+            h1_text.contains("Renderable Second"),
+            "CRIT-1 multi: <h1> must contain text from the renderable slide; got: {h1_text:?}"
+        );
+
+        // The h1 must NOT have sf-visually-hidden (it's a real rendered Title).
+        let h1_classes = h1s[0].value().attr("class").unwrap_or("");
+        assert!(
+            !h1_classes.contains("sf-visually-hidden"),
+            "CRIT-1 multi: renderable-Title h1 must not be synthetic; classes={h1_classes:?}"
+        );
+
+        // Slide 1 must be inside slide-2 article (source_index=1 → slide number 2).
+        let sel_slide2 = scraper::Selector::parse("#slide-2 h1").expect("valid selector");
+        assert!(
+            doc.select(&sel_slide2).next().is_some(),
+            "CRIT-1 multi: <h1> must live inside #slide-2 (the renderable slide); got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOW-B7 — empty <nav> must not appear in page output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B7: the page template must NOT emit an empty <nav aria-label="Slide navigation">.
+    #[test]
+    fn test_B7_no_empty_nav_in_page_output() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let slide = make_title_slide();
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![slide],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The nav element with empty body must not appear.
+        let doc = scraper::Html::parse_document(&html);
+        let sel = scraper::Selector::parse(r#"nav[aria-label="Slide navigation"]"#)
+            .expect("valid selector");
+        assert_eq!(
+            doc.select(&sel).count(),
+            0,
+            "B7: empty <nav aria-label=\"Slide navigation\"> must be removed (deferred to STORY-047); got: {html}"
+        );
+    }
+}

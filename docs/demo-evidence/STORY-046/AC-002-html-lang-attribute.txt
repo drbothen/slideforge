@@ -1,0 +1,6 @@
+AC-002: html[lang] attribute check
+===================================
+document.documentElement.lang: "en-US"
+lang="en-US" present: true
+lang="en" hardcoded (FAIL if true): false
+Output: PASS

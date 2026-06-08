@@ -1,0 +1,8 @@
+---
+source: crates/slideforge-html/src/render.rs
+expression: result
+---
+<article id="slide-1" class="sf-slide" aria-label="Slide 1" style="position:relative; width:960.00px; height:540.00px; overflow:hidden;">
+<h2 class="sf-title" style="position:absolute; left:0.00px; top:0.00px; width:960.00px; height:104.99px; overflow:hidden;">Content Slide</h2>
+<h3 class="sf-subtitle" style="position:absolute; left:0.00px; top:104.99px; width:960.00px; height:435.01px; overflow:hidden;">A subtitle here</h3>
+</article>

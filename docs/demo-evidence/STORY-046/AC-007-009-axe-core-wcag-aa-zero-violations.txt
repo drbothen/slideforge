@@ -1,0 +1,30 @@
+AC-007/AC-009: axe-core WCAG AA scan
+=====================================
+Timestamp: 2026-06-08T11:57:52.777Z
+Tags scanned: wcag2a, wcag2aa
+Rules passed: 18
+Violations: 0
+Incomplete: 0
+Inapplicable: 41
+
+RESULT: PASS — Zero WCAG AA violations
+
+Rules that passed:
+  + aria-allowed-attr: Ensure an element's role supports its ARIA attributes
+  + aria-conditional-attr: Ensure ARIA attributes are used as described in the specification of the element's role
+  + aria-deprecated-role: Ensure elements do not use deprecated roles
+  + aria-hidden-body: Ensure aria-hidden="true" is not present on the document body.
+  + aria-hidden-focus: Ensure aria-hidden elements are not focusable nor contain focusable elements
+  + aria-prohibited-attr: Ensure ARIA attributes are not prohibited for an element's role
+  + aria-required-attr: Ensure elements with ARIA roles have all required ARIA attributes
+  + aria-roles: Ensure all elements with a role attribute use a valid value
+  + aria-valid-attr-value: Ensure all ARIA attributes have valid values
+  + aria-valid-attr: Ensure attributes that begin with aria- are valid ARIA attributes
+  + color-contrast: Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds
+  + document-title: Ensure each HTML document contains a non-empty <title> element
+  + duplicate-id-aria: Ensure every id attribute value used in ARIA and in labels is unique
+  + html-has-lang: Ensure every HTML document has a lang attribute
+  + html-lang-valid: Ensure the lang attribute of the <html> element has a valid value
+  + meta-viewport: Ensure <meta name="viewport"> does not disable text scaling and zooming
+  + nested-interactive: Ensure interactive controls are not nested as they are not always announced by screen readers or can cause focus problems for assistive technologies
+  + svg-img-alt: Ensure <svg> elements with an img, graphics-document or graphics-symbol role have accessible text

@@ -1,0 +1,12 @@
+{
+  "violations": [],
+  "passes_count": 18,
+  "incomplete_count": 0,
+  "inapplicable_count": 41,
+  "timestamp": "2026-06-08T11:56:37.850Z",
+  "fixture_file": "/tmp/claude-501/slideforge-html-wcag-fixture.html",
+  "tags_scanned": [
+    "wcag2a",
+    "wcag2aa"
+  ]
+}

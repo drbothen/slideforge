@@ -22,12 +22,12 @@ members = [
     "crates/slideforge-diagrams",
     "crates/slideforge-pdf",      # STORY-043: Phase 4 — PDF core backend
     "crates/slideforge-docx",     # STORY-041: Wave 4 — DOCX core serialization
+    "crates/slideforge-html",     # STORY-046: Wave 5 — Static HTML exporter (WCAG AA)
 ]
 
-# Crates that exist as scaffolding but are not built yet (Phase 4+).
+# Crates that exist as scaffolding but are not built yet (Phase 5+).
 # Move into `members` as they are implemented.
 exclude = [
-    "crates/slideforge-html",     # Phase 4
     "crates/slideforge-ffi",      # Phase 5
 ]
 
@@ -66,6 +66,8 @@ plotters = { version = "=0.3.7", default-features = false, features = ["svg_back
 quick-xml = "=0.36.0"
 mermaid-rs-renderer = { version = "=0.2.2", default-features = false }
 usvg = "=0.47.0"
+minijinja = "=2.20.0"
+html-escape = "=0.2.13"
 
 # Serialization / config
 sha2 = "=0.11.0"
@@ -107,6 +109,8 @@ insta = "1"
 pretty_assertions = "1"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
 tempfile = "=3.27.0"
+scraper = "=0.27.0"
+tracing-test = "=0.2.5"
 
 # Internal workspace crates (referenced as path dependencies from each crate).
 slideforge-types = { path = "crates/slideforge-types", version = "0.1.0" }
@@ -124,6 +128,7 @@ slideforge-charts = { path = "crates/slideforge-charts", version = "0.1.0" }
 slideforge-diagrams = { path = "crates/slideforge-diagrams", version = "0.1.0" }
 slideforge-pdf = { path = "crates/slideforge-pdf", version = "0.1.0" }
 slideforge-docx = { path = "crates/slideforge-docx", version = "0.1.0" }
+slideforge-html = { path = "crates/slideforge-html", version = "0.1.0" }
 
 # Release profile tuned for binary size and runtime perf.
 #

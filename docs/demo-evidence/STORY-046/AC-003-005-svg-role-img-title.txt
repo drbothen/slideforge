@@ -1,0 +1,13 @@
+AC-003/005: SVG layer graphical frame accessibility
+====================================================
+<g role="img"> elements found: 2
+  [0] role="img" aria-labelledby="sf-slide-2-0"
+       title id="sf-slide-2-0" text="Bar chart: Q1 $1M, Q2 $1.3M, Q3 $1.2M, Q4 $1.8M"
+       has <title>: true
+  [1] role="img" aria-labelledby="sf-slide-3-0"
+       title id="sf-slide-3-0" text="Revenue by quarter"
+       has <title>: true
+
+Outer <svg> roles: ["presentation","presentation",null]
+All outer SVGs have role="presentation": false
+Output: PASS

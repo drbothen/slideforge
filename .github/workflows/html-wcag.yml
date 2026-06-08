@@ -1,0 +1,181 @@
+name: HTML WCAG AA
+
+# Triggers: PRs touching the HTML exporter crate, and direct pushes to develop/main
+# that include changes to crates/slideforge-html.
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-html/**"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "crates/slideforge-html/**"
+
+# Cancel in-progress runs when a new commit is pushed to the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+# ─── Pinned action SHAs ──────────────────────────────────────────────────────
+# All actions are pinned to a full commit SHA (supply chain security).
+# To update: resolve the new tag to its commit SHA and replace below.
+#
+#   actions/checkout         v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   dtolnay/rust-toolchain HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+#   Swatinem/rust-cache      v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   taiki-e/install-action   v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+#   actions/setup-node       v4  → cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ─── HTML structure unit tests ─────────────────────────────────────────────
+  # Runs the non-ignored Rust unit tests in slideforge-html.
+  # These cover: lang attribute, no <canvas>, role/alt attributes, heading
+  # hierarchy, URL scheme allowlist. The axe-core CI gate (below) depends on
+  # this job producing a clean fixture HTML file.
+  html-unit-tests:
+    name: html-unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: html-wcag
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: cargo nextest run (slideforge-html unit tests)
+        run: >
+          cargo nextest run
+          -p slideforge-html
+          --no-fail-fast
+
+  # ─── axe-core WCAG AA gate ─────────────────────────────────────────────────
+  # AC-007: Zero WCAG AA violations via @axe-core/playwright in CI.
+  # AC-009: Body text contrast ratio (color-contrast axe-core rule).
+  #
+  # This job:
+  # 1. Generates the fixture HTML file from the integration test
+  #    (`cargo test -p slideforge-html --test html_fixture -- --include-ignored`).
+  # 2. Installs Playwright + @axe-core/playwright.
+  # 3. Runs axe-core against the fixture HTML and asserts zero WCAG AA violations.
+  #
+  # Gated by: html-unit-tests (structural Rust tests must pass first).
+  # Traces to: BC-4.03.003 postcondition 2 + invariant 4, STORY-046 AC-007/AC-009.
+  html-wcag-check:
+    name: html-wcag-check (axe-core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: html-unit-tests
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: html-wcag-axe
+      - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
+        with:
+          node-version: "20"
+
+      # Step 1: Generate the fixture HTML file via the integration test.
+      # The #[ignore] attribute on the test is bypassed by --include-ignored.
+      - name: Generate fixture HTML (cargo test -- --include-ignored)
+        run: |
+          set -euo pipefail
+          cargo test -p slideforge-html --test html_fixture -- --include-ignored 2>&1
+          ls -la /tmp/slideforge-html-wcag-fixture.html
+
+      # Step 2: Install @playwright/test and @axe-core/playwright.
+      # @playwright/test provides the chromium browser launcher for Node scripts.
+      # @axe-core/playwright provides the AxeBuilder class (the correct API for
+      # this package — NOT injectAxe/checkA11y which belong to axe-playwright).
+      - name: Install Playwright + axe-core
+        run: |
+          set -euo pipefail
+          npm install --no-save @playwright/test @axe-core/playwright
+          npx playwright install chromium --with-deps
+
+      # Step 3: Write the axe-core test script using the AxeBuilder API.
+      #
+      # IMPORTANT: the script is written to $GITHUB_WORKSPACE (the checkout
+      # directory) so it is a sibling of node_modules/. Node's module resolver
+      # walks up from the script's location; placing it next to node_modules/
+      # guarantees require('@axe-core/playwright') and require('@playwright/test')
+      # resolve correctly without NODE_PATH tricks.
+      #
+      # API reference: @axe-core/playwright exports AxeBuilder (class), not
+      # injectAxe/checkA11y (those belong to the separate axe-playwright package).
+      # Usage: new AxeBuilder({ page }).withTags([...]).analyze()
+      #
+      # Positive-coverage requirement (CI-as-Code): the success log MUST include
+      # a runtime-computed pass count so an inert/no-op run is greppably
+      # distinguishable from a real scan. A hardcoded "zero violations" string
+      # would pass even if axe-core never ran.
+      - name: Write axe-core test script
+        run: |
+          cat > "$GITHUB_WORKSPACE/axe-check.js" << 'SCRIPT'
+          'use strict';
+          const { AxeBuilder } = require('@axe-core/playwright');
+          const { chromium } = require('@playwright/test');
+          const fs = require('fs');
+
+          (async () => {
+            const fixturePath = '/tmp/slideforge-html-wcag-fixture.html';
+            if (!fs.existsSync(fixturePath)) {
+              console.error('ERROR: fixture file not found: ' + fixturePath);
+              process.exitCode = 1;
+              return;
+            }
+
+            const fileUrl = 'file://' + fixturePath;
+            const browser = await chromium.launch({ args: ['--no-sandbox'] });
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            await page.goto(fileUrl);
+
+            const results = await new AxeBuilder({ page })
+              .withTags(['wcag2a', 'wcag2aa'])
+              .analyze();
+
+            await browser.close();
+
+            const violations = results.violations;
+            const passCount = results.passes.length;
+
+            if (violations.length > 0) {
+              console.error('WCAG AA violations found (' + violations.length + '):');
+              violations.forEach((v) => {
+                console.error(
+                  '- [' + v.id + '] ' + v.help +
+                  ' (' + v.nodes.length + ' nodes): ' + v.helpUrl
+                );
+              });
+              process.exitCode = 1;
+            } else {
+              console.log(
+                'WCAG AA check passed: ' + passCount + ' rule(s) passed, ' +
+                violations.length + ' violations, 1 HTML file scanned'
+              );
+            }
+          })();
+          SCRIPT
+
+      # Step 4: Run axe-core and assert zero violations.
+      # Run from $GITHUB_WORKSPACE so node_modules/ is a sibling of axe-check.js
+      # and module resolution is unambiguous.
+      - name: Run axe-core WCAG AA check (zero violations required)
+        run: node "$GITHUB_WORKSPACE/axe-check.js"
