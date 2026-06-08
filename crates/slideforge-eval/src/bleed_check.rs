@@ -27,7 +27,7 @@
 //!   sentinel in a path not scanned does not trigger a panic.
 //! - EC-004: `BleedChecker` works on **decoded XML text**. Before searching for
 //!   the sentinel, each ZIP member's raw UTF-8 bytes are XML-entity-decoded via
-//!   a **per-token tolerant decoder** (see [`decode_xml_entities`]). This means
+//!   a **per-token tolerant decoder** (see `decode_xml_entities`). This means
 //!   callers pass the **human-readable** (unescaped) register string as the
 //!   sentinel — the checker finds it regardless of how the exporter XML-escapes
 //!   it in the output. For example, a register string `R&D roadmap` will be

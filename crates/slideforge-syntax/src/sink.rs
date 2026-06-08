@@ -210,7 +210,7 @@ impl DiagnosticSink {
     /// length as `errors()`.
     ///
     /// Used by the root `slideforge` crate to thread per-diagnostic severity
-    /// into [`slideforge::error::BuildError::MultistageFailed`]
+    /// into the root crate's `BuildError::MultistageFailed` variant
     /// so that the CLI JSON renderer can emit the ACTUAL severity of each eval
     /// diagnostic rather than hardcoding `"error"` (OBS-P4-003 fix).
     #[must_use]
