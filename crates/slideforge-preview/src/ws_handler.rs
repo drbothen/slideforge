@@ -28,6 +28,24 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use tokio::sync::{broadcast, watch};
 
+/// Decide whether the WebSocket handler should shut down based on the result of
+/// `shutdown_rx.changed()` and the current watch value.
+///
+/// This is the single source of truth for "should this WS handler stop":
+///
+/// | `changed` result | `current_value` | `should_shutdown` |
+/// |------------------|-----------------|-----------------|
+/// | `Ok(())`         | `true`           | `true`  — graceful shutdown signal sent  |
+/// | `Ok(())`         | `false`          | `false` — spurious wake or pre-signal    |
+/// | `Err(_)`         | any              | `true`  — all Senders dropped (e.g., server task panic); previously caused a busy-spin |
+///
+/// The `Err` case was the MED-1 bug: `changed()` returns `Err` immediately and
+/// permanently when the last `watch::Sender` is dropped, so if only `current_value`
+/// were checked the loop would spin without yielding.
+fn should_shutdown(changed: &Result<(), watch::error::RecvError>, current_value: bool) -> bool {
+    changed.is_err() || current_value
+}
+
 /// axum handler for `GET /live` — upgrades the HTTP connection to WebSocket.
 ///
 /// # AC-002 / BC-4.03.004 postcondition 2
@@ -62,19 +80,19 @@ async fn handle_ws_connection(
     mut rx: broadcast::Receiver<String>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
+    // Write-only loop: this select! has arms for shutdown_rx and the broadcast
+    // rx, but no arm for socket.recv(). This is intentional — EC-001 (push-only
+    // server) is satisfied and tested. A silently-disconnected client lingers
+    // until the next push fails (socket.send returns Err), at which point the
+    // handler returns. STORY-048 should add a socket.recv() arm to reap closed
+    // connections promptly rather than waiting for the next push.
     loop {
         tokio::select! {
             // Cooperative shutdown path (AC-005): send Close(1001) and return.
-            //
-            // Two shutdown triggers:
-            // 1. `Ok(())` + `borrow()==true`: graceful shutdown (shutdown_tx.send(true)).
-            // 2. `Err(RecvError)`: all watch Senders dropped (e.g., server task panic
-            //    or listener error before graceful_fut runs). This was previously a
-            //    busy-spin bug: Err returned immediately on every loop iteration while
-            //    `borrow()==false`, so the `if` guard failed and the handler looped
-            //    without yielding. Fixed: treat Err as shutdown (MED-1 adv Pass-2).
+            // Delegates to `should_shutdown` — the single source of truth for
+            // the shutdown decision (see its doc comment for the full truth table).
             result = shutdown_rx.changed() => {
-                if result.is_err() || *shutdown_rx.borrow() {
+                if should_shutdown(&result, *shutdown_rx.borrow()) {
                     tracing::debug!("WebSocket handler received shutdown signal — sending Close(1001)");
                     let close_frame = CloseFrame {
                         code: axum::extract::ws::close_code::AWAY,
@@ -119,68 +137,91 @@ async fn handle_ws_connection(
 mod tests {
     use super::*;
 
-    /// MED-1 fix — sender-drop-without-send path: dropping the `watch::Sender`
-    /// (without calling `send(true)`) must cause `handle_ws_connection` to return
-    /// promptly, not hot-spin forever.
+    // -------------------------------------------------------------------------
+    // Load-bearing regression guard for MED-1 (TD-VSDD-059).
+    //
+    // These tests call `should_shutdown` directly — the production code path.
+    // If the `changed.is_err()` branch is removed from `should_shutdown`, the
+    // (Err, false) case returns `false` and `test_BC_4_03_004_med1_err_false`
+    // fails immediately, proving the regression guard is load-bearing.
+    // -------------------------------------------------------------------------
+
+    /// (Ok(()), true) → `should_shutdown` returns true.
     ///
-    /// Red gate: before the fix, `changed()` returns `Err` immediately on sender drop,
-    /// `borrow()==false`, so the `if *shutdown_rx.borrow()` guard evaluates false,
-    /// the handler falls through without returning, and the loop spins forever.
-    ///
-    /// Green gate: after the fix `result.is_err()` is checked first — the handler
-    /// sends `Close(1001)` and returns.
-    ///
-    /// This test proves two invariants that together demonstrate the busy-spin:
-    /// 1. `changed()` returns `Err` when the `Sender` is dropped without `send(true)`.
-    /// 2. `borrow()` returns `false` in that state (no `send(true)` occurred).
-    /// Therefore `if *shutdown_rx.borrow()` (pre-fix) evaluates to false → fall-through.
-    /// The fix is `if result.is_err() || *shutdown_rx.borrow()` → true → return.
+    /// Normal graceful shutdown: sender called `send(true)` and `changed()` fired.
     #[tokio::test]
-    async fn test_BC_4_03_004_med1_sender_drop_without_send_handler_returns_promptly() {
+    async fn test_BC_4_03_004_med1_ok_true_is_shutdown() {
         let (tx, mut rx) = watch::channel(false);
-
-        // Drop the sender WITHOUT sending true — this is the bug trigger.
-        drop(tx);
-
-        // After sender drop, `changed()` must return Err immediately and permanently.
+        tx.send(true).expect("send must succeed");
         let result = rx.changed().await;
         assert!(
-            result.is_err(),
-            "watch::Receiver::changed() must return Err when all Senders are dropped; \
-             got Ok — this means our assumption about the busy-spin path is wrong"
+            should_shutdown(&result, *rx.borrow()),
+            "(Ok, true) must be shutdown=true"
         );
-
-        // And borrow() must still return false (no send(true) was ever called).
-        assert!(
-            !*rx.borrow(),
-            "watch value must remain false when Sender was dropped without send(true)"
-        );
-
-        // Therefore: pre-fix code's `if *shutdown_rx.borrow()` guard evaluates to false
-        // → falls through → next loop iteration → `changed()` returns Err again
-        // → infinite hot-spin. Post-fix code checks `result.is_err()` first → returns.
     }
 
-    /// MED-1 — post-fix shutdown condition: `result.is_err() || *rx.borrow()` is
-    /// true when the `watch::Sender` is dropped without `send(true)`.
+    /// (Ok(()), false) → `should_shutdown` returns false.
     ///
-    /// This directly asserts the boolean expression used in the fixed `select!` arm,
-    /// proving that the arm now returns rather than falling through.
+    /// Spurious or intermediate wake where the value is still false — handler
+    /// should NOT shut down; it re-enters the select! loop.
     #[tokio::test]
-    async fn test_BC_4_03_004_med1_watch_err_path_is_shutdown_not_fallthrough() {
+    async fn test_BC_4_03_004_med1_ok_false_is_not_shutdown() {
         let (tx, mut rx) = watch::channel(false);
-        drop(tx); // Sender dropped without send(true) — the bug trigger.
-
+        // Send false → changed() fires but value is still false.
+        tx.send(false).expect("send must succeed");
         let result = rx.changed().await;
-
-        // Post-fix behavior: `result.is_err() || *rx.borrow()` must be true
-        // so the handler returns rather than falling through.
-        let should_shutdown = result.is_err() || *rx.borrow();
         assert!(
-            should_shutdown,
-            "After sender drop without send(true): result={result:?}, borrow={}, \
-             should_shutdown must be true (post-fix) but was false (pre-fix busy-spin bug)",
-            *rx.borrow()
+            !should_shutdown(&result, *rx.borrow()),
+            "(Ok, false) must be shutdown=false"
+        );
+    }
+
+    /// (Err(_), false) → `should_shutdown` returns true.
+    ///
+    /// This is the MED-1 busy-spin case: the last Sender was dropped without
+    /// ever calling `send(true)`, so `changed()` returns `Err` and `borrow()`
+    /// is `false`. Pre-fix code evaluated only `*borrow()` → false → fall-
+    /// through → infinite hot-spin. Post-fix `should_shutdown` checks
+    /// `changed.is_err()` first → true → handler exits.
+    ///
+    /// Regression evidence: removing the `changed.is_err()` branch from
+    /// `should_shutdown` makes this assertion fail (`false != true`).
+    #[tokio::test]
+    async fn test_BC_4_03_004_med1_err_false_is_shutdown() {
+        let (tx, mut rx) = watch::channel(false);
+        drop(tx); // Drop without send(true) — the bug trigger.
+        let result = rx.changed().await; // Returns Err immediately.
+        assert!(
+            result.is_err(),
+            "changed() must return Err when all Senders are dropped"
+        );
+        assert!(
+            !*rx.borrow(),
+            "borrow() must remain false — no send(true) was called"
+        );
+        assert!(
+            should_shutdown(&result, *rx.borrow()),
+            "(Err, false) must be shutdown=true — this is the MED-1 busy-spin case; \
+             if this fails the is_err() branch was removed from should_shutdown"
+        );
+    }
+
+    /// (Err(_), true) → `should_shutdown` returns true.
+    ///
+    /// Unusual but possible: Sender sent `true` then was immediately dropped.
+    /// Both branches of the OR are true; shutdown must still be signalled.
+    #[tokio::test]
+    async fn test_BC_4_03_004_med1_err_true_is_shutdown() {
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(true).expect("send must succeed");
+        drop(tx); // Drop after sending true.
+        // Drain the pending change notification.
+        let result = rx.changed().await;
+        // Whether result is Ok or Err here (implementation detail of tokio watch),
+        // borrow() is true, so shutdown must be signalled regardless.
+        assert!(
+            should_shutdown(&result, *rx.borrow()),
+            "(Err|Ok, true) must be shutdown=true"
         );
     }
 }
