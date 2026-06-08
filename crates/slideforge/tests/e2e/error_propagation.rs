@@ -280,9 +280,10 @@ fn test_bc_1_15_002_cross_stage_eval_and_validator_errors_both_reported() {
             ..
         } => {
             // PC1: eval diagnostics must contain E-EVL-001.
-            let has_evl = eval_diagnostics
-                .iter()
-                .any(|d| d.code().is_some_and(|c| c.to_string().contains("E-EVL-001")));
+            let has_evl = eval_diagnostics.iter().any(|d| {
+                d.code()
+                    .is_some_and(|c| c.to_string().contains("E-EVL-001"))
+            });
             assert!(
                 has_evl,
                 "BC-1.15.002 TV-13.1 PC1: MultistageFailed.eval_diagnostics must contain \
@@ -310,7 +311,10 @@ fn test_bc_1_15_002_cross_stage_eval_and_validator_errors_both_reported() {
             // Invariant: at least 2 E-EVL-001 entries (2 undefined vars in fixture).
             let evl_count = eval_diagnostics
                 .iter()
-                .filter(|d| d.code().is_some_and(|c| c.to_string().contains("E-EVL-001")))
+                .filter(|d| {
+                    d.code()
+                        .is_some_and(|c| c.to_string().contains("E-EVL-001"))
+                })
                 .count();
             assert!(
                 evl_count >= 2,
