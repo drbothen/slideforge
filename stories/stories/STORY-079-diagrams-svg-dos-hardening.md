@@ -19,7 +19,7 @@ depends_on:
   - STORY-034
 blocks: []
 estimated_days: 1
-# BC status: BC-1.12.003 is present and covers this story's scope; status=draft pending PO review of expanded postconditions (security invariants not yet in BC text).
+# BC status: BC-1.12.003 v1.2 active — PO review complete (2026-06-08). SEC-001 (CWE-674, nesting-depth cap) and SEC-002 (CWE-400, byte-size cap) formalized as postconditions 8–10 and invariants 4–7. Story ACs and implementation scope unchanged.
 ---
 
 # STORY-079: slideforge-diagrams — SVG DoS Hardening (byte-size cap + nesting-depth guard)
