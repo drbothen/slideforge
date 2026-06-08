@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
 timestamp: 2026-06-08T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-014
 lifecycle_status: active
 introduced: v1.0.0
-modified: [v1.1, v1.2]
+modified: [v1.1, v1.2, v1.3]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -57,7 +57,7 @@ cause rendering failures in Office applications.
 1. usvg normalization is applied to EVERY diagram SVG before format embedding — no bypass path.
 2. Normalization is applied after mermaid-rs-renderer produces the SVG and before any format-specific exporter receives it.
 3. The normalized SVG faithfully represents the same visual diagram as the input SVG.
-4. **Guard ordering invariant:** the byte-size guard (SEC-002) MUST precede the nesting-depth guard (SEC-001) MUST precede the `font_db()` call. The font database load (50–300ms, `OnceLock`) must never be paid for an input that will be rejected. An oversized input MUST never reach the allocation-heavy `usvg::Tree::from_str` parse.
+4. **Guard ordering invariant:** The byte-size guard (SEC-002) MUST precede the `font_db()` call and `usvg::Tree::from_str` — an oversized input MUST never pay the font-DB load (50–300ms, `OnceLock`) or reach the allocation-heavy parse. The nesting-depth guard (SEC-001) operates on the parsed `usvg::Tree`, so it necessarily runs after `font_db()`/`from_str`; it fires after a successful parse but before `tree.to_string()` (see postcondition 9). The font-DB-load-avoidance rationale applies only to the oversized-input rejection path — the depth-rejection path runs post-parse by design.
 5. **Constant parity invariant:** `MAX_SVG_BYTES` (52,428,800) and `MAX_SVG_NESTING_DEPTH` (64) in `slideforge-diagrams/src/normalize.rs` MUST equal the identically-named constants in `slideforge-pdf/src/svg_embed.rs` at all times. If one is changed, both must be changed in the same commit. This prevents split-brain security posture between the two SVG processing paths.
 6. **Iterative traversal invariant:** the nesting-depth scan MUST NOT use Rust recursion for tree traversal — use an explicit stack of `(&Group, usize)` tuples. A recursive depth counter would introduce the same stack-exhaustion vector (CWE-674) it is designed to prevent.
 7. **Tracing invariant:** both rejection paths MUST emit a `tracing::warn!` event with structured fields (`bytes` for size-cap, depth field for nesting-cap) before returning `Err(...)`. This is required for security observability (NFR-016).
@@ -150,3 +150,4 @@ STORY-034 (established `usvg_normalize` and `RawDiagramSvg`); STORY-079 (adds SE
 | 1.0 | 2026-05-24 | product-owner | Initial creation — usvg normalization postconditions (foreignObject, script, CSS, absolute dims, use-resolution, E-EXP-004 on failure). |
 | 1.1 | 2026-05-24 | product-owner | (status: draft — postconditions pending STORY-079 security invariant review). |
 | 1.2 | 2026-06-08 | product-owner | STORY-079 PO review complete. Added postconditions 8–10 (SEC-002 byte-size cap, SEC-001 nesting-depth cap, regression invariant); invariants 4–7 (guard ordering, constant parity, iterative traversal, tracing); EC-005 through EC-010 (boundary conditions); SEC-001/SEC-002 canonical test vectors with construction notes; five new VPs. Traceability expanded with SEC-001/SEC-002, NFR-016/021–025, sibling slideforge-pdf reference, STORY-079. Status promoted from draft to active. |
+| 1.3 | 2026-06-08 | product-owner | STORY-079 adversary Pass-2 MED-1 correction. Invariant 4 rewritten to eliminate internally-contradictory chained "X MUST precede Y MUST precede Z" ordering prose. Font-DB-load-avoidance rationale now scoped exclusively to the byte-size (SEC-002) rejection path; depth guard (SEC-001) correctly described as running post-parse (after `font_db()`/`from_str`), consistent with postcondition 9 and STORY-079 AC-002. No postconditions, edge cases, constants, or implementation changed. |
