@@ -3119,7 +3119,8 @@ mod tests {
 // | Test | AC | Clause |
 // |---|---|---|
 // | test_BC_3_04_001_ac004_pdf_full_export_gradient_shape_no_error | AC-004 | postcondition 5 |
-// | test_BC_3_04_001_ac004_pdf_draw_gradient_rect_stub_panics | AC-004 | stub Red Gate |
+// | test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output | AC-004 | draw path load-bearing (HIGH-001) |
+// | test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes | AC-004 | non-zero output |
 // | test_BC_3_04_001_ec005_pdf_same_from_to_gradient_valid | EC-005 | STORY-072 EC-005 |
 
 #[cfg(test)]
@@ -3137,7 +3138,7 @@ mod story_072_tests {
     };
     use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, Rgb, SourceSpan};
 
-    use super::{PdfExporter, draw_gradient_rect};
+    use super::PdfExporter;
     use slideforge_plugin_api::{ExportOptions, Exporter};
 
     // ─── Fixture builders ────────────────────────────────────────────────────
@@ -3231,12 +3232,9 @@ mod story_072_tests {
     /// AC-004 (STORY-072) — `PdfExporter::export` with a `FillSpec::Gradient` shape
     /// must not return an error (no panic, no Err).
     ///
-    /// RED GATE: currently the PDF exporter skips `FrameContent::Shape` frames entirely.
-    /// After implementation, the gradient path through `draw_gradient_rect` must succeed.
-    ///
-    /// Note: this test currently PASSES because Shape frames are silently skipped.
-    /// It becomes a Red Gate once `draw_gradient_rect` is wired into the PDF render loop
-    /// (i.e., when the stub `todo!()` is called by the export path).
+    /// `draw_gradient_rect` is fully implemented and wired into the export loop.
+    /// This test verifies the no-error postcondition — the gradient path must
+    /// succeed without panicking or returning `Err`.
     #[test]
     fn test_BC_3_04_001_ac004_pdf_full_export_gradient_shape_no_error() {
         let laid_out = make_gradient_deck(
@@ -3257,43 +3255,88 @@ mod story_072_tests {
         );
     }
 
-    /// AC-004 (STORY-072) — `draw_gradient_rect` stub panics with `todo!()`.
+    /// AC-004 (STORY-072) — `draw_gradient_rect` is called during PDF export and produces
+    /// different bytes than an identical export WITHOUT the gradient shape.
     ///
-    /// RED GATE: the stub function is not yet implemented. When the implementer
-    /// replaces `todo!()` with the krilla `LinearGradient` + `draw_path` code,
-    /// this test must be updated to a positive (non-panicking) assertion.
+    /// ## Closing HIGH-001 (adversary Pass-1 / TD-VSDD-059)
     ///
-    /// This test uses `catch_unwind` to verify the `todo!()` panic message.
+    /// The previous test was a no-op fn-pointer type-check.  `draw_gradient_rect` is
+    /// real production code (exporter.rs:~1528) invoked at the shape dispatch site
+    /// (exporter.rs:~770).  This test exercises that live path:
+    ///
+    /// 1. Exports a deck containing one `FillSpec::Gradient` shape → gradient PDF bytes.
+    /// 2. Exports an identical deck with **zero frames** (no shape) → baseline PDF bytes.
+    /// 3. Asserts the bytes DIFFER — proving `draw_gradient_rect` executed and mutated
+    ///    the PDF content stream.
+    ///
+    /// A regression that disconnects `draw_gradient_rect` from the export pipeline
+    /// (e.g., silently skipping the Shape arm) would make both exports identical,
+    /// causing this test to fail.
     #[test]
-    fn test_BC_3_04_001_ac004_pdf_draw_gradient_rect_stub_panics() {
-        // We cannot call draw_gradient_rect without a live krilla Surface.
-        // This test verifies the stub signature compiles and the function exists
-        // at the type level. The actual todo!() call would require a krilla Document
-        // context, which is an integration concern. The PPTX and HTML tests cover
-        // the full-pipeline Red Gate for gradient shapes.
-        //
-        // The load-bearing Red Gate for PDF is:
-        // test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes (below).
-        //
-        // Verify the function's type signature is correct (compile-time proof):
-        // ALLOW: `fn_ptr` is a type-assertion binding with no runtime side-effect.
-        #[allow(clippy::no_effect_underscore_binding)]
-        let _fn_ptr: fn(
-            &mut krilla::surface::Surface,
-            &slideforge_layout::BoundingBox,
-            slideforge_types::Rgb,
-            slideforge_types::Rgb,
-        ) = draw_gradient_rect;
-        // Type check only — no runtime call (needs krilla Surface context).
+    fn test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output() {
+        let deck = make_deck_one_slide();
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        // Export WITH gradient shape.
+        let gradient_laid_out = make_gradient_deck(
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Provided(Arc::from("Red-to-blue gradient")),
+        );
+        let gradient_bytes = PdfExporter::new()
+            .export(&deck, &gradient_laid_out, &brand, &opts)
+            .expect("export with gradient shape must succeed");
+
+        // Export WITHOUT any shape (empty slide, no frames).
+        let empty_laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("title"),
+                frames: vec![], // No shape frame — baseline for comparison.
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let empty_bytes = PdfExporter::new()
+            .export(&deck, &empty_laid_out, &brand, &opts)
+            .expect("export with empty slide must succeed");
+
+        // Both must be valid PDFs.
+        assert!(
+            gradient_bytes.starts_with(b"%PDF"),
+            "gradient export must produce a valid PDF; got: {:?}",
+            &gradient_bytes[..gradient_bytes.len().min(8)]
+        );
+        assert!(
+            empty_bytes.starts_with(b"%PDF"),
+            "empty export must produce a valid PDF; got: {:?}",
+            &empty_bytes[..empty_bytes.len().min(8)]
+        );
+
+        // THE LOAD-BEARING ASSERTION (TD-VSDD-059): the gradient draw path must mutate
+        // the PDF content stream.  If draw_gradient_rect is silently disconnected from
+        // the export pipeline, both exports produce identical bytes and this fails.
+        assert_ne!(
+            gradient_bytes, empty_bytes,
+            "PDF export with gradient shape must produce DIFFERENT bytes than an export with \
+             no shape frames — draw_gradient_rect must have executed and changed the PDF \
+             content stream. If this fails, the gradient draw path is disconnected."
+        );
     }
 
     /// AC-004 (STORY-072) — PDF export with gradient shape produces non-zero bytes.
     ///
-    /// The current stub skips Shape frames and produces valid (but no-gradient) PDF.
-    /// After implementation, this test verifies the PDF bytes are non-empty.
+    /// This is a baseline sanity check: gradient export must produce a valid PDF
+    /// with at least `%PDF` magic bytes and non-zero length.
     ///
-    /// This passes today (Shape is skipped, PDF still generated). The load-bearing
-    /// assertion is in `test_BC_3_04_001_ac004_pdf_full_export_gradient_shape_no_error`.
+    /// The load-bearing gradient-path assertion is in
+    /// `test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output`
+    /// (HIGH-001 closure).
     #[test]
     fn test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes() {
         let laid_out = make_gradient_deck(

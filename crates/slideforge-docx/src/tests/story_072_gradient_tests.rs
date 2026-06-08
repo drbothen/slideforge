@@ -179,17 +179,14 @@ fn test_BC_3_04_001_ac004_docx_gradient_export_no_error() {
 /// AC-004 (STORY-072) — DOCX gradient fallback emits the lint warning string:
 /// `"DOCX gradient fill downgraded to solid (DOCX does not support shape gradient fills)"`.
 ///
-/// RED GATE: the DOCX exporter does not yet emit this warning. This test will FAIL
-/// until the gradient shape path is implemented in `document_body.rs`.
+/// The warning MUST be emitted via `tracing::warn!` in `document_body.rs` whenever a
+/// `FillSpec::Gradient` shape is exported to DOCX. This is a load-bearing LESSON-14
+/// assertion: the warning string is contractual output and must not be silently dropped.
 ///
-/// The warning must be emitted via `tracing::warn!` with the specified message.
-/// This test uses `tracing_test::traced_test` to capture trace output.
-///
-/// NOTE: Since capturing `tracing` output in tests requires `tracing-test`, and
-/// the DOCX crate's `dev-dependencies` may not yet include it, this test uses a
-/// simpler approach: it checks the DOCX document.xml for the solid fallback color
-/// (which is only present if the gradient path is implemented). The warning
-/// assertion is the PRIMARY Red Gate indicator.
+/// Uses `tracing_test::traced_test` to capture the `tracing::warn!` emission directly.
+/// Also asserts the solid fallback color (`FF0000`) is present in the XML as a
+/// belt-and-suspenders check that the downgrade path actually ran.
+#[tracing_test::traced_test]
 #[test]
 fn test_BC_3_04_001_ac004_docx_gradient_fallback_emits_warning() {
     // From color is #FF0000 (red). The solid fallback must use this color.
@@ -201,18 +198,20 @@ fn test_BC_3_04_001_ac004_docx_gradient_fallback_emits_warning() {
         AltText::Provided(Arc::from("Red-to-blue gradient")),
     );
 
-    // RED GATE: the DOCX exporter currently outputs no shape XML at all.
-    // After implementation, the document.xml must contain a <w:shd> element
-    // with the from-color (FF0000) as the fill value (solid fallback per AC-004).
-    //
-    // This assertion serves as the Red Gate proxy for the warning emission path:
-    // if the solid fallback color is present, the gradient->solid downgrade code
-    // ran (and the tracing::warn! was also emitted).
+    // PRIMARY load-bearing assertion (LESSON-14 / TD-VSDD-059): the tracing::warn!
+    // for DOCX gradient downgrade MUST fire. This is contractual output per AC-004.
+    assert!(
+        logs_contain("DOCX gradient fill downgraded to solid"),
+        "tracing::warn! must emit 'DOCX gradient fill downgraded to solid' when a \
+         FillSpec::Gradient shape is exported to DOCX; warning was not captured"
+    );
+
+    // Belt-and-suspenders: the solid fallback color must also appear in the XML,
+    // confirming the downgrade path ran end-to-end.
     assert!(
         xml.contains("FF0000") || xml.contains("ff0000"),
         "DOCX document.xml must contain the gradient 'from' color 'FF0000' as a solid fallback \
-         <w:shd> fill. Currently no shape XML is emitted at all. \
-         Got XML snippet (first 600 chars): {}",
+         <w:shd> fill. Got XML snippet (first 600 chars): {}",
         &xml[..xml.len().min(600)]
     );
 }

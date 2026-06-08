@@ -15,6 +15,7 @@
 //! | `test_BC_3_04_001_ac004_pptx_gradient_stop_positions_are_0_and_100000` | AC-004 | postcondition 5 + OOXML §DrawingML |
 //! | `test_BC_3_04_001_ac004_pptx_gradient_direction_is_top_to_bottom` | AC-004 | postcondition 5 |
 //! | `test_BC_3_04_001_ac004_pptx_gradient_stop_colors_match_from_to` | AC-004 | postcondition 5 |
+//! | `test_BC_3_04_001_ac004_pptx_gradient_stop_from_precedes_to_in_xml` | AC-004 | stop ordering (LOW-001) |
 //! | `test_BC_3_04_001_ac004_pptx_gradient_shape_alt_text_on_cnvpr` | AC-004 + AC-005 | BC-3.04.001 invariant 1 |
 //! | `test_BC_3_04_001_ac004_pptx_gradient_decorative_emits_empty_descr` | AC-005 | BC-4.01.004 postcondition 2 |
 //! | `test_BC_3_04_001_ec005_pptx_same_from_to_colors_valid` | EC-005 | STORY-072 EC-005 |
@@ -262,6 +263,71 @@ fn test_BC_3_04_001_ac004_pptx_gradient_stop_colors_match_from_to() {
         "PPTX gradient XML must contain '0000FF' (to color) in a gradient stop; \
          got XML snippet: {}",
         &xml[..xml.len().min(500)]
+    );
+}
+
+/// AC-004 (STORY-072) — PPTX gradient stops are emitted in order: `from` color at
+/// `pos="0"` PRECEDES `to` color at `pos="100000"` in the serialized XML.
+///
+/// A swapped emission (from@100000, to@0) would still pass the independent existence
+/// checks in `test_BC_3_04_001_ac004_pptx_gradient_stop_colors_match_from_to`, but
+/// would produce a visually reversed gradient. This test pins the ordering explicitly
+/// by comparing substring offsets (LOW-001 adversary Pass-1 finding closure).
+///
+/// Contract: `from` = #FF0000 (red), `to` = #0000FF (blue).
+/// Expected XML order: `...pos="0"...FF0000...` before `...pos="100000"...0000FF...`
+#[test]
+fn test_BC_3_04_001_ac004_pptx_gradient_stop_from_precedes_to_in_xml() {
+    let from = Rgb { r: 255, g: 0, b: 0 }; // #FF0000
+    let to = Rgb { r: 0, g: 0, b: 255 }; // #0000FF
+    let laid_out = gradient_slide_deck(
+        from,
+        to,
+        AltText::Provided(Arc::from("Red-to-blue gradient for ordering test")),
+    );
+    let xml = build_pptx_slide1_xml(&laid_out);
+
+    // Locate the `pos="0"` stop block containing the from-color (FF0000).
+    // Locate the `pos="100000"` stop block containing the to-color (0000FF).
+    // The from-stop must appear BEFORE the to-stop in the serialized XML.
+    let from_hex = if xml.contains("FF0000") {
+        "FF0000"
+    } else {
+        "ff0000"
+    };
+    let to_hex = if xml.contains("0000FF") {
+        "0000FF"
+    } else {
+        "0000ff"
+    };
+
+    let from_pos = xml.find(from_hex).unwrap_or(usize::MAX);
+    let to_pos = xml.find(to_hex).unwrap_or(usize::MAX);
+
+    assert_ne!(
+        from_pos,
+        usize::MAX,
+        "from-color '{}' must appear in PPTX gradient XML; got (first 500): {}",
+        from_hex,
+        &xml[..xml.len().min(500)]
+    );
+    assert_ne!(
+        to_pos,
+        usize::MAX,
+        "to-color '{}' must appear in PPTX gradient XML; got (first 500): {}",
+        to_hex,
+        &xml[..xml.len().min(500)]
+    );
+    assert!(
+        from_pos < to_pos,
+        "from-color (pos=\"0\") stop must precede to-color (pos=\"100000\") stop in XML; \
+         found from-color '{}' at byte {} AFTER to-color '{}' at byte {}. \
+         XML (first 600): {}",
+        from_hex,
+        from_pos,
+        to_hex,
+        to_pos,
+        &xml[..xml.len().min(600)]
     );
 }
 
