@@ -689,11 +689,13 @@ stories:
     closes_findings: []
     notes: "Bullets list-literal field-value DSL syntax. Created 2026-06-06 to close STORY-086 AC-007 parser-gap note. Scope expanded 2026-06-06 (adversary pass-5 D5 correction): @var/vars-block list-literal does NOT parse at time of STORY-086 (parser gap discovered); STORY-088 now covers BOTH bullets DSL forms (direct list-literal AND @var/vars-block binding). Points bumped 5→8, estimated_days 2→3. Adds `[...]` list-literal arm to field_value_parser in slideforge-syntax/src/deck.rs AND @var/vars-block binding form. TextTag follow-up story was absorbed into STORY-086 (not created here). EPIC-02 (parser)."
   STORY-089:
-    status: draft
+    status: merged
     wave: 5
     wave_slot: 1
     priority: P0
     points: 8
+    pr: 68
+    merge_commit: c722c28b
     estimated_days: 5
     epic: EPIC-01
     target_module: slideforge-plugin-api

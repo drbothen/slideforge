@@ -28,11 +28,11 @@ wave_2_gate: "PASS 2026-05-27 — 11 gate passes, 19 findings fixed, 3/3 clean (
 wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-CLEAN; holdout must-pass 5/5"
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
-wave_5_status: "IN_PROGRESS — 22 stories / 130 pts. STORY-089 slot 1 DELIVERY STARTING."
-develop_sha: "df207b84"
-develop_pr_count: 67
-error_taxonomy_version: "v2.20"
-workspace_tests: "3393+/3393+ (develop df207b84; +5 PR-C tests: 3 status-title + 2 docx-percent; 18 skipped; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080)"
+wave_5_status: "IN_PROGRESS — 21 stories remain / 114 pts. STORY-089 MERGED PR #68 (c722c28b)."
+develop_sha: "c722c28b"
+develop_pr_count: 68
+error_taxonomy_version: "v2.23"
+workspace_tests: "3393+/3393+ (develop c722c28b; + STORY-089 field-validation suite (~54 tests) + e2e; FieldSchemaValidator live at build; 18 skipped; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080)"
 workspace_test_failures: 0
 ---
 
@@ -43,18 +43,19 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `df207b84` (67 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `c722c28b` (68 merged PRs, 0 open PRs).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04). Fresh machines: `git clone <repo> && git worktree add .factory factory-artifacts`.
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS** (human authorized 2026-06-07). All 6 Wave-4 follow-ups RESOLVED: (a)(b)(c)(e)(f) CLOSED via PRs #65/#66/#67; (d) FOLDED into Wave 5 as STORY-089 (slot 1). Wave-4 follow-up fix-burst cycle CLOSED. **STORY-089 delivery STARTING.**
+**Current position:** Phase 3, **Wave 5 IN PROGRESS** (human authorized 2026-06-07). STORY-089 MERGED PR #68 (c722c28b) — 21 stories / 114 pts remain.
 
-**Wave 5 — 22 stories / 130 pts:**
+**Wave 5 — 21 stories / 114 pts remaining:**
 
-- **Slot 1 (delivery starting):** STORY-089 — field-value type validation, 8 pts, P0, EPIC-01, BC-1.18.001 (new; error-taxonomy v2.20 E-VAL-104), ADR-020, error codes E-VAL-104.
-- **Other P0 first stories:** STORY-082 (EPIC-14), STORY-081 (EPIC-15), STORY-088 (EPIC-17).
-- **Dependency chains:** EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; independents: 072/074/079/080/081/082/088/089.
-- **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story (OS-level canonicalize + prefix check as PRIMARY defense). Severity: SUGGESTION.
+- **STORY-089 MERGED:** field-value type validation (BC-1.18.001 v1.5, ADR-020, error-taxonomy v2.23, E-VAL-104 T1/T2). FieldSchemaValidator wired live. Latent dead-letter bug closed. 3-CLEAN (~11-pass cascade). PR #68 c722c28b.
+- **Next P0 stories:** STORY-082 (EPIC-14), STORY-081 (EPIC-15), STORY-088 (EPIC-17).
+- **Dependency chains:** EPIC-14: 046→047→048; EPIC-15: 055→056→059 (056 also needs 047); EPIC-16: 060→061→062/063; EPIC-17: 064→065; independents: 072/074/079/080/081/082/088.
+- **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story. Severity: SUGGESTION.
+- **SEC-001-DIAG-HARDENING (OPEN, non-blocking LOW):** unbounded user-authored strings embedded verbatim in diagnostic messages (E-VAL-104 T2 + W-VAL-103 pattern). Truncate to ~512 chars. ANCHORED to future validator/diagnostic-hardening story.
 
 **Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (4) read NEXT ACTIONS below.
 
@@ -66,25 +67,24 @@ workspace_test_failures: 0
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `df207b84`, 67 merged PRs). Wave-4 follow-up fix-burst cycle CLOSED: (a)(b) PR #66; (c) PR #65; (e)(f) PR #67; (d) FOLDED as STORY-089 (slot 1). 89 stories / 553 pts. **NEXT: STORY-089 delivery STARTING.**
+Phase 3, **Wave 5 IN PROGRESS** (develop `c722c28b`, 68 merged PRs). STORY-089 MERGED PR #68. 21 stories / 114 pts remain. 89 stories / 553 pts total.
 
 - Active worktrees: none. Open PRs: 0.
-- Workspace: 3393+/3393+ pass (18 skipped; +5 PR-C tests: 3 status-title + 2 docx-percent; known flaky: slideforge-diagrams cold_budget tracked STORY-080).
+- Workspace: 3393+ pass + STORY-089 field-validation suite (~54 tests) + e2e (18 skipped; known flaky: cold_budget tracked STORY-080).
 
 ---
 
 ## NEXT ACTIONS
 
-**STATUS: Wave 5 IN PROGRESS. STORY-089 delivery STARTING (slot 1, P0, 8 pts).**
+**STATUS: Wave 5 IN PROGRESS. STORY-089 MERGED (PR #68, c722c28b). 21 stories / 114 pts remain. DO NOT auto-pick next story — orchestrator/human decides.**
 
-Wave-4 follow-up fix-burst cycle CLOSED — all 6 resolved. (d) folded as STORY-089 (BC-1.18.001, ADR-020, E-VAL-104, error-taxonomy v2.20).
+STORY-089 delivered: FieldType enum + type_matches() + E-VAL-104 (T1 type-mismatch, T2 OneOf violation) + FieldSchemaValidator wired into Stage-5. 8 Priority-1 annotations. chart.data optional. Closed latent validate_fields dead-letter (ADR-020 Decision 8).
 
-**Wave 5 delivery order (P0 first stories):**
-1. **STORY-089** — field-value type validation (E-VAL-104, BC-1.18.001, ADR-020). DELIVERY STARTING.
-2. **STORY-082** — EPIC-14 independent. Ready.
-3. **STORY-081** — EPIC-15 independent (needs 047 before 056). Ready.
-4. **STORY-088** — EPIC-17 independent. Ready.
-5. Chain stories per dependency graph: 046→047→048; 055→056→059; 060→061→062/063; 064→065; independents 072/074/079/080.
+**Wave 5 remaining delivery order (P0 first):**
+1. **STORY-082** — EPIC-14 independent. Ready.
+2. **STORY-081** — EPIC-15 independent (needs 047 before 056). Ready.
+3. **STORY-088** — EPIC-17 independent. Ready.
+4. Chain stories per dependency graph: 046→047→048; 055→056→059; 060→061→062/063; 064→065; independents 072/074/079/080.
 
 ---
 
@@ -105,7 +105,7 @@ Wave-4 follow-up fix-burst cycle CLOSED — all 6 resolved. (d) folded as STORY-
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS (22 stories/130 pts). STORY-089 delivery STARTING. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS — STORY-089 MERGED PR #68 (c722c28b); 21 stories/114 pts remain. | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status (summary)
@@ -120,17 +120,17 @@ Wave-4 follow-up fix-burst cycle CLOSED — all 6 resolved. (d) folded as STORY-
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop df207b84 (67 merged PRs). Wave-4 follow-up fix-burst cycle CLOSED. (d) FOLDED as STORY-089 (slot 1). STORY-089 delivery STARTING. 89 stories / 553 pts.**
+**Wave 5 IN PROGRESS. develop c722c28b (68 merged PRs). STORY-089 MERGED PR #68. 21 stories / 114 pts remain. 89 stories / 553 pts total.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-07 |
-| **Position** | Wave 5 IN PROGRESS. STORY-089 slot 1 delivery STARTING (BC-1.18.001, ADR-020, E-VAL-104, error-taxonomy v2.20). Wave-4 follow-up cycle CLOSED: (a)(b) PR #66; (c) PR #65; (e)(f) PR #67; (d) → STORY-089. 89 stories / 553 pts. |
-| **develop SHA** | `df207b84` (67 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Position** | Wave 5 IN PROGRESS. STORY-089 MERGED PR #68 (c722c28b). FieldSchemaValidator live; error-taxonomy v2.23; BC-1.18.001 v1.5; ADR-020 Decision 8 closed. 21 stories/114 pts remain. |
+| **develop SHA** | `c722c28b` (68 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Active worktrees** | none |
-| **Workspace tests** | 3393+/3393+ (develop df207b84; +5 PR-C tests: 3 status-title + 2 docx-percent; 18 skipped; known flaky: cold_budget STORY-080) |
+| **Workspace tests** | 3393+ + ~54 field-validation tests + e2e (18 skipped; known flaky: cold_budget STORY-080) |
 | **factory-artifacts** | PUSHED to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Deliver STORY-089 (field-value type validation, 8 pts, P0). Parallel P0s: STORY-082, STORY-081, STORY-088. Chain order: EPIC-14 046→047→048; EPIC-15 055→056→059; EPIC-16 060→061→062/063; EPIC-17 064→065; independents 072/074/079/080. SEC-001-HARDENING open (image-loading story). Phases 4-7 remain for v1.0. |
+| **RESUME INSTRUCTION** | STORY-089 done. Next P0s (orchestrator/human decides order): STORY-082 (EPIC-14), STORY-081 (EPIC-15), STORY-088 (EPIC-17). Chain order: EPIC-14 046→047→048; EPIC-15 055→056→059; EPIC-16 060→061→062/063; EPIC-17 064→065; independents 072/074/079/080. Open follow-ups: SEC-001-HARDENING (image-loading story), SEC-001-DIAG-HARDENING (diagnostic truncation, future story). Phases 4-7 remain for v1.0. |
 
 ---
 
@@ -155,6 +155,7 @@ Wave-4 follow-up fix-burst cycle CLOSED — all 6 resolved. (d) folded as STORY-
 | LESSON-16 | PRE-PUSH GATE MUST MIRROR EXACT CI INVOCATIONS (full workspace pedantic clippy + rustdoc gate), especially when adding example binaries or intra-doc links. |
 | LESSON-17 | `#[should_panic]` is NEVER a placeholder for behavioral correctness tests. Only valid for deliberate panic-on-invalid-input paths; those tests must FAIL on stubs. |
 | LESSON-18 (WORKTREE-SYNC) | After `gh pr merge --squash`, run `git fetch && git merge --ff-only origin/develop` OR `git restore --source=HEAD --staged --worktree .` to sync working tree. `git update-ref` alone leaves working tree STALE. Include disk-presence check before any gate agent dispatch. |
+| LESSON-19 (SIBLING-SWEEP) | When a fix-burst changes a canonical VALUE, TEXT, COUNT, or ANCHOR (error code, message template, site count, ADR/BC/PC citation, stale-state comment), it MUST sweep ALL sibling artifacts in ONE burst: production code + every consuming spec (BC/ADR/taxonomy/story) + test files + doc-comments + fixtures — verified by exhaustive grep BEFORE re-running the adversary. Partial propagation repeatedly reset STORY-089 3-CLEAN streak (~11 passes). Orchestrator must grep-map every occurrence itself and dispatch ONE coordinated exhaustive fix, not per-file partial fixes. Full narrative: `.factory/cycles/STORY-089/lessons.md`. |
 
 ---
 
@@ -173,6 +174,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-07 | STORY-089-MERGE | PR #68 merged → develop c722c28b. Field-value type validation: FieldType enum + type_matches() + E-VAL-104 (T1 type-mismatch, T2 OneOf violation); FieldSchemaValidator wired into Stage-5 (closes validate_fields dead-letter — latent bug; ADR-020 Decision 8); 8 Priority-1 annotations; chart.data optional; BC-1.18.001 v1.5; BC-1.17.002 v1.3 (ValueRangeValidator range-only); error-taxonomy v2.23 (E-VAL-104 formal + E-VAL-101/102/W-VAL-103). LOCAL 3-CLEAN converged (~11 passes — sibling-artifact propagation gaps drove cascade). Security CLEAN (2 LOW). pr-reviewer APPROVE. CI green. |
 | 2026-06-07 | WAVE-5-START | Human authorized Wave 5 start. (d) folded as STORY-089 (BC-1.18.001, ADR-020, E-VAL-104, error-taxonomy v2.20). Wave-4 follow-up fix-burst cycle CLOSED. factory-artifacts advanced: def8bb74 (PO BC/taxonomy) → 32fddb9a (ADR-020) → 9f01b8bf (STORY-089 + indexes). Wave 5 = 22 stories / 130 pts. STORY-089 delivery starting. |
 | 2026-06-07 | PR-C-MERGE | PR #67 merged → develop df207b84. OBS-P6-001 (status slide RegionRole::Title frame) + OBS-P6-002 (canonical ColorBar percent:u8 in FrameContent; DOCX reads directly — fixes double-floor off-by-one) CLOSED. Both confirmed real defects. +5 tests (3 status-title + 2 docx-percent). Security CLEAN, pr-reviewer APPROVE, CI green. Wave-4 follow-up fix-bursts 5/6 done; (d) feature story remains. |
 | 2026-06-07 | PR-A-MERGE | PR #66 merged → develop 23f09c62. SEC-001 (E-VAL-012, error-taxonomy v2.19, BC-1.16.001 EC-012) + diag-span CLOSED. +15 tests (11 ImagePathValidator + 4 diag-span). Security CLEAN (1 defense-in-depth suggestion anchored to image-I/O story as SEC-001-HARDENING). pr-reviewer APPROVE; CI green. |
