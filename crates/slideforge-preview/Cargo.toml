@@ -1,0 +1,91 @@
+[package]
+name = "slideforge-preview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Live web preview server for slideforge — axum HTTP + WebSocket + SVG canvas (STORY-047)"
+
+[dependencies]
+# HTTP server + built-in WebSocket (axum::extract::ws::WebSocketUpgrade).
+# 0.8.2 was yanked; minimum safe 0.8.x is 0.8.9. feature "ws" enables WebSocket.
+axum = { workspace = true }
+
+# Cryptographic random bytes for CSP nonce generation (SEC-001).
+# Already a transitive dep (via uuid/rand chain); pinned to the version in Cargo.lock.
+getrandom = { version = "=0.3.4" }
+
+# Base64 encoding for the CSP nonce (SEC-001).
+# Already a transitive dep (via axum's tungstenite base64 upgrade handshake); pinned to lock version.
+base64 = { version = "=0.22.1" }
+
+# Async runtime — curated feature set per ADR-021 (NOT "full").
+tokio = { version = "=1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "signal",
+    "fs",
+    "io-util",
+] }
+
+# JSON serialization for WebSocket messages.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Structured error types.
+thiserror = { workspace = true }
+
+# HTML rendering dependency (P4 Composite Rendering Model — ADR-008).
+slideforge-html = { workspace = true }
+
+# Core IR types: LaidOutDeck, LaidOutSlide, etc.
+slideforge-layout = { workspace = true }
+
+# Core domain types: Brand, Emu, etc.
+slideforge-types = { workspace = true }
+
+# Structured logging (CLAUDE.md: no println! in library crates).
+tracing = { workspace = true }
+
+[dev-dependencies]
+# WebSocket test client (DEV-DEP ONLY — NOT a runtime dep).
+# axum 0.8 built-in WebSocket (axum::extract::ws::WebSocketUpgrade) is the
+# server-side implementation; tungstenite is only for test clients.
+tokio-tungstenite = { workspace = true }
+
+# reqwest for HTTP integration tests (AC-001: GET / → 200 OK).
+# NOTE: reqwest 0.13.x renamed the TLS feature from `rustls-tls` (0.11/0.12) to `rustls`.
+# The workspace Cargo.toml uses `features = ["rustls", ...]` which is the correct name for
+# 0.13.4. Using an unknown feature name causes a hard build error in Cargo — it does NOT
+# silently resolve to an empty feature set. Verified: `cargo tree -e features -p reqwest`
+# confirms the `rustls` feature activates `hyper-rustls` and the full TLS stack.
+reqwest = { workspace = true }
+
+# Async test support (feature flags already included in runtime dep; repeated for clarity).
+tokio = { version = "=1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+    "sync",
+] }
+
+# futures-util for StreamExt on WebSocket streams (tokio-tungstenite test client).
+# Transitive dep of tokio-tungstenite 0.29.0; pinned to the version in the lock file.
+futures-util = "=0.3.32"
+
+# Temp directory for AC-006 no-output-files test.
+tempfile = { workspace = true }
+
+# JSON assertions in integration tests.
+serde_json = { workspace = true }
