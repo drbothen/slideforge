@@ -100,10 +100,20 @@ fn render_inline_node(node: &InlineNode) -> String {
             )
         },
         InlineNode::Xref(target) => {
-            // Xref becomes an anchor to a slide ID.
-            let safe_target = html_escape::encode_double_quoted_attribute(target);
+            // Xref becomes a fragment anchor to a slide ID.
+            // F-009 (AC-010): route through is_safe_link_scheme even though Xref
+            // always prepends '#' (making the full URL fragment-only). This ensures
+            // the allowlist logic is the single enforcement point for ALL link/xref
+            // rendering — consistent with F-006 single-log-site rule.
+            let fragment_url = format!("#{target}");
             let display = html_escape::encode_text(target);
-            format!("<a href=\"#{safe_target}\">{display}</a>")
+            if is_safe_link_scheme(&fragment_url) {
+                let safe_target = html_escape::encode_double_quoted_attribute(target);
+                format!("<a href=\"#{safe_target}\">{display}</a>")
+            } else {
+                // Defensively drop href if fragment URL is somehow rejected.
+                format!("<span>{display}</span>")
+            }
         },
     }
 }
@@ -337,10 +347,18 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     outer_svg_done = true;
                     let mut new_elem = BytesStart::new("svg");
                     // Copy existing attributes, except role (we re-inject it).
+                    // F-010: if an attribute key is not valid UTF-8, skip it cleanly
+                    // rather than silently mapping to "" which could false-match "role".
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                        if key != "role" {
-                            new_elem.push_attribute(attr);
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("role") => {}, // drop — we inject below
+                            Ok(_) => new_elem.push_attribute(attr),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "render_svg_chart: non-UTF-8 attribute key skipped \
+                                     on outer <svg>"
+                                );
+                            },
                         }
                     }
                     // Inject role="img".
@@ -372,10 +390,17 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                 } else if is_svg && depth > 0 {
                     // Inner <svg>: inject aria-hidden="true", remove existing aria-hidden.
                     let mut new_elem = BytesStart::new("svg");
+                    // F-010: skip non-UTF-8 attribute keys cleanly.
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                        if key != "aria-hidden" {
-                            new_elem.push_attribute(attr);
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("aria-hidden") => {}, // drop — we inject below
+                            Ok(_) => new_elem.push_attribute(attr),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "render_svg_chart: non-UTF-8 attribute key skipped \
+                                     on inner <svg>"
+                                );
+                            },
                         }
                     }
                     new_elem.push_attribute(("aria-hidden", "true"));
@@ -403,10 +428,17 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     // Outer self-closing <svg/>: inject role="img" and a <title>.
                     outer_svg_done = true;
                     let mut new_elem = BytesStart::new("svg");
+                    // F-010: skip non-UTF-8 attribute keys cleanly.
                     for attr in elem.attributes().flatten() {
-                        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                        if key != "role" {
-                            new_elem.push_attribute(attr);
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("role") => {}, // drop — we inject below
+                            Ok(_) => new_elem.push_attribute(attr),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "render_svg_chart: non-UTF-8 attribute key skipped \
+                                     on self-closing outer <svg/>"
+                                );
+                            },
                         }
                     }
                     new_elem.push_attribute(("role", "img"));
@@ -842,6 +874,67 @@ mod tests {
         let result = render_slide_to_html(&slide, &brand);
         insta::assert_snapshot!("content_slide_html", result);
     }
+
+        // ─────────────────────────────────────────────────────────────────────────
+    // F-009 — InlineNode::Xref must route through is_safe_link_scheme
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-009: Xref with a safe fragment target (#slide-3) must produce
+    /// `<a href="#slide-3">`.
+    #[test]
+    fn test_F009_xref_safe_fragment_renders_anchor() {
+        use slideforge_types::InlineNode;
+        use super::render_inline_node;
+        let node = InlineNode::Xref(Arc::from("slide-3"));
+        let result = render_inline_node(&node);
+        assert!(
+            result.contains("href=\"#slide-3\""),
+            "F-009: Xref to 'slide-3' must render as href=\"#slide-3\"; got: {result}"
+        );
+    }
+
+    /// F-009: Xref validation — even though Xref always prepends '#', the target
+    /// must not start with '//' or '\' after prepending (guards against crafted
+    /// targets that could bypass the fragment prefix). A plain text Xref target
+    /// such as "slide-3" must pass cleanly.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_F009_xref_routes_through_allowlist() {
+        use slideforge_types::InlineNode;
+        use super::render_inline_node;
+        // Normal Xref — must produce a valid anchor, no warn emitted.
+        let node = InlineNode::Xref(Arc::from("intro"));
+        let result = render_inline_node(&node);
+        assert!(
+            result.contains("href=\"#intro\""),
+            "F-009: Xref 'intro' must render as href=\"#intro\""
+        );
+        assert!(
+            !logs_contain("rejected"),
+            "F-009: safe Xref must not emit warn"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-010 — non-UTF-8 attribute keys must not silently degrade
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-010: render_svg_chart processes SVG with a standard ASCII attribute key —
+    /// must NOT use unwrap_or("") for key parsing (covered by code fix; this test
+    /// verifies the happy path still works correctly).
+    #[test]
+    fn test_F010_svg_attr_key_standard_ascii_processed_correctly() {
+        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="100"/></svg>"#;
+        let result = render_svg_chart(svg_in, "test");
+        assert!(
+            result.contains(r#"role="img""#),
+            "F-010: SVG with standard attribute keys must still get role=\"img\" injected"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Snapshot tests (insta) — per Test Strategy
+    // ─────────────────────────────────────────────────────────────────────────
 
     /// Snapshot test: chart slide with SVG role="img" and <title>.
     #[test]
