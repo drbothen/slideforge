@@ -246,11 +246,20 @@ fn assert_all_coordinates_are_integers(xml: &str) {
     }
 }
 
-/// Compute SHA-256 of `bytes` and return it as a hex string.
+/// Compute SHA-256 of `bytes` and return it as a lowercase hex string.
+///
+/// sha2 0.11+ returns `hybrid_array::Array` from `finalize()`, which no
+/// longer implements `LowerHex`. Convert to `[u8; 32]` first.
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    let digest: [u8; 32] = hasher.finalize().into();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write as _;
+        write!(hex, "{b:02x}").expect("write to String is infallible");
+    }
+    hex
 }
 
 // ─── Required ZIP parts (AC-002) ──────────────────────────────────────────────

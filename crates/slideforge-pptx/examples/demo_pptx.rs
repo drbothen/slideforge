@@ -218,10 +218,19 @@ fn zip_read_entry(bytes: &[u8], path: &str) -> String {
 }
 
 /// Returns the lowercase hex SHA-256 digest of the given bytes.
+///
+/// sha2 0.11+ returns `hybrid_array::Array` from `finalize()`, which no
+/// longer implements `LowerHex`. Convert to `[u8; 32]` first.
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
-    format!("{:x}", h.finalize())
+    let digest: [u8; 32] = h.finalize().into();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write as _;
+        write!(hex, "{b:02x}").expect("write to String is infallible");
+    }
+    hex
 }
 
 // ─── Section printers ────────────────────────────────────────────────────────

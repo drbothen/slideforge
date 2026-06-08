@@ -32,7 +32,7 @@ insta = { workspace = true }
 # slideforge-eval with test-utils feature exposes BleedChecker for AC-010 bleed tests.
 slideforge-eval = { workspace = true, features = ["test-utils"] }
 # sha2 for AC-007 determinism test (SHA-256 byte-identical comparison).
-sha2 = "=0.10.9"
+sha2 = { workspace = true }
 # tracing-test for load-bearing warn-capture tests (F-P5-LOW-001 partial-reuse warn).
 tracing-test = "=0.2.5"
 # quick-xml for parsing core.xml and slide XML in a11y tests (BC-4.01.004 / BC-5.01.005).
