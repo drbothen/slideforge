@@ -70,7 +70,8 @@ pub enum FillSpec {
     ///
     /// PPTX: `a:gradFill` / `a:gsLst` / `a:lin ang="5400000"` (ooxmlsdk typed builders).
     /// PDF: krilla `paint::LinearGradient` + `Surface::set_fill` + `draw_path`.
-    /// HTML: CSS `background: linear-gradient(to bottom, #RRGGBB, #RRGGBB)`.
+    /// HTML: SVG-native `<defs><linearGradient>` def + `fill="url(#sf-grad-...)"` on the shape
+    /// `<rect>` (CSS `background` does NOT paint SVG geometry — see `render_shape_svg`).
     /// DOCX: solid fallback to `from` color with lint warning.
     Gradient {
         /// Top (start) color of the linear gradient.
