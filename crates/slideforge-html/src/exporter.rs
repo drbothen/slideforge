@@ -229,6 +229,7 @@ fn render_page_template(lang: &str, title: &str, slides_html: &str) -> Result<St
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
     clippy::expect_used,
+    clippy::doc_markdown, // test doc comments use fn names and HTML that trigger doc_markdown
     non_snake_case
 )]
 mod tests {

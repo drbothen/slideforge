@@ -132,7 +132,7 @@ fn render_inline_node(node: &InlineNode) -> String {
 /// Dispatches on the block variant:
 /// - `Text` → `<p>` element containing rendered inline nodes
 /// - `Bullets` → `<ul><li>` structure with nested sub-bullets
-/// - `Math` → `<code class="math">` (full MathML is STORY-045 scope)
+/// - `Math` → code block with math class (full `MathML` rendering is STORY-045 scope)
 /// - `Chart` / `Diagram` / `Image` → these are handled via `FrameContent`
 ///   variants before reaching `Body`; here we emit a placeholder note
 /// - `Table` → `<table>` (basic rendering)
@@ -152,7 +152,7 @@ pub fn render_content_block(block: &ContentBlock) -> String {
             // Render a bullet list as <ul>.
             let mut list = String::from("<ul>\n");
             for item in items {
-                list.push_str(&render_bullet_item(item, 0));
+                list.push_str(&render_bullet_item(item));
             }
             list.push_str("</ul>");
             list
@@ -193,14 +193,14 @@ pub fn render_content_block(block: &ContentBlock) -> String {
 ///
 /// Produces `<li>` elements with nested `<ul>` for sub-bullets.
 #[must_use]
-fn render_bullet_item(item: &slideforge_types::BulletItem, _depth: u32) -> String {
+fn render_bullet_item(item: &slideforge_types::BulletItem) -> String {
     let content = render_inline_nodes(&item.inlines);
     if item.children.is_empty() {
         format!("<li>{content}</li>\n")
     } else {
         let mut nested = String::from("<ul>\n");
         for child in &item.children {
-            nested.push_str(&render_bullet_item(child, _depth + 1));
+            nested.push_str(&render_bullet_item(child));
         }
         nested.push_str("</ul>");
         format!("<li>{content}\n{nested}</li>\n")
@@ -239,7 +239,7 @@ fn render_frame_as_svg_content(frame: &Frame, heading_level: u32) -> String {
         FrameContent::Subtitle(text) => {
             // Subtitle → <hN> inside <foreignObject>; level determined by caller.
             let escaped = html_escape::encode_text(text);
-            let hl = heading_level.max(1).min(6);
+            let hl = heading_level.clamp(1, 6);
             format!(
                 r#"<foreignObject x="{x}" y="{y}" width="{w}" height="{h}"><h{hl} xmlns="http://www.w3.org/1999/xhtml">{escaped}</h{hl}></foreignObject>"#
             )
@@ -283,25 +283,19 @@ fn render_frame_as_svg_content(frame: &Frame, heading_level: u32) -> String {
                 r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
             let chart_svg = render_svg_chart(placeholder_svg, alt_text);
             // Position the chart SVG at the frame's bbox.
-            format!(
-                r#"<g transform="translate({x}, {y})">{chart_svg}</g>"#
-            )
+            format!(r#"<g transform="translate({x}, {y})">{chart_svg}</g>"#)
         },
         FrameContent::Diagram { svg, alt } => {
             let alt_text = alt_text_str(alt);
             let diagram_svg = render_svg_chart(svg.as_str(), alt_text);
-            format!(
-                r#"<g transform="translate({x}, {y})">{diagram_svg}</g>"#
-            )
+            format!(r#"<g transform="translate({x}, {y})">{diagram_svg}</g>"#)
         },
         FrameContent::Shape(shape_frame) => {
             let alt_text = alt_text_str(&shape_frame.alt);
             let placeholder_svg =
                 r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"></svg>"#;
             let shape_svg = render_svg_chart(placeholder_svg, alt_text);
-            format!(
-                r#"<g transform="translate({x}, {y})">{shape_svg}</g>"#
-            )
+            format!(r#"<g transform="translate({x}, {y})">{shape_svg}</g>"#)
         },
         FrameContent::TextRun(nodes) => {
             let text_html = format!("<p>{}</p>", render_inline_nodes(nodes));
@@ -323,12 +317,15 @@ fn render_frame_as_svg_content(frame: &Frame, heading_level: u32) -> String {
             )
         },
         FrameContent::Empty => String::new(),
-        FrameContent::ErrorSlidePlaceholder { svg, slide_title, error_code, message } => {
+        FrameContent::ErrorSlidePlaceholder {
+            svg,
+            slide_title,
+            error_code,
+            message,
+        } => {
             let alt_text = format!("Error on slide '{slide_title}': [{error_code}] {message}");
             let error_svg = render_svg_chart(svg, &alt_text);
-            format!(
-                r#"<g transform="translate({x}, {y})">{error_svg}</g>"#
-            )
+            format!(r#"<g transform="translate({x}, {y})">{error_svg}</g>"#)
         },
     }
 }
@@ -534,7 +531,7 @@ pub fn render_element_to_html(frame: &Frame) -> String {
 ///
 /// - `AltText::Provided(text)` → `<svg role="img"><title>text</title>...</svg>`
 /// - `AltText::Decorative` → `<svg role="presentation" aria-hidden="true">...</svg>`
-/// - `AltText::Unspecified` → treated as decorative with a tracing::warn!
+/// - `AltText::Unspecified` → treated as decorative with a `tracing::warn!`
 fn render_image(alt: &AltText) -> String {
     match alt {
         AltText::Provided(text) => {
@@ -598,7 +595,10 @@ fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
     let key_lower = key.to_ascii_lowercase();
     if key_lower == "href" || key_lower == "xlink:href" {
         let val_str = std::str::from_utf8(value).unwrap_or("");
-        return !val_str.trim().to_ascii_lowercase().starts_with("javascript:");
+        return !val_str
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("javascript:");
     }
     true
 }
@@ -639,6 +639,10 @@ fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
 /// A `String` containing the modified SVG markup. On parse error (malformed
 /// SVG input), returns the original `svg_str` unchanged and emits a
 /// `tracing::warn!`.
+// The SVG sanitization + accessibility injection loop is necessarily long due to the
+// number of event variants × element types it handles. Splitting it would fragment
+// the control flow and harm correctness auditing. Justified exception to too_many_lines.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
     use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -703,10 +707,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                                 );
                             },
                             Ok(key) => {
-                                if is_safe_svg_attribute_value(
-                                    key,
-                                    attr.value.as_ref(),
-                                ) {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
                                     new_elem.push_attribute(attr);
                                 } else {
                                     tracing::warn!(
@@ -1036,6 +1037,7 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
     clippy::expect_used,
+    clippy::doc_markdown, // test doc comments use fn names and HTML that trigger doc_markdown
     non_snake_case
 )]
 mod tests {
@@ -1403,7 +1405,7 @@ mod tests {
         insta::assert_snapshot!("content_slide_html", result);
     }
 
-        // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     // F-001 / F-002 — SVG canvas rendering and image-as-svg
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1705,7 +1707,8 @@ mod tests {
     #[test]
     fn test_F007_self_closing_nested_svg_gets_aria_hidden() {
         // The outer <svg> is a Start event; the inner <svg/> is an Empty event.
-        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg/></svg>"#;
+        let svg_in =
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg/></svg>"#;
         let result = render_svg_chart(svg_in, "complex chart");
         // The inner self-closing <svg/> must now have aria-hidden="true".
         // There are two svg elements; the inner one must have aria-hidden.
@@ -1723,8 +1726,8 @@ mod tests {
     /// `<a href="#slide-3">`.
     #[test]
     fn test_F009_xref_safe_fragment_renders_anchor() {
-        use slideforge_types::InlineNode;
         use super::render_inline_node;
+        use slideforge_types::InlineNode;
         let node = InlineNode::Xref(Arc::from("slide-3"));
         let result = render_inline_node(&node);
         assert!(
@@ -1740,8 +1743,8 @@ mod tests {
     #[tracing_test::traced_test]
     #[test]
     fn test_F009_xref_routes_through_allowlist() {
-        use slideforge_types::InlineNode;
         use super::render_inline_node;
+        use slideforge_types::InlineNode;
         // Normal Xref — must produce a valid anchor, no warn emitted.
         let node = InlineNode::Xref(Arc::from("intro"));
         let result = render_inline_node(&node);
