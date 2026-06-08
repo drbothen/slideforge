@@ -139,9 +139,9 @@ fn compute_heading_levels(slides: &[LaidOutSlide]) -> HeadingAssignment {
     // frame that render_text_frame silently skips → zero <h1> in the document.
     let h1_idx = slides.iter().position(|s| {
         s.slide_type_keyword.as_ref() == "title"
-            && s.frames
-                .iter()
-                .any(|f| matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox))
+            && s.frames.iter().any(|f| {
+                matches!(f.content, FrameContent::Title(_)) && is_non_degenerate_bbox(&f.bbox)
+            })
     });
     if let Some(idx) = h1_idx {
         levels[idx] = HeadingLevel::H1;
