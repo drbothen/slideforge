@@ -1926,81 +1926,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // BC-1.03.002: 4xx responses are not retried (load-bearing counter test)
-    // -----------------------------------------------------------------------
-
-    /// `test_bc_1_03_002_http_4xx_not_retried`
-    ///
-    /// AC-006: HTTP 4xx responses must be returned immediately — no retry.
-    ///
-    /// A counting server serves a 404 on the first connection. The test asserts
-    /// that exactly one connection was made (initial request only, no retry).
-    ///
-    /// This is the load-bearing test for the "4xx not retried" contract: a
-    /// simpler test that only asserts `is_err()` cannot prove the retry count.
-    ///
-    /// Traces to BC-1.03.002 retry policy.
-    #[test]
-    fn test_bc_1_03_002_http_4xx_not_retried() {
-        use std::io::Write;
-
-        // A server that counts connections and serves 404 on each.
-        let connection_counter = Arc::new(AtomicUsize::new(0));
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let counter_clone = Arc::clone(&connection_counter);
-
-        // The server accepts up to 3 connections (more than enough to detect a retry)
-        // and serves 404 for each. If only 1 connection is made, no retry happened.
-        let handle = thread::spawn(move || {
-            // Accept up to 3 connections with a 2-second hard timeout per accept.
-            listener
-                .set_nonblocking(true)
-                .expect("set_nonblocking failed");
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            let mut accepted = 0usize;
-            while std::time::Instant::now() < deadline && accepted < 3 {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        counter_clone.fetch_add(1, Ordering::SeqCst);
-                        accepted += 1;
-                        let mut buf = [0u8; 4096];
-                        let _ = stream.read(&mut buf);
-                        let response = b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found";
-                        let _ = stream.write_all(response);
-                    },
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(std::time::Duration::from_millis(5));
-                    },
-                    Err(_) => break,
-                }
-            }
-        });
-
-        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
-        let src = HttpDataSource::new(url.as_str());
-        let opts = DataSourceOptions::default();
-        let result = src.load(&url, &opts);
-        handle.join().unwrap();
-
-        // Must be an error.
-        assert!(result.is_err(), "HTTP 404 must produce an error");
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("404"),
-            "error must reference status 404; got: {msg}"
-        );
-
-        // Critical: exactly 1 connection — no retry on 4xx.
-        assert_eq!(
-            connection_counter.load(Ordering::SeqCst),
-            1,
-            "HTTP 4xx must result in exactly 1 connection (no retry); got: {}",
-            connection_counter.load(Ordering::SeqCst)
-        );
-    }
-
-    // -----------------------------------------------------------------------
     // F1 (AC-005): TOML format_hint must be rejected for HTTP sources
     // -----------------------------------------------------------------------
 
@@ -2033,6 +1958,223 @@ mod tests {
         assert!(
             msg.contains("TOML over HTTP"),
             "error must mention 'TOML over HTTP'; got: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // STORY-080: Deterministic connection-counting helper (AC-001)
+    //
+    // `spawn_deterministic_counting_server_404` is the deterministic replacement
+    // for the flaky `set_nonblocking(true)` + poll loop.
+    //
+    // Design contract (AC-001):
+    //   - Uses a blocking `TcpListener::accept()` (no `set_nonblocking`).
+    //   - Sets a 2-second read timeout on each accepted stream to prevent
+    //     a stalled peer from hanging the server beyond the watchdog window.
+    //   - Serves a 404 response on each connection, closes the stream.
+    //   - The server thread sends the final connection count over an
+    //     `mpsc::channel` after all I/O is complete.
+    //   - The main thread READS the channel (blocking) instead of reading a
+    //     shared `AtomicUsize` while the server thread may still be running.
+    //     This eliminates the connection-count race on Windows (EC-001).
+    // -----------------------------------------------------------------------
+
+    /// Spawn a deterministic single-shot 404 server for the 4xx-not-retried test.
+    ///
+    /// Unlike `spawn_counting_server`, this helper:
+    /// - Uses **blocking** `accept()` (not `set_nonblocking`) to eliminate the
+    ///   Windows connection-count race (STORY-080 AC-001).
+    /// - Sets a **2-second read timeout** on each accepted stream so that a
+    ///   stalled peer cannot hang the server thread past the watchdog window.
+    /// - Communicates the final connection count back to the main thread via
+    ///   an `mpsc::channel` instead of a shared `AtomicUsize`, ensuring the
+    ///   count is only read AFTER all server-side I/O is complete.
+    ///
+    /// The `max_connections` parameter is a **runaway-safety cap** — it
+    /// prevents an accidental infinite accept loop if the SUT issues an
+    /// unexpected burst of connections.  Under normal operation the watchdog
+    /// (1-second timeout) terminates the server after the single HTTP round-trip.
+    ///
+    /// Returns `(addr, count_receiver, join_handle)`. Call
+    /// `count_receiver.recv().unwrap()` after `src.load()` returns to get the
+    /// final count; then join the handle.
+    fn spawn_deterministic_counting_server_404(
+        max_connections: usize,
+    ) -> (
+        std::net::SocketAddr,
+        std::sync::mpsc::Receiver<usize>,
+        thread::JoinHandle<()>,
+    ) {
+        use std::io::ErrorKind;
+        use std::net::TcpStream;
+        use std::sync::mpsc;
+
+        // Bind in blocking mode — `set_nonblocking` is the root cause of the
+        // Windows connection-count race (EC-001 / STORY-080 AC-001).
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("failed to bind deterministic 404 server");
+        let addr = listener.local_addr().expect("failed to get local addr");
+
+        // Watchdog thread: after a 1-second grace period (well beyond the
+        // ~10ms HTTP round-trip to loopback and any plausible same-process
+        // retry-backoff window), opens a "poison" TCP connection to unblock
+        // the server thread's blocking `accept()` call.
+        //
+        // This sleep is NOT a race-masking delay — the connection-count race
+        // is eliminated by the mpsc channel (count is only read after the
+        // server thread sends it, i.e., after all I/O is complete).  The
+        // sleep here is pure lifecycle management: give the HTTP test 1 second
+        // to finish, then trigger a graceful server shutdown.  1 s is still
+        // vastly larger than the loopback round-trip (~10ms) and leaves no
+        // plausible window for a wrongful retry to be missed.
+        let watchdog_addr = addr;
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(1));
+            // Connect and immediately drop — sends EOF (read() returns 0)
+            // which the server detects as the shutdown signal.
+            let _ = TcpStream::connect(watchdog_addr);
+        });
+
+        let (tx, rx) = mpsc::channel::<usize>();
+
+        let handle = thread::spawn(move || {
+            let mut count = 0usize;
+            loop {
+                if count >= max_connections {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        // Set a read timeout so a stalled peer cannot hang
+                        // the server thread past the watchdog window (LOW-1).
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+
+                        // Drain the request headers, then decide whether this
+                        // is a real HTTP connection or the watchdog's poison
+                        // connection.
+                        //
+                        // Three cases:
+                        //   Ok(0)  — genuine EOF before any data: this is the
+                        //            watchdog's poison connection (connects then
+                        //            immediately drops, sending FIN with no data).
+                        //            Do NOT count; break to trigger server shutdown.
+                        //   Ok(n)  — n > 0 bytes received: a real HTTP request.
+                        //            Count it and serve 404.
+                        //   Err(e) where kind is WouldBlock or TimedOut — the
+                        //            connection arrived (accept() returned Ok) but
+                        //            the peer was slow to send headers.  This is
+                        //            still a real connection — count it and serve 404
+                        //            (prevents false-FAIL undercount).  Control falls
+                        //            through to the 404-serve block below.
+                        //   Err(_other) — unexpected I/O error; break without count.
+                        let mut buf = [0u8; 4096];
+                        match stream.read(&mut buf) {
+                            Ok(0) => {
+                                // Watchdog poison connection: EOF with no data.
+                                // Do not count; shut down the server loop.
+                                break;
+                            },
+                            Ok(_n) => {
+                                // Real HTTP request received; count and serve 404.
+                                count += 1;
+                            },
+                            Err(ref e)
+                                if e.kind() == ErrorKind::WouldBlock
+                                    || e.kind() == ErrorKind::TimedOut =>
+                            {
+                                // Connection arrived but peer was slow to send.
+                                // Count it to prevent undercount false-FAIL;
+                                // falls through to the 404-serve block below.
+                                count += 1;
+                            },
+                            Err(_) => {
+                                // Unexpected read error on an accepted stream.
+                                // Do not count; break.
+                                break;
+                            },
+                        }
+
+                        // Minimal 404 response.  `Connection: close` signals
+                        // the client to tear down the connection after reading
+                        // the response — no keep-alive probes.
+                        let response = b"HTTP/1.1 404 Not Found\r\n\
+                            Content-Type: text/plain\r\n\
+                            Content-Length: 9\r\n\
+                            Connection: close\r\n\
+                            \r\n\
+                            not found";
+                        let _ = stream.write_all(response);
+                        // `stream` is dropped here — FIN is sent, connection
+                        // is fully closed before the counter is incremented
+                        // further.
+                    },
+                    // Any I/O error on accept: stop accepting.
+                    Err(_) => break,
+                }
+            }
+            // Send the final, authoritative connection count.  The main thread
+            // blocks on `count_rx.recv()` until this send completes, which
+            // means it reads the count only AFTER all server-side I/O is done.
+            let _ = tx.send(count);
+        });
+
+        (addr, rx, handle)
+    }
+
+    // -----------------------------------------------------------------------
+    // BC-1.03.002: 4xx responses are not retried (load-bearing counter test)
+    //
+    // STORY-080 AC-001: deterministic harness replacing the original flaky
+    // `set_nonblocking(true)` + poll loop implementation.
+    // -----------------------------------------------------------------------
+
+    /// Traces to BC-1.03.002 invariant 2 + AC-001 (4xx must not be retried).
+    ///
+    /// A deterministic counting server (blocking accept + mpsc channel) serves
+    /// HTTP 404 on the first connection. The test asserts:
+    ///   1. `result.is_err()` — 404 produces an error.
+    ///   2. The error message references "404".
+    ///   3. `connection_count == 1` — exactly one connection, no retry.
+    ///
+    /// Assertion (3) is the load-bearing BC proof: it cannot be weakened to
+    /// `<= 2` without destroying the contract (per AC-003).
+    ///
+    /// This test uses `spawn_deterministic_counting_server_404` which eliminates
+    /// the Windows TCP keep-alive race (EC-001) by reading the count after the
+    /// server thread has finished all I/O and sent the final count over a channel.
+    #[test]
+    fn test_bc_1_03_002_http_4xx_not_retried() {
+        let (addr, count_rx, handle) = spawn_deterministic_counting_server_404(3);
+
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+
+        // Wait for server to finish and read the authoritative connection count.
+        // This is the key difference from the previous harness: we read the count
+        // AFTER the server has completed all I/O, not while it may still be running.
+        let connection_count = count_rx
+            .recv()
+            .expect("server thread must send final count before exiting");
+        handle.join().expect("server thread must not panic");
+
+        // Assertion 1: 404 produces an error.
+        assert!(result.is_err(), "HTTP 404 must produce an error");
+
+        // Assertion 2: error message references 404.
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("404"),
+            "error must reference status 404; got: {msg}"
+        );
+
+        // Assertion 3 (load-bearing BC-1.03.002 invariant 2 boundary):
+        // Exactly 1 connection — 4xx responses are NOT retried.
+        // AC-003: this assertion MUST NOT be weakened to `<= 2` or removed.
+        assert_eq!(
+            connection_count, 1,
+            "HTTP 4xx must result in exactly 1 connection (no retry); got: {connection_count}"
         );
     }
 
