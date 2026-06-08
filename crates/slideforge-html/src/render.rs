@@ -468,6 +468,29 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                         tracing::warn!(error = %e, "render_svg_chart: write error");
                         return svg_str.to_owned();
                     }
+                } else if is_svg && depth > 0 {
+                    // F-007 (EC-002): inner self-closing <svg/> at depth > 0 must
+                    // receive aria-hidden="true" (same as inner Start <svg>).
+                    let mut new_elem = BytesStart::new("svg");
+                    // F-010: skip non-UTF-8 attribute keys cleanly.
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok("aria-hidden") => {}, // drop — we inject below
+                            Ok(_) => new_elem.push_attribute(attr),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "render_svg_chart: non-UTF-8 attribute key skipped \
+                                     on self-closing inner <svg/>"
+                                );
+                            },
+                        }
+                    }
+                    new_elem.push_attribute(("aria-hidden", "true"));
+                    // Self-closing inner <svg/> is emitted as Empty event.
+                    if let Err(e) = writer.write_event(Event::Empty(new_elem)) {
+                        tracing::warn!(error = %e, "render_svg_chart: write error on inner self-closing svg");
+                        return svg_str.to_owned();
+                    }
                 } else if let Err(e) = writer.write_event(Event::Empty(elem)) {
                     tracing::warn!(error = %e, "render_svg_chart: write error on empty elem");
                     return svg_str.to_owned();
@@ -876,6 +899,25 @@ mod tests {
     }
 
         // ─────────────────────────────────────────────────────────────────────────
+    // F-007 — self-closing nested <svg/> inside chart must get aria-hidden="true"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-007 (EC-002): a self-closing nested `<svg/>` (Event::Empty) inside the
+    /// outer `<svg>` must receive `aria-hidden="true"`, not pass through untouched.
+    #[test]
+    fn test_F007_self_closing_nested_svg_gets_aria_hidden() {
+        // The outer <svg> is a Start event; the inner <svg/> is an Empty event.
+        let svg_in = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg/></svg>"#;
+        let result = render_svg_chart(svg_in, "complex chart");
+        // The inner self-closing <svg/> must now have aria-hidden="true".
+        // There are two svg elements; the inner one must have aria-hidden.
+        assert!(
+            result.contains("aria-hidden=\"true\""),
+            "F-007: self-closing inner <svg/> must have aria-hidden=\"true\"; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // F-009 — InlineNode::Xref must route through is_safe_link_scheme
     // ─────────────────────────────────────────────────────────────────────────
 
