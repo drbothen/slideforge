@@ -221,6 +221,7 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 /// | `ParseFailed` | 1 |
 /// | `EvalFailed` (strict) | 2 |
 /// | `ValidationFailed` (strict) | 2 |
+/// | `MultistageFailed` (strict) | 2 |
 /// | `Export` | 3 |
 /// | Other (`Registry`, `Brand`, `Layout`, `Plugin`, `UnknownFormat`) | 1 |
 ///
@@ -229,9 +230,9 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 /// `EXIT_PARSE_ERROR` on unrecognized variants).
 fn exit_code_for_build_error_u8(err: &BuildError) -> u8 {
     match err {
-        BuildError::EvalFailed { .. } | BuildError::ValidationFailed { .. } => {
-            EXIT_VALIDATION_ERROR
-        },
+        BuildError::EvalFailed { .. }
+        | BuildError::ValidationFailed { .. }
+        | BuildError::MultistageFailed { .. } => EXIT_VALIDATION_ERROR,
         BuildError::Export(_) => EXIT_EXPORT_ERROR,
         // ParseFailed, Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
         // UnknownFormat — all treated as fatal parse-category errors (exit 1).
@@ -340,6 +341,25 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
             // Render them with `file:line:col` from diag.span so EVERY
             // emitted diagnostic carries source location information.
             for diag in diagnostics {
+                let rendered = render_validation_diagnostic_to_string(diag, use_color);
+                buf.push_str(&rendered);
+                buf.push('\n');
+            }
+        },
+        BuildError::MultistageFailed {
+            eval_diagnostics,
+            validator_diagnostics,
+            ..
+        } => {
+            // F-P2-MED-001 fix: render eval-stage BoxDiagnostics first (miette),
+            // then validator-stage plugin-api Diagnostics (file:line:col format).
+            // BC-1.15.002 invariant 3: both sets rendered in one pass.
+            for diag in eval_diagnostics {
+                let rendered = render_box_diagnostic(diag.as_ref(), use_color);
+                buf.push_str(&rendered);
+                buf.push('\n');
+            }
+            for diag in validator_diagnostics {
                 let rendered = render_validation_diagnostic_to_string(diag, use_color);
                 buf.push_str(&rendered);
                 buf.push('\n');
@@ -455,6 +475,60 @@ fn render_build_error_json(err: &BuildError) {
                 obj
             })
             .collect(),
+        BuildError::MultistageFailed {
+            eval_diagnostics,
+            validator_diagnostics,
+            ..
+        } => {
+            // F-P2-MED-001: emit eval diagnostics (BoxDiagnostic) then validator
+            // diagnostics (plugin-api Diagnostic) as a single merged JSON array.
+            let mut combined: Vec<serde_json::Value> = eval_diagnostics
+                .iter()
+                .map(|d| {
+                    let code = d.code().map_or_else(String::new, |c| c.to_string());
+                    let message = d.to_string();
+                    let hint = d.help().map(|h| h.to_string());
+                    let span_obj = d.labels().and_then(|mut labels| {
+                        labels.next().map(|label| {
+                            serde_json::json!({
+                                "offset": label.offset(),
+                                "length": label.len(),
+                            })
+                        })
+                    });
+                    let mut obj = serde_json::json!({
+                        "code": code,
+                        "message": message,
+                        "severity": "error",
+                    });
+                    if let Some(h) = hint {
+                        obj["hint"] = serde_json::Value::String(h);
+                    }
+                    if let Some(s) = span_obj {
+                        obj["span"] = s;
+                    }
+                    obj
+                })
+                .collect();
+            combined.extend(validator_diagnostics.iter().map(|d| {
+                let span = &d.span;
+                let mut obj = serde_json::json!({
+                    "code": d.code.as_ref(),
+                    "message": d.message.as_ref(),
+                    "severity": d.severity.to_string(),
+                    "span": {
+                        "file": span.file.as_ref(),
+                        "line": span.line,
+                        "col": span.col,
+                    },
+                });
+                if let Some(ref hint) = d.hint {
+                    obj["hint"] = serde_json::Value::String(hint.as_ref().to_owned());
+                }
+                obj
+            }));
+            combined
+        },
         other => {
             vec![serde_json::json!({"message": other.to_string()})]
         },

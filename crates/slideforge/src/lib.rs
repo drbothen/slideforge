@@ -429,7 +429,7 @@ fn compile_inner(
     use slideforge_eval::{EvalConfig, eval_deck_with_variant, thread_fields_to_blocks};
     use slideforge_layout::run as layout_run;
     use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ValidatorOptions};
-    use slideforge_syntax::{DiagnosticSink, ParseSeverity, SourceMap, parse_checked};
+    use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
 
     tracing::info!(
         strict = options.strict,
@@ -499,7 +499,10 @@ fn compile_inner(
     //
     // OBS-1 fix: fresh DiagnosticSink for eval so that EvalFailed carries only
     // eval-phase diagnostics, not residual parse-phase ones.
-    let (mut deck, accumulated_eval_diags) = {
+    // accumulated_eval_diags: all BoxDiagnostic entries from eval stage (Error + Warning).
+    // eval_error_count: count of Error-and-Fatal severity items in accumulated_eval_diags,
+    // used by the combined strict gate to detect eval errors without re-scanning the vec.
+    let (mut deck, accumulated_eval_diags, eval_error_count) = {
         let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
         let eval_config = EvalConfig::default();
@@ -511,11 +514,13 @@ fn compile_inner(
             &mut eval_sink,
         );
 
-        // C-2: collect eval diagnostics. These are the Error/Warning-severity diagnostics
+        // Collect eval diagnostics. These are the Error/Warning-severity diagnostics
         // that eval_deck_with_variant emits even when it returns Some(deck) — e.g.
         // E-EVL-001 undefined variable, TooManySlides. They must not be silently dropped.
-        let eval_has_fatal = eval_sink.has_fatal();
-        let eval_has_errors = eval_sink.error_and_fatal_count() > 0;
+        //
+        // eval_has_fatal is checked implicitly: if eval_sink.has_fatal(), the evaluator
+        // returns None and the ok_or_else below converts it to EvalFailed (fatal path).
+        // We do not need an explicit `eval_has_fatal` binding.
 
         let deck = maybe_deck.ok_or_else(|| {
             // Fatal eval failure: eval returned None.
@@ -527,13 +532,18 @@ fn compile_inner(
             }
         })?;
 
-        // C-2: collect diagnostics for the non-fatal-but-error path (eval returned Some).
-        // This is only reached when maybe_deck was Some (no Fatal), so we need to
-        // check the error count from eval_sink for non-fatal Error-severity items.
+        // Capture the error count BEFORE moving eval_sink (which would drop it after
+        // collect_diagnostics consumes the &[BoxDiagnostic] slice).
+        // error_and_fatal_count() counts Error + Fatal severity; at this point (deck is
+        // Some) there are no Fatal items, so this equals the non-fatal Error count.
+        let err_count = eval_sink.error_and_fatal_count();
+
+        // Collect all eval diagnostics (Error + Warning) into BoxDiagnostic vec.
+        // This is reached only when maybe_deck was Some (no Fatal).
         let eval_diag_boxes = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVL-???");
 
         // Emit tracing events for eval diagnostics (mirrors validator diagnostic tracing).
-        for diag in eval_sink.errors() {
+        for diag in &eval_diag_boxes {
             tracing::warn!(
                 code = %diag.code().map(|c| c.to_string()).unwrap_or_default(),
                 message = %diag.to_string(),
@@ -541,40 +551,33 @@ fn compile_inner(
             );
         }
 
-        // C-2: if strict mode AND eval has Error-severity non-fatal diagnostics
-        // (eval returned Some but errors exist), fail with EvalFailed here —
-        // BEFORE running validators, so the error code is correctly EvalFailed
-        // (exit 2) not ValidationFailed. This keeps exit-2 causal attribution correct.
+        // F-P2-MED-001 fix: do NOT early-return when eval has non-fatal Error diagnostics.
+        // BC-1.15.002 invariant 3 requires that accumulation applies to the evaluator
+        // AND validators COLLECTIVELY. Early-returning here would swallow any validator
+        // errors that exist on the same deck (e.g. E-A11-001 missing alt on a chart that
+        // also references an undefined variable).
         //
-        // `eval_has_fatal` was already handled by the ok_or_else above (if fatal,
-        // maybe_deck is None and we returned EvalFailed). Here we gate on
-        // `eval_has_errors` — since we know `!has_fatal()` at this point (deck is
-        // Some), `eval_has_errors` is true iff Error-severity diagnostics exist.
-        let _ = eval_has_fatal; // already handled above; kept for clarity
-        if options.strict && eval_has_errors {
-            let count = eval_diag_boxes.len();
-            return Err(error::BuildError::EvalFailed {
-                diagnostics: eval_diag_boxes,
-                count,
-            });
-        }
-
+        // The strict gate is now applied ONCE at the end of compile_inner, after all
+        // validator stages have run. If BOTH eval and validator errors are present, a
+        // MultistageFailed variant is returned carrying both sets.
+        //
         // In warn-only mode (strict=false): eval errors become warnings — the deck is
         // returned and the pipeline continues. The eval_diag_boxes are passed back for
-        // tracing/logging but do not block the build.
+        // the combined strict gate below.
 
-        (deck, eval_diag_boxes)
+        (deck, eval_diag_boxes, err_count)
     };
 
     // Stage 2b: field-to-block threading (ADR-019).
     tracing::info!("compile_inner: Stage 2b — field-to-block threading (ADR-019)");
     thread_fields_to_blocks(&mut deck);
 
-    // Log accumulated eval diagnostics (warn-only mode: errors become tracing events).
+    // Log accumulated eval diagnostics. In strict mode these will be surfaced as
+    // errors at the combined gate below; in warn-only mode they become advisory events.
     if !accumulated_eval_diags.is_empty() {
         tracing::warn!(
             count = accumulated_eval_diags.len(),
-            "compile_inner: eval phase produced non-fatal diagnostics (warn-only mode)"
+            "compile_inner: eval phase produced non-fatal diagnostics"
         );
     }
 
@@ -669,28 +672,64 @@ fn compile_inner(
         all_validator_diagnostics.extend(post_diags);
     }
 
-    // ADR-018 Decision 5 strict-mode gate: evaluate the COMBINED diagnostic list
-    // (Stage 5 + Stage 6b) exactly ONCE, after both passes have collected all
-    // diagnostics.
+    // Combined strict-mode gate (F-P2-MED-001 fix / BC-1.15.002 invariant 3):
+    //
+    // Apply ONE strict gate after ALL stages (eval + Stage 5 validators + Stage 6b
+    // validators) have finished collecting diagnostics. This satisfies BC-1.15.002
+    // PC1 and invariant 3: "accumulation applies to parser, evaluator, validators
+    // COLLECTIVELY".
+    //
+    // Three cases:
+    //   a. Only validator errors: return ValidationFailed (unchanged from before).
+    //   b. Only eval errors: return EvalFailed (same variant, now triggered here
+    //      instead of above).
+    //   c. Both eval AND validator errors: return MultistageFailed carrying both
+    //      sets so all errors are rendered together (BC-1.15.002 TV-13.1 fix).
+    //
+    // Warn-only mode (strict=false): neither gate fires; both error sets are
+    // surfaced only as tracing::warn events. Build continues to export.
     if options.strict {
-        let has_error = all_validator_diagnostics
+        // eval_error_count was captured from eval_sink.error_and_fatal_count() above —
+        // it counts Error + Fatal severity eval diagnostics.
+        let has_eval_errors = eval_error_count > 0;
+
+        let validator_error_count = all_validator_diagnostics
             .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error);
-        if has_error {
-            let error_count = all_validator_diagnostics
-                .iter()
-                .filter(|d| d.severity == DiagnosticSeverity::Error)
-                .count();
-            return Err(error::BuildError::ValidationFailed {
-                diagnostics: all_validator_diagnostics,
-                count: error_count,
-            });
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .count();
+        let has_validator_errors = validator_error_count > 0;
+
+        match (has_eval_errors, has_validator_errors) {
+            (true, true) => {
+                // Case (c): MultistageFailed — both eval and validator errors present.
+                // BC-1.15.002 TV-13.1 — the cross-stage accumulation case.
+                return Err(error::BuildError::MultistageFailed {
+                    eval_diagnostics: accumulated_eval_diags,
+                    validator_diagnostics: all_validator_diagnostics,
+                    eval_count: eval_error_count,
+                    validator_count: validator_error_count,
+                });
+            },
+            (false, true) => {
+                // Case (a): validator errors only → ValidationFailed (existing behavior).
+                return Err(error::BuildError::ValidationFailed {
+                    diagnostics: all_validator_diagnostics,
+                    count: validator_error_count,
+                });
+            },
+            (true, false) => {
+                // Case (b): eval errors only → EvalFailed (existing behavior, new location).
+                // This replaces the early-return that was above Stage 5 (F-P2-MED-001 fix).
+                return Err(error::BuildError::EvalFailed {
+                    diagnostics: accumulated_eval_diags,
+                    count: eval_error_count,
+                });
+            },
+            (false, false) => {
+                // No errors — build continues to export.
+            },
         }
     }
-
-    // ParseSeverity is used only in the eval stage above; suppress dead-code
-    // warning if it is only imported for the eval_sink.has_errors() path.
-    let _ = ParseSeverity::Error;
 
     Ok(CompiledDeck {
         deck,
@@ -2272,11 +2311,21 @@ mod tests {
         let result = compile(source, &compile_opts);
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
-        // C-2: must return EvalFailed (not Ok, and not ValidationFailed).
-        // C-2: must return EvalFailed (not Ok, and not ValidationFailed).
+        // C-2 (F-P2-MED-001 update): must NOT return Ok — eval error must be gated.
+        //
+        // After F-P2-MED-001: eval errors do not early-return; validators also run.
+        // For this fixture (title "{{ undefined_var }}"):
+        //   - eval emits E-EVL-001 (undefined variable)
+        //   - FieldSchemaValidator emits E-VAL-102 (title resolves to empty string "")
+        //   → MultistageFailed { eval_count: 1, validator_count: 1 }
+        //
+        // We accept either EvalFailed (only eval errors) or MultistageFailed (eval +
+        // validator errors) — both prove that eval errors are NOT silently swallowed.
+        // We do NOT accept Ok (pre-C-2 bug) or ValidationFailed-only (eval error lost).
         match result {
             Err(error::BuildError::EvalFailed { diagnostics, count }) => {
-                // C-2: EvalFailed.diagnostics must be non-empty (E-EVL-001 must be there).
+                // EvalFailed path: eval error with no validator errors.
+                // (Possible if FieldSchemaValidator is absent or title is non-empty.)
                 assert!(
                     count > 0,
                     "C-2: EvalFailed.count must be > 0 (contains the undefined-variable error)"
@@ -2285,12 +2334,33 @@ mod tests {
                     !diagnostics.is_empty(),
                     "C-2: EvalFailed.diagnostics must be non-empty"
                 );
-                // The diagnostic must carry a code (file:line:col may not be present
-                // for undefined-var in {{ }} interpolation, but code must exist).
                 let has_code = diagnostics.iter().any(|d| d.code().is_some());
                 assert!(
                     has_code,
                     "C-2: EvalFailed diagnostics must carry error codes for rendering"
+                );
+            },
+            Err(error::BuildError::MultistageFailed {
+                eval_diagnostics,
+                eval_count,
+                ..
+            }) => {
+                // MultistageFailed path: eval error + validator error(s).
+                // The validator fires because the title resolves to "" (empty string
+                // after {{ undefined_var }} evaluates to None/empty) → E-VAL-102.
+                // BC-1.15.002 invariant 3: both stages are reported. (F-P2-MED-001 fix)
+                assert!(
+                    eval_count > 0,
+                    "C-2: MultistageFailed.eval_count must be > 0 (E-EVL-001 must be present)"
+                );
+                assert!(
+                    !eval_diagnostics.is_empty(),
+                    "C-2: MultistageFailed.eval_diagnostics must be non-empty"
+                );
+                let has_eval_code = eval_diagnostics.iter().any(|d| d.code().is_some());
+                assert!(
+                    has_eval_code,
+                    "C-2: MultistageFailed.eval_diagnostics must carry error codes for rendering"
                 );
             },
             Ok(_) => {
@@ -2301,8 +2371,8 @@ mod tests {
             },
             Err(other) => {
                 panic!(
-                    "C-2 regression: compile() returned wrong Err variant: {other}; \
-                     expected EvalFailed"
+                    "C-2 regression: compile() returned Err({other}) — expected EvalFailed or \
+                     MultistageFailed (eval error gated, not swallowed)"
                 );
             },
         }

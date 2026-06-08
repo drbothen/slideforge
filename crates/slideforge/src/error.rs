@@ -162,6 +162,58 @@ pub enum BuildError {
         count: usize,
     },
 
+    /// Both the evaluator and one or more validators reported `Error`-severity
+    /// diagnostics in the same strict-mode build run.
+    ///
+    /// This variant is produced when `compile_inner` accumulates non-fatal eval
+    /// errors (e.g. `E-EVL-001` undefined variable — evaluator returns `Some(Deck)`
+    /// rather than `None`) AND the subsequent validator stage also produces
+    /// `Error`-severity diagnostics (e.g. `E-A11-001` missing alt text).
+    ///
+    /// Both groups of diagnostics are carried so that the CLI (and any other
+    /// caller) can render ALL errors in a single pass — satisfying
+    /// BC-1.15.002 PC1 ("all N errors reported in a single build output") and
+    /// invariant 3 ("accumulation applies to parser, evaluator, validators
+    /// COLLECTIVELY").
+    ///
+    /// ## Rendering
+    ///
+    /// The CLI renders `eval_diagnostics` first (via `BoxDiagnostic` / miette),
+    /// then `validator_diagnostics` (via `slideforge_plugin_api::Diagnostic`).
+    /// This preserves the existing rendering paths for each type.
+    ///
+    /// ## Exit code
+    ///
+    /// Exit code 2 — same as `EvalFailed` and `ValidationFailed`.
+    ///
+    /// ## Traceability
+    ///
+    /// - BC-1.15.002 PC1, invariant 3
+    /// - STORY-055 AC-006 / F-P2-MED-001 fix
+    #[error(
+        "build failed with {eval_count} eval error(s) and {validator_count} validator \
+         error(s); run with --warn-only to demote to warnings"
+    )]
+    MultistageFailed {
+        /// Eval-stage diagnostics (from `DiagnosticSink` — `Box<dyn miette::Diagnostic>`).
+        ///
+        /// Contains all non-fatal eval errors (e.g. `E-EVL-001` undefined variable)
+        /// that were accumulated when `eval_deck_with_variant` returned `Some(Deck)`.
+        eval_diagnostics: Vec<slideforge_syntax::BoxDiagnostic>,
+
+        /// Validator-stage diagnostics (from all registered `Validator` plugins).
+        ///
+        /// Contains all diagnostics (Error + Warning) from Stage 5 + Stage 6b
+        /// validators — same set that `ValidationFailed` would carry.
+        validator_diagnostics: Vec<Diagnostic>,
+
+        /// Count of `Error`-severity diagnostics in `eval_diagnostics`.
+        eval_count: usize,
+
+        /// Count of `Error`-severity diagnostics in `validator_diagnostics`.
+        validator_count: usize,
+    },
+
     /// The `Deck` could not be laid out into a `LaidOutDeck`.
     ///
     /// Wraps [`slideforge_layout::LayoutError`].

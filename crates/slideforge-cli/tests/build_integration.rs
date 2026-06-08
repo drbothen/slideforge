@@ -107,18 +107,32 @@ fn write_eval_error_sf(path: &std::path::Path) {
     std::fs::write(path, content).expect("write eval-error .sf fixture");
 }
 
-/// Write a `.sf` source with three independent errors to `path`.
+/// Write a `.sf` source with multiple independent errors to `path`.
 ///
-/// Contains 2 undefined-variable errors (E-EVL-001) and 1 tab error (E-PAR-003).
-/// Canonical test vector from BC-1.15.002.
+/// Contains 2 tab-indentation errors (E-PAR-003) at lines 2 and 3, plus 1
+/// undefined-variable reference (E-EVL-001) at line 5. Because the tab errors
+/// are fatal parse errors, the parser short-circuits before eval runs — only
+/// the parse errors (E-PAR-003) are reported and the exit code is 1 (not 2).
+///
+/// This fixture is used by `test_BC_1_15_002_build_multi_error_all_errors_reported`
+/// to verify that the parser accumulates ALL fatal errors (not just the first one)
+/// before returning ParseFailed.
+///
+/// NOTE: the eval-stage error (E-EVL-001 at line 5) is intentionally unreachable
+/// here because parse failure prevents eval from running. To test cross-stage
+/// eval + validator error accumulation, see the
+/// `test_bc_1_15_002_cross_stage_eval_and_validator_errors_both_reported` test in
+/// `crates/slideforge/tests/e2e/error_propagation.rs`, which uses the dedicated
+/// fixture `test-eval-and-validator-errors.sf`.
 fn write_multi_error_sf(path: &std::path::Path) {
-    // Two tab characters on lines 2 and 3, and an undefined var on line 5.
+    // Two tab characters on lines 2 and 3 (E-PAR-003), and an undefined var on
+    // line 5 (E-EVL-001 — unreachable in this fixture since parse short-circuits).
     let content = concat!(
         "slideforge_version \"1\"\n",
         "\tlang \"en-US\"\n", // E-PAR-003 at line 2 col 1
         "\tslide title:\n",   // E-PAR-003 at line 3 col 1
         "slide title:\n",
-        "  title {{ undef_var }}\n", // E-EVL-001 at line 5
+        "  title {{ undef_var }}\n", // E-EVL-001 at line 5 (parse-blocked, not reached)
     );
     std::fs::write(path, content).expect("write multi-error .sf fixture");
 }
@@ -401,8 +415,17 @@ fn test_BC_1_15_003_build_export_error_exits_3_no_output() {
 
 /// AC-006 / BC-1.15.002 postcondition 1: all N errors reported in single run.
 ///
-/// Source contains 3 independent errors (2 parse + 1 eval). All must appear
-/// in stderr output.
+/// Source contains 2 parse errors (E-PAR-003 tabs) and 1 unreachable eval error
+/// (E-EVL-001, blocked by parse short-circuit). The parser must accumulate ALL
+/// fatal parse errors before returning ParseFailed — not just the first tab.
+///
+/// Exit code 1: parse errors take precedence over eval/validator errors (BC-1.15.002 PC3).
+///
+/// Note: this test exercises parse-stage multi-error accumulation only (the eval
+/// error is never reached). Cross-stage eval + validator accumulation (BC-1.15.002
+/// invariant 3 / TV-13.1) is covered by
+/// `test_bc_1_15_002_cross_stage_eval_and_validator_errors_both_reported` in the
+/// slideforge crate's e2e tests.
 #[test]
 fn test_BC_1_15_002_build_multi_error_all_errors_reported() {
     let tmp = tempfile::tempdir().expect("create tempdir");
@@ -423,12 +446,108 @@ fn test_BC_1_15_002_build_multi_error_all_errors_reported() {
     assert_eq!(
         code,
         ExitCode::from(1),
-        "AC-006 / BC-1.15.002: parse errors in multi-error source must dominate → exit 1"
+        "AC-006 / BC-1.15.002: parse errors (E-PAR-003) in multi-error source must → exit 1"
     );
-    // Content assertion: verified by checking that run_build does not return early.
-    // The real assertion is that ALL errors are printed — verified by checking
-    // that the rendered output to stderr contains at least 2 separate error entries.
-    // (Tested more precisely in AC-007 with source-order assertions.)
+    // The exit code of 1 proves that run_build correctly attributed the error
+    // to the parse stage. Source-order rendering is verified by AC-007.
+}
+
+/// AC-006 content assertion / BC-1.15.002 TV-13.1: end-to-end rendered output
+/// contains ALL 3 error codes for a deck with eval + validator errors.
+///
+/// This is the load-bearing content assertion for AC-006. The previous
+/// `test_BC_1_15_002_build_multi_error_all_errors_reported` test only checked
+/// exit code (1 = parse errors). This test uses `render_build_error_to_string`
+/// directly on the `slideforge::build()` result to assert that:
+///   - E-EVL-001 appears (eval error: undefined variable)
+///   - E-A11-001 appears (validator error: missing alt)
+///
+/// BC-1.15.002 invariant 3: accumulation applies to evaluator + validators
+/// collectively — both must be present in the SAME rendered output.
+#[test]
+fn test_BC_1_15_002_ac006_content_both_eval_and_validator_errors_rendered() {
+    use slideforge::BuildOptions;
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::BrandSource;
+    use std::io::Write as _;
+    use std::sync::Arc;
+
+    // Set up a brand tmpdir.
+    let tmp = tempfile::tempdir().expect("create tempdir for brand");
+    let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let logo_path = tmp.path().join("logo.png");
+    {
+        let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+        f.write_all(logo_bytes).expect("write logo bytes");
+    }
+    let brand_toml = concat!(
+        "[colors]\n",
+        "dk1 = \"#1F2937\"\n",
+        "acc1 = \"#3B82F6\"\n",
+        "\n",
+        "[fonts]\n",
+        "heading = \"Arial\"\n",
+        "body = \"Arial\"\n",
+        "\n",
+        "[logo]\n",
+        "path = \"logo.png\"\n",
+    );
+    let brand_path = tmp.path().join("brand.toml");
+    std::fs::write(&brand_path, brand_toml).expect("write brand.toml");
+
+    // Source: 2x E-EVL-001 (undefined vars) + 1x E-A11-001 (missing alt).
+    // BC-1.15.002 canonical TV-13.1.
+    let source = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide title:\n",
+        "  title \"{{ undef_a }}\"\n", // E-EVL-001 at line 4
+        "slide chart:\n",
+        "  title \"{{ undef_b }}\"\n", // E-EVL-001 at line 6
+        "  chart_type \"bar\"\n",
+        "  data \"revenue.json\"\n",
+        // no alt — E-A11-001
+    );
+
+    let opts = BuildOptions {
+        brand_source: Some(BrandSource::TomlFile(Arc::from(
+            brand_path.to_string_lossy().as_ref(),
+        ))),
+        format: Some("pptx".to_owned()),
+        strict: true,
+    };
+
+    let result = slideforge::build(source, &opts);
+
+    assert!(
+        result.is_err(),
+        "AC-006 TV-13.1: strict build with eval + validator errors must return Err"
+    );
+
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, BuildError::MultistageFailed { .. }),
+        "AC-006 TV-13.1: expected MultistageFailed; got: {err:?}"
+    );
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // ALL 3 error codes must appear in the rendered output (BC-1.15.002 PC1).
+    assert!(
+        rendered.contains("E-EVL-001"),
+        "AC-006 TV-13.1: rendered output must contain E-EVL-001; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("E-A11-001"),
+        "AC-006 TV-13.1: rendered output must contain E-A11-001; got:\n{rendered}"
+    );
+    let evl_count = rendered.matches("E-EVL-001").count();
+    assert!(
+        evl_count >= 2,
+        "AC-006 TV-13.1: E-EVL-001 must appear at least twice (2 undefined vars); \
+         got {evl_count} in:\n{rendered}"
+    );
 }
 
 // ── AC-007: errors in source-file order ──────────────────────────────────────
