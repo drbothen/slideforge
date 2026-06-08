@@ -420,22 +420,45 @@ fn pre_parse_version_gate(
                 }
 
                 let major: u64 = major_str.parse().unwrap_or(0);
-                if major != 1 {
-                    errors.push(SyntaxError::version_error(
-                        file_path.to_string(),
-                        format!(
-                            "E-PAR-010: forward-incompatible version '{ver_str}' — \
-                                 this build of slideforge supports version 1.x only"
-                        ),
-                        true,
-                        src.to_string(),
-                        ver_span.start,
-                    ));
-                    return VersionGateResult::FatalVersionError;
-                }
 
-                // Major == 1: compatible.
-                return VersionGateResult::Compatible;
+                // Compatibility rules:
+                // - major == 1 → compatible (stable release series).
+                // - major == 0 with a minor component → compatible pre-1.0
+                //   development version (e.g. "0.1.0" for the slideforge
+                //   project's own development builds). Allows developers to
+                //   write `.sf` files with the current project version without
+                //   a gate error.
+                // - major == 0 with NO minor component (bare "0") → rejected.
+                // - major >= 2 → forward-incompatible; rejected.
+                if major == 1 {
+                    // Stable v1.x series: compatible.
+                    return VersionGateResult::Compatible;
+                }
+                if major == 0 && ver_str.contains('.') {
+                    // Pre-1.0 development (e.g. "0.1.0"): compatible.
+                    return VersionGateResult::Compatible;
+                }
+                // Either bare "0" or major >= 2: reject.
+                let msg = if major >= 2 {
+                    format!(
+                        "E-PAR-010: forward-incompatible version '{ver_str}' — \
+                         this build of slideforge supports version 1.x only"
+                    )
+                } else {
+                    format!(
+                        "E-PAR-010: invalid version string '{ver_str}' — \
+                         the version must be a numeric major version (1.x) or \
+                         a pre-1.0 development version (0.x.y), e.g. \"1\" or \"0.1.0\""
+                    )
+                };
+                errors.push(SyntaxError::version_error(
+                    file_path.to_string(),
+                    msg,
+                    true,
+                    src.to_string(),
+                    ver_span.start,
+                ));
+                return VersionGateResult::FatalVersionError;
             }
             // slideforge_version with no following string — unusual; let
             // the chumsky parser generate the appropriate error.

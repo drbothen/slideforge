@@ -207,7 +207,8 @@ fn make_laid_out_deck(n: usize) -> LaidOutDeck {
             .collect(),
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Run the exporter on a `LaidOutDeck` and return raw PPTX bytes.

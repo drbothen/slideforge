@@ -789,7 +789,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],            slide_sections: vec![],
+            slide_sections: vec![],
         };
         let deck2 = deck.clone();
         assert_eq!(deck, deck2);

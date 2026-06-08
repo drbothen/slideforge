@@ -184,7 +184,8 @@ fn make_laid_out_deck(n: usize) -> LaidOutDeck {
             .collect(),
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Run the exporter on a minimal deck and return raw PPTX bytes.
@@ -1875,7 +1876,8 @@ fn test_sec100_progress_bar_label_with_control_char_stripped_from_slide_xml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     let deck = make_deck(1);
     let brand = make_brand();

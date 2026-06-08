@@ -26,6 +26,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
+#![allow(clippy::manual_assert)]
 #![allow(clippy::missing_docs_in_private_items)]
 
 use crate::span::SourceMap;
@@ -92,7 +93,10 @@ section "Background":
     let parse_result = result.expect("mixed section forms must parse without fatal errors");
     let items = &parse_result.deck.items;
 
-    let section_block_count = items.iter().filter(|i| matches!(i, BlockItem::Section(_))).count();
+    let section_block_count = items
+        .iter()
+        .filter(|i| matches!(i, BlockItem::Section(_)))
+        .count();
     let section_group_count = items
         .iter()
         .filter(|i| matches!(i, BlockItem::SectionGroup(_)))
@@ -110,14 +114,26 @@ section "Background":
     // The SectionBlock must be the bare-ident form (kind = "methodology").
     let section_block = items
         .iter()
-        .find_map(|i| if let BlockItem::Section(s) = i { Some(s.value()) } else { None })
+        .find_map(|i| {
+            if let BlockItem::Section(s) = i {
+                Some(s.value())
+            } else {
+                None
+            }
+        })
         .expect("SectionBlock must be present");
     assert_eq!(section_block.kind.value(), "methodology");
 
     // The SectionGroup must have name = "Background".
     let section_group = items
         .iter()
-        .find_map(|i| if let BlockItem::SectionGroup(s) = i { Some(s.value()) } else { None })
+        .find_map(|i| {
+            if let BlockItem::SectionGroup(s) = i {
+                Some(s.value())
+            } else {
+                None
+            }
+        })
         .expect("SectionGroup must be present");
     assert_eq!(
         section_group.name.value().as_ref(),
@@ -240,7 +256,7 @@ section "Background":
     // Parse must SUCCEED (duplicate name is a WARNING, not a fatal error).
     let parse_result = result.expect(
         "duplicate section name must NOT produce a fatal parse error — \
-         W-PAR-002 is cosmetic (BC-4.01.003 PC8)"
+         W-PAR-002 is cosmetic (BC-4.01.003 PC8)",
     );
 
     // Warnings must include W-PAR-002.

@@ -1449,7 +1449,7 @@ mod tests {
         let output = ShapeLayoutOutput {
             frames: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+        };
         let output2 = output.clone();
         assert_eq!(output, output2);
         let mut set = HashSet::new();

@@ -903,7 +903,8 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        }
+            slide_sections: vec![],
+        }
     }
 
     fn stub_brand() -> Brand {

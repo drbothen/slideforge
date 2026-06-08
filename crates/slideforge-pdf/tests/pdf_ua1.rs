@@ -170,7 +170,8 @@ fn n_slide_deck(n: usize) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a single slide with a title frame + body frame (with bullets).
@@ -223,7 +224,8 @@ fn title_and_body_slide() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a slide with a non-decorative image frame carrying real alt text.
@@ -265,7 +267,8 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a slide whose only content frame is a decorative image (empty alt).
@@ -295,7 +298,8 @@ fn decorative_only_slide() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Helper: export `laid_out` + `deck` + minimal brand → raw PDF bytes.
@@ -547,7 +551,8 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     // Use uncompressed export to scan content stream for Artifact markers.
     let bytes = exporter
@@ -633,7 +638,8 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     // Use uncompressed export to scan content stream.
     let bytes = exporter
@@ -873,7 +879,8 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     // Use uncompressed export so content stream operators are scannable.
     let exporter = PdfExporter::new();
@@ -1219,7 +1226,8 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
         slides,
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     let deck = deck_with_lang("en-US");
     let bytes = export_to_bytes(&deck, &laid_out);
@@ -2099,7 +2107,8 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
         slides: vec![subtitle_slide],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
 
     // Use with_font_path for deterministic font resolution (same as F-006 fix).
     let font_path = {
@@ -2831,7 +2840,8 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
         slides: vec![body_slide],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    };
+        slide_sections: vec![],
+    };
     let deck = deck_with_lang("en-US");
     let brand = minimal_brand();
     let opts = ExportOptions::default();

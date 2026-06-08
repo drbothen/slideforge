@@ -69,12 +69,52 @@ pub const SLIDE_ID_START: u32 = 256;
 /// Introduced in STORY-082.
 #[must_use]
 pub fn extract_slide_sections(deck_node: &DeckNode) -> Vec<SlideSectionEntry> {
-    todo!(
-        "STORY-082: implement extract_slide_sections — walk deck_node.items, \
-         find SectionGroup blocks, map slide children to PPTX IDs starting at 256, \
-         return Vec<SlideSectionEntry>. \
-         BC-1.14.003: do NOT read register content from SectionNode.fields."
-    )
+    let mut result = Vec::new();
+    let mut slide_index: usize = 0;
+
+    for item in &deck_node.items {
+        match item {
+            BlockItem::Slide(_) => {
+                // Ungrouped slide — contributes to index but no section entry.
+                slide_index += 1;
+            },
+            BlockItem::SectionGroup(spanned) => {
+                let group = spanned.value();
+                let name = std::sync::Arc::clone(group.name.value());
+
+                // Collect PPTX IDs for each direct Slide child.
+                let mut slide_ids: Vec<u32> = Vec::new();
+                for child in &group.slides {
+                    if matches!(child, BlockItem::Slide(_)) {
+                        slide_ids.push(slide_id_for_index(slide_index));
+                        slide_index += 1;
+                    }
+                    // @for/@if blocks inside a section group are not counted
+                    // here — they are not yet evaluated; post-eval expansion
+                    // would be needed. In v1.0, only direct slide children
+                    // are mapped (spec requirement per STORY-082 algorithm §2).
+                }
+
+                // Only emit a SlideSectionEntry if the section has slides.
+                // Empty sections (no direct slide children) are silently dropped.
+                if !slide_ids.is_empty() {
+                    result.push(SlideSectionEntry { name, slide_ids });
+                }
+            },
+            BlockItem::For(_) | BlockItem::If(_) | BlockItem::Section(_) => {
+                // @for/@if: control-flow blocks at deck level. We cannot
+                // statically know how many slides they produce without
+                // evaluating. In v1.0, these are NOT inside section groups
+                // per the grammar, so no ID accounting is needed here.
+                //
+                // Section (bare-ident form, STORY-078): document-structure
+                // sections do NOT contain slides in the PPTX grouping sense.
+                // No index advancement; no section entry.
+            },
+        }
+    }
+
+    result
 }
 
 /// Compute the PPTX slide ID for the slide at zero-based absolute `index`.
@@ -88,9 +128,12 @@ pub fn extract_slide_sections(deck_node: &DeckNode) -> Vec<SlideSectionEntry> {
 /// (impossible in practice — a deck cannot have > 4 billion slides).
 #[must_use]
 pub fn slide_id_for_index(index: usize) -> u32 {
-    todo!(
-        "STORY-082: implement slide_id_for_index — return SLIDE_ID_START + index as u32"
-    )
+    // SLIDE_ID_START is 256; adding a large index would overflow u32 only for
+    // decks with ~4 billion slides — documented as impossible in practice.
+    u32::try_from(index)
+        .expect("slide index exceeds u32::MAX — impossible in practice")
+        .checked_add(SLIDE_ID_START)
+        .expect("slide ID overflows u32 — impossible in practice")
 }
 
 /// Count the direct slide children in `items`.
@@ -103,7 +146,8 @@ pub fn slide_id_for_index(index: usize) -> u32 {
 /// The number of direct slide children in declaration order.
 #[must_use]
 pub fn count_direct_slides(items: &[BlockItem]) -> usize {
-    todo!(
-        "STORY-082: implement count_direct_slides — count BlockItem::Slide items in `items`"
-    )
+    items
+        .iter()
+        .filter(|item| matches!(item, BlockItem::Slide(_)))
+        .count()
 }

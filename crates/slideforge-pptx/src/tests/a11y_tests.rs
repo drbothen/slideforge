@@ -192,7 +192,8 @@ fn make_laid_out_deck_with_image_alt(alt: &str) -> LaidOutDeck {
         slides: vec![make_slide_with_image_alt(0, alt)],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a minimal `LaidOutDeck` with one slide containing a decorative image.
@@ -202,7 +203,8 @@ fn make_laid_out_deck_with_decorative_image() -> LaidOutDeck {
         slides: vec![make_slide_with_decorative_image(0)],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a minimal `LaidOutDeck` with a single title-only slide (no visual frames).
@@ -224,7 +226,8 @@ fn make_laid_out_deck_with_lang_only() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a `LaidOutDeck` with one slide containing a REAL `FrameContent::Chart` frame (AC-005).
@@ -258,7 +261,8 @@ fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a `LaidOutDeck` with one slide containing a REAL `FrameContent::Diagram` frame (AC-005).
@@ -294,7 +298,8 @@ fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a `LaidOutDeck` with one slide containing a `FrameContent::Chart`
@@ -331,7 +336,8 @@ fn make_laid_out_deck_with_chart_decorative() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 /// Build a `LaidOutDeck` with one slide containing a `FrameContent::Diagram`
@@ -371,7 +377,8 @@ fn make_laid_out_deck_with_diagram_decorative() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 // ─── ZIP helpers ──────────────────────────────────────────────────────────────

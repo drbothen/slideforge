@@ -29,6 +29,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
 #![allow(clippy::missing_docs_in_private_items)]
+#![allow(clippy::uninlined_format_args)]
 
 use std::sync::Arc;
 
@@ -37,7 +38,9 @@ use slideforge_layout::{
 };
 use slideforge_types::{Emu, InlineNode, Register, RegisteredContent};
 
-use crate::sections::{SECTION_LST_EXT_URI, P14_NS_URI, SectionListBuilder, derive_section_guid, format_guid};
+use crate::sections::{
+    P14_NS_URI, SECTION_LST_EXT_URI, SectionListBuilder, derive_section_guid, format_guid,
+};
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -104,19 +107,41 @@ fn stub_presentation_xml() -> Vec<u8> {
 #[test]
 fn test_BC_4_01_003_ac003_presentation_xml_has_p14_section_lst() {
     let sections = vec![
-        SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256, 257] },
-        SlideSectionEntry { name: Arc::from("Analysis"), slide_ids: vec![258, 259] },
+        SlideSectionEntry {
+            name: Arc::from("Background"),
+            slide_ids: vec![256, 257],
+        },
+        SlideSectionEntry {
+            name: Arc::from("Analysis"),
+            slide_ids: vec![258, 259],
+        },
     ];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
 
     assert!(xml_str.contains("<p:extLst>"), "must contain <p:extLst>");
-    assert!(xml_str.contains(SECTION_LST_EXT_URI), "must contain ext uri");
-    assert!(xml_str.contains("p14:sectionLst"), "must contain p14:sectionLst");
-    assert_eq!(xml_str.matches("<p14:section ").count(), 2, "must have 2 p14:section elements");
-    assert!(xml_str.contains("name=\"Background\""), "must have Background section");
-    assert!(xml_str.contains("name=\"Analysis\""), "must have Analysis section");
+    assert!(
+        xml_str.contains(SECTION_LST_EXT_URI),
+        "must contain ext uri"
+    );
+    assert!(
+        xml_str.contains("p14:sectionLst"),
+        "must contain p14:sectionLst"
+    );
+    assert_eq!(
+        xml_str.matches("<p14:section ").count(),
+        2,
+        "must have 2 p14:section elements"
+    );
+    assert!(
+        xml_str.contains("name=\"Background\""),
+        "must have Background section"
+    );
+    assert!(
+        xml_str.contains("name=\"Analysis\""),
+        "must have Analysis section"
+    );
 }
 
 /// AC-003 — `p:extLst` is the LAST child of `p:presentation`.
@@ -124,17 +149,25 @@ fn test_BC_4_01_003_ac003_presentation_xml_has_p14_section_lst() {
 /// Traces to BC-4.01.003 architecture rule 4.
 #[test]
 fn test_BC_4_01_003_ac003_extlst_is_last_child_of_presentation() {
-    let sections = vec![SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] }];
+    let sections = vec![SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256],
+    }];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
 
-    let ext_end = xml_str.rfind("</p:extLst>").expect("</p:extLst> must be present");
-    let prs_end = xml_str.rfind("</p:presentation>").expect("</p:presentation> must be present");
+    let ext_end = xml_str
+        .rfind("</p:extLst>")
+        .expect("</p:extLst> must be present");
+    let prs_end = xml_str
+        .rfind("</p:presentation>")
+        .expect("</p:presentation> must be present");
     let between = xml_str[ext_end + "</p:extLst>".len()..prs_end].trim();
     assert!(
         between.is_empty(),
-        "p:extLst must be last child of p:presentation; got: {:?}", between
+        "p:extLst must be last child of p:presentation; got: {:?}",
+        between
     );
 }
 
@@ -143,7 +176,10 @@ fn test_BC_4_01_003_ac003_extlst_is_last_child_of_presentation() {
 /// Traces to BC-4.01.003 postcondition 5.
 #[test]
 fn test_BC_4_01_003_ac003_ext_uri_is_correct_fixed_constant() {
-    let sections = vec![SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] }];
+    let sections = vec![SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256],
+    }];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
@@ -158,7 +194,10 @@ fn test_BC_4_01_003_ac003_ext_uri_is_correct_fixed_constant() {
 /// Traces to BC-4.01.003 postcondition 5.
 #[test]
 fn test_BC_4_01_003_ac003_xmlns_p14_declared_on_presentation() {
-    let sections = vec![SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] }];
+    let sections = vec![SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256],
+    }];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
@@ -177,12 +216,21 @@ fn test_BC_4_01_003_ac003_xmlns_p14_declared_on_presentation() {
 fn test_BC_4_01_003_ac004_no_ext_lst_when_no_sections() {
     let prs_xml = stub_presentation_xml();
     let prs_xml_copy = prs_xml.clone();
-    let result = SectionListBuilder::inject(prs_xml, &[])
-        .expect("inject with empty sections must succeed");
-    assert_eq!(result, prs_xml_copy, "bytes must be unchanged when sections is empty");
+    let result =
+        SectionListBuilder::inject(prs_xml, &[]).expect("inject with empty sections must succeed");
+    assert_eq!(
+        result, prs_xml_copy,
+        "bytes must be unchanged when sections is empty"
+    );
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
-    assert!(!xml_str.contains("<p:extLst>"), "no extLst when sections empty");
-    assert!(!xml_str.contains("p14:sectionLst"), "no sectionLst when sections empty");
+    assert!(
+        !xml_str.contains("<p:extLst>"),
+        "no extLst when sections empty"
+    );
+    assert!(
+        !xml_str.contains("p14:sectionLst"),
+        "no sectionLst when sections empty"
+    );
 }
 
 /// AC-004 — inject with empty sections returns `Ok`.
@@ -239,17 +287,37 @@ fn test_BC_4_01_003_ac005_xml_escaped_section_name() {
 #[test]
 fn test_BC_4_01_003_ac006_two_single_slide_sections() {
     let sections = vec![
-        SlideSectionEntry { name: Arc::from("Section A"), slide_ids: vec![256] },
-        SlideSectionEntry { name: Arc::from("Section B"), slide_ids: vec![257] },
+        SlideSectionEntry {
+            name: Arc::from("Section A"),
+            slide_ids: vec![256],
+        },
+        SlideSectionEntry {
+            name: Arc::from("Section B"),
+            slide_ids: vec![257],
+        },
     ];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
 
-    assert_eq!(xml_str.matches("<p14:section ").count(), 2, "must have 2 p14:section");
-    assert_eq!(xml_str.matches("<p14:sldId ").count(), 2, "must have 2 p14:sldId (one per section)");
-    assert!(xml_str.contains("<p14:sldId id=\"256\""), "must have sldId 256");
-    assert!(xml_str.contains("<p14:sldId id=\"257\""), "must have sldId 257");
+    assert_eq!(
+        xml_str.matches("<p14:section ").count(),
+        2,
+        "must have 2 p14:section"
+    );
+    assert_eq!(
+        xml_str.matches("<p14:sldId ").count(),
+        2,
+        "must have 2 p14:sldId (one per section)"
+    );
+    assert!(
+        xml_str.contains("<p14:sldId id=\"256\""),
+        "must have sldId 256"
+    );
+    assert!(
+        xml_str.contains("<p14:sldId id=\"257\""),
+        "must have sldId 257"
+    );
 }
 
 // ─── AC-007 test ──────────────────────────────────────────────────────────────
@@ -262,16 +330,26 @@ fn test_BC_4_01_003_ac006_two_single_slide_sections() {
 fn test_BC_4_01_003_ac007_section_lst_skipped_for_non_pptx() {
     let deck = make_laid_out_deck_with_sections(
         2,
-        vec![SlideSectionEntry { name: Arc::from("Section A"), slide_ids: vec![256, 257] }],
+        vec![SlideSectionEntry {
+            name: Arc::from("Section A"),
+            slide_ids: vec![256, 257],
+        }],
     );
-    assert_eq!(deck.slide_sections.len(), 1, "slide_sections must be accessible");
+    assert_eq!(
+        deck.slide_sections.len(),
+        1,
+        "slide_sections must be accessible"
+    );
 
     // Non-PPTX path = call inject with empty sections (no-op).
     let prs_xml = stub_presentation_xml();
     let result = SectionListBuilder::inject(prs_xml, &[])
         .expect("inject with no sections (non-PPTX simulation) must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
-    assert!(!xml_str.contains("p14:sectionLst"), "no sectionLst for non-PPTX path");
+    assert!(
+        !xml_str.contains("p14:sectionLst"),
+        "no sectionLst for non-PPTX path"
+    );
 }
 
 // ─── AC-008 test ──────────────────────────────────────────────────────────────
@@ -297,17 +375,31 @@ fn test_BC_1_14_003_ac008_no_register_content_in_ext_lst() {
     ];
 
     // SectionListBuilder reads ONLY the sections argument, not slide register_content.
-    let sections = vec![SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] }];
+    let sections = vec![SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256],
+    }];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
 
-    let ext_start = xml_str.find("<p:extLst>").expect("p:extLst must be present");
-    let ext_end = xml_str.find("</p:extLst>").map(|i| i + "</p:extLst>".len()).expect("</p:extLst> must be present");
+    let ext_start = xml_str
+        .find("<p:extLst>")
+        .expect("p:extLst must be present");
+    let ext_end = xml_str
+        .find("</p:extLst>")
+        .map(|i| i + "</p:extLst>".len())
+        .expect("</p:extLst> must be present");
     let ext_xml = &xml_str[ext_start..ext_end];
 
-    assert!(!ext_xml.contains(detail_sentinel), "p:extLst must NOT contain detail content (BC-1.14.003 PC3)");
-    assert!(!ext_xml.contains(report_sentinel), "p:extLst must NOT contain report content (BC-1.14.003 PC5)");
+    assert!(
+        !ext_xml.contains(detail_sentinel),
+        "p:extLst must NOT contain detail content (BC-1.14.003 PC3)"
+    );
+    assert!(
+        !ext_xml.contains(report_sentinel),
+        "p:extLst must NOT contain report content (BC-1.14.003 PC5)"
+    );
 }
 
 // ─── AC-009 tests ─────────────────────────────────────────────────────────────
@@ -318,14 +410,23 @@ fn test_BC_1_14_003_ac008_no_register_content_in_ext_lst() {
 #[test]
 fn test_BC_4_01_003_ac009_deterministic_guids_identical_across_builds() {
     let sections = vec![
-        SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256, 257] },
-        SlideSectionEntry { name: Arc::from("Analysis"), slide_ids: vec![258, 259] },
+        SlideSectionEntry {
+            name: Arc::from("Background"),
+            slide_ids: vec![256, 257],
+        },
+        SlideSectionEntry {
+            name: Arc::from("Analysis"),
+            slide_ids: vec![258, 259],
+        },
     ];
     let result1 = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("first inject must succeed");
     let result2 = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("second inject must succeed");
-    assert_eq!(result1, result2, "two identical calls must produce byte-identical output");
+    assert_eq!(
+        result1, result2,
+        "two identical calls must produce byte-identical output"
+    );
 }
 
 /// AC-009 — `derive_section_guid` is deterministic, brace-wrapped, uppercase,
@@ -338,11 +439,16 @@ fn test_BC_4_01_003_ac009_guid_format_braced_uppercase() {
     let guid2 = derive_section_guid("Background");
 
     assert_eq!(guid1, guid2, "derive_section_guid must be deterministic");
-    assert!(guid1.starts_with('{') && guid1.ends_with('}'), "GUID must be brace-wrapped; got: {guid1}");
+    assert!(
+        guid1.starts_with('{') && guid1.ends_with('}'),
+        "GUID must be brace-wrapped; got: {guid1}"
+    );
 
     let inner = &guid1[1..guid1.len() - 1];
     assert!(
-        inner.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-'),
+        inner
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-'),
         "GUID inner must be uppercase hex + hyphens; got: {inner}"
     );
 
@@ -354,7 +460,11 @@ fn test_BC_4_01_003_ac009_guid_format_braced_uppercase() {
     assert_eq!(parts[3].len(), 4);
     assert_eq!(parts[4].len(), 12);
 
-    assert!(parts[2].starts_with('5'), "version nibble must be 5; third group: {}", parts[2]);
+    assert!(
+        parts[2].starts_with('5'),
+        "version nibble must be 5; third group: {}",
+        parts[2]
+    );
 
     let variant_char = parts[3].chars().next().expect("fourth part non-empty");
     assert!(
@@ -374,8 +484,14 @@ fn test_BC_4_01_003_ac009_guid_format_braced_uppercase() {
 #[test]
 fn test_BC_4_01_003_ac011_duplicate_section_name_same_guid() {
     let sections = vec![
-        SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] },
-        SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![257] },
+        SlideSectionEntry {
+            name: Arc::from("Background"),
+            slide_ids: vec![256],
+        },
+        SlideSectionEntry {
+            name: Arc::from("Background"),
+            slide_ids: vec![257],
+        },
     ];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject with duplicate-named sections must succeed");
@@ -399,10 +515,15 @@ fn test_BC_4_01_003_ac011_duplicate_section_name_same_guid() {
         }
     }
 
-    assert_eq!(ids.len(), 2, "must find 2 p14:section id values; got: {ids:?}");
+    assert_eq!(
+        ids.len(),
+        2,
+        "must find 2 p14:section id values; got: {ids:?}"
+    );
     assert_eq!(
         ids[0], ids[1],
-        "duplicate names must produce identical GUIDs; id[0]={} id[1]={}", ids[0], ids[1]
+        "duplicate names must produce identical GUIDs; id[0]={} id[1]={}",
+        ids[0], ids[1]
     );
 }
 
@@ -414,13 +535,23 @@ fn test_BC_4_01_003_ac011_duplicate_section_name_same_guid() {
 #[test]
 fn test_BC_4_01_003_inject_well_formed_xml_with_two_sections() {
     let sections = vec![
-        SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256, 257] },
-        SlideSectionEntry { name: Arc::from("Analysis"), slide_ids: vec![258, 259] },
+        SlideSectionEntry {
+            name: Arc::from("Background"),
+            slide_ids: vec![256, 257],
+        },
+        SlideSectionEntry {
+            name: Arc::from("Analysis"),
+            slide_ids: vec![258, 259],
+        },
     ];
     let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
         .expect("inject must succeed");
     let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
-    assert_eq!(xml_str.matches("<p14:sldId ").count(), 4, "must have 4 sldId elements");
+    assert_eq!(
+        xml_str.matches("<p14:sldId ").count(),
+        4,
+        "must have 4 sldId elements"
+    );
     assert!(xml_str.contains("id=\"256\""));
     assert!(xml_str.contains("id=\"257\""));
     assert!(xml_str.contains("id=\"258\""));
@@ -431,7 +562,10 @@ fn test_BC_4_01_003_inject_well_formed_xml_with_two_sections() {
 #[test]
 fn test_BC_4_01_003_slide_section_entry_implements_hash_eq_clone() {
     use std::collections::HashSet;
-    let entry = SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256, 257] };
+    let entry = SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256, 257],
+    };
     let entry2 = entry.clone();
     assert_eq!(entry, entry2);
     let mut set = HashSet::new();
@@ -442,8 +576,14 @@ fn test_BC_4_01_003_slide_section_entry_implements_hash_eq_clone() {
 /// Different names → different entries (not equal).
 #[test]
 fn test_BC_4_01_003_slide_section_entry_different_names_not_equal() {
-    let a = SlideSectionEntry { name: Arc::from("Background"), slide_ids: vec![256] };
-    let b = SlideSectionEntry { name: Arc::from("Analysis"), slide_ids: vec![256] };
+    let a = SlideSectionEntry {
+        name: Arc::from("Background"),
+        slide_ids: vec![256],
+    };
+    let b = SlideSectionEntry {
+        name: Arc::from("Analysis"),
+        slide_ids: vec![256],
+    };
     assert_ne!(a, b);
 }
 
@@ -451,13 +591,17 @@ fn test_BC_4_01_003_slide_section_entry_different_names_not_equal() {
 #[test]
 fn test_BC_4_01_003_format_guid_produces_correct_format() {
     let bytes: [u8; 16] = [
-        0x3D, 0x4F, 0x2B, 0x8A, 0x1C, 0x9E, 0x52, 0xA0,
-        0xB4, 0xD6, 0x7E, 0x8A, 0x9B, 0x0C, 0x1D, 0x2E,
+        0x3D, 0x4F, 0x2B, 0x8A, 0x1C, 0x9E, 0x52, 0xA0, 0xB4, 0xD6, 0x7E, 0x8A, 0x9B, 0x0C, 0x1D,
+        0x2E,
     ];
     let guid = format_guid(&bytes);
     assert!(guid.starts_with('{') && guid.ends_with('}'));
     let inner = &guid[1..guid.len() - 1];
-    assert!(inner.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-'));
+    assert!(
+        inner
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+    );
     let parts: Vec<&str> = inner.split('-').collect();
     assert_eq!(parts.len(), 5);
     assert_eq!(parts[0].len(), 8);

@@ -437,7 +437,9 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                             );
                             slides.extend(generated);
                         },
-                        BlockItem::Slide(_) | BlockItem::Section(_) | BlockItem::SectionGroup(_) => {
+                        BlockItem::Slide(_)
+                        | BlockItem::Section(_)
+                        | BlockItem::SectionGroup(_) => {
                             // Nested slides inside a slide body are not valid;
                             // silently ignored (parser guards against this).
                         },

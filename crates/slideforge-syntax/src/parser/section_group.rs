@@ -113,10 +113,8 @@ where
                 // Emit the routing message that parser/mod.rs routes to errors.
                 emitter.emit(Rich::custom(
                     name_tspan,
-                    format!(
-                        "E-PAR-023: section group name must be non-empty. \
-                         Provide a quoted, non-empty name, e.g. section \"Background\":"
-                    ),
+                    "E-PAR-023: section group name must be non-empty. \
+                     Provide a quoted, non-empty name, e.g. section \"Background\":",
                 ));
                 // Produce a sentinel BlockItem that is filtered out in the deck pass.
                 // Using a real node with a sentinel name is safer than returning None.

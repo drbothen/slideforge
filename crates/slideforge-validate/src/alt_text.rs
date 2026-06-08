@@ -1179,7 +1179,8 @@ mod tests {
             slides: vec![slide0, slide1],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+            slide_sections: vec![],
+        };
 
         let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
 
@@ -1267,7 +1268,8 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+            slide_sections: vec![],
+        };
 
         let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
 
@@ -1342,7 +1344,8 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+            slide_sections: vec![],
+        };
 
         let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
 
@@ -1400,7 +1403,8 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+            slide_sections: vec![],
+        };
 
         let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
 
@@ -1697,7 +1701,8 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
-            slide_sections: vec![],        };
+            slide_sections: vec![],
+        };
 
         let diags = AltTextValidator.validate_post_layout(&laid_out, &default_opts());
 

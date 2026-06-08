@@ -156,7 +156,8 @@ fn progress_bar_laid_out_deck() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
-        slide_sections: vec![],    }
+        slide_sections: vec![],
+    }
 }
 
 // ── Scan bytes for a needle ───────────────────────────────────────────────────
