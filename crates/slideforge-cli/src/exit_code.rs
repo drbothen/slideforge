@@ -146,8 +146,8 @@ mod tests {
     /// BC-1.15.003 invariant: `exit_code_for_build_error` (in build.rs) correctly
     /// maps `BuildError` variants to exit codes.
     ///
-    /// This test exercises the build.rs stub — it panics (todo!()), which is the
-    /// Red Gate failure.
+    /// This test calls the implemented `exit_code_for_build_error` function in
+    /// `commands/build.rs` and asserts the correct exit code mapping.
     #[test]
     fn test_BC_1_15_003_invariant_build_error_parse_failed_maps_to_exit_1_via_build_module() {
         use crate::commands::build::exit_code_for_build_error;

@@ -301,6 +301,17 @@ pub struct CompileOptions {
     /// If `true` (the default), any Error-severity validation diagnostic fails
     /// the compile with [`error::BuildError::ValidationFailed`].
     pub strict: bool,
+
+    /// Optional named variant to activate during evaluation (C-1 / EC-006).
+    ///
+    /// When `Some(name)`, `eval_deck_with_variant` applies the named variant's
+    /// vars as an inner scope override. When `None`, the base deck vars are used
+    /// unchanged.
+    ///
+    /// An undefined variant name produces a `ParseSeverity::Error` diagnostic
+    /// (E-EVL-001) that is gated by `strict` mode, producing `EvalFailed` or
+    /// `ValidationFailed` (exit 2) rather than silently being ignored.
+    pub active_variant: Option<String>,
 }
 
 impl Default for CompileOptions {
@@ -308,6 +319,7 @@ impl Default for CompileOptions {
         Self {
             brand_source: None,
             strict: true,
+            active_variant: None,
         }
     }
 }
@@ -395,26 +407,41 @@ pub fn export_format(
 
 /// Core compile-phase implementation (parse → eval → brand → validate → layout).
 ///
-/// Does NOT run the exporter — that is handled by [`export_format`].
+/// This is the **single canonical pipeline** shared by both [`compile`] (which
+/// returns a [`CompiledDeck`] for multi-format export) and [`build_inner`] (which
+/// wraps this function then adds Stage 7 export). No pipeline logic is duplicated.
+///
 /// The `registry` is consumed and stored in the returned [`CompiledDeck`] so
 /// that [`export_format`] can look up exporters without re-assembling the registry.
+///
+/// ## I-1 / Unification note
+///
+/// Prior to this refactor, `build_inner` contained a duplicate of all stages 2–6.
+/// `build_inner` now delegates here and only adds the Stage 7 export call, so
+/// brand-routing, eval variant support, MED-C lang injection, ADR-018 strict-gate
+/// ordering, and C-2 eval-error gating exist in exactly one place.
 #[allow(clippy::too_many_lines)]
 fn compile_inner(
     source: &str,
     options: &CompileOptions,
     registry: PluginRegistry,
 ) -> Result<CompiledDeck, error::BuildError> {
-    use slideforge_eval::{EvalConfig, eval_deck, thread_fields_to_blocks};
+    use slideforge_eval::{EvalConfig, eval_deck_with_variant, thread_fields_to_blocks};
     use slideforge_layout::run as layout_run;
     use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ValidatorOptions};
-    use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
+    use slideforge_syntax::{DiagnosticSink, ParseSeverity, SourceMap, parse_checked};
 
     tracing::info!(
         strict = options.strict,
+        active_variant = options.active_variant.as_deref().unwrap_or("<none>"),
         "compile_inner: starting pipeline (parse → eval → brand → validate → layout)"
     );
 
     // Stage 3 (physical: brand is loaded first for I/O efficiency): load brand.
+    //
+    // CRIT-1 fix: route by BrandSource variant.
+    // - BrandSource::TomlFile  → BrandSynthesizer ("slideforge-brand-synthesizer")
+    // - BrandSource::PptxFile | DocxFile → BrandLoader ("slideforge-brand/default")
     let brand_source = options
         .brand_source
         .as_ref()
@@ -424,6 +451,8 @@ fn compile_inner(
         tracing::info!("pipeline stage: brand");
         let provider_id: &str = match brand_source {
             BrandSource::TomlFile(_) => "slideforge-brand-synthesizer",
+            // All other variants (PptxFile, DocxFile, and future non-exhaustive variants)
+            // route to BrandLoader.
             _ => "slideforge-brand/default",
         };
         let brand_provider = registry
@@ -435,7 +464,10 @@ fn compile_inner(
             .map_err(error::BuildError::Brand)?
     };
 
-    // Stage 2: parse.
+    // Stage 2: parse the DSL source.
+    //
+    // M1 fix: on parse failure, carry the full structured DiagnosticSink
+    // diagnostics (not just a count) so callers retain file:line:col + hints.
     let deck_node = {
         let _span =
             tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
@@ -453,24 +485,107 @@ fn compile_inner(
         })?
     };
 
-    // Stage 2a: evaluate.
-    let mut deck = {
+    // Stage 2a: evaluate the AST into a semantic Deck.
+    //
+    // C-1 fix: use eval_deck_with_variant (threaded from CompileOptions.active_variant)
+    // so that `--variant` is fully applied rather than silently ignored.
+    //
+    // C-2 fix: the eval_sink is NO LONGER silently dropped. After eval_deck_with_variant
+    // returns Some(deck) (non-fatal diagnostics present), we collect Error + Warning
+    // diagnostics from eval_sink into accumulated_eval_diags. These are then included
+    // in the strict-mode gate below (triggering EvalFailed or ValidationFailed as
+    // appropriate), preventing silent swallowing of E-EVL-001 (undefined variable),
+    // TooManySlides, and similar non-fatal eval errors.
+    //
+    // OBS-1 fix: fresh DiagnosticSink for eval so that EvalFailed carries only
+    // eval-phase diagnostics, not residual parse-phase ones.
+    let (mut deck, accumulated_eval_diags) = {
         let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
         let eval_config = EvalConfig::default();
         let mut eval_sink = DiagnosticSink::new();
-        eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
-            let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
-            let count = diagnostics.len();
-            error::BuildError::EvalFailed { diagnostics, count }
-        })?
+        let maybe_deck = eval_deck_with_variant(
+            &deck_node,
+            &eval_config,
+            options.active_variant.as_deref(),
+            &mut eval_sink,
+        );
+
+        // C-2: collect eval diagnostics. These are the Error/Warning-severity diagnostics
+        // that eval_deck_with_variant emits even when it returns Some(deck) — e.g.
+        // E-EVL-001 undefined variable, TooManySlides. They must not be silently dropped.
+        let eval_has_fatal = eval_sink.has_fatal();
+        let eval_has_errors = eval_sink.error_and_fatal_count() > 0;
+
+        let deck = maybe_deck.ok_or_else(|| {
+            // Fatal eval failure: eval returned None.
+            let diags = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVL-???");
+            let count = diags.len();
+            error::BuildError::EvalFailed {
+                diagnostics: diags,
+                count,
+            }
+        })?;
+
+        // C-2: collect diagnostics for the non-fatal-but-error path (eval returned Some).
+        // This is only reached when maybe_deck was Some (no Fatal), so we need to
+        // check the error count from eval_sink for non-fatal Error-severity items.
+        let eval_diag_boxes = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVL-???");
+
+        // Emit tracing events for eval diagnostics (mirrors validator diagnostic tracing).
+        for diag in eval_sink.errors() {
+            tracing::warn!(
+                code = %diag.code().map(|c| c.to_string()).unwrap_or_default(),
+                message = %diag.to_string(),
+                "eval diagnostic"
+            );
+        }
+
+        // C-2: if strict mode AND eval has Error-severity non-fatal diagnostics
+        // (eval returned Some but errors exist), fail with EvalFailed here —
+        // BEFORE running validators, so the error code is correctly EvalFailed
+        // (exit 2) not ValidationFailed. This keeps exit-2 causal attribution correct.
+        //
+        // `eval_has_fatal` was already handled by the ok_or_else above (if fatal,
+        // maybe_deck is None and we returned EvalFailed). Here we gate on
+        // `eval_has_errors` — since we know `!has_fatal()` at this point (deck is
+        // Some), `eval_has_errors` is true iff Error-severity diagnostics exist.
+        let _ = eval_has_fatal; // already handled above; kept for clarity
+        if options.strict && eval_has_errors {
+            let count = eval_diag_boxes.len();
+            return Err(error::BuildError::EvalFailed {
+                diagnostics: eval_diag_boxes,
+                count,
+            });
+        }
+
+        // In warn-only mode (strict=false): eval errors become warnings — the deck is
+        // returned and the pipeline continues. The eval_diag_boxes are passed back for
+        // tracing/logging but do not block the build.
+
+        (deck, eval_diag_boxes)
     };
 
-    // Stage 2b: field-to-block threading.
+    // Stage 2b: field-to-block threading (ADR-019).
     tracing::info!("compile_inner: Stage 2b — field-to-block threading (ADR-019)");
     thread_fields_to_blocks(&mut deck);
 
-    // Stage 5: validate pre-layout.
+    // Log accumulated eval diagnostics (warn-only mode: errors become tracing events).
+    if !accumulated_eval_diags.is_empty() {
+        tracing::warn!(
+            count = accumulated_eval_diags.len(),
+            "compile_inner: eval phase produced non-fatal diagnostics (warn-only mode)"
+        );
+    }
+
+    // Stage 5 (ADR-016 Decision 3): run all registered Validators.
+    //
+    // Validators run on the semantic Deck (pre-layout). Collect ALL diagnostics
+    // (Error + Warning) into all_validator_diagnostics — never silently drop warnings.
+    //
+    // OBS-5 / ADR-018 Decision 5: NO pre-layout strict gate here. We collect
+    // Stage 5 diagnostics, then run layout, then collect Stage 6b diagnostics,
+    // then apply ONE strict gate on the combined list after Stage 6b.
     let validator_opts = ValidatorOptions::default();
     let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
     {
@@ -496,11 +611,15 @@ fn compile_inner(
         }
     }
 
-    // Inject lang default post-validation.
+    // MED-C (ADR-016 Decision 3 cross-stage contract): inject the default lang "en"
+    // AFTER the validator loop so LangValidator can correctly detect absent lang.
     tracing::info!("compile_inner: injecting lang default (post-validate)");
     slideforge_validate::inject_lang_default(&mut deck);
 
-    // Stage 6: layout.
+    // Stage 6: lay out the Deck.
+    //
+    // OBS-5 / ADR-018 Decision 5: layout runs before the combined strict gate,
+    // so Stage 6b post-layout validators can also add diagnostics first.
     let layout_result = {
         let _span = tracing::info_span!("layout", stage = "layout").entered();
         tracing::info!("pipeline stage: layout");
@@ -509,6 +628,8 @@ fn compile_inner(
     let laid_out = match layout_result {
         Ok(lo) => lo,
         Err(layout_err) => {
+            // If there are pre-layout Error diagnostics, they are the root cause.
+            // Return ValidationFailed (more informative) in strict mode.
             if options.strict {
                 let pre_layout_errors: Vec<slideforge_plugin_api::Diagnostic> =
                     all_validator_diagnostics
@@ -528,7 +649,7 @@ fn compile_inner(
         },
     };
 
-    // Stage 6b: post-layout validation.
+    // Stage 6b (ADR-018 Decision 1): post-layout validation pass.
     tracing::info!("compile_inner: running post-layout validators (Stage 6b)");
     for validator in registry.iter_validators() {
         let validator_id = validator.id().to_owned();
@@ -548,7 +669,9 @@ fn compile_inner(
         all_validator_diagnostics.extend(post_diags);
     }
 
-    // Combined strict-mode gate.
+    // ADR-018 Decision 5 strict-mode gate: evaluate the COMBINED diagnostic list
+    // (Stage 5 + Stage 6b) exactly ONCE, after both passes have collected all
+    // diagnostics.
     if options.strict {
         let has_error = all_validator_diagnostics
             .iter()
@@ -564,6 +687,10 @@ fn compile_inner(
             });
         }
     }
+
+    // ParseSeverity is used only in the eval stage above; suppress dead-code
+    // warning if it is only imported for the eval_sink.has_errors() path.
+    let _ = ParseSeverity::Error;
 
     Ok(CompiledDeck {
         deck,
@@ -590,7 +717,7 @@ fn compile_inner(
 pub(crate) fn build_with_registry(
     source: &str,
     options: &BuildOptions,
-    registry: &PluginRegistry,
+    registry: PluginRegistry,
 ) -> Result<BuildOutput, error::BuildError> {
     build_inner(source, options, registry)
 }
@@ -641,369 +768,44 @@ pub(crate) fn build_with_registry(
 pub fn build(source: &str, options: &BuildOptions) -> Result<BuildOutput, error::BuildError> {
     // Stage 1: assemble the plugin registry.
     let registry = registry::default_registry()?;
-    build_inner(source, options, &registry)
+    build_inner(source, options, registry)
 }
 
-/// Core pipeline implementation shared by [`build`] and (in tests)
-/// [`build_with_registry`].
+/// Core pipeline implementation for [`build`] and (in tests) [`build_with_registry`].
 ///
-/// Stages (ADR-016 amended by ADR-018 and ADR-019) — logical dependency order:
+/// ## I-1 / Unification
 ///
-/// - Stage 1:  Plugin registry assembly
-/// - Stage 2:  DSL parsing (`slideforge-syntax`) → `DeckNode` (AST)
-/// - Stage 2a: AST evaluation (`slideforge-eval::eval_deck`) → `Deck` (fields resolved, blocks empty)
-/// - Stage 2b: Field-to-block threading (`slideforge-eval::thread_fields_to_blocks` — ADR-019)
-///   → `Deck` (blocks populated with typed `ContentBlock` entries)
-/// - Stage 3:  Brand load (`slideforge-brand`)
-/// - Stage 4:  Inject lang default (`slideforge-validate`)
-/// - Stage 5:  Validate pre-layout (all registered `Validator` plugins, on `&Deck`)
-/// - Stage 6:  Layout (`slideforge-layout`) → `LaidOutDeck`
-/// - Stage 6b: Validate post-layout (`validate_post_layout` on `&LaidOutDeck` — ADR-018 Decision 3)
-/// - Stage 7:  Export (selected exporter plugin)
+/// This function is a thin adapter that:
+/// 1. Converts [`BuildOptions`] → [`CompileOptions`] (strips the `format` field).
+/// 2. Delegates Stages 2–6 to [`compile_inner`] (the single canonical pipeline).
+/// 3. Runs Stage 7 (export) via [`export_format`].
 ///
-/// **Physical execution note:** Stage 3 (brand I/O) is executed first in the
-/// function body, before Stage 2 (parse) and Stage 2a/2b (eval/threading), as an
-/// I/O optimization (fail fast on missing brand before spending time parsing).
-/// Stage 2b has no data dependency on brand; the logical stage numbering reflects
-/// semantic dependencies, not physical call order.
-///
-/// Stage 2b is a **pure** (no I/O, deterministic) pass. It reads resolved
-/// `Slide.fields` and populates `Slide.blocks`
-/// with typed `ContentBlock` entries (title, body, subtitle, bullets, chart,
-/// image, diagram), enabling the layout engine and all exporters to produce
-/// content-bearing output. See ADR-019 Decisions 1, 2, and 9 for rationale and
-/// seam contract. Implemented by STORY-086.
-///
-/// The function exceeds clippy's default 150-line threshold because each pipeline
-/// stage requires non-trivial dispatch logic with panic-boundary wrapping
-/// (`dispatch_plugin`), diagnostic accumulation, and stage-specific error variant
-/// mapping. Extracting each stage into a free function would scatter the pipeline
-/// DAG across multiple private helpers without improving readability. The
-/// `clippy::too_many_lines` lint is suppressed with documented justification per
-/// CLAUDE.md §Strict Defaults ("documented exceptions only").
-#[allow(clippy::too_many_lines)]
+/// All pipeline logic lives in `compile_inner`. No stage logic is duplicated here.
+/// Changes to brand routing, eval variant threading, MED-C lang injection, ADR-018
+/// strict-gate ordering, and C-2 eval-error gating are made ONCE in `compile_inner`.
 fn build_inner(
     source: &str,
     options: &BuildOptions,
-    registry: &PluginRegistry,
+    registry: PluginRegistry,
 ) -> Result<BuildOutput, error::BuildError> {
-    use slideforge_eval::{EvalConfig, eval_deck, thread_fields_to_blocks};
-    use slideforge_layout::run as layout_run;
-    use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ExportOptions, ValidatorOptions};
-    use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
-
     let format = options.format.as_deref().unwrap_or("pptx");
     tracing::info!(
         format,
         strict = options.strict,
-        "build_inner: starting pipeline"
+        "build_inner: delegating to compile_inner then export"
     );
 
-    // Stage 3 (physical: brand is loaded here, before parse/eval, for I/O efficiency;
-    // logical stage number follows ADR-019 Decision 1): load brand via the BrandProvider plugin.
-    //
-    // CRIT-1 fix: route by BrandSource variant.
-    //
-    // - BrandSource::TomlFile  → BrandSynthesizer ("slideforge-brand-synthesizer")
-    //   BrandLoader ("slideforge-brand/default") returns Err for TomlFile sources.
-    //
-    // - BrandSource::PptxFile | DocxFile → BrandLoader ("slideforge-brand/default")
-    //   BrandSynthesizer does not support PPTX/DOCX extraction.
-    //
-    // H1: BrandProvider::load is a plugin surface — wrap in dispatch_plugin to
-    // catch panics from third-party brand providers. (EC-003 / AC-008.)
-    //
-    // AC-007: "brand" is one of the 6 canonical pipeline stage spans.
-    // The `stage` field carries the span name so tests can assert the structured
-    // field value is exactly the canonical name (BC-5.02.001 AC-007 / NFR-032).
-    let brand_source = options
-        .brand_source
-        .as_ref()
-        .ok_or(error::BuildError::NoBrandSource)?;
-    let brand = {
-        let _span = tracing::info_span!("brand", stage = "brand").entered();
-        tracing::info!("pipeline stage: brand");
-
-        // Select the correct provider id based on the BrandSource variant.
-        //
-        // `BrandSource` is `#[non_exhaustive]`. The wildcard arm ensures that
-        // future source types (e.g., `ApiEndpoint`) route to `BrandLoader` as a
-        // reasonable default. If the provider can't handle the new type it will
-        // return `Err(BrandError::ValidationError)` with an actionable message.
-        let provider_id: &str = match brand_source {
-            BrandSource::TomlFile(_) => "slideforge-brand-synthesizer",
-            // All other variants (PptxFile, DocxFile, and future non-exhaustive variants)
-            // route to BrandLoader.
-            _ => "slideforge-brand/default",
-        };
-
-        let brand_provider = registry
-            .lookup_brand_provider(provider_id)
-            .ok_or(error::BuildError::NoBrandProvider)?;
-        let brand_provider_id = brand_provider.id();
-        dispatch::dispatch_plugin(brand_provider_id, || brand_provider.load(brand_source))
-            .map_err(error::BuildError::Plugin)?
-            .map_err(error::BuildError::Brand)?
+    let compile_opts = CompileOptions {
+        brand_source: options.brand_source.clone(),
+        strict: options.strict,
+        active_variant: None,
     };
 
-    // Stage 2: parse the DSL source.
-    //
-    // M1 fix: on parse failure, carry the full structured DiagnosticSink
-    // diagnostics (not just a count) so callers retain file:line:col + hints.
-    //
-    // AC-007: "parse" is one of the 6 canonical pipeline stage spans.
-    // `stage` field is the canonical span name for structured-field assertions.
-    let deck_node = {
-        let _span =
-            tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
-        tracing::info!("pipeline stage: parse");
-        let mut source_map = SourceMap::new();
-        let file_id = source_map.add_file(
-            std::sync::Arc::from("<build>"),
-            std::sync::Arc::from(source),
-        );
-        let mut sink = DiagnosticSink::new();
-        parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
-            let diagnostics = diag_util::collect_diagnostics(sink.errors(), "E-PAR-???");
-            let count = diagnostics.len();
-            error::BuildError::ParseFailed { diagnostics, count }
-        })?
-    };
+    // Stages 2–6: delegate to compile_inner (single canonical pipeline).
+    let compiled = compile_inner(source, &compile_opts, registry)?;
 
-    // Stage 2a: evaluate the AST into a semantic Deck.
-    //
-    // OBS-1 fix: use a FRESH DiagnosticSink for eval so that EvalFailed
-    // carries only eval-phase diagnostics, not residual parse-phase ones.
-    //
-    // MED-C: `deck` is bound `mut` so that `inject_lang_default(&mut deck)` can
-    // be called after the validator loop without rebinding. The Validator trait
-    // takes `&Deck` (immutable), so the mutation is deferred to after all
-    // validator dispatch is complete.
-    //
-    // AC-007: "evaluate" is one of the 6 canonical pipeline stage spans.
-    // `stage` field is the canonical span name for structured-field assertions.
-    let mut deck = {
-        let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
-        tracing::info!("pipeline stage: evaluate");
-        let eval_config = EvalConfig::default();
-        let mut eval_sink = DiagnosticSink::new();
-        eval_deck(&deck_node, &eval_config, &mut eval_sink).ok_or_else(|| {
-            let diagnostics = diag_util::collect_diagnostics(eval_sink.errors(), "E-EVAL-???");
-            let count = diagnostics.len();
-            error::BuildError::EvalFailed { diagnostics, count }
-        })?
-    };
-
-    // Stage 2b (ADR-019 Decision 1 and 9): post-eval field-to-block threading pass.
-    //
-    // Reads resolved `Slide.fields` and populates `Slide.blocks` with typed
-    // `ContentBlock` entries. This is a pure, no-I/O pass that runs after all
-    // `{{ }}` expressions are resolved (Stage 2a complete) and before layout or
-    // validation. Brand is physically loaded earlier in this function (Stage 3)
-    // as an I/O optimization; Stage 2b has no dependency on brand data.
-    //
-    // Without this pass, `Slide.blocks` would always be `vec![]` (for_eval.rs:342
-    // original deferral), making all three exporters (PPTX, PDF, DOCX) produce
-    // content-empty output and making the post-layout alt-text validator
-    // unconditionally unsatisfiable for chart/image/diagram slides.
-    // See ADR-019 §Context for full diagnosis.
-    // Implemented in STORY-086. See `slideforge_eval::field_to_block::thread_fields_to_blocks`.
-    tracing::info!("build_inner: Stage 2b — field-to-block threading (ADR-019)");
-    thread_fields_to_blocks(&mut deck);
-
-    // Stage 5 (ADR-016 Decision 3): run all registered Validators.
-    //
-    // C3 fix: iterate every registered Validator, collect all diagnostics.
-    // Validators run on the semantic Deck (pre-layout), as specified by the
-    // Validator trait signature: `validate(&Deck, &ValidatorOptions)`.
-    //
-    // H1: Validator::validate is a plugin surface — wrap in dispatch_plugin.
-    //
-    // HIGH-2 fix: collect ALL diagnostics (Error + Warning) into
-    // all_validator_diagnostics. Never silently drop warnings.
-    //
-    // OBS-5 / ADR-018 Decision 5: NO pre-layout strict gate here. We collect
-    // Stage 5 diagnostics, then run layout, then collect Stage 6b diagnostics,
-    // then apply ONE strict gate on the combined list. This ensures both passes
-    // complete before any failure is raised.
-    //
-    // AC-007: "validate" is one of the 6 canonical pipeline stage spans.
-    // `stage` field is the canonical span name for structured-field assertions.
-    let validator_opts = ValidatorOptions::default();
-    let mut all_validator_diagnostics: Vec<slideforge_plugin_api::Diagnostic> = vec![];
-    {
-        let _span =
-            tracing::info_span!("validate", stage = "validate", strict = options.strict).entered();
-        tracing::info!("pipeline stage: validate");
-        for validator in registry.iter_validators() {
-            let validator_id = validator.id().to_owned();
-            let diags = dispatch::dispatch_plugin(&validator_id, || {
-                validator.validate(&deck, &validator_opts)
-            })
-            .map_err(error::BuildError::Plugin)?;
-            for diag in &diags {
-                tracing::warn!(
-                    validator = %validator_id,
-                    code = %diag.code,
-                    severity = %diag.severity,
-                    message = %diag.message,
-                    "validator diagnostic"
-                );
-            }
-            all_validator_diagnostics.extend(diags);
-        }
-    }
-
-    // MED-C (ADR-016 Decision 3 cross-stage contract): inject the default lang
-    // "en" into deck.metadata.lang AFTER the validator loop completes.
-    //
-    // `LangValidator.validate(&deck)` must run BEFORE injection so that it
-    // correctly emits E-A11-003 when lang is absent. After the loop, the
-    // pipeline dispatcher (this function, per ADR-016 Dec 3) calls
-    // `inject_lang_default` so that all downstream stages (layout, exporters)
-    // can treat `metadata.lang` as `Some("...")` — never `None` post-validation.
-    //
-    // Returns `true` if a default was injected (lang was absent or blank),
-    // `false` if lang was already set. The return value is not used here (the
-    // diagnostic was already emitted by LangValidator above if needed).
-    tracing::info!("build_inner: injecting lang default (post-validate)");
-    slideforge_validate::inject_lang_default(&mut deck);
-
-    // Stage 6: lay out the Deck into a LaidOutDeck.
-    //
-    // OBS-5 / ADR-018 Decision 5: layout runs before the combined strict gate,
-    // so that Stage 6b post-layout validators can also add diagnostics before
-    // the single gate evaluates.
-    //
-    // Layout–validator interaction: if layout itself returns Err (e.g., EmptyDeck),
-    // the layout error may be a CONSEQUENCE of pre-layout validation errors (e.g.,
-    // ZeroSlideValidator already flagged E-LAY-002). In that case, returning
-    // ValidationFailed (with the root-cause validator diagnostics) is more
-    // informative than returning a raw LayoutError. Therefore:
-    //
-    // - If layout returns Err AND we have pre-layout Error-severity diagnostics
-    //   AND strict=true → return ValidationFailed (root cause takes priority).
-    // - If layout returns Err AND there are no Error-severity pre-layout
-    //   diagnostics (or strict=false) → return Layout(err) as usual.
-    //
-    // layout::run is wrapped in catch_unwind (STORY-049), so a panic on an
-    // invalid deck becomes BuildError::Layout, not a crash.
-    //
-    // AC-007: "layout" is one of the 6 canonical pipeline stage spans.
-    // `stage` field is the canonical span name for structured-field assertions.
-    let layout_result = {
-        let _span = tracing::info_span!("layout", stage = "layout").entered();
-        tracing::info!("pipeline stage: layout");
-        layout_run(&deck, &brand)
-    };
-    let laid_out = match layout_result {
-        Ok(lo) => lo,
-        Err(layout_err) => {
-            // If there are pre-layout Error diagnostics, they are the root cause.
-            // Return ValidationFailed (more informative) in strict mode.
-            if options.strict {
-                let pre_layout_errors: Vec<slideforge_plugin_api::Diagnostic> =
-                    all_validator_diagnostics
-                        .iter()
-                        .filter(|d| d.severity == DiagnosticSeverity::Error)
-                        .cloned()
-                        .collect();
-                if !pre_layout_errors.is_empty() {
-                    let count = pre_layout_errors.len();
-                    return Err(error::BuildError::ValidationFailed {
-                        diagnostics: all_validator_diagnostics,
-                        count,
-                    });
-                }
-            }
-            return Err(error::BuildError::Layout(layout_err));
-        },
-    };
-
-    // Stage 6b (ADR-018 Decision 1): post-layout validation pass on LaidOutDeck.
-    //
-    // This pass invokes `validate_post_layout` on every registered Validator,
-    // accumulating diagnostics from `FrameContent::Chart`, `FrameContent::Image`,
-    // and `FrameContent::Diagram` frames — data that only exists in the geometric IR,
-    // not in the semantic Deck passed to Stage 5.
-    //
-    // The post-layout diagnostics are APPENDED to `all_validator_diagnostics`
-    // (collect-all, not fail-on-first per ADR-018 Decision 5). The combined list
-    // from both passes feeds the strict-mode gate exactly once, below.
-    //
-    // H1: Validator::validate_post_layout is a plugin surface — wrap in dispatch_plugin.
-    tracing::info!("build_inner: running post-layout validators (Stage 6b)");
-    for validator in registry.iter_validators() {
-        let validator_id = validator.id().to_owned();
-        let post_diags = dispatch::dispatch_plugin(&validator_id, || {
-            validator.validate_post_layout(&laid_out, &validator_opts)
-        })
-        .map_err(error::BuildError::Plugin)?;
-        for diag in &post_diags {
-            tracing::warn!(
-                validator = %validator_id,
-                code = %diag.code,
-                severity = %diag.severity,
-                message = %diag.message,
-                "post-layout validator diagnostic"
-            );
-        }
-        all_validator_diagnostics.extend(post_diags);
-    }
-
-    // ADR-018 Decision 5 strict-mode gate: evaluate the COMBINED diagnostic list
-    // (Stage 5 + Stage 6b) exactly ONCE, after both passes have collected all
-    // diagnostics. No early return at Stage 5; the gate fires here, after Stage 6b.
-    if options.strict {
-        let has_error = all_validator_diagnostics
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error);
-        if has_error {
-            let error_count = all_validator_diagnostics
-                .iter()
-                .filter(|d| d.severity == DiagnosticSeverity::Error)
-                .count();
-            return Err(error::BuildError::ValidationFailed {
-                diagnostics: all_validator_diagnostics,
-                count: error_count,
-            });
-        }
-    }
-
-    // Stage 7: select the exporter and produce output bytes.
-    //
-    // H1: Exporter::export is a plugin surface — wrap in dispatch_plugin.
-    //
-    // MED-D fix: capture extension from exporter.extension() (the trait method),
-    // not from the format key string. The Exporter trait distinguishes id()
-    // (lookup key, e.g. "pptx") from extension() (file extension, e.g. "pptx"
-    // for most, but may differ for custom exporters). This ensures BuildOutput
-    // carries the authoritative file extension declared by the exporter.
-    //
-    // AC-007: "export" is one of the 6 canonical pipeline stage spans.
-    // `stage` field is the canonical span name for structured-field assertions.
-    let (bytes, file_extension) = {
-        let _span = tracing::info_span!("export", stage = "export", format).entered();
-        tracing::info!("pipeline stage: export");
-        let exporter = registry
-            .lookup_exporter(format)
-            .ok_or_else(|| error::BuildError::UnknownFormat(format.to_owned()))?;
-        let exporter_id = exporter.id().to_owned();
-        // Capture the extension before dispatch_plugin borrows exporter in the closure.
-        let file_extension = exporter.extension().to_owned();
-        let export_opts = ExportOptions::default();
-        let bytes = dispatch::dispatch_plugin(&exporter_id, || {
-            exporter.export(&deck, &laid_out, &brand, &export_opts)
-        })
-        .map_err(error::BuildError::Plugin)?
-        .map_err(error::BuildError::Export)?;
-        (bytes, file_extension)
-    };
-
-    Ok(BuildOutput {
-        bytes,
-        extension: file_extension,
-    })
+    // Stage 7: export the compiled deck.
+    export_format(&compiled, format)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1485,7 +1287,7 @@ mod tests {
             strict: true,
         };
 
-        let result_strict = build_with_registry(source, &opts, &registry);
+        let result_strict = build_with_registry(source, &opts, registry);
 
         // Cleanup tmpdir.
         let _ = std::fs::remove_dir_all(&tmp_dir);
@@ -1572,7 +1374,7 @@ mod tests {
             strict: false,
         };
 
-        let result = build_with_registry(source, &opts, &registry);
+        let result = build_with_registry(source, &opts, registry);
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
@@ -1657,7 +1459,7 @@ mod tests {
             strict: true,
         };
 
-        let result = build_with_registry(source, &opts, &registry);
+        let result = build_with_registry(source, &opts, registry);
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
@@ -2332,7 +2134,7 @@ mod tests {
             strict: false,
         };
 
-        let result = build_with_registry(source, &opts, &registry);
+        let result = build_with_registry(source, &opts, registry);
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
         let output = result
@@ -2389,5 +2191,186 @@ mod tests {
             sections: vec![],
             warnings: vec![],
         }
+    }
+
+    // ── C-2 regression: eval Error diagnostics gated in strict mode ───────────
+
+    /// C-2 regression: `compile()` with an undefined-variable source in strict mode
+    /// must return `Err(BuildError::EvalFailed { .. })` — NOT `Ok(CompiledDeck)`.
+    ///
+    /// Before C-2: `eval_deck_with_variant` returned `Some(deck)` with an
+    /// Error-severity diagnostic in the eval_sink. The eval_sink was then dropped
+    /// silently. The pipeline continued and returned `Ok`.
+    ///
+    /// After C-2: the eval sink's Error diagnostics are collected and in strict mode
+    /// the build returns `EvalFailed`, which maps to exit 2 at the CLI layer.
+    ///
+    /// This test proves:
+    /// 1. `compile()` returns `Err(EvalFailed { .. })` for undefined-variable source.
+    /// 2. The `EvalFailed.diagnostics` vec is non-empty (contains the eval error).
+    /// 3. Exit-2 causation: the error is an EvalFailed (not ValidationFailed),
+    ///    correctly attributing exit 2 to the eval stage.
+    #[test]
+    fn test_c2_regression_eval_error_gated_in_strict_mode() {
+        use std::io::Write as _;
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_c2_regression_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        // Source with undefined variable {{ undefined_var }} — produces E-EVL-001
+        // (ParseSeverity::Error, not Fatal) so eval returns Some(deck) with error in sink.
+        // Before C-2 fix: eval_sink dropped → compile() returned Ok.
+        // After C-2 fix: eval_sink error gated → compile() returns EvalFailed.
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  title \"{{ undefined_var }}\"\n", // E-EVL-001 undefined variable
+        );
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            strict: true, // strict mode must gate the eval error
+            active_variant: None,
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        // C-2: must return EvalFailed (not Ok, and not ValidationFailed).
+        // C-2: must return EvalFailed (not Ok, and not ValidationFailed).
+        match result {
+            Err(error::BuildError::EvalFailed { diagnostics, count }) => {
+                // C-2: EvalFailed.diagnostics must be non-empty (E-EVL-001 must be there).
+                assert!(
+                    count > 0,
+                    "C-2: EvalFailed.count must be > 0 (contains the undefined-variable error)"
+                );
+                assert!(
+                    !diagnostics.is_empty(),
+                    "C-2: EvalFailed.diagnostics must be non-empty"
+                );
+                // The diagnostic must carry a code (file:line:col may not be present
+                // for undefined-var in {{ }} interpolation, but code must exist).
+                let has_code = diagnostics.iter().any(|d| d.code().is_some());
+                assert!(
+                    has_code,
+                    "C-2: EvalFailed diagnostics must carry error codes for rendering"
+                );
+            },
+            Ok(_) => {
+                panic!(
+                    "C-2 regression: compile() returned Ok for undefined-variable source in \
+                     strict mode — eval error was silently swallowed (pre-C-2 bug)"
+                );
+            },
+            Err(other) => {
+                panic!(
+                    "C-2 regression: compile() returned wrong Err variant: {other}; \
+                     expected EvalFailed"
+                );
+            },
+        }
+    }
+
+    /// C-2 warn-only: same undefined-variable source with `strict: false` must
+    /// return `Ok(CompiledDeck)` (eval error demoted to warning in warn-only mode).
+    #[test]
+    fn test_c2_regression_eval_error_warn_only_returns_ok() {
+        use std::io::Write as _;
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_c2_warnonly_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_content = concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        );
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  title \"{{ undefined_var }}\"\n",
+        );
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            strict: false, // warn-only: eval errors demoted, build continues
+            active_variant: None,
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        assert!(
+            result.is_ok(),
+            "C-2 warn-only: compile() with undefined-variable in strict=false must return Ok"
+        );
     }
 }

@@ -31,6 +31,7 @@
 //! - BC-1.15.003: three-tier exit code model
 //! - AC-001 through AC-015
 
+use std::fmt::Write as _;
 use std::io::IsTerminal as _;
 use std::process::ExitCode;
 
@@ -89,27 +90,15 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
         },
     };
 
-    // EC-006: variant selection.
-    //
-    // The root `slideforge::compile()` API does not yet support variant selection
-    // in the `CompileOptions` struct — variant resolution requires eval-layer support
-    // not present in this release. STORY-008 (merged) parses the `variants:` block
-    // but does not apply a selected variant at eval time. Providing `--variant`
-    // is therefore a clean usage error, not a runtime heuristic.
-    //
-    // Decision: return E-VAR-004 (exit 2) when `--variant` is specified, with a
-    // deterministic honest message. This avoids the substring-matching heuristic
-    // (MED-002) and ensures the CLI behaves predictably.
-    if let Some(variant_name) = args.variant.as_deref() {
-        render_plain_error(&format!(
-            "Error: variant selection is not yet supported (E-VAR-004). \
-             '--variant {variant_name}' is not applied during evaluation in this release. \
-             Remove '--variant' to build without variant selection."
-        ));
-        return ExitCode::from(EXIT_VALIDATION_ERROR);
-    }
-
     // Discover brand.toml next to the source file.
+    //
+    // I-4: No default-brand fallback is available — `BrandSource` has no
+    // `Default` or `Synthesized` variant, and the BrandSynthesizer requires
+    // an explicit TomlFile path. A missing brand.toml is therefore a hard error
+    // (exit 1, parse-category). The error message includes a correction hint:
+    // "Create a brand.toml in the same directory as your .sf file." This satisfies
+    // BC-1.15.001 (correction hint present). The error code is E-PAR-005
+    // (file not found). No span is possible since there is no source file to point to.
     let brand_toml_path = match discover_brand_toml(args) {
         Ok(path) => path,
         Err(msg) => {
@@ -132,11 +121,19 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     // Run parse → eval → brand → validate → layout EXACTLY ONCE for all selected
     // formats. Diagnostics are collected and rendered EXACTLY ONCE here, not once
     // per format. Only the export stage runs per format.
+    //
+    // C-1 fix: thread args.variant into CompileOptions.active_variant so that
+    // eval_deck_with_variant is called with the selected variant name.
+    // - Defined variant → exit 0 (variant vars applied)
+    // - Undefined variant → E-EVL-001 in EvalFailed → exit 2
+    // The blanket --variant rejection that was here before is removed; the eval
+    // layer now correctly handles both defined and undefined variant names.
     let compile_opts = CompileOptions {
         brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
             brand_toml_path.as_str(),
         ))),
         strict,
+        active_variant: args.variant.clone(),
     };
 
     let compiled = match slideforge::compile(&source_text, &compile_opts) {
@@ -311,17 +308,31 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
         return;
     }
 
+    let rendered = render_build_error_to_string(err, use_color);
+    let mut stderr = std::io::stderr();
+    let _ = std::io::Write::write_all(&mut stderr, rendered.as_bytes());
+}
+
+/// Render a build error's diagnostics to a `String` (for testability).
+///
+/// OBS-1 fix: exposes the rendering logic as a pure string-returning function
+/// so tests can assert on rendered content without spawning a subprocess or
+/// redirecting stderr. This is the single-site implementation shared by
+/// `render_build_error` (which writes to stderr) and integration test content
+/// assertions.
+#[must_use]
+pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String {
+    let mut buf = String::new();
+
     match err {
         BuildError::ParseFailed { diagnostics, .. }
         | BuildError::EvalFailed { diagnostics, .. } => {
             // Render each BoxDiagnostic (Box<dyn miette::Diagnostic>) directly
             // using the appropriate miette handler.
-            let mut stderr = std::io::stderr();
             for diag in diagnostics {
                 let rendered = render_box_diagnostic(diag.as_ref(), use_color);
-                // Ignore write errors — best effort.
-                let _ = std::io::Write::write_all(&mut stderr, rendered.as_bytes());
-                let _ = std::io::Write::write_all(&mut stderr, b"\n");
+                buf.push_str(&rendered);
+                buf.push('\n');
             }
         },
         BuildError::ValidationFailed { diagnostics, .. } => {
@@ -329,13 +340,17 @@ fn render_build_error(err: &BuildError, use_color: bool, global: &GlobalFlags) {
             // Render them with `file:line:col` from diag.span so EVERY
             // emitted diagnostic carries source location information.
             for diag in diagnostics {
-                render_validation_diagnostic(diag, use_color);
+                let rendered = render_validation_diagnostic_to_string(diag, use_color);
+                buf.push_str(&rendered);
+                buf.push('\n');
             }
         },
         other => {
-            eprintln!("Error: {other}");
+            let _ = write!(buf, "Error: {other}");
         },
     }
+
+    buf
 }
 
 /// Render a single `dyn miette::Diagnostic` to a string using the appropriate
@@ -356,21 +371,30 @@ fn render_box_diagnostic(diag: &dyn miette::Diagnostic, use_color: bool) -> Stri
 /// with `file:line:col` span information (HIGH-001 fix).
 ///
 /// Format: `[severity] code: message (file:line:col)\n  hint: <hint>`
-fn render_validation_diagnostic(diag: &slideforge::ValidationDiagnostic, _use_color: bool) {
+///
+/// Returns the rendered string (not printed to stderr — call site is responsible).
+fn render_validation_diagnostic_to_string(
+    diag: &slideforge::ValidationDiagnostic,
+    _use_color: bool,
+) -> String {
     let span = &diag.span;
+    let mut buf = String::new();
     // Include file:line:col if the span carries a real source location.
     // SourceSpan defaults to file="", line=0, col=0 for span-less diagnostics.
     if !span.file.is_empty() && (span.line > 0 || span.col > 0) {
-        eprintln!(
+        let _ = write!(
+            buf,
             "[{}] {}: {} ({}:{}:{})",
             diag.severity, diag.code, diag.message, span.file, span.line, span.col
         );
     } else {
-        eprintln!("[{}] {}: {}", diag.severity, diag.code, diag.message);
+        let _ = write!(buf, "[{}] {}: {}", diag.severity, diag.code, diag.message);
     }
     if let Some(ref hint) = diag.hint {
-        eprintln!("  hint: {hint}");
+        buf.push('\n');
+        let _ = write!(buf, "  hint: {hint}");
     }
+    buf
 }
 
 /// Render build error as JSON to stderr (for `--json` mode).

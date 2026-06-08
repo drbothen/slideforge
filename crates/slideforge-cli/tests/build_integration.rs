@@ -768,20 +768,80 @@ fn test_BC_1_15_003_ec_004_warn_only_does_not_demote_parse_errors() {
     );
 }
 
-// ── EC-006: --variant → clean not-yet-supported error ────────────────────────
+// ── EC-006: --variant → defined succeeds; undefined → E-EVL-001 exit 2 ────────
 
-/// EC-006 / BC-1.15.003 / MED-002: `--variant` produces a clean usage error (exit 2).
+/// Write a `.sf` source that declares a variant named "exec".
 ///
-/// MED-002 fix: variant selection is not yet supported (no variant is applied
-/// during evaluation in this release). The CLI returns a deterministic exit 2
-/// with a clear honest message, instead of the previous substring-heuristic
-/// that fabricated exit codes.
+/// Used to test that a defined variant name builds successfully (exit 0)
+/// and an undefined variant name produces E-EVL-001 (exit 2).
+fn write_variant_sf(path: &std::path::Path) {
+    // variants: block with one declared variant named "exec"
+    // DSL syntax: `ident: value` inside the vars block
+    let content = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "variants:\n",
+        "  exec:\n",
+        "    vars:\n",
+        "      note: \"exec-note\"\n",
+        "slide title:\n",
+        "  title \"Variant test\"\n",
+    );
+    std::fs::write(path, content).expect("write variant .sf fixture");
+}
+
+/// EC-006 (a) / C-1: `--variant exec` on a deck that declares "exec" → exit 0.
+///
+/// C-1 fix: variant selection is now threaded through CompileOptions.active_variant
+/// to eval_deck_with_variant. A defined variant name applies the variant vars and
+/// the build succeeds.
+#[test]
+fn test_BC_1_15_003_ec_006_defined_variant_exits_0() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("variant_defined.sf");
+    let out_dir = tmp.path().join("dist");
+    write_variant_sf(&src_path);
+    // Brand discovery: CLI looks for brand.toml next to the source file.
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: Some("exec".to_owned()),
+    };
+    let global = default_global();
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "EC-006 (a) / C-1: --variant exec (defined) must produce exit 0"
+    );
+    // Output file must be written.
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    assert!(
+        out_dir.join(format!("{stem}.pptx")).exists(),
+        "EC-006 (a): .pptx must be written when defined --variant is used"
+    );
+}
+
+/// EC-006 (b) / C-2: `--variant nonexistent` → E-EVL-001 eval error → exit 2.
+///
+/// C-1 fix: the blanket --variant rejection is removed. Instead, eval_deck_with_variant
+/// is called with the (undefined) variant name, which pushes E-EVL-001 (Error-severity,
+/// not Fatal) into the eval sink. C-2 fix: the eval sink is gated in strict mode,
+/// producing EvalFailed → exit 2. No output files are written.
 #[test]
 fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let src_path = tmp.path().join("variant_test.sf");
     let out_dir = tmp.path().join("dist");
-    write_valid_sf(&src_path);
+    // Use the variant-aware fixture so the variants: block is parsed.
+    write_variant_sf(&src_path);
+    // Brand discovery: CLI looks for brand.toml next to the source file.
+    write_brand_toml(tmp.path());
 
     let args = BuildArgs {
         source: src_path,
@@ -796,7 +856,7 @@ fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
     assert_eq!(
         code,
         ExitCode::from(2),
-        "EC-006 / MED-002: --variant must produce exit 2 with clean not-yet-supported error"
+        "EC-006 (b) / C-1+C-2: undefined --variant must produce exit 2 (E-EVL-001 from eval)"
     );
     assert!(
         !out_dir.exists()
@@ -804,7 +864,7 @@ fn test_BC_1_15_003_ec_006_undefined_variant_exits_2() {
                 .read_dir()
                 .map(|mut d| d.next().is_none())
                 .unwrap_or(true),
-        "EC-006: no output files when --variant is specified (not yet supported)"
+        "EC-006 (b): no output files when --variant is undefined (eval error in strict mode)"
     );
 }
 
@@ -1043,6 +1103,68 @@ fn test_BC_1_15_003_med_001_all_or_nothing_no_partial_output_on_export_failure()
     );
 }
 
+/// MED-001 (sibling-case) / BC-1.15.003 inv3: when 2 formats are requested and the
+/// FIRST format's write succeeds but the SECOND format's write fails, the FIRST
+/// format's final file must be rolled back (deleted).
+///
+/// I-3 fix: the original MED-001 test forced failure on the FIRST writer (non-existent
+/// dir), so the "1st succeeded → rolled back when 2nd fails" branch was never exercised.
+/// This test exercises that rollback branch by:
+/// 1. Using a real writable output directory.
+/// 2. Pre-creating the second format's TMP path as a DIRECTORY so that
+///    `File::create(&tmp)` (used in write_atomic) fails — cannot open a directory
+///    as a file for writing.
+/// 3. Asserting the first format's final file was rolled back (does NOT exist) and
+///    exit code is 3.
+#[test]
+fn test_BC_1_15_003_med_001_second_format_fail_rolls_back_first_format() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("atomic_sibling.sf");
+    write_valid_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    // Use a real writable output directory.
+    let out_dir = tmp.path().join("dist_sibling");
+    std::fs::create_dir_all(&out_dir).expect("create out_dir");
+
+    // Pre-create the second format's TMP path as a DIRECTORY to force write failure.
+    // write_atomic calls File::create(&tmp_path) which fails if tmp_path is a directory.
+    // OutputWriter::tmp_path() returns "<output_dir>/<stem>.<ext>.tmp".
+    // For html format, this is "dist_sibling/atomic_sibling.html.tmp".
+    let html_tmp_blocker = out_dir.join("atomic_sibling.html.tmp");
+    std::fs::create_dir_all(&html_tmp_blocker)
+        .expect("pre-create atomic_sibling.html.tmp as a directory to block html write");
+
+    let args = BuildArgs {
+        source: src_path,
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx, OutputFormat::Html],
+        variant: None,
+    };
+    let global = default_global();
+
+    let code = run_build(&args, &global);
+
+    // The html write fails after pptx succeeds → rollback → exit 3.
+    assert_eq!(
+        code,
+        ExitCode::from(3),
+        "MED-001 (sibling): second-format write failure must produce exit 3"
+    );
+    // The first format's FINAL file must have been rolled back (removed).
+    assert!(
+        !out_dir.join("atomic_sibling.pptx").exists(),
+        "MED-001 (sibling): first-format final file (atomic_sibling.pptx) must be rolled back \
+         when second-format write fails"
+    );
+    // Tmp files must not remain (except the pre-created directory which is not removed
+    // by remove_file — the test only verifies the pptx rollback, not the directory blocker).
+    assert!(
+        !out_dir.join("atomic_sibling.pptx.tmp").exists(),
+        "MED-001 (sibling): .tmp file must not remain after rollback"
+    );
+}
+
 // ── HIGH-001: ValidationFailed span rendering ─────────────────────────────────
 
 /// HIGH-001 / BC-1.15.001 PC1: ValidationFailed diagnostics include file:line:col.
@@ -1185,5 +1307,260 @@ fn test_BC_1_15_001_json_output_has_correct_total_and_span_fields() {
         first["span"]["col"].as_u64().unwrap_or(0),
         1,
         "HIGH-003: span.col must be present in JSON output"
+    );
+}
+
+// ── OBS-1: content-bearing assertions for AC-006/AC-007/BC-1.15.001/BC-1.15.002 ─
+
+/// OBS-1 / AC-006 / BC-1.15.002 PC1: rendered output contains ALL error codes.
+///
+/// Uses `render_build_error_to_string` to collect rendered output to a String
+/// buffer, then asserts ALL N error codes are present. This makes the AC-006
+/// assertion actually verify content, not just exit code.
+#[test]
+fn test_OBS_1_ac_006_rendered_output_contains_all_error_codes() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // 3 diagnostics with distinct codes.
+    let diagnostics: Vec<Diagnostic> = vec![
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-EVL-001"),
+            message: Arc::from("undefined variable: foo"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 3,
+                col: 10,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("define 'foo' in a vars: block")),
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-EVL-001"),
+            message: Arc::from("undefined variable: bar"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 5,
+                col: 10,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("define 'bar' in a vars: block")),
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-A11-001"),
+            message: Arc::from("missing alt text"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 7,
+                col: 3,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("add alt \"...\" to the image block")),
+        },
+    ];
+
+    let err = BuildError::ValidationFailed {
+        count: 3,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false /* no_color */);
+
+    // AC-006: ALL 3 error codes must appear in the rendered output.
+    assert!(
+        rendered.contains("E-EVL-001"),
+        "OBS-1 / AC-006: rendered output must contain E-EVL-001; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("E-A11-001"),
+        "OBS-1 / AC-006: rendered output must contain E-A11-001; got:\n{rendered}"
+    );
+    // Verify both E-EVL-001 entries appear (count check: at least 2 occurrences).
+    let evl_count = rendered.matches("E-EVL-001").count();
+    assert!(
+        evl_count >= 2,
+        "OBS-1 / AC-006: E-EVL-001 must appear at least 2 times (2 errors); \
+         got {evl_count} in:\n{rendered}"
+    );
+}
+
+/// OBS-1 / AC-007 / BC-1.15.002 PC2: errors in rendered output are in source order.
+///
+/// Constructs 3 ValidationFailed diagnostics at different line numbers and asserts
+/// the first appears before the second in the rendered string (source order).
+#[test]
+fn test_OBS_1_ac_007_rendered_output_errors_in_source_order() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // Diagnostics at line 7 and line 2 — should be rendered in (file,line,col) order.
+    // (The validator diagnostics list is given in source order per BC-1.15.002.)
+    let diagnostics: Vec<Diagnostic> = vec![
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-EVL-001"),
+            message: Arc::from("error at line 2"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 2,
+                col: 1,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("fix at line 2")),
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-EVL-002"),
+            message: Arc::from("error at line 7"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 7,
+                col: 1,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("fix at line 7")),
+        },
+    ];
+
+    let err = BuildError::ValidationFailed {
+        count: 2,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false /* no_color */);
+
+    // Both errors must appear.
+    assert!(
+        rendered.contains("E-EVL-001"),
+        "OBS-1/AC-007: E-EVL-001 must appear"
+    );
+    assert!(
+        rendered.contains("E-EVL-002"),
+        "OBS-1/AC-007: E-EVL-002 must appear"
+    );
+
+    // Source order: "line 2" diagnostic must appear before "line 7" diagnostic.
+    let pos_line2 = rendered.find("E-EVL-001").expect("E-EVL-001 must appear");
+    let pos_line7 = rendered.find("E-EVL-002").expect("E-EVL-002 must appear");
+    assert!(
+        pos_line2 < pos_line7,
+        "OBS-1 / AC-007 / BC-1.15.002 PC2: line-2 error must appear before line-7 error \
+         in rendered output (source order); positions: E-EVL-001={pos_line2} E-EVL-002={pos_line7}"
+    );
+}
+
+/// OBS-1 / BC-1.15.001 PC2: every diagnostic carries a non-empty correction hint.
+///
+/// Asserts that hint text appears in rendered output for ValidationFailed diagnostics
+/// that have a hint field set.
+#[test]
+fn test_OBS_1_bc_1_15_001_hint_text_present_in_rendered_output() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    let diagnostics: Vec<Diagnostic> = vec![Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from("E-EVL-001"),
+        message: Arc::from("undefined variable: myvar"),
+        span: SourceSpan {
+            file: Arc::from("deck.sf"),
+            line: 4,
+            col: 8,
+            ..SourceSpan::default()
+        },
+        hint: Some(Arc::from("add myvar to a vars: block")),
+    }];
+
+    let err = BuildError::ValidationFailed {
+        count: 1,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false /* no_color */);
+
+    // BC-1.15.001 PC2: hint text must be present.
+    assert!(
+        rendered.contains("add myvar to a vars: block"),
+        "OBS-1 / BC-1.15.001 PC2: hint text must appear in rendered output; got:\n{rendered}"
+    );
+    // Source location must be present.
+    assert!(
+        rendered.contains("deck.sf") && rendered.contains("4") && rendered.contains("8"),
+        "OBS-1 / BC-1.15.001: file:line:col must appear in rendered output; got:\n{rendered}"
+    );
+}
+
+/// OBS-1 / BC-1.15.002 invariant: exact error count matches rendered entries.
+///
+/// Constructs 2 independent ParseFailed diagnostics and asserts the rendered output
+/// contains exactly 2 distinct error entries. Verifies no deduplication occurs.
+#[test]
+fn test_OBS_1_bc_1_15_002_exact_error_count_in_rendered_output() {
+    use slideforge::error::BuildError;
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity};
+    use slideforge_types::SourceSpan;
+    use std::sync::Arc;
+
+    // 2 independent errors at different lines.
+    let diagnostics: Vec<Diagnostic> = vec![
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-PAR-003"),
+            message: Arc::from("tab indentation at line 2"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 2,
+                col: 1,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("use spaces for indentation")),
+        },
+        Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: Arc::from("E-PAR-003"),
+            message: Arc::from("tab indentation at line 3"),
+            span: SourceSpan {
+                file: Arc::from("deck.sf"),
+                line: 3,
+                col: 1,
+                ..SourceSpan::default()
+            },
+            hint: Some(Arc::from("use spaces for indentation")),
+        },
+    ];
+
+    let err = BuildError::ValidationFailed {
+        count: 2,
+        diagnostics,
+    };
+
+    let rendered = render_build_error_to_string(&err, false /* no_color */);
+
+    // BC-1.15.002 invariant: exactly 2 E-PAR-003 entries (no deduplication).
+    let par003_count = rendered.matches("E-PAR-003").count();
+    assert_eq!(
+        par003_count, 2,
+        "OBS-1 / BC-1.15.002 invariant: rendered output must contain exactly 2 E-PAR-003 entries; \
+         got {par003_count} in:\n{rendered}"
+    );
+    // Both hint texts must appear (no omission).
+    let hint_count = rendered.matches("use spaces for indentation").count();
+    assert_eq!(
+        hint_count, 2,
+        "OBS-1 / BC-1.15.002: both hint texts must be present (no deduplication); \
+         got {hint_count} hint occurrences"
     );
 }

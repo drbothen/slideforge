@@ -63,7 +63,8 @@ pub enum PluginError {
 ///
 /// ## Non-exhaustive
 ///
-/// New pipeline stages (e.g., HTML exporter in STORY-050) may add variants.
+/// New pipeline stages may add variants. All four export formats (pptx, docx,
+/// pdf, html) are registered in the default plugin registry.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -171,7 +172,7 @@ pub enum BuildError {
     ///
     /// `format` is the format string from [`crate::BuildOptions::format`]
     /// (or `"pptx"` if none was set).
-    #[error("no exporter registered for format '{0}'; supported: pptx, docx, pdf")]
+    #[error("no exporter registered for format '{0}'; supported: pptx, docx, pdf, html")]
     UnknownFormat(String),
 
     /// The export stage failed to produce output bytes.
