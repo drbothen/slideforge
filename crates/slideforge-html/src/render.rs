@@ -458,16 +458,22 @@ pub fn render_text_frame(
 ///
 /// ## AC-004 (STORY-072)
 ///
-/// `FillSpec::Gradient` → CSS `style="background: linear-gradient(to bottom, ...)"` on `<rect>`.
+/// `FillSpec::Gradient` → SVG-native `<defs><linearGradient id="sf-grad-{slide_id}-{grad_idx}">...
+/// </linearGradient></defs>` followed by `<rect fill="url(#sf-grad-...)"/>`.
+/// CSS `background` is NOT used — it has no effect on SVG geometry elements.
+/// The gradient flows top-to-bottom (`x1="0" y1="0" x2="0" y2="1"`) matching
+/// PPTX ang=5400000 and the `to bottom` direction used by `css_linear_gradient_background`.
+///
 /// `FillSpec::SolidColor` → SVG `fill="#RRGGBB"` attribute.
 /// `FillSpec::None` → SVG `fill="none"` attribute.
-/// Emit an SVG `<g>` fragment for a shape with the given alt/fill/bbox.
 ///
 /// Called by [`render_graphics_layer`] for `FrameContent::Shape` frames.
-/// Extracted to keep the parent function within `clippy::too_many_lines`.
+/// `grad_idx` is incremented each time a gradient def is emitted so multiple
+/// gradient shapes on the same slide receive distinct `<linearGradient>` ids.
 fn render_shape_svg(
     out: &mut String,
     frame_idx: &mut u32,
+    grad_idx: &mut u32,
     slide_id: &str,
     alt: &AltText,
     fill: &slideforge_layout::FillSpec,
@@ -475,12 +481,24 @@ fn render_shape_svg(
 ) {
     use std::fmt::Write as _;
     let (x, y, w, h) = bbox;
+
+    // For gradient fills, emit a <defs> block BEFORE the <g> so the
+    // gradient def is available when the <rect> references it.
+    // SVG spec allows <defs> anywhere within an <svg> element.
     let fill_attr = match fill {
         slideforge_layout::FillSpec::Gradient { from, to } => {
-            format!(
-                "style=\"background: {}\"",
-                css_linear_gradient_background(*from, *to)
-            )
+            let gid = format!("sf-grad-{slide_id}-{grad_idx}");
+            *grad_idx += 1;
+            let escaped_gid = html_escape::encode_double_quoted_attribute(&gid);
+            let _ = write!(
+                out,
+                "<defs><linearGradient id=\"{escaped_gid}\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">\
+<stop offset=\"0\" stop-color=\"#{:02X}{:02X}{:02X}\"/>\
+<stop offset=\"1\" stop-color=\"#{:02X}{:02X}{:02X}\"/>\
+</linearGradient></defs>",
+                from.r, from.g, from.b, to.r, to.g, to.b
+            );
+            format!("fill=\"url(#{escaped_gid})\"")
         },
         slideforge_layout::FillSpec::SolidColor(rgb) => {
             format!("fill=\"#{:02X}{:02X}{:02X}\"", rgb.r, rgb.g, rgb.b)
@@ -549,6 +567,10 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
     // MED-B3: frame_idx is 0-based; incremented BEFORE use for each graphical frame.
     // This gives ids: sf-{slide_id}-0, sf-{slide_id}-1, ... (no doubling of slide_id).
     let mut frame_idx: u32 = 0;
+    // grad_idx is a per-slide counter for linearGradient def ids (AC-004 STORY-072).
+    // Incremented each time a gradient shape is emitted so multiple gradient shapes
+    // on one slide get distinct ids: sf-grad-{slide_id}-0, sf-grad-{slide_id}-1, ...
+    let mut grad_idx: u32 = 0;
 
     for frame in frames {
         // MED-B5 / Pass-10: skip frames with zero OR NEGATIVE bbox dimensions.
@@ -670,6 +692,7 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 render_shape_svg(
                     &mut graphical_content,
                     &mut frame_idx,
+                    &mut grad_idx,
                     slide_id,
                     &shape_frame.alt,
                     &shape_frame.fill,
@@ -1817,19 +1840,30 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STORY-072: FillSpec::Gradient — HTML CSS linear-gradient stub
+// STORY-072: FillSpec::Gradient — CSS linear-gradient helper (utility / test surface)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Produce the CSS `background` property value for a linear gradient fill.
+/// Produce the CSS `background` property value string for a linear gradient.
 ///
-/// ## Contract (STORY-072 AC-004)
+/// ## Note (STORY-072 adv-P2 HIGH-001)
+///
+/// This function is NOT called by `render_shape_svg`. SVG `<rect>` elements
+/// are SVG geometry nodes — CSS `background` has no effect on them. Gradient
+/// fills on shapes are rendered via SVG-native `<linearGradient>` defs +
+/// `fill="url(#...)"` (see `render_shape_svg`).
+///
+/// This function is retained as a public utility for callers that render
+/// gradients onto CSS box-model elements (e.g. HTML `<div>` overlays in
+/// non-SVG rendering paths) and as a stable test surface for the CSS
+/// gradient format contract.
+///
+/// ## Contract
 ///
 /// Returns a CSS string of the form:
 /// `linear-gradient(to bottom, #RRGGBB, #RRGGBB)`
 ///
 /// - Direction is fixed as `to bottom` (top-to-bottom, v1.0).
 /// - Both hex values are uppercase 6-digit (`#RRGGBB`).
-/// - Used as the `style="background: ..."` attribute value on the shape `<div>`.
 ///
 /// ## Examples
 ///
@@ -4529,7 +4563,7 @@ mod tests {
 // | test_BC_3_04_001_ac004_html_css_linear_gradient_direction_to_bottom | AC-004 | postcondition 5 |
 // | test_BC_3_04_001_ac004_html_css_gradient_stop_colors_uppercase_hex | AC-004 | postcondition 5 |
 // | test_BC_3_04_001_ec005_html_same_from_to_css_gradient_valid | EC-005 | STORY-072 EC-005 |
-// | test_BC_3_04_001_ac004_html_gradient_shape_frame_emits_linear_gradient_style | AC-004 | postcondition 5 (render_graphics_layer) |
+// | test_BC_3_04_001_ac004_html_gradient_shape_frame_emits_linear_gradient_style | AC-004/OBS-002 | SVG linearGradient paint (adv-P2 HIGH-001) |
 // | test_BC_3_04_001_ac004_html_gradient_shape_alt_accessible_name | AC-004 + AC-005 | invariant 1 |
 // | test_BC_3_04_001_ac005_html_gradient_decorative_shape_aria_hidden | AC-005 | BC-3.04.001 invariant 1 |
 
@@ -4657,12 +4691,16 @@ mod story_072_tests {
 
     // ─── render_graphics_layer integration tests (Red Gate via assertion) ────
 
-    /// AC-004 (STORY-072) — `render_graphics_layer` with a gradient `ShapeFrame`
-    /// produces HTML containing `linear-gradient(to bottom, ...)` in a `style` attribute.
+    /// AC-004 (STORY-072) / OBS-002 — `render_graphics_layer` with a gradient `ShapeFrame`
+    /// paints the shape via SVG-native `<linearGradient>` + `fill="url(#sf-grad-..."`.
     ///
-    /// RED GATE: currently the Shape arm emits `fill="none"` regardless of `FillSpec`.
-    /// After implementation, the SVG `<rect>` or containing element must carry
-    /// `style="background: linear-gradient(to bottom, #FF0000, #0000FF)"`.
+    /// Load-bearing paint assertion (adv-P2 HIGH-001): asserts BOTH:
+    /// 1. A `<linearGradient` element exists in the output (the def is present), AND
+    /// 2. The `<rect>` references it with `fill="url(#sf-grad` (the paint is wired up).
+    ///
+    /// A regression to the old CSS-background form (which used `style="background: ..."`
+    /// on the SVG `<rect>` and painted NOTHING in browsers) will fail this test because
+    /// neither `<linearGradient` nor `fill="url(#sf-grad` would be present.
     #[test]
     fn test_BC_3_04_001_ac004_html_gradient_shape_frame_emits_linear_gradient_style() {
         let from = Rgb { r: 255, g: 0, b: 0 };
@@ -4674,13 +4712,21 @@ mod story_072_tests {
         )];
         let html = render_graphics_layer(&frames, "test-slide", &default_page());
 
-        // RED GATE: currently the Shape arm emits fill="none", not a CSS gradient.
+        // OBS-002 load-bearing: assert SVG-native gradient def is emitted.
         assert!(
-            html.contains("linear-gradient"),
-            "HTML graphics layer must contain 'linear-gradient' for FillSpec::Gradient shape; \
-             currently Shape frames emit fill=\"none\" (no gradient CSS). \
+            html.contains("<linearGradient"),
+            "HTML graphics layer must contain '<linearGradient' element for FillSpec::Gradient; \
+             CSS background on <rect> painted nothing (HIGH-001). \
              Got HTML snippet: {}",
-            &html[..html.len().min(600)]
+            &html[..html.len().min(800)]
+        );
+        // OBS-002 load-bearing: assert the <rect> actually references the gradient def.
+        assert!(
+            html.contains("fill=\"url(#sf-grad"),
+            "HTML graphics layer <rect> must reference the gradient def via fill=\"url(#sf-grad...\"; \
+             gradient def without a reference paints nothing (HIGH-001). \
+             Got HTML snippet: {}",
+            &html[..html.len().min(800)]
         );
     }
 

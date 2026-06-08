@@ -557,6 +557,63 @@ mod tests {
         );
     }
 
+    // ── LOW-001 (adv-P2): pin exact interim gradient string format ───────────
+    //
+    // The parser emits `gradient {from} to {to}` (UNQUOTED hex, no surrounding
+    // quotes) as the fill string. This test pins the exact format so that any
+    // future change to `format!("gradient {from_s} to {to_s}")` in shape.rs
+    // will immediately fail here, preventing silent downstream decoder breakage.
+    //
+    // Note: the parser passes through the hex values as the user wrote them
+    // (case-preserved), so the exact form depends on the input. This test uses
+    // uppercase input to match the canonical STORY-072 AC-001 example.
+
+    /// LOW-001 (adv-P2 / STORY-072 AC-001): parser fill string for `fill gradient
+    /// "#FF0000" to "#0000FF"` is EXACTLY `"gradient #FF0000 to #0000FF"` —
+    /// unquoted, single space around keywords.
+    ///
+    /// Pins the interim AST gradient-string format so the future
+    /// `ShapeNode→ShapeSpec` decoder has a stable input contract.
+    #[test]
+    fn test_bc_3_04_001_low001_gradient_fill_string_exact_format() {
+        let src = concat!(
+            "slide content:\n",
+            "  shape:\n",
+            "    type \"rect\"\n",
+            "    fill gradient \"#FF0000\" to \"#0000FF\"\n",
+            "    alt \"Gradient background\"\n",
+        );
+        let result = parse_str(src);
+        assert!(
+            result.is_ok(),
+            "fill gradient must parse without errors; got: {result:?}"
+        );
+        let deck = result.unwrap();
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("expected Slide block item");
+        };
+        let shape_field = slide_s
+            .value()
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "shape")
+            .expect("shape field must exist");
+        let FieldValue::Shape(shape_node) = shape_field.value.value() else {
+            panic!("must be FieldValue::Shape");
+        };
+        let fill_val = shape_node
+            .fill
+            .as_ref()
+            .expect("fill must be Some after gradient syntax");
+        // LOW-001: pin the EXACT interim format — not just starts_with("gradient").
+        assert_eq!(
+            fill_val.value(),
+            "gradient #FF0000 to #0000FF",
+            "gradient fill string must be EXACTLY 'gradient #FF0000 to #0000FF' (unquoted, \
+             single space); future decoder depends on this format (LOW-001 adv-P2)"
+        );
+    }
+
     // ── EC-005: `raw` field inside shape: block → E-PAR-009 ──────────────────
 
     #[test]
