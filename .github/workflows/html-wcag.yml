@@ -111,6 +111,12 @@ jobs:
 
       # Step 3: Write the axe-core test script using the AxeBuilder API.
       #
+      # IMPORTANT: the script is written to $GITHUB_WORKSPACE (the checkout
+      # directory) so it is a sibling of node_modules/. Node's module resolver
+      # walks up from the script's location; placing it next to node_modules/
+      # guarantees require('@axe-core/playwright') and require('@playwright/test')
+      # resolve correctly without NODE_PATH tricks.
+      #
       # API reference: @axe-core/playwright exports AxeBuilder (class), not
       # injectAxe/checkA11y (those belong to the separate axe-playwright package).
       # Usage: new AxeBuilder({ page }).withTags([...]).analyze()
@@ -121,7 +127,7 @@ jobs:
       # would pass even if axe-core never ran.
       - name: Write axe-core test script
         run: |
-          cat > /tmp/axe-check.js << 'SCRIPT'
+          cat > "$GITHUB_WORKSPACE/axe-check.js" << 'SCRIPT'
           'use strict';
           const { AxeBuilder } = require('@axe-core/playwright');
           const { chromium } = require('@playwright/test');
@@ -169,5 +175,7 @@ jobs:
           SCRIPT
 
       # Step 4: Run axe-core and assert zero violations.
+      # Run from $GITHUB_WORKSPACE so node_modules/ is a sibling of axe-check.js
+      # and module resolution is unambiguous.
       - name: Run axe-core WCAG AA check (zero violations required)
-        run: node /tmp/axe-check.js
+        run: node "$GITHUB_WORKSPACE/axe-check.js"
