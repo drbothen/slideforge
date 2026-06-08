@@ -19,7 +19,9 @@ pub struct InitArgs {
 /// Run the `slideforge init` subcommand.
 ///
 /// Stub implementation — will be completed in STORY-057.
+/// Returns exit code 2 (usage error) to indicate the command is not yet available.
 #[must_use]
 pub fn run_init(_args: &InitArgs, _global: &GlobalFlags) -> ExitCode {
-    todo!("slideforge init is not yet implemented — see STORY-057")
+    eprintln!("slideforge init is not yet implemented (STORY-057)");
+    ExitCode::from(2)
 }

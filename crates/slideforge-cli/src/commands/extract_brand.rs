@@ -20,7 +20,9 @@ pub struct ExtractBrandArgs {
 /// Run the `slideforge extract-brand` subcommand.
 ///
 /// Stub implementation — will be completed in STORY-057.
+/// Returns exit code 2 (usage error) to indicate the command is not yet available.
 #[must_use]
 pub fn run_extract_brand(_args: &ExtractBrandArgs, _global: &GlobalFlags) -> ExitCode {
-    todo!("slideforge extract-brand is not yet implemented — see STORY-057")
+    eprintln!("slideforge extract-brand is not yet implemented (STORY-057)");
+    ExitCode::from(2)
 }

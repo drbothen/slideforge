@@ -20,7 +20,9 @@ pub struct WatchArgs {
 /// Run the `slideforge watch` subcommand.
 ///
 /// Stub implementation — will be completed in STORY-056.
+/// Returns exit code 2 (usage error) to indicate the command is not yet available.
 #[must_use]
 pub fn run_watch(_args: &WatchArgs, _global: &GlobalFlags) -> ExitCode {
-    todo!("slideforge watch is not yet implemented — see STORY-056")
+    eprintln!("slideforge watch is not yet implemented (STORY-056)");
+    ExitCode::from(2)
 }
