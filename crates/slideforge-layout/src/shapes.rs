@@ -17,7 +17,7 @@
 //! | User unit | EMU conversion |
 //! |-----------|---------------|
 //! | `1in`     | `914_400 EMU` |
-//! | `1em`     | `brand.font_size_emu` (default: `457_200` = 0.5 inch at 36pt) |
+//! | `1em`     | `brand.font_size_emu` (default: `457_200` = 36pt body font = 0.5 inch at `914_400` EMU/inch) |
 //!
 //! ## Off-canvas detection (AC-003 / BC-3.04.001 EC-002)
 //!
@@ -42,7 +42,7 @@ use crate::types::{BoundingBox, FillSpec, Frame, LayoutWarning, PageSize, ShapeF
 /// EMU per inch: 914,400 (canonical DSL unit definition, DI-010).
 pub const EMU_PER_INCH: i64 = 914_400;
 
-/// Default em-to-EMU conversion: 457,200 EMU = 0.5 inch at 36pt brand default.
+/// Default em-to-EMU conversion: 457,200 EMU (36pt body font = 0.5 inch at 914,400 EMU/inch).
 ///
 /// # Test-only constant (AC-002 / STORY-074)
 ///
@@ -62,7 +62,7 @@ const DEFAULT_EM_IN_EMU: i64 = 457_200;
 /// # Arguments
 ///
 /// * `unit` — the measurement in user units.
-/// * `em_in_emu` — the brand's em-to-EMU resolution (default: `457_200` EMU = 0.5 inch at 36pt).
+/// * `em_in_emu` — the brand's em-to-EMU resolution (default: `457_200` EMU = 36pt body font = 0.5 inch at `914_400` EMU/inch).
 ///
 /// # Returns
 ///
@@ -586,7 +586,7 @@ mod tests {
 
     /// AC-001 — `from_em(1000, DEFAULT_EM_IN_EMU)` converts 1em → `Some(Emu(457_200))`.
     ///
-    /// Default brand em: 457_200 EMU = 0.5 inch at 36pt.
+    /// Default brand em: `457_200` EMU = 36pt body font = 0.5 inch at `914_400` EMU/inch.
     #[test]
     fn test_bc_3_04_001_ac001_one_em_to_emu() {
         assert_eq!(

@@ -261,7 +261,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         //
         // STORY-074 (brand-em-sizing) CLOSED: `BrandFonts.font_size_emu` is now
         // wired here (BC-3.04.001 PC-2 — brand-aware em resolution). The historical
-        // `DEFAULT_EM_IN_EMU` constant (457_200 EMU = 0.5 inch at 36pt) is no longer
+        // `DEFAULT_EM_IN_EMU` constant (457_200 EMU = 36pt body font = 0.5 inch at 914_400 EMU/inch) is no longer
         // used in production code; `BrandFonts::default()` carries the same value for
         // backward compatibility (AC-003).
         //

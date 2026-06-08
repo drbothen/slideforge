@@ -35,7 +35,7 @@ pub struct BrandPalette {
 /// `ShapeUnit::Em` measurements: `em_emu = em_milliems * font_size_emu / 1_000`
 /// (BC-3.04.001 Postcondition 2).
 ///
-/// Default: `457_200` EMU (36pt at 96dpi = 0.5 inch), matching the historical
+/// Default: `457_200` EMU (36pt body font = 0.5 inch at `914_400` EMU/inch), matching the historical
 /// `DEFAULT_EM_IN_EMU` constant in `slideforge-layout::shapes`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BrandFonts {
@@ -58,7 +58,7 @@ pub struct BrandFonts {
 
 impl Default for BrandFonts {
     /// Returns a `BrandFonts` with generic typeface names and the default
-    /// `font_size_emu` of `457_200` (36pt body font = 0.5 inch in EMU).
+    /// `font_size_emu` of `457_200` (36pt body font = 0.5 inch at `914_400` EMU/inch).
     fn default() -> Self {
         Self {
             heading: Arc::from("Calibri Light"),
