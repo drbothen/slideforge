@@ -2037,6 +2037,121 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // STORY-080: Deterministic connection-counting helper (Red Gate stub)
+    //
+    // `spawn_deterministic_counting_server` is the replacement for the
+    // flaky `set_nonblocking(true)` + poll loop used by the existing
+    // `test_bc_1_03_002_http_4xx_not_retried` test.
+    //
+    // Design contract (AC-001):
+    //   - Uses a blocking `TcpListener::accept()` (no `set_nonblocking`).
+    //   - Serves a 404 response on each connection, closes the stream.
+    //   - After the `deadline` expires (or `max_connections` are served),
+    //     the server thread sends the final connection count over the returned
+    //     `mpsc::Receiver<usize>` channel.
+    //   - The main thread READS the channel (blocking) instead of reading a
+    //     shared `AtomicUsize` while the server thread may still be running.
+    //     This eliminates the connection-count race on Windows.
+    //
+    // The function is stubbed (`todo!()`) until the implementer replaces it.
+    // Any test that calls it will panic with "not yet implemented", giving
+    // a genuine Red Gate failure.
+    // -----------------------------------------------------------------------
+
+    /// Spawn a deterministic single-shot 404 server for the 4xx-not-retried test.
+    ///
+    /// Unlike `spawn_counting_server`, this helper:
+    /// - Uses **blocking** `accept()` (not `set_nonblocking`) to eliminate the
+    ///   Windows connection-count race (STORY-080 AC-001).
+    /// - Communicates the final connection count back to the main thread via
+    ///   an `mpsc::channel` instead of a shared `AtomicUsize`, ensuring the
+    ///   count is only read AFTER all server-side I/O is complete.
+    ///
+    /// Returns `(addr, count_receiver, join_handle)`. Call
+    /// `count_receiver.recv().unwrap()` after `src.load()` returns to get the
+    /// final count; then join the handle.
+    ///
+    /// # Panics
+    ///
+    /// Currently stubs with `todo!()` (STORY-080 Red Gate). The implementer
+    /// replaces `todo!()` with the real implementation.
+    fn spawn_deterministic_counting_server_404(
+        _max_connections: usize,
+    ) -> (
+        std::net::SocketAddr,
+        std::sync::mpsc::Receiver<usize>,
+        thread::JoinHandle<()>,
+    ) {
+        todo!(
+            "STORY-080: implement deterministic mpsc-channel-based 404 counting server \
+             (replaces set_nonblocking poll loop; AC-001 fix)"
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // STORY-080 AC-001: deterministic 4xx-not-retried test
+    //
+    // This is the REPLACEMENT test for `test_bc_1_03_002_http_4xx_not_retried`.
+    // It uses `spawn_deterministic_counting_server_404` (above) instead of
+    // the racy non-blocking accept loop.
+    //
+    // Red Gate: this test panics on the `todo!()` in the helper until the
+    // implementer provides the real helper body.
+    // -----------------------------------------------------------------------
+
+    /// Traces to BC-1.03.002 invariant 2 + AC-001 (4xx must not be retried).
+    ///
+    /// A deterministic counting server (blocking accept + mpsc channel) serves
+    /// HTTP 404 on the first connection. The test asserts:
+    ///   1. `result.is_err()` — 404 produces an error.
+    ///   2. The error message references "404".
+    ///   3. `connection_count == 1` — exactly one connection, no retry.
+    ///
+    /// Assertion (3) is the load-bearing BC proof: it cannot be weakened to
+    /// `<= 2` without destroying the contract (per AC-003).
+    ///
+    /// This test uses `spawn_deterministic_counting_server_404` which eliminates
+    /// the Windows TCP keep-alive race (EC-001) by reading the count after the
+    /// server thread has finished all I/O and sent the final count over a channel.
+    #[test]
+    #[allow(non_snake_case)] // BC-based naming convention: test_BC_S_SS_NNN_xxx
+    fn test_BC_1_03_002_http_4xx_not_retried_deterministic_harness() {
+        let (addr, count_rx, handle) = spawn_deterministic_counting_server_404(3);
+
+        let url = format!("http://127.0.0.1:{}/data.json", addr.port());
+        let src = HttpDataSource::new(url.as_str());
+        let opts = DataSourceOptions::default();
+        let result = src.load(&url, &opts);
+
+        // Wait for server to finish and read the authoritative connection count.
+        // This is the key difference from the flaky test: we read the count AFTER
+        // the server has completed all I/O, not while it may still be running.
+        let connection_count = count_rx
+            .recv()
+            .expect("server thread must send final count before exiting");
+        handle.join().expect("server thread must not panic");
+
+        // Assertion 1: 404 produces an error.
+        assert!(result.is_err(), "HTTP 404 must produce an error");
+
+        // Assertion 2: error message references 404.
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("404"),
+            "error must reference status 404; got: {msg}"
+        );
+
+        // Assertion 3 (load-bearing BC-1.03.002 invariant 2 boundary):
+        // Exactly 1 connection — 4xx responses are NOT retried.
+        // AC-003: this assertion MUST NOT be weakened to `<= 2` or removed.
+        assert_eq!(
+            connection_count,
+            1,
+            "HTTP 4xx must result in exactly 1 connection (no retry); got: {connection_count}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // F3: from_context with Some(vec![]) (empty allowlist) blocks all
     // -----------------------------------------------------------------------
 

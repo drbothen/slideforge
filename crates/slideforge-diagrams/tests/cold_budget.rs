@@ -30,6 +30,7 @@
 //! a genuinely cold `FONT_DB`.
 
 #![allow(clippy::unwrap_used)] // integration tests may use unwrap
+#![allow(clippy::tests_outside_test_module)] // integration test binary — no mod tests wrapper
 
 use std::time::{Duration, Instant};
 
@@ -83,4 +84,66 @@ fn test_cold_budget_under_200ms() {
          stays within the NFR-003 cold budget on CI. \
          If this fails only on CI: check system font count or CI runner speed."
     );
+}
+
+// ---------------------------------------------------------------------------
+// STORY-080 AC-002 / AC-003: companion correctness test (non-timing path)
+//
+// This test is added as part of the STORY-080 deflake work (AC-002). Its
+// purpose is to satisfy AC-003 (behavioral assertions must not be weakened):
+// even after `test_cold_budget_under_200ms` is moved to an on-demand
+// (#[ignore]) test, a correctness-only test must remain in the default matrix
+// that proves the cold render succeeds and returns non-empty content.
+//
+// Red Gate note: this test passes against the current production code (the
+// render already works). The Red Gate for STORY-080 cold_budget is provided
+// by `test_BC_1_03_002_http_4xx_not_retried_deterministic_harness` in
+// slideforge-data, which uses a `todo!()` stub. See Red Gate log for the full
+// rationale on why no failing-stub Red Gate is used here.
+//
+// The `#[ignore]` annotation on `test_cold_budget_under_200ms` is the
+// implementer's one-line change that eliminates the spurious CI failure.
+// That change has no driving test — it is documented here instead.
+// ---------------------------------------------------------------------------
+
+/// STORY-080 AC-002 / AC-003: cold render must produce `Ok(NormalizedDiagramSvg)`
+/// with non-empty content, regardless of timing.
+///
+/// This is the timing-gate-free companion to `test_cold_budget_under_200ms`.
+/// It verifies the correctness contract (BC-1.12.003 postcondition: render
+/// returns normalized SVG) without a wall-clock assertion, making it safe
+/// for all 5 CI platforms under any load level.
+///
+/// The timing gate (NFR-003 compliance) is preserved in `test_cold_budget_under_200ms`
+/// but moved to on-demand execution (Option A: `#[ignore = "..."]`) by the
+/// implementer so it does not cause spurious CI failures under CPU contention.
+///
+/// Traces to: BC-1.12.003 (cold render correctness), STORY-080 AC-002, AC-003.
+#[test]
+#[allow(non_snake_case)] // BC-based naming convention: test_BC_S_SS_NNN_xxx
+fn test_BC_1_12_003_cold_render_correctness() {
+    // This test runs in the cold_budget.rs binary (separate Cargo test binary),
+    // so FONT_DB starts uninitialized. However, because cold_budget.rs runs
+    // BOTH this test and `test_cold_budget_under_200ms` in the same binary,
+    // the ordering of tests within the binary is non-deterministic. For the
+    // cold-path budget measurement, `test_cold_budget_under_200ms` is the
+    // authoritative test; this test only verifies correctness.
+    let result = DiagramRendererImpl::render_diagram(
+        "graph TD\n  A-->B[correctness check]",
+        DiagramLang::Mermaid,
+        "cold-correctness-test",
+    );
+
+    // AC-003: the cold render MUST return Ok(...) with non-empty content.
+    // This assertion is non-negotiable — it must survive regardless of what
+    // Option A/B/C does to the timing gate.
+    let normalized =
+        result.expect("cold render must succeed for a valid Mermaid flowchart (AC-003)");
+    assert!(
+        !normalized.is_empty(),
+        "cold render must return non-empty NormalizedDiagramSvg (AC-003)"
+    );
+
+    // No timing assertion — that is the entire point of this companion test.
+    // The timing gate lives in test_cold_budget_under_200ms (on-demand, #[ignore]).
 }
