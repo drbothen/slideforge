@@ -1,0 +1,75 @@
+[package]
+name = "slideforge-preview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Live web preview server for slideforge — axum HTTP + WebSocket + SVG canvas (STORY-047)"
+
+[dependencies]
+# HTTP server + built-in WebSocket (axum::extract::ws::WebSocketUpgrade).
+# 0.8.2 was yanked; minimum safe 0.8.x is 0.8.9. feature "ws" enables WebSocket.
+axum = { workspace = true }
+
+# Async runtime — curated feature set per ADR-021 (NOT "full").
+tokio = { version = "=1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+    "signal",
+    "fs",
+    "io-util",
+] }
+
+# JSON serialization for WebSocket messages.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Structured error types.
+thiserror = { workspace = true }
+
+# HTML rendering dependency (P4 Composite Rendering Model — ADR-008).
+slideforge-html = { workspace = true }
+
+# Core IR types: LaidOutDeck, LaidOutSlide, etc.
+slideforge-layout = { workspace = true }
+
+# Plugin API: Diagnostic type for error messages.
+slideforge-plugin-api = { workspace = true }
+
+# Structured logging (CLAUDE.md: no println! in library crates).
+tracing = { workspace = true }
+
+[dev-dependencies]
+# WebSocket test client (DEV-DEP ONLY — NOT a runtime dep).
+# axum 0.8 built-in WebSocket (axum::extract::ws::WebSocketUpgrade) is the
+# server-side implementation; tungstenite is only for test clients.
+tokio-tungstenite = { workspace = true }
+
+# reqwest for HTTP integration tests (AC-001: GET / → 200 OK).
+# NOTE: The workspace reqwest entry uses `features = ["rustls-tls", ...]` but
+# reqwest 0.13.4 renamed this feature to `rustls`. The workspace Cargo.toml
+# needs the feature corrected from "rustls-tls" → "rustls" before reqwest
+# can be activated as a workspace dep. Tracked as a workspace bug to fix at
+# implementation time. The `{ workspace = true }` form inherits the broken
+# feature name, so we bypass the workspace entry and pin directly here.
+# See: https://docs.rs/reqwest/0.13.4/reqwest/#optional-features
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "charset", "http2"] }
+
+# Async test support (feature flags already included in runtime dep; repeated for clarity).
+tokio = { version = "=1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "net",
+    "sync",
+] }

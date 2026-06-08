@@ -23,6 +23,7 @@ members = [
     "crates/slideforge-pdf",      # STORY-043: Phase 4 — PDF core backend
     "crates/slideforge-docx",     # STORY-041: Wave 4 — DOCX core serialization
     "crates/slideforge-html",     # STORY-046: Wave 5 — Static HTML exporter (WCAG AA)
+    "crates/slideforge-preview",  # STORY-047: Wave 5 — Live preview server (axum + WebSocket)
 ]
 
 # Crates that exist as scaffolding but are not built yet (Phase 5+).
@@ -129,6 +130,7 @@ slideforge-diagrams = { path = "crates/slideforge-diagrams", version = "0.1.0" }
 slideforge-pdf = { path = "crates/slideforge-pdf", version = "0.1.0" }
 slideforge-docx = { path = "crates/slideforge-docx", version = "0.1.0" }
 slideforge-html = { path = "crates/slideforge-html", version = "0.1.0" }
+slideforge-preview = { path = "crates/slideforge-preview", version = "0.1.0" }
 
 # Release profile tuned for binary size and runtime perf.
 #
