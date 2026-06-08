@@ -59,8 +59,8 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "2f6d5da4"
-develop_pr_count: 72
+develop_sha: "e08f2f80"
+develop_pr_count: 73
 last_updated: 2026-06-08
 wave_4_gate: PASS
 wave_4_gate_date: 2026-06-07
@@ -69,8 +69,8 @@ wave_4_followups_closed: 6
 wave_5_started: 2026-06-07
 wave_5_total_stories: 22
 wave_5_total_points: 130
-wave_5_stories_merged: 4
-wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079]
+wave_5_stories_merged: 5
+wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079, STORY-080]
 wave_5_dep_prep_pr: 69
 wave_5_dep_prep_commit: "3e3a978f"
 wave_5_dep_prep_merged: 2026-06-08
@@ -628,11 +628,18 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 5/6/7 (7-pass total cascade)"
     notes: "Layout: ContentBlock::Bullets → FrameContent::TextRun. One TextRun frame per BulletItem (recursive, parent-before-children). MAX_BULLET_DEPTH=64 + LayoutError::BulletDepthExceeded (E-LAY-007). Had 2 CI fmt/clippy re-fixes (bare -D warnings used instead of full pedantic gate). Security CLEAN + pr-reviewer APPROVE."
   STORY-074:
-    status: draft
+    status: in-review
     wave: 5
     priority: P2
     points: 3
-    notes: "brand-em-sizing follow-up from STORY-028 cascade; deferred P2 to Wave 5"
+    pr: 74
+    pr_url: "https://github.com/drbothen/slideforge/pull/74"
+    pr_head_commit: "c84976b2"
+    pr_base_commit: "2f6d5da4"
+    adversary_convergence: "3/3 strict-CLEAN at passes 11/12/13 (13 total passes — long doc-precision tail; code converged since pass 3)"
+    adversary_streak: "3/3"
+    converged: true
+    notes: "Brand-aware Em conversion (font_size_emu); follow-up from STORY-028 cascade; deferred P2 to Wave 5. LOCAL converged 3/3 strict-CLEAN passes 11-13; PR #74 OPEN in security+pr review as of 2026-06-08. STANDING MERGE AUTH applies when security CLEAN + pr-reviewer APPROVE + CI green."
   STORY-075:
     status: merged
     wave: 4
@@ -693,11 +700,20 @@ stories:
     specs_evolved: "BC-1.12.003 v1.3 (inv-4 ordering, PC-8/9/10, EC-005..008); error-taxonomy v2.26 (E-EXP-004 sibling-accuracy); export-architecture v1.4 (root-at-1 iterative)"
     notes: "slideforge-diagrams SVG DoS hardening: SEC-001 nesting-depth guard (CWE-674, iterative DFS cap 64), SEC-002 byte-size guard (CWE-400, cap 50 MiB), E-EXP-004 added. BC-1.12.003; EPIC-12. Follow-ups: FU-079-SEC-001 (MEDIUM, Phase 6 exhaustiveness), FU-079-SEC-LOW, FU-079-DOC-NITS (all anchored Phase 6)."
   STORY-080:
-    status: draft
+    status: merged
     wave: 5
     priority: P2
     points: 3
-    notes: "Test reliability: de-flake http_4xx_not_retried (slideforge-data, connection-count race on Windows) + cold_budget (slideforge-diagrams, timing gate under CI load); BC: BC-1.03.002; EPICs: EPIC-19 (CI); created 2026-06-01 from DI-6 (drift item → story)"
+    pr: 73
+    merge_commit: "e08f2f80"
+    merged: 2026-06-08
+    adversary_convergence: "3/3 strict-CLEAN at passes 5/6/7 (7 total passes)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "CLEAN"
+    pr_reviewer: "APPROVE"
+    ci_status: "all-green"
+    notes: "Test reliability: de-flake http_4xx_not_retried (deterministic blocking-accept+mpsc 4xx harness, eliminates Windows TCP keep-alive flake) + cold_budget (restructured into always-on catastrophic NFR-003 gate 1s/2s catches 10x EC-005 + #[ignore]'d precision test + always-on correctness companion). PERMANENTLY FIXES cold_budget CI flake. Error-taxonomy edge-case anchors corrected. BC: BC-1.03.002; EPIC-19. Follow-ups: FU-080-CI-PLATFORMS (5th macOS leg), FU-080-BC-PROSE (non-behavioral). cold_budget flake eliminated — no more re-runs needed on future PRs."
   STORY-086:
     status: merged
     wave: 4
