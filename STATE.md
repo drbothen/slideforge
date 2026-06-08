@@ -29,11 +29,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "3 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71). Both unlock keys (046+055) merged → L1 unlocked. 19 stories / 98 pts remain. WAVE5-FULLWIDTH-LAUNCH: 8-story fan-out (082/088/072/074/079/080/047/081) Stage-1 Red Gate IN FLIGHT."
-develop_sha: "cbebfd57"
-develop_pr_count: 71
-error_taxonomy_version: "v2.24"
-workspace_tests: "~3690+ pass / 18 skip (develop cbebfd57); slideforge-cli added: slideforge build command + unified compile()/export_format() API; known flaky: slideforge-diagrams cold_budget timing tracked STORY-080"
+wave_5_status: "4 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72). 18 stories / 95 pts remain. In-flight: STORY-080 (converged→PR), STORY-074 (pass 10+), STORY-047/088/072/082/081 active. STORY-080 LOCAL 3/3 strict-CLEAN (passes 5-6-7); demo+PR pending."
+develop_sha: "2f6d5da4"
+develop_pr_count: 72
+error_taxonomy_version: "v2.26"
+workspace_tests: "~3690+ pass / 18 skip (develop 2f6d5da4); slideforge-cli added: slideforge build command + unified compile()/export_format() API; cold_budget flake tracked STORY-080 (converged, PR pending)"
 workspace_test_failures: 0
 ---
 
@@ -44,25 +44,26 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `cbebfd57` (71 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `2f6d5da4` (72 merged PRs, 0 open PRs).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04). Fresh machines: `git clone <repo> && git worktree add .factory factory-artifacts`.
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-046 MERGED PR #70 (fa85d1136). STORY-055 MERGED PR #71 (cbebfd57). Both unlock keys done. 19 stories / 98 pts remain.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-079 MERGED PR #72 (2f6d5da4). 4 of 22 done. 18 stories / 95 pts remain.
 
-**Wave 5 — 3 of 22 done; 19 stories / 98 pts remaining:**
+**Wave 5 — 4 of 22 done; 18 stories / 95 pts remaining (develops 2f6d5da4, 72 PRs):**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation. FieldSchemaValidator live. error-taxonomy v2.24. ADR-020. STORY-082 spec reconciled (BC-4.01.003 v1.3, export-arch v1.1).
-- **STORY-046 MERGED** PR #70 (fa85d1136): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. ADR-008 amended (P4 — real positioned HTML text layer + sibling `<svg role="presentation">` graphics; outer SVG NOT aria-hidden). BC-4.03.003 v1.4 (4-step heading chain + synthetic visually-hidden h1). HtmlExporter registered in root registry. 23-pass LOCAL cascade; 3/3 strict-CLEAN (passes 21-22-23). slideforge-html crate adds ~132 new tests. STORY-047 + STORY-081 UNLOCKED (←046).
-- **STORY-055 MERGED** PR #71 (cbebfd57): `slideforge build` CLI command + miette diagnostics; unified compile pipeline (compile_core single source; build_inner = compile_core + export_format; new public API compile()/export_format()/CompileOptions/CompiledDeck; BuildError::MultistageFailed). 7-pass LOCAL 3-CLEAN + 4 post-convergence CI-fix cycles. Security CLEAN (2 LOW follow-ups Phase 6). STORY-057/058/060/064 UNLOCKED (←055). STORY-056 UNLOCKED (←047+055).
+- **STORY-046 MERGED** PR #70 (fa85d113): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. BC-4.03.003 v1.4. STORY-047 + STORY-081 UNLOCKED (←046).
+- **STORY-055 MERGED** PR #71 (cbebfd57): `slideforge build` CLI + miette diagnostics; unified compile pipeline. STORY-057/058/060/064 UNLOCKED (←055). STORY-056 UNLOCKED (←047+055).
+- **STORY-079 MERGED** PR #72 (2f6d5da4): slideforge-diagrams SVG DoS hardening. SEC-001 nesting-depth guard (CWE-674, cap 64, iterative), SEC-002 byte-size guard (CWE-400, cap 50 MiB), error E-EXP-004. BC-1.12.003 v1.3 (inv-4 ordering, PC-8/9/10, EC-005..008). error-taxonomy v2.26 (E-EXP-004 sibling-accuracy). export-architecture v1.4 (root-at-1 iterative). LOCAL adversary 3/3 strict-CLEAN (passes 3-4-5; 5 total). Security CLEAN, pr-reviewer APPROVE, CI green.
 - **DEP-PREP MERGED** PR #69 (3e3a978f): [workspace.dependencies] centralized + ADR-022 major-version migrations + INERT Wave-5 catalog. ADR-022 migration tasks DONE.
 - **Uncertainty pass COMPLETE:** all stories spec-accurate. Ready to deliver.
-- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 082/088/072/074/079/080. Both unlock keys merged → L1 UNLOCKED. Critical path: 047→056→059. **CAUTION:** resolve FU-SEC-001-GIT2-OPENSSL before STORY-060/061.
+- **In-flight:** STORY-080 (LOCAL 3/3 strict-CLEAN passes 5-6-7, demo+PR pending — also fixes cold_budget flake permanently), STORY-074 (pass 10+, prose-nit tail), STORY-047 (Pass 4), STORY-088 (Pass 2), STORY-072/082 (impl done→adversary), STORY-081 (impl).
+- **Dependency levels:** Full table in BACKLOG.md WAVE5-DELIVERY. **L0 remaining:** 082/088/072/074/080. Both unlock keys merged → L1 active: 047/081. Critical path: 047→056→059. **CAUTION:** resolve FU-SEC-001-GIT2-OPENSSL before STORY-060/061.
 - **SEC-001-HARDENING (OPEN, non-blocking):** residual string-layer bypass vectors in ImagePathValidator. ANCHORED to image-loading story.
-- **SEC-001-DIAG-HARDENING (OPEN, non-blocking LOW):** unbounded user-authored strings in diagnostics. ANCHORED to future validator/diagnostic-hardening story.
 - **FU-SEC-001-GIT2-OPENSSL (OPEN, MEDIUM):** inert `git2` catalog entry with `features=["https"]` will pull `openssl-sys` (banned by deny.toml) when first consumed. MUST resolve before STORY-060/061. Anchored to STORY-060. See BACKLOG.md.
 
-**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3690+ pass, 18 skip; slideforge-cli (build command + unified compile()/export_format() API) added in PR #71; known flaky: cold_budget tracked STORY-080) (4) read `.factory/BACKLOG.md` and TaskCreate one task per OPEN item (5) read NEXT ACTIONS below (6) await human go-ahead before picking a story.
+**Startup procedure:** (1) run `vsdd-factory:factory-worktree-health` (2) verify `develop == origin/develop` (3) confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3690+ pass, 18 skip; cold_budget STORY-080 converged, PR pending) (4) read `.factory/BACKLOG.md` and TaskCreate one task per OPEN item (5) read NEXT ACTIONS below (6) await human go-ahead before picking a story.
 
 **Durable task source:** `.factory/BACKLOG.md` — rebuild in-session tasks from OPEN items there on every session start. State-manager mirrors it alongside STATE.md at every milestone.
 
@@ -74,10 +75,10 @@ workspace_test_failures: 0
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `cbebfd57`, 71 merged PRs). STORY-089 MERGED PR #68; STORY-046 MERGED PR #70; STORY-055 MERGED PR #71; dep-prep MERGED PR #69. 19 stories / 98 pts remain. 89 stories / 553 pts total.
+Phase 3, **Wave 5 IN PROGRESS** (develop `2f6d5da4`, 72 merged PRs). STORY-089 PR #68; STORY-046 PR #70; STORY-055 PR #71; STORY-079 PR #72; dep-prep PR #69. 4 of 22 done. 18 stories / 95 pts remain. 89 stories / 553 pts total.
 
-- Active worktrees: 8 — STORY-082/088/072/074/079/080/047/081 in `.worktrees/` on `feature/STORY-<NNN>`, base cbebfd57. Stage-1 Red Gate in flight. Open PRs: 0.
-- Workspace: ~3690+ pass, 18 skip (slideforge-cli added: build command + unified compile()/export_format() API; known flaky: cold_budget tracked STORY-080).
+- Active worktrees: 7 — STORY-047/072/074/080/081/082/088 in `.worktrees/` on `feature/STORY-<NNN>`. STORY-079 worktree cleaned up post-merge. Open PRs: 0.
+- Workspace: ~3690+ pass, 18 skip (cold_budget STORY-080 converged→PR pending).
 - Uncertainty pass: COMPLETE (all stories spec-accurate).
 - ADR-022 dep-centralization migrations: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE (wired in STORY-055 otel feature).
 
@@ -85,11 +86,11 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `cbebfd57`, 71 merged PRs). STORY-089 M
 
 ## NEXT ACTIONS
 
-**STATUS: Wave 5, both unlock keys merged. FULL-WIDTH FAN-OUT AUTHORIZED + batch selected (human, 2026-06-08).**
+**STATUS: Wave 5, STORY-079 merged (PR #72, develop 2f6d5da4). 4 of 22 done. 7 worktrees active.**
 
-**RESUME PROCEDURE (zero context):** (1) run `vsdd-factory:factory-worktree-health`; (2) verify `git rev-parse develop` == origin/develop == `cbebfd57`; (3) confirm workspace tests (`cargo nextest run --workspace` — expect green modulo cold_budget flake STORY-080); (4) read BACKLOG.md WAVE5-DELIVERY for the approved batch; (5) LAUNCH the approved 8-story batch full-width via per-story delivery (create one worktree per story off develop, then per-story: test-writer stubs → test-writer failing tests → implementer TDD → LOCAL adversary 3-CLEAN (BC-5.39.001) → demo-recorder → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → squash-merge → state-manager post-merge burst → worktree cleanup).
+**RESUME PROCEDURE (zero context):** (1) run `vsdd-factory:factory-worktree-health`; (2) verify `git rev-parse develop` == origin/develop == `2f6d5da4`; (3) confirm workspace tests (`cargo nextest run --workspace` — expect green; cold_budget permanently fixed pending STORY-080 PR); (4) read BACKLOG.md WAVE5-DELIVERY for in-flight status; (5) CONTINUE per-story delivery for active worktrees (STORY-080 converged→PR, STORY-074 at pass 10+, STORY-047/088/072/082/081 in varying adversary stages).
 
-**APPROVED BATCH:** STORY-082, 088, 072, 074, 079, 080, 047, 081. **HELD:** STORY-057/058/064 (slideforge-cli same-crate conflict — deliver after this batch); STORY-056 (←047 not yet merged); STORY-060/061 (FU-SEC-001-GIT2-OPENSSL must be resolved first).
+**IN-FLIGHT (7 active worktrees):** STORY-047 (Pass 4), STORY-072 (impl→adversary), STORY-074 (pass 10+ prose-nit tail), STORY-080 (3/3 strict-CLEAN passes 5-6-7, demo+PR pending), STORY-081 (impl), STORY-082 (impl→adversary), STORY-088 (Pass 2). **HELD:** STORY-057/058/064 (slideforge-cli same-crate conflict — deliver after this batch); STORY-056 (←047 not yet merged); STORY-060/061 (FU-SEC-001-GIT2-OPENSSL must be resolved first).
 
 **CRITICAL — APPLY LESSON-21 to EVERY story's exit gate** (this prevented 4 CI-fix cycles on STORY-055): the implementer/pre-push gate MUST run, in addition to nextest: `cargo test --workspace --all-features` (SHARED-PROCESS — catches global-state/test-isolation bugs nextest masks), `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` (catches cross-crate intra-doc links), and tests touching filesystem/global-state MUST be cross-platform + isolation-robust (no `/nonexistent` Unix-root paths — use a blocker-file parent; no virgin-global-subscriber assumptions; Windows can't run on the dev mac, so expect the Windows CI job as validator). APPLY LESSON-22: verify any implementer "upstream gap" claim + that any cited story ID exists before routing a deferral.
 
@@ -114,7 +115,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `cbebfd57`, 71 merged PRs). STORY-089 M
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS — 3/22 done (STORY-089 PR #68, STORY-046 PR #70, STORY-055 PR #71); 19 stories/98 pts remain. Both unlock keys (046+055) merged → L1 unlocked. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 4: 23/23 COMPLETE + follow-ups CLOSED. Wave 5: IN PROGRESS — 4/22 done (STORY-089 PR #68, STORY-046 PR #70, STORY-055 PR #71, STORY-079 PR #72); 18 stories/95 pts remain. Both unlock keys (046+055) merged → L1 unlocked. | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ## Wave 4 Story Status (summary)
@@ -129,19 +130,18 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `cbebfd57`, 71 merged PRs). STORY-089 M
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop cbebfd57 (71 merged PRs). 8-story fan-out LAUNCHED (Stage-1 Red Gate in flight). 19 stories / 98 pts remain.**
+**Wave 5 IN PROGRESS. develop 2f6d5da4 (72 merged PRs). STORY-079 merged. 7 worktrees active. 18 stories / 95 pts remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-08 |
-| **Position** | Wave 5 IN PROGRESS. 3 stories merged (STORY-089 PR #68, STORY-046 PR #70, STORY-055 PR #71). WAVE5-FULLWIDTH-LAUNCH: 8-story fan-out started. Stage-1 (test-writer Red Gate) launched in parallel for all 8. Active worktrees at cbebfd57: STORY-082/088/072/074/079/080 (L0) + STORY-047/081 (L1, ←046). 19 stories / 98 pts remain. |
-| **develop SHA** | `cbebfd57` (71 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Active worktrees** | 8 — STORY-082/088/072/074/079/080/047/081, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`, base cbebfd57 |
-| **Stage** | Stage-1 (test-writer Red Gate: compilable stubs + failing tests) IN FLIGHT for all 8 stories |
-| **Merge model** | Parallel development → SERIAL merge w/ rebase + re-gate. Serialize 072+074 (shared types+layout). Crate overlaps: layout (082/088/072/074), pdf (072/079/081), types (072/074), syntax (082/088), eval (088/081), diagrams (079/080), html (047/081). |
-| **Workspace tests** | ~3690+ pass / 18 skip (slideforge-cli build command + unified API added in PR #71; known flaky: cold_budget STORY-080) |
+| **Position** | Wave 5 IN PROGRESS. 4 stories merged (STORY-089 PR #68, STORY-046 PR #70, STORY-055 PR #71, STORY-079 PR #72). Active: STORY-080 (3/3 strict-CLEAN, demo+PR pending), STORY-074 (pass 10+ prose-nit tail), STORY-047 (Pass 4), STORY-088 (Pass 2), STORY-072/082 (impl→adversary), STORY-081 (impl). 18 stories / 95 pts remain. |
+| **develop SHA** | `2f6d5da4` (72 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Active worktrees** | 7 — STORY-047/072/074/080/081/082/088, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`. STORY-079 cleaned up post-merge. |
+| **Merge model** | Parallel development → SERIAL merge w/ rebase + re-gate. Serialize 072+074 (shared types+layout). Crate overlaps: layout (082/088/072/074), pdf (072/081), types (072/074), syntax (082/088), eval (088/081), html (047/081). |
+| **Workspace tests** | ~3690+ pass / 18 skip (cold_budget permanently fixed pending STORY-080 PR merge) |
 | **factory-artifacts** | PUSHED to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | 8 worktrees + branches exist at base cbebfd57. Check each branch's commits to see which stage each story reached. Per-story: test-writer stubs → failing tests → implementer TDD → LOCAL adversary 3-CLEAN (BC-5.39.001) → demo-recorder → pr-manager 9-step → squash-merge → state-manager post-merge burst → worktree cleanup. Apply LESSON-21 exit gate to EVERY story. HELD (next batch after 8 merge): STORY-057/058/064 (cli same-crate conflict). BLOCKED until FU-SEC-001-GIT2-OPENSSL resolved: STORY-060/061. HELD (←047 unmerged): STORY-056. Dep-graph L0–L3 in BACKLOG.md WAVE5-DELIVERY. Phases 4-7 remain for v1.0. |
+| **RESUME INSTRUCTION** | 7 worktrees + branches in varying stages. STORY-080: converged 3/3 clean, needs demo+pr-manager. STORY-074: long tail, may need final fixburst before clean streak. Others: check each branch's commits to see which stage reached. Per-story: implementer TDD → LOCAL adversary 3-CLEAN (BC-5.39.001) → demo-recorder → pr-manager 9-step → squash-merge → state-manager post-merge burst → worktree cleanup. Apply LESSON-21 exit gate to EVERY story. HELD (next batch after this batch merges): STORY-057/058/064 (cli same-crate conflict). BLOCKED until FU-SEC-001-GIT2-OPENSSL resolved: STORY-060/061. HELD (←047 unmerged): STORY-056. Dep-graph L0–L3 in BACKLOG.md WAVE5-DELIVERY. Phases 4-7 remain for v1.0. |
 
 ---
 
@@ -188,6 +188,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-08 | STORY-079-MERGE | PR #72 squash-merged → develop `2f6d5da4` (72 merged PRs). slideforge-diagrams SVG DoS hardening: SEC-001 nesting-depth guard (CWE-674, iterative DFS cap 64), SEC-002 byte-size guard (CWE-400, cap 50 MiB), E-EXP-004 added. Specs evolved during convergence: BC-1.12.003 v1.3 (inv-4 ordering correction, PC-8/9/10, EC-005..008); error-taxonomy v2.26 (E-EXP-004 sibling-accuracy); export-architecture v1.4 (root-at-1 iterative). LOCAL adversary 3/3 strict-CLEAN (passes 3-4-5; 5 total). Security CLEAN, pr-reviewer APPROVE, CI green (cold_budget flake cleared on re-run). Follow-ups anchored Phase 6: FU-079-SEC-001 (compile-time exhaustiveness on usvg Node variants), FU-079-SEC-LOW (slide_title truncation + shared constants + distinct sentinel spans), FU-079-DOC-NITS (normalize.rs AC-003 doc + evidence-report edge-case IDs). See BACKLOG.md. |
 | 2026-06-08 | WAVE5-FULLWIDTH-LAUNCH | Human confirmed "full 8 parallel now". Orchestrator created 8 per-story worktrees off develop cbebfd57 and launched Stage-1 (test-writer Red Gate: compilable stubs + failing tests) for all 8 stories in parallel. Active worktrees + branches: STORY-082 (feature/STORY-082), STORY-088, STORY-072, STORY-074, STORY-079, STORY-080, STORY-047, STORY-081 — each in `.worktrees/STORY-<NNN>` on branch `feature/STORY-<NNN>`. Merge model: parallel development, SERIAL merge with rebase + re-gate. Known crate overlaps to manage at merge time: slideforge-layout (082/088/072/074), slideforge-pdf (072/079/081), slideforge-types (072/074), slideforge-syntax (082/088), slideforge-eval (088/081), slideforge-diagrams (079/080), slideforge-html (047/081). Serialize 072 and 074 merges (shared types+layout). Per-story flow per BC-5.39.001 + LESSON-21 exit gate applies to each. RESUME NOTE: if session dies mid-flight, 8 worktrees + feature branches exist at base cbebfd57; check each branch's commits to see which stage each story reached. |
 | 2026-06-08 | WAVE5-FULLWIDTH-FANOUT-AUTH | Human authorized FULL-WIDTH fan-out (up to 8 parallel) and selected the next delivery batch. APPROVED NEXT BATCH (8 stories, launch in parallel): STORY-082, STORY-088, STORY-072, STORY-074, STORY-079, STORY-080, STORY-047, STORY-081. RATIONALE: 6 ready L0 (082/088/072/074/079/080) + the two 046-unlocked L1 (047,081). STORY-080 included to fix the recurring cold_budget timing flake (re-run-cleared on every PR this session). HELD (do NOT launch in this batch): STORY-057/058/064 — all extend slideforge-cli and would collide in parallel worktrees; deliver them AFTER this batch (or serialized) to avoid same-crate merge conflicts. STORY-056 — depends on STORY-047 (not yet merged). STORY-060/061 — blocked by FU-SEC-001-GIT2-OPENSSL (must resolve git2 https/openssl-sys before launching). NOTE within-batch minor same-crate risk: STORY-072+074 are both EPIC-07 (verify crate before parallelizing those two). |
 | 2026-06-08 | STORY-055-MERGE | PR #71 squash-merged → develop cbebfd57. slideforge build CLI command + miette diagnostics; UNIFIED compile pipeline (compile_core single source; build_inner = compile_core + export_format; new public API compile()/export_format()/CompileOptions/CompiledDeck; BuildError::MultistageFailed for cross-stage eval+validator accumulation). 7-pass LOCAL 3-CLEAN + 4 post-convergence CI-fix cycles (B1 cross-crate intra-doc link; B2 otel rt-tokio needed a Tokio runtime — wired TracingGuard owning a runtime gated on `otel` feature, ADR-021; snapshots-job shared-process test-isolation — init_tracing already-set→Ok(noop) + moved traced_test to own binary; Windows cross-platform export-error test injection — portable blocker-file technique). Security CLEAN (2 LOW follow-ups SEC-001 tmp-file symlink, SEC-002 otel endpoint → Phase 6). pr-reviewer APPROVE. adversary 3-CLEAN. CI all-green incl windows+macos+snapshots+docs+bench. Convergence: `.factory/cycles/STORY-055/convergence-summary.md`. |

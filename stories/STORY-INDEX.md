@@ -13,7 +13,7 @@ total_stories: 89
 stories_written: 89
 stories_ready: 0
 stories_in_progress: 0
-stories_merged: 59
+stories_merged: 65
 ---
 
 # STORY-INDEX — slideforge v1.0
@@ -33,10 +33,10 @@ stories_merged: 59
 | Wave 1 | 14 | 0 | 0 | 0 | 14 | 0 |
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
-| Wave 4 | 23 | 1 | 0 | 1 | 21 | 0 |
-| Wave 5 | 22 | 22 | 0 | 0 | 0 | 0 |
+| Wave 4 | 23 | 0 | 0 | 0 | 23 | 0 |
+| Wave 5 | 22 | 18 | 0 | 0 | 4 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **89** | **29** | **0** | **1** | **59** | **0** |
+| **Total** | **89** | **24** | **0** | **0** | **65** | **0** |
 
 ---
 
@@ -131,7 +131,7 @@ stories_merged: 59
 | [STORY-077](stories/STORY-077-section-block-ir-extension.md) | EPIC-18 | SectionBlock IR Extension: FieldValue body + section-level register routing + inline-markup parser | BC-3.02.002, BC-1.14.003 | P0 | 13 | strict | merged |
 | [STORY-078](stories/STORY-078-parser-section-block-syntax.md) | EPIC-02 | Parser: section block syntax (section &lt;type&gt;: ... with sub-blocks) | BC-3.02.002 | P0 | 5 | strict | merged |
 | [STORY-086](stories/STORY-086-slide-field-to-block-threading.md) | EPIC-03 | Stage 2b: Post-Eval Field-to-Block Threading Pass (AltText::Unspecified) + TextTag Routing | BC-1.16.001, BC-5.02.001, BC-5.01.001, BC-4.01.001, BC-4.02.001 | P0 | 21 | strict | merged |
-| [STORY-087](stories/STORY-087-color-coded-slide-types.md) | EPIC-01 | Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement) | BC-1.17.001, BC-1.17.002, BC-1.17.003 | P1 | 13 | strict | draft |
+| [STORY-087](stories/STORY-087-color-coded-slide-types.md) | EPIC-01 | Color-Coded Slide Types: status, progress_bar, weighted_composite (Registration + LabelCheck WCAG Enforcement) | BC-1.17.001, BC-1.17.002, BC-1.17.003 | P1 | 13 | strict | merged |
 
 **Wave 4 total points: 163** _(150 prior + 13 STORY-087 pull-in [human-authorized 2026-06-06: Wave 5→Wave 4 to close F-G3-HIGH-003 before re-gate]; closes BLK-002, F-G3-CRIT-001, F-G3-HIGH-001/002/003; must re-pass Gate 3 + Gate 5 with both STORY-086 + STORY-087 merged)_
 
@@ -141,11 +141,11 @@ stories_merged: 59
 
 | Story ID | Epic | Title | BCs | Priority | Points | tdd_mode | Status |
 |----------|------|-------|-----|---------|--------|---------|--------|
-| [STORY-089](stories/STORY-089-field-value-type-validation.md) | EPIC-01 | FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement | BC-1.18.001 | P0 | 8 | strict | draft |
-| [STORY-046](stories/STORY-046-html-exporter-wcag.md) | EPIC-14 | Static HTML Exporter: WCAG AA via axe-core | BC-4.03.003 | P0 | 8 | strict | draft |
+| [STORY-089](stories/STORY-089-field-value-type-validation.md) | EPIC-01 | FieldDef Type Annotation + validate_fields E-VAL-104 Enforcement | BC-1.18.001 | P0 | 8 | strict | merged |
+| [STORY-046](stories/STORY-046-html-exporter-wcag.md) | EPIC-14 | Static HTML Exporter: WCAG AA via axe-core | BC-4.03.003 | P0 | 8 | strict | merged |
 | [STORY-047](stories/STORY-047-preview-server-websocket.md) | EPIC-14 | Web Preview Server: axum + WebSocket + SVG Canvas | BC-4.03.004 | P1 | 8 | strict | draft |
 | [STORY-048](stories/STORY-048-preview-live-reload-a11y.md) | EPIC-14 | Web Preview: Live Reload + Accessibility | BC-5.05.005 | P1 | 8 | strict | draft |
-| [STORY-055](stories/STORY-055-cli-build-command.md) | EPIC-15 | CLI: build command + miette error rendering | BC-1.15.001-003 | P0 | 8 | strict | draft |
+| [STORY-055](stories/STORY-055-cli-build-command.md) | EPIC-15 | CLI: build command + miette error rendering | BC-1.15.001-003 | P0 | 8 | strict | merged |
 | [STORY-056](stories/STORY-056-cli-watch-mode.md) | EPIC-15 | CLI: watch mode + notify integration + incremental rebuild | BC-5.05.001-004 | P0 | 8 | strict | draft |
 | [STORY-057](stories/STORY-057-cli-init-extract-brand.md) | EPIC-15 | CLI: init scaffolding + extract-brand command | BC-5.06.001-002 | P0 | 5 | strict | draft |
 | [STORY-058](stories/STORY-058-cli-flags-nocolor.md) | EPIC-15 | CLI: --json/--quiet/--verbose flags + NO_COLOR + non-TTY | BC-1.15.001 | P0 | 5 | strict | draft |
@@ -158,7 +158,7 @@ stories_merged: 59
 | [STORY-065](stories/STORY-065-workspace-sfconfig-explain.md) | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | BC-5.04.002-003 | P1 | 5 | strict | draft |
 | [STORY-072](stories/STORY-072-shape-gradient-fills.md) | EPIC-07 | shape: Gradient Fills (FillSpec::Gradient) | BC-3.04.001 | P2 | 3 | strict | draft |
 | [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | draft |
-| [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | draft |
+| [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | merged |
 | [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | draft |
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | draft |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | draft |

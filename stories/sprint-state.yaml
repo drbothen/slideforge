@@ -59,18 +59,18 @@ wave_4_batch_c:
 wave_4_pulled_in_p1: [STORY-073, STORY-075, STORY-076]
 wave_4_deferred_p2_to_wave5: [STORY-072, STORY-074]
 wave_4_bc_deltas: "BC-2.01.001 v1.1→v1.2; BC-2.01.003 v1.8→v1.9; error-taxonomy v2.2→v2.3"
-develop_sha: "3e3a978f"
-develop_pr_count: 69
+develop_sha: "2f6d5da4"
+develop_pr_count: 72
 last_updated: 2026-06-08
 wave_4_gate: PASS
 wave_4_gate_date: 2026-06-07
 wave_4_stories_merged: 23
 wave_4_followups_closed: 6
 wave_5_started: 2026-06-07
-wave_5_total_stories: 21
-wave_5_total_points: 114
-wave_5_stories_merged: 1
-wave_5_stories_merged_list: [STORY-089]
+wave_5_total_stories: 22
+wave_5_total_points: 130
+wave_5_stories_merged: 4
+wave_5_stories_merged_list: [STORY-089, STORY-046, STORY-055, STORY-079]
 wave_5_dep_prep_pr: 69
 wave_5_dep_prep_commit: "3e3a978f"
 wave_5_dep_prep_merged: 2026-06-08
@@ -455,7 +455,7 @@ stories:
     security_review: "CLEAN (2 LOW only — SEC-040-001 URL safety verified via test; SEC-040-002 deferred)"
     notes: "PPTX Speaker Notes + notesMaster1.xml + handoutMaster1.xml (BC-4.01.003 Half A, BC-4.01.006). Re-scoped 5→3 pts; slide-grouping sections split to STORY-082 (human-authorized 2026-06-04). SafeUrl guard (link_safety.rs is_safe_link_scheme, CWE-601) shipped. Missing slide→notesSlide rel fixed; NotesMasterSerializer dead-code issue resolved; lossy+insecure notes links fixed; schema-invalid grpSpPr fixed. Batch B pptx chain 037→038→039→040 COMPLETE."
   STORY-082:
-    status: ready
+    status: in-progress
     wave: 5
     priority: P0
     points: 5
@@ -677,11 +677,21 @@ stories:
     adversary_convergence: "3/3 strict-CLEAN at passes 7/8/9 (10-pass total cascade)"
     notes: "Parser: section block syntax. Un-reserved `section` keyword; section_block_parser → SectionNode; W-PAR-001 parse-time warning (unrecognized sub-block key); E-PAR-017 (reserved-name no-colon); E-PAR-018 (section-not-top-level). Security CLEAN + pr-reviewer APPROVE. UNBLOCKS STORY-077."
   STORY-079:
-    status: draft
+    status: merged
     wave: 5
     priority: P2
     points: 3
-    notes: "slideforge-diagrams SVG DoS hardening: MAX_SVG_BYTES (50 MiB) + MAX_SVG_NESTING_DEPTH (64) guards on usvg_normalize; CWE-400/CWE-674; mirrors STORY-043 SEC-001/SEC-002 pattern; BC: BC-1.12.003; EPIC-12; created 2026-06-01 from DI-4 (drift item → story)"
+    pr: 72
+    merge_commit: "2f6d5da4"
+    merged: 2026-06-08
+    adversary_convergence: "3/3 strict-CLEAN at passes 3/4/5 (5-pass total cascade)"
+    adversary_streak: "3/3"
+    converged: true
+    security_review: "CLEAN"
+    pr_reviewer: "APPROVE"
+    ci_status: "all-green (cold_budget flake cleared on re-run)"
+    specs_evolved: "BC-1.12.003 v1.3 (inv-4 ordering, PC-8/9/10, EC-005..008); error-taxonomy v2.26 (E-EXP-004 sibling-accuracy); export-architecture v1.4 (root-at-1 iterative)"
+    notes: "slideforge-diagrams SVG DoS hardening: SEC-001 nesting-depth guard (CWE-674, iterative DFS cap 64), SEC-002 byte-size guard (CWE-400, cap 50 MiB), E-EXP-004 added. BC-1.12.003; EPIC-12. Follow-ups: FU-079-SEC-001 (MEDIUM, Phase 6 exhaustiveness), FU-079-SEC-LOW, FU-079-DOC-NITS (all anchored Phase 6)."
   STORY-080:
     status: draft
     wave: 5
@@ -689,7 +699,7 @@ stories:
     points: 3
     notes: "Test reliability: de-flake http_4xx_not_retried (slideforge-data, connection-count race on Windows) + cold_budget (slideforge-diagrams, timing gate under CI load); BC: BC-1.03.002; EPICs: EPIC-19 (CI); created 2026-06-01 from DI-6 (drift item → story)"
   STORY-086:
-    status: draft
+    status: merged
     wave: 4
     wave_designation: "4-REMEDIATION"
     batch: D
@@ -705,15 +715,19 @@ stories:
     gate_obligation: "Must re-pass Wave 4 Gate 3 (strict-mode a11y) + Gate 5 (holdout must-pass ≥0.6) before Wave 5 dispatch"
     notes: "Stage 2b: Post-Eval Field-to-Block Threading Pass + TextTag Routing + AltText::Unspecified. Authorized ADR-019 (human 2026-06-05). Scope expanded (human 2026-06-06): TextTag enum + TextBlock.tag + PPTX title-placeholder routing (BC-4.01.001 v1.2 PC-9-12) + DOCX Heading1 routing (BC-4.02.001 v1.2 PC-8-11) absorbed into story. TextTag follow-up story absorbed (NOT created separately). Bullets direct list-literal syntax deferred to STORY-088 (Wave 5). 7-crate change: slideforge-eval (new module), slideforge-types (AltText::Unspecified + TextTag enum + TextBlock.tag), slideforge-layout (regions.rs 5 sites + thread_media_alt_into_frames 3 sites + layout.rs comment), slideforge-validate (alt_text.rs match arms + comment), slideforge (build_inner Stage 2b call + doc comment), slideforge-pptx (TextTag routing), slideforge-docx (TextTag routing). LESSON-13/LESSON-14 placement assertions (not just presence) required in E2E tests."
   STORY-087:
-    status: in-progress
+    status: merged
     wave: 4
     priority: P1
     points: 13
+    pr: 63
+    merge_commit: "54b8d3b1"
+    merged: 2026-06-06
     epic: EPIC-01
     depends_on: [STORY-086, STORY-003, STORY-017]
     blocks: []
     bcs: [BC-1.17.001, BC-1.17.002, BC-1.17.003]
     closes_findings: [F-G3-HIGH-003]
+    adversary_convergence: "3/3 strict-CLEAN (10-pass total cascade)"
     notes: "Color-Coded Slide Types: status + progress_bar + weighted_composite. Registration in SLIDE_TYPE_KEYWORDS (keywords.rs PHF) + regions.rs region map + SlideType impls in slideforge-plugin-api/src/slide_types/ + LabelCheck component-iteration extension for weighted_composite. Authorized 2026-06-05 per ADR-019 human_gate_resolved. E-A11-002 enforcement via LabelCheckValidator (Stage 5 pre-layout, reads Slide.fields directly — NO Stage 2b dependency). Closes F-G3-HIGH-003 (COLOR_CODED_TYPES dead-guard eliminated). 4-crate change: slideforge-plugin-api (3 new SlideType impls), slideforge-syntax (3 keywords), slideforge-layout (3 region map entries), slideforge-validate (weighted_composite component iteration)."
   STORY-088:
     status: draft
