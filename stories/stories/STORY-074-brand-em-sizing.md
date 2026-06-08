@@ -110,7 +110,7 @@ let shape_spec = ShapeSpec {
     },
     ..minimal_shape()
 };
-let output = layout_shapes(&[shape_spec], PAGE_SIZE_EMU, 0, brand_48pt.fonts.font_size_emu)
+let output = layout_shapes(&[shape_spec], PAGE_SIZE_EMU, 0, brand_48pt.fonts.font_size_emu, 0)
     .expect("should succeed");
 let frame = &output.frames[0];
 assert_eq!(frame.bounding_box.x, Emu(609_600));
@@ -141,10 +141,12 @@ passed before STORY-074 may fail after it.
 - `BrandFonts` location: check `slideforge-types/src/brand.rs`. If the struct
   is in `slideforge-brand`, the field addition is in that crate but the
   `slideforge-layout` change (threading the value) is still in SS-05 scope.
-- `layout_shapes` signature already accepts `em_per_emu: i64` (the fourth
-  argument) — confirmed in STORY-028 implementation. This story only changes
-  the call site in `layout::run` from `DEFAULT_EM_IN_EMU` to
-  `brand.fonts.font_size_emu` (or equivalent accessor).
+- `layout_shapes` signature accepts `em_in_emu: i64` as the fourth argument
+  and `base_index: usize` as the fifth — confirmed in the STORY-028 + STORY-055
+  delivered implementation. This story only changes the call site in
+  `layout::run` from `DEFAULT_EM_IN_EMU` to `brand.fonts.font_size_emu` (or
+  equivalent accessor); `base_index` is passed through unchanged from the
+  surrounding context.
 - No change to `layout_shapes` internal logic or signature required.
 - The `Emu` newtype or `i64` raw value: match whatever type `DEFAULT_EM_IN_EMU`
   is today. Do not introduce a new type.
@@ -154,3 +156,4 @@ passed before STORY-074 may fail after it.
 | Version | Date | Author | Notes |
 |---------|------|--------|-------|
 | 1.0 | 2026-05-29 | product-owner | Created — resolves STORY-NNN-brand-em-sizing placeholder at layout.rs:208 (F-P18-MED-001 from pass-18 report). Closes structural deferral from STORY-028. |
+| 1.1 | 2026-06-08 | story-writer | Prose-only correction per adversary Pass-1 F-074-P1-LOW-001: updated illustrative fixture to 5-arg `layout_shapes` call (added trailing `base_index` = 0) and updated Implementation Note to reflect `em_in_emu` (4th arg) + `base_index` (5th arg) per actual delivered signature. No AC semantics or contract thresholds changed. |
