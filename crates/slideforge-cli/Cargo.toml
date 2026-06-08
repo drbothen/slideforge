@@ -32,6 +32,7 @@ otel = [
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
     "dep:tracing-opentelemetry",
+    "dep:tokio",
 ]
 
 [dependencies]
@@ -48,6 +49,10 @@ opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+## tokio: required by opentelemetry_sdk's rt-tokio feature for the batch span
+## processor.  Only activated when the `otel` feature is on; the default
+## (non-otel) binary has zero tokio dependency.
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 ## tracing-test: capture tracing spans/events in tests for AC-011 assertions.
@@ -62,3 +67,5 @@ tempfile = { workspace = true }
 slideforge-plugin-api = { workspace = true }
 ## slideforge-types: for SourceSpan used in Diagnostic construction in unit tests.
 slideforge-types = { workspace = true }
+## tokio: required for `#[tokio::test]` on the AC-015 otel integration test.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

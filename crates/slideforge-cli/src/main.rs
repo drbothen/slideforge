@@ -35,11 +35,23 @@ fn main() -> ExitCode {
     // Initialize the tracing subscriber.  Errors here are non-fatal: if
     // initialization fails (e.g., because a test already installed one) we
     // log a warning to stderr and continue.
-    if let Err(e) = tracing_setup::init_tracing(&cli.global) {
-        // Use eprintln! here only — this is main() (not a library crate).
-        eprintln!("warning: could not initialize tracing subscriber: {e}");
-    }
+    //
+    // The guard MUST be kept alive across `commands::dispatch` — when the
+    // `otel` feature is active it owns the Tokio runtime that backs the OTLP
+    // batch exporter.  Dropping it early would shut down the runtime before
+    // spans finish exporting.
+    let _tracing_guard = match tracing_setup::init_tracing(&cli.global) {
+        Ok(guard) => guard,
+        Err(e) => {
+            // Use eprintln! here only — this is main() (not a library crate).
+            eprintln!("warning: could not initialize tracing subscriber: {e}");
+            // Return a no-op guard so dispatch still proceeds.
+            tracing_setup::TracingGuard::default()
+        },
+    };
 
     // Dispatch to the appropriate subcommand handler.
+    // `_tracing_guard` is dropped after dispatch returns, which flushes any
+    // queued OTel spans before the process exits.
     commands::dispatch(&cli)
 }
