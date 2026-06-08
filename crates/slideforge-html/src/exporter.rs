@@ -235,7 +235,12 @@ impl Exporter for HtmlExporter {
         let page_size = &laid_out.page_size;
         let mut slides_html = String::new();
         for (slide, &heading_level) in laid_out.slides.iter().zip(heading_levels.iter()) {
-            slides_html.push_str(&render_slide_to_html(slide, brand, heading_level, page_size));
+            slides_html.push_str(&render_slide_to_html(
+                slide,
+                brand,
+                heading_level,
+                page_size,
+            ));
             slides_html.push('\n');
         }
 
@@ -1244,7 +1249,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
         let doc = scraper::Html::parse_document(&html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
@@ -1273,7 +1280,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
         let doc = scraper::Html::parse_document(&html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
@@ -1309,7 +1318,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
         let doc = scraper::Html::parse_document(&html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
@@ -1331,17 +1342,15 @@ mod tests {
         let deck = make_deck("en-US");
         let laid_out = LaidOutDeck {
             page_size: slideforge_layout::PageSize::default(),
-            slides: vec![
-                make_title_slide(),
-                make_title_slide(),
-                make_title_slide(),
-            ],
+            slides: vec![make_title_slide(), make_title_slide(), make_title_slide()],
             sections: vec![],
             warnings: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
         let doc = scraper::Html::parse_document(&html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
@@ -1390,7 +1399,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
         // The outer SVG graphics layer must have role="presentation"
@@ -1426,7 +1437,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
         // The decorative <g> must carry aria-hidden="true"
@@ -1473,7 +1486,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
         // Must contain sf-slide-1-0 (0-based frame index)
@@ -1589,7 +1604,9 @@ mod tests {
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
-        let bytes = exporter.export(&deck, &laid_out, &brand, &opts).expect("export must succeed");
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
         let html = String::from_utf8(bytes).expect("valid UTF-8");
 
         // The nav element with empty body must not appear.

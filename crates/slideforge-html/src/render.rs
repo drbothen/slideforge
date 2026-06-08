@@ -54,9 +54,11 @@
 //! level itself.
 //!
 //! Pre-pass algorithm (ADR-008 / BC-4.03.003 postcondition 6):
-//! 1. Find first slide with `slide_type_keyword == "title"` → its Title frame gets H1.
-//! 2. If none: find first slide with any `Title` frame → that frame gets H1.
-//! 3. If none (body-only deck): promote first body frame to H1, emit `tracing::warn!`.
+//!
+//! - Find first slide with `slide_type_keyword == "title"` → its Title frame gets H1.
+//! - If none: find first slide with any `Title` frame → that frame gets H1.
+//! - If none (body-only deck): promote first body frame to H1, emit `tracing::warn!`.
+//!
 //! All other Title frames emit H2. Exactly one H1 per document.
 //!
 //! ## Coordinate conversion (MED-3 / EMU → CSS px @96 dpi)
@@ -454,7 +456,8 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                     r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"></svg>"#;
                 // WHEN real chart SVG is added (STORY-047/048) it MUST route through
                 // render_chart_frame (which applies the SVG sanitizer) — LOW-2.
-                let chart_g = render_chart_frame(placeholder_svg, alt_text, &frame_id_str, slide_id);
+                let chart_g =
+                    render_chart_frame(placeholder_svg, alt_text, &frame_id_str, slide_id);
                 let _ = write!(
                     graphical_content,
                     r#"<g transform="translate({x} {y})">{chart_g}</g>"#
@@ -592,7 +595,7 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
 /// # Heading level (AC-008 / BC-4.03.003 postcondition 7)
 ///
 /// The `heading_level` parameter is **pre-computed by the exporter pre-pass**
-/// in [`crate::exporter::HtmlExporter::export`]. This function does NOT decide
+/// in [`crate::exporter::HtmlExporter`]. This function does NOT decide
 /// heading level itself (see CRITICAL-B1/MED-B4 fix).
 ///
 /// Pre-pass invariant: exactly one slide in the document receives `HeadingLevel::H1`
@@ -680,10 +683,11 @@ pub fn render_slide_to_html(
                 FrameContent::TextRun(nodes) => render_inline_nodes(nodes),
                 _ => unreachable!("guarded above"),
             };
-            text_layer.push_str(&format!(
-                r#"<h1 class="sf-body-promoted" style="{position_style}">{inner}</h1>"#
-            ));
-            text_layer.push('\n');
+            text_layer.push_str("<h1 class=\"sf-body-promoted\" style=\"");
+            text_layer.push_str(&position_style);
+            text_layer.push_str("\">");
+            text_layer.push_str(&inner);
+            text_layer.push_str("</h1>\n");
             body_h1_promoted = true;
             continue;
         }
@@ -1967,7 +1971,12 @@ mod tests {
             }],
         );
         slide0.source_index = 0;
-        doc_html.push_str(&render_slide_to_html(&slide0, &brand, HeadingLevel::H1, &page_size));
+        doc_html.push_str(&render_slide_to_html(
+            &slide0,
+            &brand,
+            HeadingLevel::H1,
+            &page_size,
+        ));
 
         // Slide 1: content-slide with H2 level
         let mut slide1 = make_title_slide_type(
@@ -1980,7 +1989,12 @@ mod tests {
             }],
         );
         slide1.source_index = 1;
-        doc_html.push_str(&render_slide_to_html(&slide1, &brand, HeadingLevel::H2, &page_size));
+        doc_html.push_str(&render_slide_to_html(
+            &slide1,
+            &brand,
+            HeadingLevel::H2,
+            &page_size,
+        ));
 
         // Slide 2: title-slide at index 2 with H2 level (not the h1 slide)
         let mut slide2 = make_title_slide_type(
@@ -1993,7 +2007,12 @@ mod tests {
             }],
         );
         slide2.source_index = 2;
-        doc_html.push_str(&render_slide_to_html(&slide2, &brand, HeadingLevel::H2, &page_size));
+        doc_html.push_str(&render_slide_to_html(
+            &slide2,
+            &brand,
+            HeadingLevel::H2,
+            &page_size,
+        ));
 
         let doc = scraper::Html::parse_document(&doc_html);
         let sel_h1 = scraper::Selector::parse("h1").expect("valid");
@@ -2933,8 +2952,14 @@ mod tests {
         let h2_pos = result.find("<h2");
         let h3_pos = result.find("<h3");
         // Both must be present
-        assert!(h2_pos.is_some(), "B8: Title frame must produce h2; got: {result}");
-        assert!(h3_pos.is_some(), "B8: Subtitle frame must produce h3; got: {result}");
+        assert!(
+            h2_pos.is_some(),
+            "B8: Title frame must produce h2; got: {result}"
+        );
+        assert!(
+            h3_pos.is_some(),
+            "B8: Subtitle frame must produce h3; got: {result}"
+        );
         // Document the actual behavior: frame order determines DOM order.
         // This test does NOT assert h3 < h2 is invalid — it asserts the behavior is deterministic.
         // The layout invariant comment above is load-bearing documentation.
