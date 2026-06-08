@@ -1,9 +1,10 @@
 ---
 document_type: ux-spec-index
-version: "1.0"
+version: "1.1"
 status: draft
 producer: ux-designer
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
 phase: 1c
 inputs:
   - .factory/specs/prd.md
@@ -241,7 +242,7 @@ Contrast verification (WCAG AA 4.5:1 for normal text):
 | Metric | Target | Validation |
 |--------|--------|-----------|
 | Cold build (25-slide deck) | < 500ms | CI criterion benchmark (NFR-001) |
-| Incremental rebuild (1 slide change, watch mode) | < 50ms | CI criterion benchmark (NFR-002) |
+| Watch mode rebuild (1 file change, v1.0 full rebuild) | < 500ms (NFR-001 path) | CI criterion benchmark (NFR-001); NFR-002 < 50ms incremental DEFERRED to v1.x — see nfr-catalog v1.3 |
 | CLI startup time (--version, --help) | < 50ms | Manual timing |
 | Error rendering to stderr | < 10ms | Part of parse stage timing |
 

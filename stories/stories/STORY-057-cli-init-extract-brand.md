@@ -304,9 +304,17 @@ Context budget: 18 000 / 200 000 ≈ 9.0% — within limit.
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `clap` | `=4.5` | `InitArgs`, `ExtractBrandArgs` derive |
-| `toml` | `=0.8` | Validate generated `brand.toml` template in tests |
-| `thiserror` | `=2.0` | `ScaffoldError` error type |
+| `clap` | `{workspace = true}` (=4.6.1) | `InitArgs`, `ExtractBrandArgs` derive. Centralized per ADR-022. |
+| `toml` | `{workspace = true}` (=1.1.2) | Validate generated `brand.toml` template in tests. Two-major bump from 0.8; centralized per ADR-022. See note below. |
+| `thiserror` | `{workspace = true}` (=2.0.18) | `ScaffoldError` error type. Centralized per ADR-022. |
+
+**toml 1.x migration note:** `toml =1.1.2` is a two-major-version bump from `toml =0.8`.
+The primary behavior change affecting this story: when generating `brand.toml` content via
+struct serialization (preferred for determinism), use `toml::to_string_pretty()` from
+`toml =1.1.2`. If using `toml::Value` deserialization in tests, the API is compatible but
+flatten (`#[serde(flatten)]`) layouts must be test-verified — serialize → deserialize round-trip
+in `test_brand_toml_has_all_12_slots()` to catch any flatten edge cases introduced by the
+toml 1.x internal representation changes.
 
 No new production dependencies are needed for this story beyond what STORY-055 already
 added to `Cargo.toml`.

@@ -180,8 +180,10 @@ defined in STORY-060. No new crate structure is needed.
    /// Find all .sf files under `project_dir` that contain `@import "pkg_name/..."`
    pub fn scan_sf_imports(project_dir: &Path, package_name: &str) -> Vec<PathBuf>;
    ```
-   Uses `walkdir` for recursive `.sf` glob and `str::contains()` search within each
-   file's content. Does NOT parse the AST — text search is sufficient for a warning.
+   Uses `walkdir` (=2.5.0, `{ workspace = true }`) for recursive `.sf` file enumeration
+   and `str::contains()` text search within each file's content. Does NOT parse the AST
+   — text search is sufficient for a warning. Search pattern: `@import "` + package_name
+   + `/` — aligns with the canonical `@import` token used by the DSL parser.
 
 5. Wire CLI subcommands in `slideforge-cli/src/commands/package.rs`:
    ```rust
@@ -294,12 +296,14 @@ Context budget: 19 000 / 200 000 ≈ 9.5% — well within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `toml_edit` | `=0.22` | Structure-preserving TOML mutation for remove |
-| `toml` | `=0.8` | TOML parsing for list (read-only) |
-| `walkdir` | `=2.5` | Recursive `.sf` file scan in `scan_sf_imports()` |
-| `thiserror` | `=2.0` | PackageError (already present from STORY-060) |
+| `toml_edit` | `=0.25.12` | Structure-preserving TOML mutation for remove (DocumentMut; remove_dependency mirrors add_dependency from STORY-060; parse → ImDocument → .into_mut()) |
+| `toml` | `=1.1.2` | TOML parsing for list (read-only) |
+| `walkdir` | `=2.5.0` | Recursive `.sf` file scan in `scan_sf_imports()` |
+| `thiserror` | `=2.0.18` | PackageError (already present from STORY-060) |
 
 ## File Structure Requirements
 

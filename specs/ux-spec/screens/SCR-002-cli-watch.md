@@ -2,15 +2,18 @@
 document_type: ux-spec-screen
 screen_id: "SCR-002"
 screen_name: "CLI: watch"
-version: "1.0"
+version: "1.1"
 status: draft
 producer: ux-designer
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
 phase: 1c
 complexity: complex
 traces_to: UX-INDEX.md
 prd_requirements:
   - "PRD §2.5 BC-5.05.001-005"
+  - "PRD §4 NFR-001 (< 500ms cold build — governs v1.0 watch rebuild latency)"
+  - "PRD §4 NFR-002 (< 50ms incremental rebuild — DEFERRED to v1.x; see nfr-catalog v1.3)"
   - "interface-definitions.md §1.3"
   - "q1-decision-final.md §1 (Data Binding — watch mode polls HTTP)"
   - "q16-q25-decisions.md Q17 (watch mode always warn-only)"
@@ -28,7 +31,7 @@ prd_requirements:
 1. Compiles the deck immediately on launch
 2. Starts an axum HTTP + WebSocket server
 3. Watches all .sf files and file-based data sources for changes
-4. Re-runs the full pipeline on any change (incremental: < 50ms target, NFR-002)
+4. Re-runs the full pipeline on any change (v1.0: full rebuild, governed by NFR-001 < 500ms; NFR-002 < 50ms incremental target is DEFERRED to v1.x)
 5. Pushes delta to WebSocket clients (web preview auto-updates)
 
 Watch mode always uses warn-only mode (per Q17). Parse errors are still fatal and

@@ -142,7 +142,7 @@ anchor; the other flag behaviors (quiet, verbose, json) are observability concer
            if global.json {
                return Self::Json;
            }
-           let no_color_env = std::env::var("NO_COLOR").map(|v| !v.is_empty()).unwrap_or(false);
+           let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
            let is_tty = std::io::stderr().is_terminal();
            if global.no_color || no_color_env || !is_tty {
                Self::Plain
@@ -155,18 +155,31 @@ anchor; the other flag behaviors (quiet, verbose, json) are observability concer
 2. Update `src/tracing_setup.rs` to honor `global.verbose` and `global.quiet`:
    ```rust
    pub fn init_tracing(global: &GlobalFlags) {
-       let level = match (global.quiet, global.verbose) {
-           (true, _) => Level::ERROR,
-           (false, 0) => Level::INFO,
-           (false, 1) => Level::DEBUG,
-           (false, _) => Level::TRACE,
+       // EnvFilter carries the level when RUST_LOG is set; the CLI default is the fallback.
+       // RUST_LOG overrides the CLI verbosity flags — this is intentional (power-user escape hatch).
+       let default_level = match (global.quiet, global.verbose) {
+           (true, _) => "error",
+           (false, 0) => "info",
+           (false, 1) => "debug",
+           (false, _) => "trace",
        };
+       let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+           .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_level));
        let _ = tracing_subscriber::fmt()
-           .with_max_level(level)
+           .with_env_filter(filter)
            .with_ansi(ColorMode::detect(global) == ColorMode::Color)
            .try_init();
+       // try_init() returns Err(SetLoggerError) on second call (e.g., in test threads).
+       // Discard the error here — callers that need a OnceLock guard should call once per process.
    }
    ```
+
+   **EnvFilter composition rule (consistent with STORY-055):**
+   - `EnvFilter` carries the effective level when `RUST_LOG` is set. This is correct behavior.
+   - `with_max_level(level)` (the old approach) would conflict with `EnvFilter` — do NOT combine them.
+   - When the `env-filter` feature is active, always use `with_env_filter()`, never `with_max_level()`.
+   - `try_init()` is safe to call in tests (returns `Err` on second init without panicking); guard
+     with `OnceLock` in production `main()` for clarity.
 3. Update `DiagnosticRenderer` usage in `src/commands/build.rs` (and future commands):
    - Replace inline `use_color` bool with `ColorMode::detect(global)`.
    - In `ColorMode::Json` mode: call `sink.to_json()` and write to stderr as JSON.
@@ -271,9 +284,10 @@ Context budget: 15 500 / 200 000 ≈ 7.75% — within limit.
 1. `ColorMode::detect()` is the SINGLE source of truth for color/JSON/plain mode. No
    code anywhere in `slideforge-cli` should independently check `NO_COLOR` env var or TTY
    state — all must call `ColorMode::detect(global)`.
-2. `NO_COLOR` env var detection uses `std::env::var("NO_COLOR")` — do NOT use any
-   third-party env-var library. The spec (no-color.org) requires "any non-empty value"
-   to disable color.
+2. `NO_COLOR` env var detection uses `std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty())`
+   — do NOT use `std::env::var()` (panics on non-UTF-8) or any third-party env-var library.
+   The spec (no-color.org) requires "any non-empty value" to disable color; empty string does NOT
+   disable color.
 3. `--verbose` uses `clap`'s `action = ArgAction::Count` to allow stacking (`-v`, `-vv`).
    The `u8` count maps to `Level::DEBUG` (1) and `Level::TRACE` (2+). Do NOT invent a
    separate `--debug` or `--trace` flag.
@@ -292,10 +306,10 @@ Context budget: 15 500 / 200 000 ≈ 7.75% — within limit.
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `miette` | `=7.2` | `GraphicalReportHandler` for color/plain rendering |
-| `tracing-subscriber` | `=0.3` | Level filtering from `--verbose`/`--quiet` |
-| `serde` | `=1.0` | `JsonDiagnosticOutput` serialization |
-| `serde_json` | `=1.0` | JSON serialization and test parsing |
+| `miette` | `{workspace = true}` (=7.6.0) | `GraphicalReportHandler` for color/plain rendering. Centralized per ADR-022. |
+| `tracing-subscriber` | `{workspace = true}` (=0.3.23, feature `env-filter`) | `EnvFilter` + level filtering from `--verbose`/`--quiet`. Centralized per ADR-022. |
+| `serde` | `{workspace = true}` (=1.0.228) | `JsonDiagnosticOutput` serialization. Centralized per ADR-022. |
+| `serde_json` | `{workspace = true}` (=1.0.150) | JSON serialization and test parsing. Centralized per ADR-022. |
 
 ## File Structure Requirements
 
@@ -334,14 +348,27 @@ This is the correct implementation per miette's rendering behavior.
 
 Per the no-color.org specification:
 - `NO_COLOR` set to any non-empty string → disable color
-- `NO_COLOR` unset or empty → no effect
+- `NO_COLOR` unset OR set to empty string → no effect (empty string does NOT disable color)
 - The `--color` flag is NOT part of the slideforge CLI (no force-enable override)
 
+Full color-disable precedence chain (highest to lowest):
+1. `global.json == true` → `ColorMode::Json` (always suppresses color)
+2. `--no-color` CLI flag (`global.no_color == true`) → `ColorMode::Plain`
+3. `NO_COLOR` env var is non-empty (`var_os("NO_COLOR").is_some_and(|v| !v.is_empty())`) → `ColorMode::Plain`
+4. `stderr` is not a TTY (`!std::io::stderr().is_terminal()`) → `ColorMode::Plain`
+5. Otherwise → `ColorMode::Color`
+
 ```rust
-let no_color_env = std::env::var_os("NO_COLOR")
-    .map(|v| !v.is_empty())
-    .unwrap_or(false);
+let no_color_env = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
 ```
+
+Use `var_os` (returns `OsString`) rather than `var` (returns `String`) to handle non-UTF-8
+env var values gracefully without panicking. The `is_some_and` method (stable since Rust 1.70)
+makes the empty-string check a single expression.
+
+Note: `CLICOLOR_FORCE` and `CLICOLOR=0` awareness is OPTIONAL in v1.0. The above chain
+covers the no-color.org spec and the `--no-color` flag. The extended chain is noted for
+documentation but is not an AC requirement.
 
 ### JSON output schema for diagnostics
 

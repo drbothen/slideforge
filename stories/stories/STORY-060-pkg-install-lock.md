@@ -53,6 +53,8 @@ Key responsibilities:
 5. **slideforge.toml update**: append the package to `[dependencies]` if not already
    present.
 6. **Cache write**: store the package archive at `~/.slideforge/cache/<sha256>.tar.gz`.
+   Use `dirs::home_dir()` + join `.slideforge/cache` (dirs =6.0.0 — NOT `cache_dir()`;
+   that resolves to a platform cache dir, not `~/.slideforge/cache`).
 7. **Build-time warning**: detect at project-load time when `slideforge.toml` has a
    non-empty `[dependencies]` section but `sf.lock` is absent; emit E-PKG-004.
 
@@ -96,8 +98,13 @@ Key responsibilities:
   (traces to BC-5.03.001 edge case EC-003)
 
 - [ ] **AC-008** — `sf.lock` entries are sorted alphabetically by package name and
-  contain no timestamp fields. Two installs on the same package produce byte-for-byte
-  identical `sf.lock` output.
+  contain no timestamp fields. Two installs of the same package produce byte-for-byte
+  identical `sf.lock` output. Determinism is achieved by: (a) serializing from a
+  `Vec<LockedPackage>` sorted by `name` (NOT from `toml::Value` or `HashMap` fields),
+  and (b) the reproducible-tar.gz approach (mtime=0, sorted entries, fixed gzip params).
+  A cross-platform CI byte-diff test must verify that a re-install on a different OS
+  produces an identical SHA-256 (caveat: flate2 OS-byte in gzip header — see archive.rs
+  HAZARD note; may require post-processing header byte 9 → 0xFF).
   (traces to BC-5.03.001 invariant 2, invariant 3 — determinism)
 
 - [ ] **AC-009** — `sf.lock` format is valid TOML. Each entry is a
@@ -131,6 +138,8 @@ Key responsibilities:
      "crates/slideforge-package",
    ]
    ```
+   All dependencies below use `{ workspace = true }` — centralized in
+   `[workspace.dependencies]` per ADR-022. New crate added to workspace table per ADR-022.
    ```toml
    # crates/slideforge-package/Cargo.toml
    [package]
@@ -139,19 +148,28 @@ Key responsibilities:
    edition = "2024"
 
    [dependencies]
-   git2 = "=0.20"
-   sha2 = "=0.10"
-   toml = "=0.8"
-   serde = { version = "=1.0", features = ["derive"] }
-   thiserror = "=2.0"
-   tracing = "=0.1"
-   tokio = { version = "=1.44", features = ["fs", "process"] }
-   dirs = "=5.0"
+   git2 = { workspace = true }
+   sha2 = { workspace = true }
+   hex = { workspace = true }
+   toml = { workspace = true }
+   toml_edit = { workspace = true }
+   serde = { workspace = true }
+   thiserror = { workspace = true }
+   tracing = { workspace = true }
+   tokio = { workspace = true }
+   dirs = { workspace = true }
+   tempfile = { workspace = true }
    ```
 
 2. Define the `sf.lock` data model:
    ```rust
    // src/lock.rs
+   // IMPORTANT: sf.lock serialization uses toml =1.1.2. For byte-deterministic output,
+   // serialize from a SORTED Rust struct (Vec<LockedPackage> sorted by name field),
+   // NOT from toml::Value or any HashMap fields. Do NOT use #[serde(flatten)] with
+   // Option<table> types — toml 1.x flatten behavior with Options is INCONCLUSIVE;
+   // unit-test round-trip against =1.1.2 before committing; fall back to explicit
+   // nesting if errors occur.
    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
    pub struct LockFile {
        #[serde(rename = "package")]
@@ -179,16 +197,26 @@ Key responsibilities:
 3. Implement the install algorithm in `src/install.rs`:
    ```rust
    pub async fn install(url: &str, ref_spec: Option<&str>) -> Result<LockedPackage, PackageError> {
-       // Step 1: Clone into a temp dir
+       // Step 1: Full clone into a temp dir (git2 =0.21.0 has no usable shallow clone —
+       // do NOT use --depth or builder.fetch_options() depth; use RepoBuilder full clone).
        let tmp_dir = tempfile::tempdir()?;
-       git_clone(url, tmp_dir.path(), ref_spec).await?;
-       // Step 2: Resolve HEAD commit SHA
-       let rev = resolve_head_sha(tmp_dir.path())?;
+       let repo = git2::build::RepoBuilder::new()
+           .clone(url, tmp_dir.path())?;
+       // Step 2: Resolve ref_spec to a full 40-character commit SHA.
+       // For annotated tags, peel to commit via Object::peel_to_commit().
+       // Use set_head_detached + checkout_tree for arbitrary commit checkout.
+       let rev = resolve_ref_to_commit_sha(&repo, ref_spec)?;
+       checkout_commit(&repo, &rev)?;
        // Step 3: Validate sf-package.toml
        let manifest = load_manifest(tmp_dir.path())?;
-       // Step 4: Create deterministic tar archive
+       // Step 4: Create deterministic tar archive.
+       // Build tar::Header manually (never append_path): mtime=0, uid=0, gid=0,
+       // mode 0o644/0o755, empty user/group, entries in lexicographic sort order.
+       // Gzip via GzBuilder::new().mtime(0).filename("").comment("") + fixed Compression
+       // level. HAZARD: flate2 has no gzip OS-byte setter → add a cross-platform
+       // CI byte-diff test; may need to post-process header byte 9 → 0xFF.
        let archive = create_archive(tmp_dir.path())?;
-       // Step 5: Compute SHA-256
+       // Step 5: Compute SHA-256 (sha2 =0.11.0 — see hash.rs for .into() boundary)
        let sha256 = sha256_hex(&archive);
        // Step 6: Write to cache
        let cache_path = cache_dir()?.join(format!("{sha256}.tar.gz"));
@@ -209,7 +237,10 @@ Key responsibilities:
    pub fn sha256_hex(data: &[u8]) -> String {
        let mut hasher = Sha256::new();
        hasher.update(data);
-       hex::encode(hasher.finalize())
+       // sha2 =0.11.0: finalize() returns hybrid_array::Array, not GenericArray.
+       // Convert to [u8; 32] via .into() at the boundary before passing to hex::encode.
+       let digest: [u8; 32] = hasher.finalize().into();
+       hex::encode(digest)
    }
    ```
 
@@ -323,9 +354,10 @@ Context budget: 23 500 / 200 000 ≈ 11.8% — within limit.
 
 ## Architecture Compliance Rules
 
-1. `slideforge-package` is an **effectful** crate — it performs network I/O (git clone),
-   filesystem writes (sf.lock, cache), and subprocess calls. All effectful operations must
-   be async (`tokio`).
+1. `slideforge-package` is an **effectful** crate — it performs network I/O (git clone via
+   git2/libgit2) and filesystem writes (sf.lock, cache). All effectful I/O must be async
+   (`tokio` with `fs` feature only — NOT `process` feature; git operations use git2
+   exclusively, no subprocess calls).
 2. The pure functions (`sha256_hex`, `create_archive`, `LockFile` serialization) must be
    factored into separate modules with no async/I/O so they are Kani-amenable (Phase 6).
 3. `slideforge-package` must NOT import `slideforge-eval` or any parser crate — package
@@ -347,18 +379,20 @@ Context budget: 23 500 / 200 000 ≈ 11.8% — within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `git2` | `=0.20` | Git clone + SHA resolution (libgit2 bindings) |
-| `sha2` | `=0.10` | SHA-256 checksum computation |
-| `toml` | `=0.8` | sf.lock and sf-package.toml parsing |
-| `toml_edit` | `=0.22` | Structure-preserving slideforge.toml mutation |
-| `serde` | `=1.0` | Serialize/Deserialize for LockFile |
-| `thiserror` | `=2.0` | PackageError derive |
-| `tokio` | `=1.44` | Async runtime for I/O operations |
-| `dirs` | `=5.0` | `~/.slideforge/cache/` home dir resolution |
-| `tempfile` | `=3.10` | Temp dir for git clone staging |
-| `hex` | `=0.4` | Hex encoding of SHA-256 digest |
+| `git2` | `=0.21.0` | Git clone + SHA resolution (libgit2 bindings; default-features=false, HTTPS-only; NO shallow clone — use full RepoBuilder clone + set_head_detached + checkout_tree + peel_to_commit for annotated tags) |
+| `sha2` | `=0.11.0` | SHA-256 checksum computation (finalize() → hybrid_array::Array; convert to [u8;32] via .into() before hex::encode) |
+| `toml` | `=1.1.2` | sf.lock and sf-package.toml parsing (deterministic sf.lock via sorted struct serialize — NOT toml::Value/HashMap) |
+| `toml_edit` | `=0.25.12` | Structure-preserving slideforge.toml mutation (parse → ImDocument → .into_mut() → DocumentMut; array-of-tables via as_array_of_tables_mut()) |
+| `serde` | `=1.0.228` | Serialize/Deserialize for LockFile |
+| `thiserror` | `=2.0.18` | PackageError derive |
+| `tokio` | `=1.44` | Async runtime for fs I/O operations (NOT process feature — git ops use git2, no subprocess) |
+| `dirs` | `=6.0.0` | `~/.slideforge/cache/` via home_dir() + join ".slideforge/cache" (NOT cache_dir()) |
+| `tempfile` | `=3.27.0` | Temp dir for git clone staging |
+| `hex` | `=0.4.3` | Hex encoding of SHA-256 digest |
 
 ## File Structure Requirements
 

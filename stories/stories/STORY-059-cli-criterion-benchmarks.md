@@ -36,7 +36,7 @@ target_module: slideforge-cli
 
 ## Summary
 
-Implement Criterion 0.5 performance benchmarks for the slideforge build pipeline in
+Implement Criterion 0.8 performance benchmarks for the slideforge build pipeline in
 `crates/slideforge-cli/benches/build_bench.rs`. The benchmarks enforce the CLAUDE.md
 quality bar performance gates and are run in CI to detect regressions.
 
@@ -60,8 +60,9 @@ Three benchmark groups:
 Additionally: isolated benchmarks for `parse_only` and `eval_only` stages for diagnostic
 purposes (not CI-gated, but helpful for locating regressions).
 
-The CI job uses `cargo bench --bench build_bench -- --output-format bencher` and compares
-against a stored baseline via `criterion-compare` in the workflow.
+The CI job runs `cargo bench --bench build_bench -- --save-baseline current` and compares
+against a stored baseline via `critcmp =0.1.8`. Absolute threshold enforcement parses
+`target/criterion/.../new/estimates.json` directly with `jq`.
 
 ## Note on Behavioral Contracts
 
@@ -80,9 +81,13 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
   GitHub Actions Linux x86_64 runner (`ubuntu-latest`).
   (traces to NFR-001 — cold build < 500ms)
 
-- [ ] **AC-003** — `incremental_rebuild/single_field_change` benchmark mean time is < 50ms
-  on the same runner.
-  (traces to NFR-002 — incremental rebuild < 50ms)
+- [ ] **AC-003** — **DEFERRED to v1.x** — The `incremental_rebuild/single_field_change`
+  benchmark is implemented and records timing, but the < 50ms gate is NOT enforced in v1.0 CI.
+  NFR-002 (incremental rebuild < 50ms) is deferred to v1.x (nfr-catalog v1.3) because it
+  requires the comemo incremental cache which is a post-v1.0 feature. The v1.0 benchmark calls
+  `slideforge::compile()` on a modified source string and records the result; the 50ms threshold
+  enforcement will be added when comemo ships.
+  (traces to NFR-002 — DEFERRED to v1.x; v1.0 keeps the cold-build gate only)
 
 - [ ] **AC-004** — `serialization/pptx_25_slides` + `serialization/docx_25_slides` benchmark
   mean times are each < 200ms.
@@ -94,14 +99,16 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
   (traces to NFR-001 validation workflow — "25 slides using at least 10 slide types, brand.toml
   synthesis, 2 @data sources (file-based)")
 
-- [ ] **AC-006** — Benchmark results are saved as JSON baseline files
-  (`benches/baselines/build_bench_baseline.json`) to enable `criterion-compare` regression
-  detection in CI.
-  (traces to NFR-001/002 — "CI regression detection via criterion-compare")
+- [ ] **AC-006** — Criterion saves baseline JSON files under `target/criterion/`. After the
+  bench job runs, use `critcmp =0.1.8` for relative-to-baseline regression detection in CI.
+  (traces to NFR-001/002 — "CI regression detection")
 
 - [ ] **AC-007** — The CI workflow step for benchmarks (`jobs.bench` in `ci.yml`) fails the PR
-  if `cold_build` exceeds 500ms or `incremental_rebuild` exceeds 50ms, using
-  `criterion-compare` threshold enforcement.
+  if `cold_build` mean exceeds 500ms. Regression gating uses two methods:
+  (a) Relative: `critcmp` compares current run against saved baseline and reports regressions.
+  (b) Absolute: parse `target/criterion/cold_build__25_slides_all_formats/new/estimates.json`
+      and assert `mean.point_estimate` (in ns) ÷ 1_000_000 < 500ms using `jq` + shell exit 1.
+  Note: `criterion-compare` is not a real crate — use `critcmp =0.1.8` for baseline comparison.
   (traces to NFR-001 — "Gate: blocking — PR cannot merge if NFR-001 is violated")
 
 - [ ] **AC-008** — Benchmarks are in a separate binary target (`[[bench]]` in `Cargo.toml`) and
@@ -124,9 +131,10 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
    STORY-057's scaffold template).
 3. Create `benches/fixtures/data1.json` and `data2.json` — small JSON arrays (10 items
    each) used by `@data` directives in `bench_deck.sf`.
-4. Implement `benches/build_bench.rs` using Criterion 0.5:
+4. Implement `benches/build_bench.rs` using Criterion 0.8.2:
    ```rust
-   use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+   use std::hint::black_box;  // ALWAYS use std::hint::black_box — criterion::black_box is deprecated and fails -D warnings
+   use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 
    fn bench_cold_build(c: &mut Criterion) {
        let source = include_str!("fixtures/bench_deck.sf");
@@ -148,25 +156,27 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
    }
 
    fn bench_incremental_rebuild(c: &mut Criterion) {
-       // Build the fixture once; then simulate a single-field change
-       let mut source = include_str!("fixtures/bench_deck.sf").to_string();
+       // NFR-002 (<50ms) is DEFERRED to v1.x (nfr-catalog v1.3); true incremental requires
+       // comemo which is post-v1.0. This benchmark records timing for regression tracking only.
+       // The v1.0 implementation calls compile() on the modified source string (no warm cache).
+       // When comemo ships, replace compile() with compile_incremental() and enable the CI gate.
+       let source = include_str!("fixtures/bench_deck.sf");
 
        c.bench_function("incremental_rebuild/single_field_change", |b| {
            b.iter(|| {
-               // Mutate a single field value in the source string
-               let modified = source.replacen(
+               let modified = black_box(source).replacen(
                    r#"title "Welcome to slideforge""#,
                    r#"title "Updated title""#,
                    1,
                );
                let opts = CompileOptions {
                    source: black_box(modified),
-                   warm_cache: Some(compiled_cache()),  // pre-built cache from cold build
-                   formats: vec![OutputFormat::Pptx],   // only PPTX for incremental
+                   formats: vec![OutputFormat::Pptx],
                    offline: true,
                    ..Default::default()
                };
-               black_box(slideforge::compile_incremental(opts).expect("incremental must succeed"))
+               // v1.0: full compile; comemo incremental available in v1.x
+               black_box(slideforge::compile(opts).expect("incremental must succeed"))
            })
        });
    }
@@ -211,8 +221,13 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
    harness = false
 
    [dev-dependencies]
-   criterion = { version = "=0.5.1", features = ["html_reports"] }
+   # criterion =0.8.2: MSRV 1.88. html_reports is OPT-IN (not default).
+   # Default features: cargo_bench_support, plotters, rayon.
+   criterion = { version = "=0.8.2", features = ["html_reports"] }
+   # critcmp for baseline regression comparison in CI
+   critcmp = "=0.1.8"
    ```
+   If the workspace centralizes `criterion`, use `{workspace = true}`; otherwise pin at `=0.8.2`.
 6. Add `jobs.bench` to `.github/workflows/ci.yml`:
    ```yaml
    bench:
@@ -220,15 +235,24 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
      steps:
        - uses: actions/checkout@v4
        - name: Run benchmarks
-         run: cargo bench --bench build_bench -- --output-format bencher | tee bench_output.txt
-       - name: Check cold_build threshold (< 500ms)
+         run: cargo bench --bench build_bench -- --save-baseline current
+       - name: Check cold_build absolute threshold (< 500ms, NFR-001)
          run: |
-           MEAN=$(grep "cold_build/25_slides_all_formats" bench_output.txt | awk '{print $5}')
-           python3 -c "import sys; ms=float('${MEAN}'); sys.exit(0 if ms < 500 else 1)"
-       - name: Check incremental_rebuild threshold (< 50ms)
+           # Parse Criterion's estimates.json for the cold_build mean (nanoseconds).
+           # Criterion 0.8 writes to target/criterion/<group>/<bench>/new/estimates.json.
+           ESTIMATES="target/criterion/cold_build/25_slides_all_formats/new/estimates.json"
+           NS=$(jq '.mean.point_estimate' "$ESTIMATES")
+           MS=$(echo "scale=2; $NS / 1000000" | bc)
+           echo "cold_build mean: ${MS}ms"
+           python3 -c "import sys; ms=float('${MS}'); sys.exit(0 if ms < 500 else (print(f'FAIL: cold_build {ms:.1f}ms > 500ms gate', file=sys.stderr) or 1))"
+       # NOTE: incremental_rebuild <50ms gate is DEFERRED to v1.x (NFR-002, nfr-catalog v1.3).
+       # The benchmark runs but the threshold is not enforced in v1.0 CI.
+       - name: Baseline regression check (critcmp)
          run: |
-           MEAN=$(grep "incremental_rebuild/single_field_change" bench_output.txt | awk '{print $5}')
-           python3 -c "import sys; ms=float('${MEAN}'); sys.exit(0 if ms < 50 else 1)"
+           # Compare current run against the committed baseline (main branch).
+           # critcmp exits 0 if no regressions; exits 1 if any bench regressed > noise threshold.
+           cargo critcmp main current --threshold 10
+         continue-on-error: true  # non-blocking in v1.0; tighten at release
    ```
 7. Save baseline: run `cargo bench -- --save-baseline main` on first setup; commit
    `benches/baselines/` to the repository.
@@ -242,7 +266,8 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
 - `crates/slideforge-cli/benches/fixtures/brand.toml` — brand config for fixture
 - `crates/slideforge-cli/benches/fixtures/data1.json` — data source 1
 - `crates/slideforge-cli/benches/fixtures/data2.json` — data source 2
-- `crates/slideforge-cli/Cargo.toml` — add `[[bench]]` section + `criterion =0.5` dev-dep
+- `crates/slideforge-cli/Cargo.toml` — add `[[bench]]` section + `criterion =0.8.2` dev-dep
+  (feature `html_reports` opt-in) + `critcmp =0.1.8` dev-dep
 - `.github/workflows/ci.yml` — add `jobs.bench` with threshold checks
 
 ## Token Budget Estimate
@@ -252,7 +277,7 @@ for facade-mode stories is mutation testing at wave gate, not BC authorship). Th
 | This story spec | ~4 500 |
 | STORY-055 (CompileOptions API) | ~1 500 |
 | STORY-056 (compile_incremental() API) | ~1 500 |
-| Criterion 0.5 API reference | ~1 000 |
+| Criterion 0.8 API reference | ~1 000 |
 | Benchmark harness code to write | ~3 000 |
 | Fixture files to write | ~1 500 |
 | CI workflow update | ~1 000 |
@@ -273,9 +298,10 @@ Benchmarks are not unit-tested in the TDD sense. Validation strategy:
 - Threshold is checked via a simple Python one-liner against the Criterion bencher output.
 
 **Baseline regression detection**:
-- `criterion-compare` can compare two Criterion baseline JSON files and output a report.
-  Use this in the PR workflow to surface regressions even if they are below the absolute
-  threshold.
+- `critcmp =0.1.8` compares two Criterion baseline JSON files and outputs a report.
+  Use `cargo critcmp main current --threshold 10` in the PR workflow to surface regressions
+  exceeding 10% even if below the absolute threshold.
+  Note: `criterion-compare` is NOT a real crate — it does not exist on crates.io. Use `critcmp`.
 
 **Wave-gate mutation testing** (facade-mode requirement):
 - Mutation testing at the EPIC-15 wave gate via `cargo-mutants` runs against the
@@ -324,10 +350,13 @@ Benchmarks are not unit-tested in the TDD sense. Validation strategy:
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `criterion` | `=0.5` | Benchmark harness (dev-dependency only) |
+| `criterion` | `=0.8.2` (dev-dep; feature `html_reports` opt-in) | Benchmark harness. MSRV 1.88. Default features: cargo_bench_support, plotters, rayon. `html_reports` is NOT default — must be explicitly enabled. Use `{workspace = true}` if centralized per ADR-022; else pin `=0.8.2`. |
+| `critcmp` | `=0.1.8` (dev-dep) | CLI tool for Criterion baseline comparison in CI (`cargo critcmp`). |
 
-Note: `criterion` is a dev-dependency. It uses `=0.5` pinning consistent with the workspace
-policy. Do NOT add it as a production dependency.
+**CRITICAL:** Always import `use std::hint::black_box;` — NEVER `use criterion::black_box`
+(deprecated in Criterion 0.5+, removed/empty in 0.8, causes compile error under `-D warnings`).
+
+Note: `criterion` and `critcmp` are dev-dependencies. Do NOT add them as production dependencies.
 
 ## File Structure Requirements
 
@@ -367,6 +396,32 @@ benchmark does not correctly validate NFR-001.
 
 ## Implementation Notes
 
+### Font loading in the cold-build benchmark
+
+For the `cold_build` benchmark, the font loading step must NOT call `load_system_fonts()` in
+the timed region — system font discovery is non-deterministic in timing (varies by OS, number
+of fonts installed, Windows registry scan) and can dominate the measurement on CI.
+
+Instead, load a bundled/pinned font set in the benchmark setup (outside `b.iter()`):
+```rust
+// Setup (outside the hot loop):
+let font_db = {
+    let mut db = fontdb::Database::new();
+    db.load_fonts_dir("benches/fixtures/fonts/");  // bundled subset, deterministic
+    // OR: db.load_font_data(include_bytes!("fixtures/fonts/Calibri.ttf").to_vec());
+    db
+};
+
+// Hot loop:
+b.iter(|| {
+    let opts = CompileOptions { font_db: black_box(font_db.clone()), ... };
+    black_box(slideforge::compile(opts).expect("fixture must compile"))
+})
+```
+
+Commit a minimal set of fonts (e.g., Calibri subset, 2-3 files) under `benches/fixtures/fonts/`.
+This ensures the cold-build benchmark measures actual pipeline work, not OS font scanning.
+
 ### bench_deck.sf fixture slide type coverage
 
 The fixture must use at least 10 of the 31 slide types. Suggested set (covers diverse
@@ -400,17 +455,30 @@ pub fn criterion_config() -> Criterion {
 
 ### CI threshold enforcement
 
-The bencher output format (from `--output-format bencher`) produces lines like:
+Criterion 0.8 does NOT support `--output-format bencher` reliably for threshold checking.
+Instead, parse the JSON estimates file written by `--save-baseline`:
+
 ```
-test cold_build/25_slides_all_formats ... bench: 312,483,521 ns/iter (+/- 18,234,011)
+target/criterion/<group>/<benchmark_name>/new/estimates.json
 ```
 
-The Python threshold check converts nanoseconds to milliseconds:
-```python
-ns = int("312483521")   # parsed from output
-ms = ns / 1_000_000
-assert ms < 500, f"Cold build {ms:.1f}ms exceeds 500ms gate"
+The JSON structure:
+```json
+{
+  "mean": { "point_estimate": 312483521.0, "standard_error": 1234567.0, ... },
+  ...
+}
 ```
+
+Extract and check with `jq` + Python:
+```bash
+NS=$(jq '.mean.point_estimate' target/criterion/cold_build/25_slides_all_formats/new/estimates.json)
+MS=$(echo "scale=2; $NS / 1000000" | bc)
+python3 -c "import sys; ms=float('${MS}'); sys.exit(0 if ms < 500 else 1)"
+```
+
+For relative regression detection: `cargo critcmp <baseline> <current> --threshold 10`
+(critcmp reads the Criterion baseline JSON files and reports benches that regressed > 10%).
 
 ### Wall-clock vs CPU time
 
@@ -427,5 +495,5 @@ Criterion measures wall-clock time by default. For CI reproducibility, add:
 | EC-001 | Benchmark fixture fails to compile | `expect("fixture must compile")` panics during benchmark setup; Criterion reports the benchmark as failed; CI job fails |
 | EC-002 | CI runner is slower than threshold (flaky gate) | Threshold is set with 20% headroom: NFR says < 500ms; CI gate checks < 500ms; if the runner is consistently > 400ms, investigate before tightening |
 | EC-003 | `compile_incremental()` not yet available | Fall back to `compile()` with a comment; note that true incremental measurement requires STORY-056's cache API |
-| EC-004 | Criterion html_reports feature not available in CI | Use `--output-format bencher` for CI; html reports are local-only (the `html_reports` feature is enabled in Cargo.toml but Criterion falls back gracefully) |
+| EC-004 | Criterion html_reports feature availability | `html_reports` is OPT-IN (not the default); it is explicitly enabled in `Cargo.toml`. In CI, benchmarks are run with `--save-baseline`; HTML reports are generated locally only. Criterion 0.8 does not panic if the feature is enabled but reports are not viewed. |
 | EC-005 | Platform variance: macOS benchmarks are not gated | Only `ubuntu-latest` runs are gated. macOS/Windows bench jobs run but threshold failures are non-blocking (different CPU characteristics) |

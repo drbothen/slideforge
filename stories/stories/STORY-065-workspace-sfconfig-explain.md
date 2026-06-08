@@ -187,7 +187,12 @@ infrastructure defined in STORY-064.
    ```rust
    pub struct ResolvedConfig {
        pub settings: ProjectSettings,
-       pub provenance: HashMap<String, ProvenanceEntry>,
+       // DETERMINISM FIX: use BTreeMap, NOT HashMap. HashMap has randomized iteration
+       // order which would make `config explain` output non-deterministic across runs,
+       // violating AC-009/AC-011/AC-013 which require identical output per run.
+       // Alternatively, use indexmap::IndexMap (=2.10.0) if insertion-order stability
+       // is preferred (indexmap is in the workspace table). BTreeMap is the simpler choice.
+       pub provenance: std::collections::BTreeMap<String, ProvenanceEntry>,
    }
 
    pub struct ProvenanceEntry {
@@ -230,7 +235,9 @@ infrastructure defined in STORY-064.
    }
 
    pub fn format_json(resolved: &ResolvedConfig) -> String {
-       // serde_json::to_string_pretty of a HashMap<String, JsonProvenanceEntry>
+       // serde_json::to_string_pretty of a BTreeMap<String, JsonProvenanceEntry>.
+       // BTreeMap serializes in sorted key order → deterministic JSON output across
+       // runs (required by AC-011/AC-013). Do NOT use HashMap here.
    }
    ```
 
@@ -307,6 +314,9 @@ Context budget: 24 000 / 200 000 ≈ 12% — within limit.
 - `test_explain_format_text()`: known `ProvenanceEntry`; assert text output contains
   `from:` and `level:` strings.
 - `test_explain_format_json()`: serialize `ResolvedConfig`; parse JSON; assert valid.
+- `test_explain_deterministic_output()`: call `format_json()` twice on the same
+  `ResolvedConfig`; assert byte-identical output. Validates that BTreeMap (not HashMap)
+  is used — HashMap would produce non-deterministic key ordering.
 
 **Integration tests** (`crates/slideforge-cli/tests/config_explain_integration.rs`):
 
@@ -352,7 +362,11 @@ Context budget: 24 000 / 200 000 ≈ 12% — within limit.
    a test: snapshot directory before/after; assert identical.
 4. JSON output uses `serde_json`. Do NOT hand-format JSON strings.
 5. `#![forbid(unsafe_code)]` at the crate root.
-6. The `config explain` provenance chain covers exactly 5 levels in order of precedence
+6. **Determinism (AC-009/AC-011/AC-013)**: `config explain` must produce identical output
+   across runs. `ResolvedConfig::provenance` must use `BTreeMap<String, ProvenanceEntry>`
+   (NOT `HashMap`) to guarantee sorted-key iteration in both text and JSON formatters.
+   Any `HashMap` in the provenance chain would introduce randomized output order.
+7. The `config explain` provenance chain covers exactly 5 levels in order of precedence
    (highest to lowest): `cli-flag` > `sfconfig-level-1` (deck directory, i.e., `deck-local`) >
    `sfconfig-level-2` (parent directory) > `workspace-root` > `default`.
    Note: `deck-local` IS `sfconfig-level-1`; they are the same level, not two distinct levels.
@@ -363,14 +377,17 @@ Context budget: 24 000 / 200 000 ≈ 12% — within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `toml` | `=0.8` | Parse `.sfconfig` files (already in crate from STORY-064) |
-| `serde` | `=1.0` | Deserialize `ProjectSettings` (already present) |
-| `serde_json` | `=1.0` | JSON output for `config explain --format json` |
-| `thiserror` | `=2.0` | `ConfigError` (already present) |
+| `toml` | `=1.1.2` | Parse `.sfconfig` files (already in crate from STORY-064) |
+| `serde` | `=1.0.228` | Deserialize `ProjectSettings` (already present) |
+| `serde_json` | `=1.0.150` | JSON output for `config explain --format json` (add to workspace table per ADR-022) |
+| `thiserror` | `=2.0.18` | `ConfigError` (already present) |
 
-No new dependencies beyond `serde_json` (not yet in `slideforge-config`).
+No new dependencies beyond `serde_json` (not yet in `slideforge-config`). Add to
+`[workspace.dependencies]` and reference as `serde_json = { workspace = true }` per ADR-022.
 
 ## File Structure Requirements
 
@@ -383,7 +400,7 @@ crates/slideforge-config/
     lib.rs              # add: pub use cascade::{..}; pub use explain_format::{..};
   tests/
     cascade_integration.rs
-  Cargo.toml            # add serde_json = "=1.0"
+  Cargo.toml            # add serde_json = { workspace = true } (centralized in workspace table per ADR-022)
 crates/slideforge-cli/
   src/
     cli.rs              # Command::Config(ConfigArgs), ExplainArgs, ExplainFormat added

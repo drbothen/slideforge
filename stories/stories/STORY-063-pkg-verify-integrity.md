@@ -270,14 +270,23 @@ Context budget: 13 000 / 200 000 ≈ 6.5% — well within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+No new dependencies beyond what STORY-060 already established.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `sha2` | `=0.10` | Re-compute SHA-256 of archive (already present from STORY-060) |
-| `hex` | `=0.4` | Hex encoding (already present) |
-| `toml` | `=0.8` | sf.lock parsing (already present) |
-| `thiserror` | `=2.0` | PackageError (already present) |
+| `sha2` | `=0.11.0` | Re-compute SHA-256 of archive — reuses `sha256_hex()` from STORY-060 `src/hash.rs` (finalize() → hybrid_array::Array → [u8;32] via .into()) |
+| `hex` | `=0.4.3` | Hex encoding (already present) |
+| `toml` | `=1.1.2` | sf.lock parsing (already present from STORY-060) |
+| `thiserror` | `=2.0.18` | PackageError (already present) |
 
 No new dependencies are needed. This story only adds code within the existing crate.
+
+**Determinism note for AC-008**: The verification is deterministic because sha2 is
+deterministic and the archive bytes in the cache are fixed after install. However,
+whether a re-fetch (on a different OS) reproduces identical bytes couples to STORY-060's
+reproducible-archive risk (flate2 OS-byte caveat). The cross-platform CI byte-diff test
+from STORY-060 must pass before AC-008 can be considered fully validated.
 
 ## File Structure Requirements
 

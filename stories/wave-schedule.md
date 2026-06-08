@@ -1,9 +1,11 @@
 ---
 document_type: wave-schedule
-version: "1.0"
+version: "1.1"
 status: draft
 producer: story-writer
-timestamp: 2026-05-25T00:00:00
+timestamp: 2026-06-07T00:00:00
+changelog:
+  - "1.1 (2026-06-07): NFR-002 incremental-rebuild benchmark annotated DEFERRED to v1.x (comemo post-v1.0); NFR-001 cold-build remains active v1.0 gate (human-approved 2026-06-07)"
 phase: 2
 traces_to:
   - .factory/stories/dependency-graph.md
@@ -855,13 +857,13 @@ reloads. All CI gates pass including performance benchmarks (NFR-001 < 500ms).
 - **Epic:** EPIC-15
 - **Crate:** slideforge-cli
 - **BCs:** (no BC — NFR enforcement)
-- **NFRs:** NFR-001, NFR-002, NFR-005, NFR-006
+- **NFRs:** NFR-001, NFR-002 (DEFERRED to v1.x — comemo post-v1.0; see nfr-catalog NFR-002), NFR-005, NFR-006
 - **Points:** 5
 - **Priority:** P0
 - **tdd_mode:** facade
 - Criterion benchmark in `crates/slideforge-cli/benches/build_bench.rs`. Fixture:
   25 slides, 10+ slide types, brand.toml synthesis, 2 file-based @data sources.
-  Gate: NFR-001 cold build < 500ms; NFR-002 incremental < 50ms; NFR-005 PPTX/DOCX
+  Gate: NFR-001 cold build < 500ms; NFR-002 incremental < 50ms (DEFERRED to v1.x — comemo post-v1.0; see nfr-catalog NFR-002); NFR-005 PPTX/DOCX
   serialization < 200ms; NFR-006 peak memory < 256MB.
 
 ### STORY-046 — HTML Exporter: WCAG AA via axe-core

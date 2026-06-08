@@ -56,9 +56,11 @@ Complete the web preview feature by adding:
      reconnect" and stops attempting.
 
 2. **File watcher integration** (in `slideforge-cli`, calling into `slideforge-preview`):
-   - `notify 8.0.0` watches the .sf file and data source files.
-   - On change event, debounce 100ms (from STORY-047), then re-evaluate, then call
-     `push_update()` or `push_error()`.
+   - `notify =8.2.0` watches the .sf file and data source files (bumped from workspace
+     baseline of =6.1.1 to =8.2.0 per ADR-022 root bump).
+   - Debounce is handled by `notify-debouncer-full =0.7.0` (preferred over hand-rolled
+     debounce; consistent with STORY-047's 100ms debounce in `debounce.rs`).
+   - On debounced change event, re-evaluate, then call `push_update()` or `push_error()`.
 
 3. **Accessibility features** of the preview page:
    - `aria-live="polite"` region for connection status announcements.
@@ -172,8 +174,14 @@ includes:
   - Send `full-state` message as first message to each new WebSocket connection
 - [ ] Create `crates/slideforge-preview/src/watcher.rs`:
   - `FileWatcher::watch(path: &Path, on_change: impl Fn() + Send + 'static)`
-  - Uses `notify 8.0.0`
-  - Debounce applied before `on_change` callback
+  - Uses `notify =8.2.0` (workspace per ADR-022; bumped from =6.1.1 baseline)
+  - Debounce via `notify-debouncer-full =0.7.0` (preferred over hand-rolled debounce;
+    aligns with STORY-047's 100ms debounce contract)
+  - `EventHandler` trait is implemented via blanket impl for closures (`FnMut`);
+    event types are re-exported from `notify-types`
+  - Enable `crossbeam-channel` feature on `notify` if bounded queue is needed
+    (default is `crossbeam-channel = false`); queue overflow surfaces via
+    `EventKind::Other` — trigger a full rescan on overflow
 - [ ] Update `slideforge-cli` `watch` subcommand (STORY-056 will finalize CLI; this
   story adds the plumbing between notify and the preview server)
 - [ ] Write integration tests (Playwright-based, in `tests/e2e/`):
@@ -182,7 +190,8 @@ includes:
   - 5-minute timeout behavior (mocked with shorter timeout for testing)
   - `prefers-reduced-motion` reduces animations
   - Keyboard navigation: ArrowRight advances to slide 2
-- [ ] Add `notify = "=8.0.0"` to `slideforge-preview` Cargo.toml
+- [ ] Add `notify = { workspace = true }` and `notify-debouncer-full = { workspace = true }`
+  to `slideforge-preview` Cargo.toml (pins =8.2.0 and =0.7.0 respectively per ADR-022)
 
 ## Previous Story Intelligence
 
@@ -190,9 +199,12 @@ STORY-047 established `PreviewServer` with `push_update()`, `push_error()`,
 and the WebSocket endpoint at `/live`. The WebSocket broadcast channel from
 STORY-047 is reused here for the `full-state` message dispatch.
 
-Key lesson from STORY-047: the 100ms debounce is in `debounce.rs`. The file
-watcher in this story calls the debounced trigger, not the raw evaluation. Do not
-re-implement debounce here — import and use `debounce::Debouncer` from STORY-047.
+Key lesson from STORY-047: the 100ms debounce contract is established in
+`debounce.rs`. This story uses `notify-debouncer-full =0.7.0` as the debounce
+mechanism, which wraps notify's event stream and fires after a 100ms quiet window.
+This is consistent with STORY-047's debounce contract and replaces any hand-rolled
+debounce. Do not re-implement debounce — use `notify-debouncer-full` in
+`watcher.rs`, which provides the same 100ms coalescing behavior as `debounce::Debouncer`.
 
 ## Architecture Compliance Rules
 
@@ -213,11 +225,13 @@ re-implement debounce here — import and use `debounce::Debouncer` from STORY-0
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| `notify` | `=8.0.0` | File system event watcher (MSRV 1.77; note: version 6.1 never existed; notify jumped from 6.0.1 to 8.0.0) |
+| `notify` | `{ workspace = true }` = `=8.2.0` (ADR-022) | File system event watcher. Bumped from workspace baseline =6.1.1 to =8.2.0 per ADR-022 root bump. `EventHandler` trait has blanket impl for `FnMut` closures. Event types re-exported from `notify-types`. `crossbeam-channel` feature default-off; enable only if bounded queue is needed. Queue overflow surfaces via `EventKind::Other` → trigger full rescan. |
+| `notify-debouncer-full` | `{ workspace = true }` = `=0.7.0` (ADR-022) | Debounce wrapper for notify — preferred over hand-rolled debounce; handles the 100ms window consistent with STORY-047 `debounce.rs` contract |
 | `slideforge-preview` (self, STORY-047) | workspace | Extends server with full-state + watcher |
 | `slideforge-html` | workspace | `render_slide_to_html()` |
 | (Browser JavaScript) | Inline | WebSocket reconnect logic; no npm packages in output |
 
+All workspace-pinned crates centralized in `[workspace.dependencies]` per ADR-022.
 Note: The browser-side JavaScript is embedded inline in the served HTML as a
 `<script>` block. No npm/node.js packages are used in the shipped HTML — the
 JavaScript is minimal, vanilla JS, with no external dependencies. This is a
@@ -228,9 +242,9 @@ deliberate choice for simplicity and offline usability.
 | File | Action | Purpose |
 |------|--------|---------|
 | `crates/slideforge-preview/src/client_js.rs` | Create | Embedded JS (const str, included in HTML) |
-| `crates/slideforge-preview/src/watcher.rs` | Create | notify 8.0.0 file watcher integration |
+| `crates/slideforge-preview/src/watcher.rs` | Create | notify 8.2.0 + notify-debouncer-full 0.7.0 file watcher integration (ADR-022) |
 | `crates/slideforge-preview/src/server.rs` | Modify | Add full-state dispatch on new WS connection |
-| `crates/slideforge-preview/Cargo.toml` | Modify | Add notify = "=8.0.0" |
+| `crates/slideforge-preview/Cargo.toml` | Modify | Add `notify = { workspace = true }` (=8.2.0) and `notify-debouncer-full = { workspace = true }` (=0.7.0) per ADR-022 |
 | `crates/slideforge-preview/tests/e2e/` | Create | Playwright integration tests directory |
 | `crates/slideforge-preview/tests/e2e/reconnect.spec.ts` | Create | Reconnect + full-state test |
 | `crates/slideforge-preview/tests/e2e/keyboard.spec.ts` | Create | Keyboard navigation test |
@@ -243,7 +257,7 @@ deliberate choice for simplicity and offline usability.
 | BC-5.05.005 | ~1,200 |
 | STORY-047 server.rs context | ~1,500 |
 | STORY-047 debounce.rs context | ~600 |
-| notify 8.0.0 API docs | ~800 |
+| notify 8.2.0 + notify-debouncer-full 0.7.0 API docs | ~900 |
 | JavaScript client code to write | ~2,000 |
 | Playwright test files to write | ~2,000 |
 | **Total** | **~10,900** |

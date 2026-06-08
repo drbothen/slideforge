@@ -313,14 +313,16 @@ Context budget: 25 000 / 200 000 ≈ 12.5% — within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `sha2` | `=0.10` | Re-verify cache checksum on re-fetch |
-| `hex` | `=0.4` | Hex encoding |
-| `tar` | `=0.4` | Extract .tar.gz archive contents |
-| `flate2` | `=1.0` | Gzip decompression for .tar.gz |
-| `thiserror` | `=2.0` | `PackageResolveError` derive |
-| `git2` | `=0.20` | Re-fetch via git when cache is missing |
+| `sha2` | `=0.11.0` | Re-verify cache checksum on re-fetch (finalize() → hybrid_array::Array → [u8;32] via .into(); matches STORY-060 sha256_hex()) |
+| `hex` | `=0.4.3` | Hex encoding |
+| `tar` | `=0.4.46` | Extract .tar.gz archive contents |
+| `flate2` | `=1.1.9` | Gzip decompression for .tar.gz (=1.1.6 and =1.1.7 are yanked — use =1.1.9 only) |
+| `thiserror` | `=2.0.18` | `PackageResolveError` derive |
+| `git2` | `=0.21.0` | Re-fetch via full clone when cache is missing (default-features=false, HTTPS-only; NO shallow clone; checkout via set_head_detached + checkout_tree; annotated tags via peel_to_commit()) |
 
 ## File Structure Requirements
 
@@ -373,11 +375,18 @@ path `slides/intro` maps to the file `slides/intro.sf` inside the package archiv
 
 ### Re-fetch algorithm (cache miss, online mode)
 
+Uses git2 =0.21.0 — full clone only (no shallow clone). Re-fetch must reproduce an
+identical SHA-256 as the original install; this couples to STORY-060's reproducible-archive
+approach (mtime=0, sorted entries, fixed gzip params). The cross-platform CI byte-diff
+test from STORY-060 must verify that a re-fetch on a different OS produces the same
+SHA-256 — they must match for the integrity check to pass.
+
 ```
 1. Find LockedPackage entry in sf.lock (has url + rev)
-2. git clone <url> into temp dir
-3. git checkout <rev> in temp dir
-4. create_archive(temp dir) → Vec<u8>
+2. Full git clone <url> into temp dir via RepoBuilder::new().clone()
+3. Checkout <rev>: repo.set_head_detached(oid) + repo.checkout_tree()
+   (for annotated tags: peel to commit via Object::peel_to_commit() first)
+4. create_archive(temp dir) → Vec<u8>  (same deterministic logic as STORY-060)
 5. verify sha256_hex(archive) == entry.sha256  (if mismatch → E-PKG-003)
 6. write archive to cache path
 7. return archive

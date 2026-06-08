@@ -18,7 +18,7 @@ behavioral_contracts:
   - BC-5.05.004
 verification_properties: []
 nfr_refs:
-  - NFR-002
+  - NFR-002  # DEFERRED to v1.x (nfr-catalog v1.3) — incremental <50ms requires comemo
   - NFR-021
   - NFR-022
   - NFR-023
@@ -124,9 +124,11 @@ Key design constraints:
   introduces it. The watcher adds the included file to its watch set.
   (traces to BC-5.05.001 invariant 2)
 
-- [ ] **AC-014** — Incremental rebuild for a single `.sf` file change completes in < 50ms on
-  the CI benchmark runner (NFR-002).
-  (traces to NFR-002 — incremental rebuild < 50ms)
+- [ ] **AC-014** — **DEFERRED to v1.x** — NFR-002 (incremental rebuild < 50ms) is deferred to
+  v1.x in nfr-catalog v1.3 because it requires the comemo incremental cache which is a post-v1.0
+  feature. The v1.0 watch mode triggers a full re-evaluation on each file change. The benchmark
+  (`STORY-059`) still records incremental timing but the < 50ms gate is NOT enforced in v1.0 CI.
+  (traces to NFR-002 — DEFERRED to v1.x; comemo incremental not in v1.0 scope)
 
 - [ ] **AC-015** — `#![forbid(unsafe_code)]`, zero `.unwrap()` in non-test code, `clippy::pedantic`
   clean.
@@ -198,8 +200,15 @@ Key design constraints:
   `trigger_force_rebuild()`
 - `crates/slideforge-cli/src/cli.rs` — add `WatchArgs` struct (extends existing file)
 - `crates/slideforge-cli/src/debounce.rs` — `DebouncedSender<T>` utility
-- `crates/slideforge-cli/src/keyboard.rs` — async keyboard reader
-- `crates/slideforge-cli/Cargo.toml` — add: `tokio` (features: full), `notify =8.0`
+- `crates/slideforge-cli/src/keyboard.rs` — async keyboard reader using `crossterm::event::EventStream`
+  with `tokio::select!`; guard `KeyEventKind::Press` to avoid duplicate events on key-up
+- `crates/slideforge-cli/Cargo.toml` — add async stack (new to workspace — the existing
+  workspace HTTP client is sync `ureq =2.12.1`, which does NOT satisfy async watch-mode needs):
+  - `tokio = {workspace = true}` (=1.52.3, features: rt-multi-thread,macros,net,time,sync,signal,fs,io-util — NOT `full`); cite ADR-021.
+  - `reqwest = {workspace = true}` (=0.13.4, default-features=false, features: rustls-tls,charset,http2) — used for async HTTP data-source polling in watch mode; bridges to existing sync DataSource plugins via a thin async wrapper.
+  - `notify = {workspace = true}` (=8.2.0) + `notify-debouncer-full = {workspace = true}` (=0.7.0).
+  - `crossterm = {workspace = true}` (=0.29.0, feature `event-stream`) — for async `r` keypress via `EventStream` integrated with `tokio::select!`.
+  - `clap = {workspace = true}`, `tracing = {workspace = true}` — already in workspace per ADR-022.
 - `crates/slideforge-cli/tests/watch_integration.rs` — integration tests
 
 ## Token Budget Estimate
@@ -245,7 +254,9 @@ Context budget: 25 000 / 200 000 ≈ 12.5% — within limit.
 **Benchmark** (`benches/build_bench.rs` — Criterion, also used by STORY-059):
 
 - `bench_incremental_rebuild_single_file()`: modify 1 field in a 25-slide fixture;
-  measure re-evaluation time; assert < 50ms per NFR-002.
+  measure re-evaluation time. **NOTE: NFR-002 (<50ms) is DEFERRED to v1.x** (nfr-catalog v1.3);
+  this benchmark records the timing for regression tracking but the < 50ms gate is NOT enforced
+  in v1.0 CI. The v1.0 watch loop triggers a full re-evaluation; true incremental requires comemo.
 
 ## Dependencies
 
@@ -293,14 +304,18 @@ Context budget: 25 000 / 200 000 ≈ 12.5% — within limit.
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `notify` | `=8.0` | File system event watching (inotify/FSEvents/ReadDirectoryChanges) |
-| `tokio` | `=1.44` | Async runtime; `tokio::select!`, timers, channels |
-| `clap` | `=4.5` | `WatchArgs` derive |
-| `tracing` | `=0.1` | Span instrumentation for watch events |
-| `reqwest` | `=0.12` | HTTP poll client (also used in slideforge-data; CLI uses it for polling) |
+| `notify` | `{workspace = true}` (=8.2.0) | File system event watching (inotify/FSEvents/ReadDirectoryChanges). MSRV 1.77. Centralized per ADR-022. |
+| `notify-debouncer-full` | `{workspace = true}` (=0.7.0) | Pairs with notify =8.2.0 for debouncing file events. Centralized per ADR-022. |
+| `tokio` | `{workspace = true}` (=1.52.3, features: rt-multi-thread,macros,net,time,sync,signal,fs,io-util) | Async runtime; `tokio::select!`, timers, channels. NOT `full` feature. Cite ADR-021. |
+| `reqwest` | `{workspace = true}` (=0.13.4, default-features=false, rustls-tls,charset,http2) | Async HTTP poll client. **NEW to workspace** — the existing sync `ureq =2.12.1` in `slideforge-data` does NOT satisfy async watch-mode needs. Cite ADR-021. |
+| `crossterm` | `{workspace = true}` (=0.29.0, feature `event-stream`) | Async keyboard input via `EventStream` for `r` keypress; integrates with `tokio::select!`. Guard `KeyEventKind::Press` to filter key-up noise. |
+| `clap` | `{workspace = true}` (=4.6.1) | `WatchArgs` derive. Centralized per ADR-022. |
+| `tracing` | `{workspace = true}` (=0.1.44) | Span instrumentation for watch events. Centralized per ADR-022. |
 
-Note: `reqwest` is already in the dependency graph for `slideforge-data`. Import it in
-`slideforge-cli` with `=0.12` pinning.
+**Note:** The existing `slideforge-data` crate uses sync `ureq =2.12.1`. Watch-mode async
+HTTP polling uses `reqwest =0.13.4` (async, tokio-backed). These are separate crates with
+separate transport choices. DataSource plugin bridges remain sync; the watch loop wraps them
+via `tokio::task::spawn_blocking` where needed.
 
 ## File Structure Requirements
 
@@ -325,9 +340,11 @@ user passed in `GlobalFlags.warn_only`. This is a contract from BC-5.05.001 inva
 and must be enforced in `run_watch()` before constructing `CompileOptions`.
 
 Key from BC-5.05.002: the `last_good_deck` in `WatchState` must be cloned and held even
-after an error. It is the state shown in the browser until recovery. This means
-`Deck` (or `LaidOutDeck`) must implement `Clone` — verify this is enforced in STORY-001
-(ir-core-types) before implementing STORY-056.
+after an error. It is the state shown in the browser until recovery. Per CLAUDE.md
+"Two-IR Model": all IR types implement `Hash + Eq + Clone` from day 1 (comemo compatibility).
+`Deck` and `LaidOutDeck` therefore implement `Clone` — this is a non-negotiable invariant
+established in STORY-001 (ir-core-types) and confirmed in CLAUDE.md. No hedge or verification
+needed; if STORY-001 ships without `Clone` on IR types it is a defect in STORY-001 to fix there.
 
 ## Implementation Notes
 
@@ -363,19 +380,24 @@ async fn debounce_loop(mut rx: mpsc::UnboundedReceiver<()>, fire_tx: mpsc::Sende
 }
 ```
 
-### Notify watcher event handling
+### Notify watcher event handling (notify =8.2.0 + notify-debouncer-full =0.7.0)
 
-`notify 8.0` provides `EventKind` variants. Map them as follows:
+Use `notify-debouncer-full =0.7.0` which pairs with `notify =8.2.0`. Map `DebouncedEvent`
+variants:
 - `EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)` → file changed event
-- `EventKind::Other` with data indicating overflow → overflow event (triggers full rebuild)
+- `EventKind::Other` → overflow/unclassified event (triggers full rebuild + CLI warning)
 
-Note: notify 8.0 raised MSRV to 1.77 and added `RecommendedCache` for automatic file ID
-caching on Windows/macOS. The `recommended_watcher(handler)` API still exists as a
-convenience function returning the platform `RecommendedWatcher`. On macOS, FSEvents
-coalesces events automatically; no special handling needed. On Linux, `IN_Q_OVERFLOW`
-arrives as a synthetic event from inotify — the notify crate surfaces this as a
-watcher-level error via the `Error` type passed to the event handler. Register an error
-check in the `EventHandler` closure that detects overflow conditions.
+Key facts for notify =8.2.0 (MSRV 1.77):
+- `recommended_watcher(handler)` API still exists; `handler` is `FnMut(notify::Result<Event>)`
+  (the `EventHandler` trait bound).
+- Use `crossbeam-channel` feature on `notify-debouncer-full` for the debounced channel sender.
+- On Linux, `IN_Q_OVERFLOW` surfaces as `watcher-level Error`; register an error handler in
+  the `EventHandler` closure.
+- On macOS, FSEvents coalesces naturally; the `debouncer-full` crate handles the rest.
+- Overflow detection: `EventKind::Other` with a kind string containing "overflow", OR a
+  watcher `Error` with `ErrorKind::WatchNotFound` — treat both as full-rescan triggers.
+- The `debouncer-full` debounce window is configured at construction time:
+  `new_debouncer(Duration::from_millis(100), None, handler)?`
 
 ### HTTP polling task
 

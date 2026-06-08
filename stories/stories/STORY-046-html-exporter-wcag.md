@@ -91,13 +91,23 @@ The `<html>` element has `lang="<value>"` where `<value>` is `deck.lang` (e.g.,
 two fixture decks (lang "en-US" and lang "ja") produce HTML with matching `lang`
 attributes.
 
-### AC-003: Non-decorative images have non-empty alt attributes
+### AC-003: Non-decorative SVG elements have role="img" and <title> injected via XML manipulation
 (traces to BC-4.03.003 postcondition 4)
 
 For every `LaidOutElement` with `decorative: false`, the generated `<img>` or `<svg>`
 element in the HTML output has a non-empty `alt` attribute (for `<img>`) or a
 `<title>` child element (for `<svg>`). Verified by parsing the HTML output with
 `scraper` and asserting no `img[alt=""]` where `decorative=false`.
+
+**CRITICAL — usvg 0.47.0 limitation (export-architecture v1.2):** usvg strips all
+non-presentation attributes during SVG tree processing (no `role`, no `aria-*`). usvg
+MUST NOT be used to inject `role="img"` or `<title>` — it will silently discard them.
+The correct approach is raw SVG string/XML manipulation via `quick-xml` or `roxmltree`
+after usvg geometry processing is complete:
+1. Use usvg for geometry normalization and validation only.
+2. After usvg processing, use `quick-xml` XML manipulation to inject `role="img"` on
+   the outer `<svg>` element and prepend a `<title>` child with the alt text.
+This ensures accessibility attributes survive through to the rendered HTML.
 
 ### AC-004: Decorative images have alt="" and role="presentation"
 (traces to BC-4.03.003 postcondition 5)
@@ -113,12 +123,25 @@ For each `FrameContent::ChartSvg` or `FrameContent::DiagramSvg` element, the out
 is the element's `alt` text. Inner SVG elements are `aria-hidden="true"`. Verified
 by HTML structure tests.
 
+**Implementation note (usvg 0.47.0 — export-architecture v1.2):** usvg strips
+non-presentation attributes including `role` and `aria-*`. Inject `role="img"` and
+`<title>` via `quick-xml` raw XML manipulation after usvg processing, not via the
+usvg tree API. usvg is used for geometry/validation only; the accessibility attributes
+are written at the serialization step.
+
 ### AC-006: SVG-based canvas (not <canvas> element)
 (traces to BC-4.03.003 invariant 2)
 
 The HTML output uses `<svg>` elements for slide content rendering. No `<canvas>`
 elements appear in the HTML output. This is verified by an assertion in the unit
-test: `scraper::Html::parse_document(&html).select("canvas").count() == 0`.
+test using the correct `scraper` API (scraper 0.27.0):
+```rust
+let doc = scraper::Html::parse_document(&html);
+let sel = scraper::Selector::parse("canvas").expect("valid selector");
+assert_eq!(doc.select(&sel).count(), 0);
+```
+Note: `Html::parse_document(s).select("canvas")` is invalid — `select()` requires a
+`&Selector` reference, not a string literal. Always construct a `Selector` first.
 
 ### AC-007: Zero WCAG AA violations via axe-core in CI
 (traces to BC-4.03.003 postcondition 2 and invariant 4)
@@ -172,15 +195,21 @@ when they implement inline node rendering. This AC establishes the pattern for S
 ## Tasks
 
 - [ ] Create `crates/slideforge-html/Cargo.toml` with dependencies:
-  `minijinja = "=2.3.0"` (templating), `usvg = "=0.47.0"` (SVG handling),
-  `html-escape = "=0.2.13"` (text escaping), `scraper = "=0.21.0"` (test-only),
-  `slideforge-plugin-api`, `slideforge-types`
+  `minijinja = { workspace = true }` (templating; centralized in [workspace.dependencies] per ADR-022;
+  pin =2.20.0; autoescape is keyed on template name — `.html` suffix enables HTML autoescape automatically),
+  `usvg = { workspace = true }` (SVG geometry/validation only — NOT for role/aria injection; see AC-003/AC-005),
+  `html-escape = { workspace = true }` (use `encode_text` for text content, `encode_double_quoted_attribute`
+  for attribute values; unnecessary when output is built via quick-xml which auto-escapes),
+  `quick-xml` (for role/title injection into SVG after usvg processing),
+  `scraper = "=0.27.0"` (dev-dep test-only), `slideforge-plugin-api`, `slideforge-types`.
+  Centralized versions per ADR-022; pin =2.20.0 for minijinja, =0.47.0 for usvg, =0.2.13 for html-escape.
 - [ ] Create `crates/slideforge-html/src/lib.rs` — re-export `HtmlExporter`
 - [ ] Create `crates/slideforge-html/src/exporter.rs` — `HtmlExporter` + `Exporter` impl
 - [ ] Create `crates/slideforge-html/src/render.rs`:
   - `render_slide_to_html(slide: &LaidOutSlide, brand: &Brand) -> String`
   - `render_element_to_html(element: &LaidOutElement) -> String`
-  - `render_svg_chart(svg: &str, alt: &str) -> String` (wraps in role=img + title)
+  - `render_svg_chart(svg: &str, alt: &str) -> String` (injects role="img" and <title> via
+    quick-xml XML manipulation after usvg geometry pass — NOT via usvg tree API per export-architecture v1.2)
 - [ ] Create `crates/slideforge-html/templates/slide.html.jinja` — Jinja2 template for a slide
 - [ ] Create `crates/slideforge-html/templates/page.html.jinja` — full HTML page wrapper
 - [ ] Write unit tests:
@@ -226,15 +255,17 @@ Specifically: `render_slide_to_html()` should return a `String` (not write to a
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| `minijinja` | `=2.3.0` | Jinja2-compatible HTML templating |
-| `usvg` | `=0.47.0` | SVG parsing for role/title injection |
-| `html-escape` | `=0.2.13` | Escape text content for HTML embedding |
-| `scraper` | `=0.21.0` | HTML parsing in tests (dev-dependency only) |
+| `minijinja` | `{ workspace = true }` = `=2.20.0` (ADR-022) | Jinja2-compatible HTML templating; `.html` suffix enables HTML autoescape automatically |
+| `usvg` | `{ workspace = true }` = `=0.47.0` (ADR-022) | SVG geometry/validation ONLY — does NOT round-trip role/aria attributes (stripped); use quick-xml for accessibility injection |
+| `html-escape` | `{ workspace = true }` = `=0.2.13` (ADR-022) | `encode_text` for text nodes; `encode_double_quoted_attribute` for attr values; not needed when using quick-xml (auto-escapes) |
+| `quick-xml` | workspace | Raw XML manipulation for role/title injection into SVG after usvg pass |
+| `scraper` | `=0.27.0` (dev-dep only) | HTML parsing in tests — use `Selector::parse("...")` + `doc.select(&sel)`, not `.select("canvas")` directly |
 | `slideforge-plugin-api` | workspace | `Exporter` trait |
 | `slideforge-types` | workspace | `LaidOutDeck`, `LaidOutSlide`, `Brand` |
 | `@axe-core/playwright` | CI only | WCAG AA validation (not a Rust dep) |
 | `playwright` | CI only | Headless browser for axe-core (not a Rust dep) |
 
+All workspace-pinned crates centralized in `[workspace.dependencies]` per ADR-022.
 Forbidden: `<canvas>` in output HTML. `pulldown-cmark` (Markdown is not needed;
 the DSL produces structured IR, not Markdown).
 
@@ -260,7 +291,7 @@ the DSL produces structured IR, not Markdown).
 | BC-4.03.003 | ~1,400 |
 | LaidOutDeck/LaidOutSlide types | ~2,000 |
 | Exporter trait | ~800 |
-| minijinja 2.3.0 API reference | ~1,000 |
+| minijinja 2.20.0 API reference | ~1,000 |
 | HTML templates to write | ~1,500 |
 | Test files to write | ~2,000 |
 | **Total** | **~11,500** |

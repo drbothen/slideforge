@@ -114,6 +114,8 @@ and `slideforge-cli` (the `--workspace` flag and build loop).
 ## Tasks
 
 1. Create the `slideforge-config` crate in the Cargo workspace:
+   All dependencies use `{ workspace = true }` — centralized in `[workspace.dependencies]`
+   per ADR-022. New crate added to workspace table per ADR-022.
    ```toml
    # crates/slideforge-config/Cargo.toml
    [package]
@@ -122,21 +124,29 @@ and `slideforge-cli` (the `--workspace` flag and build loop).
    edition = "2024"
 
    [dependencies]
-   toml = "=0.8"
-   serde = { version = "=1.0", features = ["derive"] }
-   glob = "=0.3"
-   thiserror = "=2.0"
-   tracing = "=0.1"
+   toml = { workspace = true }
+   serde = { workspace = true }
+   globset = { workspace = true }
+   walkdir = { workspace = true }
+   thiserror = { workspace = true }
+   tracing = { workspace = true }
    ```
 
 2. Define the `WorkspaceConfig` model in `src/workspace.rs`:
    ```rust
+   // HAZARD: #[serde(flatten)] with Option<WorkspaceSection> under toml 1.x is
+   // INCONCLUSIVE — behavior may differ from serde_json. REQUIRED: write a
+   // serialize/deserialize unit test against toml =1.1.2 for SlideForgeTOML before
+   // committing to this layout. If the flatten + Option<table> combination errors,
+   // fall back to explicit nesting (i.e., keep workspace as a named field, not flattened).
    #[derive(Debug, Clone, Deserialize)]
    pub struct SlideForgeTOML {
        #[serde(rename = "workspace")]
        pub workspace: Option<WorkspaceSection>,
-       #[serde(flatten)]
-       pub settings: ProjectSettings,
+       // NOTE: Do NOT use #[serde(flatten)] for ProjectSettings without first passing
+       // the unit test described above. Use explicit named fields or a named sub-table
+       // if flatten proves unreliable with toml =1.1.2.
+       pub settings: Option<ProjectSettings>,
    }
 
    #[derive(Debug, Clone, Deserialize)]
@@ -154,24 +164,48 @@ and `slideforge-cli` (the `--workspace` flag and build loop).
 
 3. Implement `discover_members(workspace_root: &Path, members_globs: &[String]) -> Vec<PathBuf>`
    in `src/discovery.rs`:
+
+   Use `globset =0.4.18` paired with `walkdir =2.5.0` for member discovery (preferred
+   over `glob =0.3` which lacks brace expansion and has cross-platform quirks).
+
+   DEDUP FIX: `Vec::dedup()` only removes CONSECUTIVE duplicates. The full path list
+   must be SORTED before dedup to ensure all duplicates from overlapping globs are
+   removed. Sort the full accumulated `paths` vec, then dedup (EC-007).
+
    ```rust
+   use globset::{Glob, GlobSetBuilder};
+   use walkdir::WalkDir;
+
    pub fn discover_members(
        workspace_root: &Path,
        members_globs: &[String],
    ) -> Result<Vec<PathBuf>, ConfigError> {
-       let mut paths: Vec<PathBuf> = Vec::new();
+       let mut builder = GlobSetBuilder::new();
        for pattern in members_globs {
-           let full_pattern = workspace_root.join(pattern);
-           let full_pattern_str = full_pattern.to_str().ok_or(ConfigError::InvalidGlob)?;
-           let mut matches: Vec<PathBuf> = glob::glob(full_pattern_str)?
-               .filter_map(|r| r.ok())
-               .filter(|p| p.is_dir())
-               .collect();
-           matches.sort();  // deterministic alphabetical order
-           paths.extend(matches);
+           let glob = Glob::new(pattern).map_err(|_| ConfigError::InvalidGlob)?;
+           builder.add(glob);
        }
-       // Deduplicate (a path can match multiple globs)
+       let glob_set = builder.build().map_err(|_| ConfigError::InvalidGlob)?;
+
+       let mut paths: Vec<PathBuf> = WalkDir::new(workspace_root)
+           .min_depth(1)
+           .max_depth(2)  // adjust depth based on expected workspace layout
+           .into_iter()
+           .filter_map(|e| e.ok())
+           .filter(|e| e.file_type().is_dir())
+           .filter(|e| {
+               // Match relative path from workspace_root against glob patterns
+               let rel = e.path().strip_prefix(workspace_root).ok();
+               rel.map(|r| glob_set.is_match(r)).unwrap_or(false)
+           })
+           .map(|e| e.into_path())
+           .collect();
+
+       // CRITICAL: sort the FULL list before dedup (Vec::dedup removes consecutive dups
+       // only — sorting first ensures all cross-glob duplicates are adjacent).
+       paths.sort();
        paths.dedup();
+
        if paths.is_empty() {
            return Err(ConfigError::NoMembersFound);
        }
@@ -297,6 +331,10 @@ Context budget: 19 000 / 200 000 ≈ 9.5% — within limit.
   merged settings do NOT contain workspace section.
 - `test_load_no_workspace_section()`: `slideforge.toml` without `[workspace]`; assert
   `ConfigError::NoWorkspaceSection`.
+- `test_slideforge_toml_serde_flatten_roundtrip()`: serialize a `SlideForgeTOML` with
+  both `workspace` and `settings` populated to a TOML string using toml =1.1.2, then
+  deserialize back; assert round-trip equality. REQUIRED before committing the
+  `#[serde(flatten)]` layout — if this test errors, switch to explicit field nesting.
 
 **Integration tests** (`crates/slideforge-cli/tests/workspace_integration.rs`):
 
@@ -346,6 +384,14 @@ Context budget: 19 000 / 200 000 ≈ 9.5% — within limit.
    must be caught at the member-loop boundary and recorded as a failure, not propagated
    up to terminate the entire workspace build.
 5. `#![forbid(unsafe_code)]` at the crate root for `slideforge-config`.
+6. **Dedup correctness (EC-007)**: `Vec::dedup()` only removes CONSECUTIVE duplicates.
+   The full path list from all glob expansions must be SORTED before calling `dedup()`,
+   otherwise paths matched by multiple overlapping globs will not be deduplicated.
+   Always: `paths.sort(); paths.dedup();` — never `paths.dedup()` alone.
+7. **serde(flatten) + Option<table> (toml 1.x)**: Write a serialize/deserialize round-trip
+   unit test for `SlideForgeTOML` against toml =1.1.2 before committing. If
+   `#[serde(flatten)]` + `Option<WorkspaceSection>` produces an error, use explicit
+   named field layout instead.
 
 **Forbidden dependencies for `slideforge-config`:**
 - Must NOT import `slideforge-eval`, `slideforge-syntax`, or any exporter crate.
@@ -354,13 +400,16 @@ Context budget: 19 000 / 200 000 ≈ 9.5% — within limit.
 
 ## Library and Framework Requirements
 
+All versions centralized in `[workspace.dependencies]` per ADR-022; crate uses `{ workspace = true }`.
+
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `toml` | `=0.8` | Parse `slideforge.toml` and member-local overrides |
-| `serde` | `=1.0` | Deserialize `SlideForgeTOML`, `ProjectSettings` |
-| `glob` | `=0.3` | Glob pattern expansion for `members` list |
-| `thiserror` | `=2.0` | `ConfigError` enum |
-| `tracing` | `=0.1` | Span per member-build in workspace loop |
+| `toml` | `=1.1.2` | Parse `slideforge.toml` and member-local overrides |
+| `serde` | `=1.0.228` | Deserialize `SlideForgeTOML`, `ProjectSettings` (NOTE: test #[serde(flatten)] + Option<table> against =1.1.2 before committing; fall back to explicit nesting if it errors) |
+| `globset` | `=0.4.18` | Glob pattern expansion for `members` list (preferred over glob =0.3 — supports brace expansion and cross-platform patterns; pair with walkdir) |
+| `walkdir` | `=2.5.0` | Directory traversal for globset-based member discovery |
+| `thiserror` | `=2.0.18` | `ConfigError` enum |
+| `tracing` | `=0.1.44` | Span per member-build in workspace loop |
 
 ## File Structure Requirements
 

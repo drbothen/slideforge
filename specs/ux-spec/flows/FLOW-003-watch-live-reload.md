@@ -2,10 +2,11 @@
 document_type: ux-spec-flow
 flow_id: "FLOW-003"
 flow_name: "Watch Live Reload"
-version: "1.0"
+version: "1.1"
 status: draft
 producer: ux-designer
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
 phase: 1c
 traces_to: UX-INDEX.md
 screens_involved:
@@ -14,7 +15,8 @@ screens_involved:
   - SCR-008
 prd_requirements:
   - "PRD §2.5 BC-5.05.001-005"
-  - "PRD §4 NFR-002 (< 50ms incremental rebuild)"
+  - "PRD §4 NFR-002 (< 50ms incremental rebuild — DEFERRED to v1.x; see nfr-catalog v1.3)"
+  - "PRD §4 NFR-001 (< 500ms cold build — v1.0 watch rebuild path governed by this)"
   - "interface-definitions.md §1.3"
   - "q16-q25-decisions.md Q17 (watch always warn-only)"
   - "q1-decision-final.md §1 (HTTP data polling)"
@@ -43,7 +45,7 @@ This flow covers one full edit-rebuild-reload cycle.
 | 5 | User | Editor | Saves deck.sf | (no output yet) |
 | 6 | System | Terminal | File change detected | `[watch] deck.sf changed (HH:MM:SS) — rebuilding...` |
 | 7 | System | Browser | `build_started` WS message | Loading overlay on changed slides |
-| 8 | System | System | Incremental rebuild (< 50ms target) | (internal) |
+| 8 | System | System | Full re-evaluation rebuild (NFR-002 incremental target deferred to v1.x; v1.0 performs full rebuild) | (internal) |
 | 9 | System | Terminal | Rebuild success | `Rebuilt in 18ms — 25 slides` |
 | 10 | System | Browser | `slide_delta` WS message | Only changed slide SVGs swap in-place |
 | 11 | System | Browser | Overlays removed | Slides show updated content |
@@ -80,14 +82,19 @@ This flow covers one full edit-rebuild-reload cycle.
 
 ## Performance Gate
 
-The step 8→10 path (file save → browser update) must complete in < 200ms total
-when the incremental rebuild completes in < 50ms (NFR-002). This includes:
+> **NFR-002 deferral (approved 2026-06-07):** The < 50ms incremental rebuild target
+> (NFR-002, comemo-based) is DEFERRED to v1.x. v1.0 watch mode performs a full
+> re-evaluation on every change; perceived latency is governed by NFR-001 (< 500ms
+> cold build). The live-reload UX (file watch, WebSocket push, browser update)
+> ships in v1.0 — only the sub-50ms performance commitment is deferred.
+
+The step 8→10 path (file save → browser update) for v1.0 is bounded by the full
+rebuild path (NFR-001 < 500ms). The CI E2E budget below uses a 500ms assertion.
+When comemo incremental lands in v1.x, this gate tightens to < 200ms total:
 - File system event detection: < 10ms
-- Incremental pipeline: < 50ms (NFR-002)
+- Incremental pipeline: < 50ms (NFR-002, v1.x target)
 - WebSocket message: < 1ms
 - Browser DOM swap: < 16ms
-
-Total budget: ~77ms for fast path. Under the 100ms perception threshold.
 
 ---
 
@@ -97,7 +104,7 @@ Yes. Integration test:
 1. Start `slideforge watch` on a test deck
 2. Assert browser preview loads and green dot appears
 3. Modify a field in the deck source file
-4. Assert browser DOM updates within 500ms (generous CI budget)
+4. Assert browser DOM updates within 500ms (CI budget; governed by NFR-001 full rebuild in v1.0)
 5. Assert terminal shows rebuild line with "ms" timing
 6. Introduce an error into the source file
 7. Assert browser shows error overlay

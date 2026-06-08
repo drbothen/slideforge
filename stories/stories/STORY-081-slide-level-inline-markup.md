@@ -46,8 +46,12 @@ estimated_days: 6
   by the layout engine; the PPTX exporter renders what layout provides).
 - SS-05 (DOCX Exporter) owns DOCX rendering: `<w:b/>` for Bold, `<w:i/>` for Italic,
   `<w:rStyle w:val="CodeSpan"/>` for Code, `<w:hyperlink>` for Link, etc.
-- SS-06 (PDF Exporter) — krilla text runs; bold via `FontFamily::SansSerifBold` or
-  weight override; italic via `FontStyle::Italic`; code via monospace font switch.
+- SS-06 (PDF Exporter) — krilla `=0.6.0` text runs (pinned in slideforge-pdf/Cargo.toml,
+  NOT workspace); bold via a separate loaded bold `Font::new(bold_data, index)` face
+  (no set_bold toggle); italic via a separate loaded italic `Font::new(italic_data, index)`
+  face (no set_italic toggle); code via monospace `Font::new(mono_data, index)`;
+  super/subscript via per-glyph `KrillaGlyph.y_offset` in `Surface::draw_glyphs`
+  (normalized by units_per_em; no text-rise setter). (per export-architecture v1.2)
 - SS-07 (HTML Exporter) — `<strong>` for Bold, `<em>` for Italic, `<code>` for Code,
   `<a href="...">` for Link, `<sup>` for Superscript, `<sub>` for Subscript,
   `<del>` for Strikethrough, `<mark>` for Highlight.
@@ -124,8 +128,11 @@ output format violates the production-grade default). It MUST land before v1.0 s
      Code; `<w:hyperlink r:id="...">` for Link; `<w:vertAlign w:val="superscript"/>` for
      Superscript; `<w:vertAlign w:val="subscript"/>` for Subscript; `<w:strike/>` for
      Strikethrough; `<w:highlight w:val="yellow"/>` for Highlight.
-   - PDF: bold weight via font selector; italic style; monospace font family switch for
-     Code; URL annotations for Link; text raise/lower for Super/Subscript.
+   - PDF (krilla `=0.6.0`, pinned in slideforge-pdf/Cargo.toml): bold via separate loaded
+     bold `Font` face (`Font::new(bold_data, index)`); italic via separate loaded italic
+     `Font` face; monospace font face for Code; URL annotations for Link; per-glyph
+     `KrillaGlyph.y_offset` (normalized by units_per_em) for Super/Subscript via
+     `Surface::draw_glyphs`. (per export-architecture v1.2)
    - HTML: `<strong>`, `<em>`, `<code>`, `<a href>`, `<sup>`, `<sub>`, `<del>`, `<mark>`.
 
 ### PPTX Single-Run Title Constraint (Binding)
@@ -195,16 +202,31 @@ is correct per the OOXML specification (element ordering is schema-significant p
 
 A slide body containing all 8 inline markup forms (Bold, Italic, Code, Link, Superscript,
 Subscript, Strikethrough, Highlight) produces DOCX XML with the correct OOXML run
-properties for each form (per Summary section above). Snapshot test on the DOCX XML.
+properties for each form using ooxmlsdk `=0.6.1` typed builders for `w:rPr`:
+`w:b` (Bold), `w:i` (Italic), `w:rStyle w:val="CodeSpan"` (Code),
+`w:vertAlign w:val="superscript"` (Superscript), `w:vertAlign w:val="subscript"` (Subscript),
+`w:strike` (Strikethrough), `w:highlight w:val="yellow"` (Highlight).
+For `InlineNode::Highlight`: ooxmlsdk `=0.6.1` provides typed builders for `w:highlight`
+in WordprocessingML. Use the typed API, not raw XML. Snapshot test on the DOCX XML.
 `InlineNode::Plain` nodes produce plain `<w:r>` runs without formatting overrides.
 
-### AC-004: PDF exporter renders Bold/Italic/Code via font switching
-(traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in PDF)
+### AC-004: PDF exporter renders Bold/Italic/Code via font switching (traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in PDF)
 
 A slide body containing `InlineNode::Bold` and `InlineNode::Italic` nodes produces
-PDF output where the bold text is rendered with the bold font weight and italic text
-with italic style. Unit test uses the krilla API path and verifies the font selector
-dispatches correctly. A PDF snapshot fixture test asserts structural equivalence.
+PDF output where the bold text is rendered with the appropriate font face. In krilla
+`=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace):
+
+- **Bold**: load the bold font face via `Font::new(bold_font_data, index)` — there is NO
+  `set_bold()` toggle; bold is a separate loaded `Font` face.
+- **Italic**: load the italic font face via `Font::new(italic_font_data, index)` — there is
+  NO `set_italic()` toggle; italic is a separate loaded `Font` face.
+- **Code (monospace)**: load the monospace font face via `Font::new(mono_font_data, index)`.
+- **Superscript / Subscript**: rendered via `Surface::draw_glyphs` with per-glyph
+  `y_offset` on each `KrillaGlyph` (normalized by `units_per_em`). There is NO
+  text-rise setter in krilla 0.6.0 — offset is applied per-glyph.
+
+Unit test uses the krilla API path and verifies the font selector dispatches correctly.
+A PDF snapshot fixture test asserts structural equivalence. (per export-architecture v1.2)
 
 ### AC-005: HTML exporter renders all 8 inline markup forms as semantic HTML elements
 (traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in HTML/preview)
@@ -308,11 +330,14 @@ split is acceptable: sub-burst A (eval + layout), sub-burst B (PPTX + DOCX), sub
 - [ ] Snapshot test: DOCX XML for a slide body with all 8 markup forms
 
 ### Phase 5: PDF Exporter (slideforge-pdf)
-- [ ] Add `inline_node_to_krilla_spans(node: &InlineNode, ...) -> Vec<TextSpan>` dispatching
-  on all 12 variants; bold via bold font weight, italic via font style, code via monospace
-  font family, link via URL annotation, super/subscript via text rise
+- [ ] Add `inline_node_to_krilla_spans(node: &InlineNode, fonts: &FontSet, ...) -> Vec<KrillaGlyph sequence or TextSpan>` dispatching on all 12 variants using krilla `=0.6.0` API (pinned in slideforge-pdf/Cargo.toml, NOT workspace per export-architecture v1.2):
+  - Bold: `Font::new(fonts.bold_data, 0)` — separate loaded font face, no set_bold toggle
+  - Italic: `Font::new(fonts.italic_data, 0)` — separate loaded font face, no set_italic toggle
+  - Code: `Font::new(fonts.mono_data, 0)` — monospace font face
+  - Link: URL annotation via krilla link annotation API
+  - Superscript / Subscript: `Surface::draw_glyphs` with per-glyph `KrillaGlyph { y_offset: ±(units_per_em / 3), .. }` — NO text-rise setter exists in 0.6.0
 - [ ] Wire into slide body text placement
-- [ ] Snapshot test: PDF text span sequence for Bold + Italic bullet
+- [ ] Snapshot test: PDF text span/glyph sequence for Bold + Italic bullet
 
 ### Phase 6: HTML Exporter (slideforge-html)
 - [ ] Add `inline_node_to_html(node: &InlineNode) -> HtmlNode` dispatching all 12 variants
@@ -350,10 +375,14 @@ The `<w:rPr>` element MUST appear before `<w:t>` in a `<w:r>`. The PPTX equivale
 `<a:rPr>` before `<a:t>` in `<a:r>`. The implementer must verify element ordering against
 the OOXML schema, not just produce logically correct content.
 
-Key lesson from STORY-043 (PDF): krilla's text API uses `TextSpan` structs with font
-selector fields. Bold is NOT produced by a `<b>` flag — it requires selecting the bold
-font face. The implementer must use the brand's bold font family (or fall back to the
-system-default bold face if no brand bold font is configured).
+Key lesson from STORY-043 (PDF): krilla `=0.6.0` (pinned in slideforge-pdf/Cargo.toml,
+NOT workspace — per export-architecture v1.2) has NO `set_bold()` / `set_italic()` /
+text-rise setter. Bold requires loading a separate bold `Font` face via
+`Font::new(bold_font_data, index)`; italic requires loading a separate italic `Font` face.
+Superscript / subscript are rendered via `Surface::draw_glyphs` with per-glyph
+`KrillaGlyph.y_offset` (normalized by `units_per_em`). The implementer must use the
+brand's bold/italic/mono font data (or fall back to system-default faces if no brand
+fonts are configured).
 
 ## Architecture Compliance Rules
 
@@ -383,12 +412,12 @@ system-default bold face if no brand bold font is configured).
 | `slideforge-types` (workspace) | workspace | `InlineNode`, `FieldValue::Inlines` — consumed by all layers |
 | `slideforge-eval` (workspace) | workspace | `chunks_to_inline_nodes` (reused from STORY-077) |
 | `slideforge-layout` (workspace) | workspace | `FrameContent::TextRun` type update |
-| `ooxmlsdk` | `=0.6.1` | PPTX + DOCX OOXML element builders for run properties |
-| `krilla` | workspace | PDF text span font-weight + font-style selectors |
-| `axum` | workspace | Web preview HTML generation (unchanged; rendering function extended) |
+| `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:rPr` (b/i/strike/fill) and DOCX typed builders for `w:rPr` (w:b/w:i/w:rStyle/w:vertAlign/w:strike/w:highlight) — typed API, not raw XML |
+| `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font::new(data, index)` for bold/italic/mono faces; `Surface::draw_glyphs` + `KrillaGlyph.y_offset` for super/subscript |
 
 No new external dependencies required. All listed crates are already in the respective
-`Cargo.toml` files.
+`Cargo.toml` files. Note: `axum` is NOT used by this story — HTML inline-markup rendering
+lives in `slideforge-html` (minijinja/usvg), not axum. `axum` belongs only to STORY-047.
 
 ## File Structure Requirements
 
@@ -430,7 +459,7 @@ Build fails if any of the above constraints are violated.
 | EC-005 | `InlineNode::Math` in bullet | Math inline in a bullet renders via the `MathRenderer` plugin. The PPTX exporter embeds the math SVG as an image run (same path as standalone math). DOCX uses OMML. HTML uses MathML. |
 | EC-006 | Plain-text bullet with no inline markup | `FieldValue::Str` (or `FieldValue::Inlines([InlineNode::Plain(...)])`) — both are valid. Exporters must handle both forms without error. Prefer `FieldValue::Str` for pure-text bullets to avoid unnecessary allocation. |
 | EC-007 | `{{ var }}` resolves to string containing `**bold**` | Resolved string is `InlineNode::Plain(Arc::from("**bold**"))` — NOT further parsed (DIR-077-002 §3 rule: inline markup is parsed from DSL source, not dynamically resolved values). |
-| EC-008 | `InlineNode::Highlight` in PPTX | OOXML does not have a standard highlight run property for DrawingML (only `<w:highlight>` in WordprocessingML). PPTX exporter renders Highlight as a yellow background color on the run (`<a:rPr>` with `<a:highlight a:val="yellow"/>` if schema allows, else plain run with warning). |
+| EC-008 | `InlineNode::Highlight` in PPTX | DrawingML does not have a `<a:highlight>` element equivalent to WordprocessingML's `<w:highlight>`. The PPTX exporter renders Highlight via a solid-fill/highlight child on `<a:rPr>` using the ooxmlsdk `=0.6.1` typed fill builder (emit a yellow solid-color highlight fill on the run via typed builder). If the DrawingML schema genuinely lacks a direct highlight element, emit a plain run plus a `tracing::warn!` noting the degradation. Use the typed builder API — not raw XML — in all cases. |
 | EC-009 | `InlineNode::Strikethrough` in PPTX | `<a:rPr strike="sngStrike"/>` — single strikethrough. |
 | EC-010 | Empty `bullets: []` | No `FieldValue::Inlines` produced; bullet frame content is empty. No error. |
 
@@ -504,3 +533,4 @@ snapshot/visual regression gating).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-06-02 | story-writer | Initial creation per DIR-077-002 §4 and human authorization (2026-06-02). Follow-up to STORY-077. Covers eval + layout + all-exporter inline markup rendering for slide-level fields. Assigned Wave 5, P0, 13 points. Blocks v1.0 release. |
+| 1.1 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: fixed krilla mislabel — krilla=0.6.0 is pinned in slideforge-pdf/Cargo.toml (NOT workspace; per export-architecture v1.2); updated AC-004, Subsystem Anchor SS-06, Summary PDF description, and Phase-5 tasks to reflect correct krilla 0.6.0 API: bold/italic via separate Font::new(data,index) faces (no set_bold/set_italic toggle), super/subscript via KrillaGlyph.y_offset in Surface::draw_glyphs (no text-rise setter); updated AC-003 and Phase-4 DOCX tasks to use ooxmlsdk=0.6.1 typed builders for w:rPr; updated EC-008 PPTX highlight to typed-builder approach; removed axum Library table row (slideforge-html uses minijinja/usvg, not axum; axum belongs to STORY-047 only); cited export-architecture v1.2 throughout. |

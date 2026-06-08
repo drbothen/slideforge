@@ -1,9 +1,11 @@
 ---
 document_type: epic-decomposition
-version: "1.0"
+version: "1.1"
 status: draft
 producer: story-writer
-timestamp: 2026-05-25T00:00:00
+timestamp: 2026-06-07T00:00:00
+changelog:
+  - "1.1 (2026-06-07): NFR-002 incremental-rebuild gate annotated DEFERRED to v1.x (comemo post-v1.0); NFR-001 cold-build remains active v1.0 gate (human-approved 2026-06-07)"
 phase: 2
 traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
@@ -398,7 +400,7 @@ spans. Criterion build benchmarks.
 - BC-5.05.001 through BC-5.05.004 — watch mode
 - BC-5.06.001, BC-5.06.002 — init/scaffolding
 
-**NFR Scope:** NFR-001, NFR-002 (performance benchmarks), NFR-005, NFR-032, NFR-033
+**NFR Scope:** NFR-001 (performance benchmarks), NFR-002 (DEFERRED to v1.x — comemo post-v1.0; see nfr-catalog NFR-002), NFR-005, NFR-032, NFR-033
 
 **Story Count:** 5 stories (build command, watch mode, init + extract-brand, config explain, error display)
 

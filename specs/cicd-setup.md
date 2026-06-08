@@ -1,10 +1,12 @@
 ---
 document_type: devops-reference
 section: cicd-setup
-version: "1.0"
+version: "1.1"
 status: approved
 producer: devops-engineer
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
+modification_note: "NFR-002 incremental-rebuild bench gate deferred to v1.x (human-approved 2026-06-07; nfr-catalog v1.3); bench tooling note corrected (jq+estimates.json absolute gate; critcmp =0.1.8 relative regression)"
 traces_to: architecture/ARCH-INDEX.md, architecture/tooling-selection.md, prd-supplements/nfr-catalog.md
 ---
 
@@ -41,7 +43,7 @@ have explicit `timeout-minutes`. No secrets are hardcoded.
 | `docs` | ubuntu-latest | Blocking: `RUSTDOCFLAGS="-D warnings" cargo doc` | NFR-023 |
 | `snapshots` | ubuntu-latest | Blocking: `cargo insta test --check` | Quality bar |
 | `supply-chain` | ubuntu-latest | Blocking: `cargo audit` + `cargo deny check` | NFR-016, NFR-017 |
-| `bench` | ubuntu-latest | Blocking when fixtures exist: criterion thresholds | NFR-001, NFR-002 |
+| `bench` | ubuntu-latest | Blocking when fixtures exist: criterion threshold for cold build (NFR-001); NFR-002 incremental gate **DEFERRED to v1.x** — not a v1.0 CI gate | NFR-001 (active); NFR-002 (deferred) |
 | `visual-regression` | ubuntu-latest | Blocking when fixtures exist: SSIM ≥ 0.99, PSNR ≥ 35dB | NFR-007, NFR-008 |
 | `all-checks-pass` | ubuntu-latest | Synthetic gate — depends on all above | Branch protection target |
 
@@ -169,6 +171,19 @@ then update the SHA in the workflow file and this table.
 2. Add `crates/slideforge-cli/benches/build_bench.rs` with criterion benchmark
 3. The `bench` and `visual-regression` CI jobs activate automatically
 4. Change `snapshots` job `--unreferenced=warn` to `--unreferenced=reject`
+
+**Bench gate tooling (v1.0 scope — NFR-001 only):**
+
+- **Absolute gate (NFR-001, blocking):** parse `target/criterion/<bench-name>/new/estimates.json`
+  with `jq` and assert `mean.point_estimate < 500_000_000` (nanoseconds). Fails the
+  `bench` job if the cold-build mean exceeds 500ms. `criterion-compare` does not exist
+  as a standalone tool and must NOT be referenced.
+- **Relative regression (non-blocking advisory):** install `critcmp =0.1.8`; run
+  `critcmp main HEAD --threshold 5` to surface regressions > 5% versus the base branch.
+  Results are posted as a PR comment but do not fail the job in v1.0.
+- **NFR-002 incremental gate:** DEFERRED to v1.x — do NOT add a 50ms incremental
+  threshold to the `bench` job for v1.0. The comemo integration that enables
+  sub-50ms incremental rebuilds is a post-v1.0 feature.
 
 ### Phase 6 (formal hardening)
 

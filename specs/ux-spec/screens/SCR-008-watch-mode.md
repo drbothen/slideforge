@@ -2,16 +2,18 @@
 document_type: ux-spec-screen
 screen_id: "SCR-008"
 screen_name: "Watch Mode"
-version: "1.0"
+version: "1.1"
 status: draft
 producer: ux-designer
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
 phase: 1c
 complexity: complex
 traces_to: UX-INDEX.md
 prd_requirements:
   - "PRD §2.5 BC-5.05.001-005"
-  - "PRD §4 NFR-002 (< 50ms incremental rebuild)"
+  - "PRD §4 NFR-001 (< 500ms cold build — governs v1.0 watch rebuild latency)"
+  - "PRD §4 NFR-002 (< 50ms incremental rebuild — DEFERRED to v1.x; see nfr-catalog v1.3)"
   - "interface-definitions.md §1.3"
   - "q16-q25-decisions.md Q23 (error recovery — error-slide placeholders)"
   - "q1-decision-final.md §1 (HTTP data sources polled in watch mode)"
@@ -28,7 +30,9 @@ prd_requirements:
 
 Watch mode is the primary authoring loop. The developer edits `.sf` files in their
 editor, and the web preview updates automatically. The terminal shows rebuild events.
-The goal is a sub-50ms feedback loop that feels instant.
+The v1.0 goal is a fast feedback loop bounded by the full rebuild path (NFR-001
+< 500ms). The sub-50ms incremental target (NFR-002, comemo-based) is deferred to
+v1.x.
 
 The combined UX is: editor on left, terminal (optional) in middle, browser on right.
 The terminal is optional — if the user ignores it after launch, the browser preview
@@ -55,17 +59,22 @@ is the entire feedback surface.
 
 ## Incremental Rebuild UX
 
-The NFR-002 target is < 50ms incremental rebuild for a single slide change.
-The UX implication: the browser update should feel instantaneous (below the
-perception threshold of ~100ms). The terminal line is a confirmation, not a
-status bar.
+> **NFR-002 deferral (approved 2026-06-07):** The < 50ms incremental rebuild target
+> (NFR-002, comemo-based) is DEFERRED to v1.x. In v1.0, watch mode performs a
+> full re-evaluation on every change. Perceived latency is governed by NFR-001
+> (< 500ms cold build). The terminal timing display and browser update path below
+> are unchanged — only the performance commitment shifts from < 50ms to < 500ms
+> for v1.0.
 
-Terminal for fast rebuild (< 50ms):
+In v1.0, each file-save triggers a full rebuild. The terminal line shows actual
+elapsed time; users will typically see 50-400ms depending on deck size.
+
+Terminal example (v1.0 full rebuild):
 ```
-[watch] deck.sf changed (14:22:01) — rebuilt in 18ms
+[watch] deck.sf changed (14:22:01) — rebuilt in 87ms
 ```
 
-Terminal for slower rebuild (> 100ms, multifile or data refresh):
+Terminal for slower rebuild (multifile or data refresh):
 ```
 [watch] deck.sf changed (14:22:01) — rebuilding...
   Rebuilt in 234ms — 25 slides (3 data sources refreshed)
@@ -73,6 +82,9 @@ Terminal for slower rebuild (> 100ms, multifile or data refresh):
 
 The "rebuilding..." intermediate line appears only if the rebuild takes > 100ms.
 Sub-100ms rebuilds show only the completion line (avoids flicker).
+
+When NFR-002 lands in v1.x (comemo incremental), the typical fast-path timing
+will drop to < 50ms and single-slide delta updates will replace full rebuilds.
 
 ---
 
@@ -115,8 +127,9 @@ perspective, the visible behaviors are:
 | `build_error` | Error block | "Build failed" overlay on all slides |
 | `slide_delta` | (silent) | Only changed slides re-render (not full page) |
 
-The `slide_delta` message is critical for the < 50ms UX: only the SVG elements
-that changed are swapped in the DOM, not the entire page.
+The `slide_delta` message delivers efficient browser updates: only the SVG elements
+that changed are swapped in the DOM, not the entire page. In v1.0 this follows a
+full rebuild; in v1.x (NFR-002) it will follow a comemo incremental rebuild.
 
 ---
 

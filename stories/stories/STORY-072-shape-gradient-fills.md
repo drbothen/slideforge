@@ -109,9 +109,9 @@ Each exporter emits gradients as follows:
 
 | Format | Gradient Behavior |
 |--------|------------------|
-| PPTX | Native: `<a:gradFill>` with `<a:lin ang="5400000">` (top→bottom) and two `<a:gs>` stops at `pos="0"` (from) and `pos="100000"` (to) |
+| PPTX | Native: ooxmlsdk `=0.6.1` typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` — emit typed DrawingML gradient fill with `a:lin ang="5400000"` (top→bottom) and two `a:gs` stops at `pos="0"` (from) and `pos="100000"` (to). Use the typed-builder API, not raw XML. |
 | DOCX | Fallback: solid first color (`from` Rgb) rendered as `<w:shd w:fill="RRGGBB"/>`. A lint warning is emitted: "DOCX gradient fill downgraded to solid (DOCX does not support shape gradient fills)" |
-| PDF | Native: `pdf-writer` `ShadingPattern` with linear gradient from `from` to `to` along y-axis |
+| PDF | Native via krilla `=0.6.0`: `Surface::set_fill(Some(Fill { paint: LinearGradient { x1, y1, x2, y2, spread_method, stops: Vec<Stop> }.into(), rule: FillRule::NonZero, opacity }))` then `draw_path(rect)`. Uses `paint::LinearGradient` from the krilla API. `pdf-writer` is NOT a direct dependency — krilla wraps it internally and a direct `pdf-writer` dep creates version-skew risk. (per export-architecture v1.2) |
 | HTML | Native: CSS `background: linear-gradient(to bottom, #RRGGBB, #RRGGBB)` on the shape div |
 
 Gradient direction in v1.0 is fixed as top-to-bottom (vertical linear). Arbitrary
@@ -131,8 +131,8 @@ does not change the alt-text contract.
 - [ ] Extend DSL parser (in `slideforge-syntax` or `slideforge-eval` — whichever owns `shape:` parsing) to accept `fill gradient #RRGGBB to #RRGGBB` and produce `FillSpec::Gradient`
 - [ ] Remove E-PAR-016 error code from the parser (the "gradient not supported" guard)
 - [ ] Update `layout::run()` shape pass to pass `FillSpec::Gradient` through to `ShapeFrame` (likely already correct — passthrough logic in STORY-028 should be variant-agnostic)
-- [ ] Implement PPTX gradient: emit `<a:gradFill>` with two `<a:gs>` stops
-- [ ] Implement PDF gradient: emit `ShadingPattern` linear gradient
+- [ ] Implement PPTX gradient: use ooxmlsdk `=0.6.1` typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` — typed API, not raw XML
+- [ ] Implement PDF gradient via krilla `=0.6.0`: call `Surface::set_fill(Some(Fill { paint: paint::LinearGradient { x1, y1, x2, y2, spread_method: SpreadMethod::Pad, stops: vec![Stop { offset: 0.0, color: from_color }, Stop { offset: 1.0, color: to_color }] }.into(), rule: FillRule::NonZero, opacity: NormalizedF32::ONE }))` then `draw_path(rect)`. Do NOT add `pdf-writer` as a direct dep — krilla exposes the full gradient API.
 - [ ] Implement HTML gradient: emit `background: linear-gradient(to bottom, ...)` CSS
 - [ ] Implement DOCX fallback: solid `from` color + lint warning
 - [ ] Write unit tests:
@@ -178,9 +178,9 @@ errors in exporter code — fix those exhaustive matches in the same story.
 |---------|---------|---------|
 | `slideforge-types` | workspace | `FillSpec::Gradient`, `Rgb`, `ShapeSpec` |
 | `slideforge-layout` | workspace | `layout::run()` shape pass extension |
-| `ooxmlsdk` | `=0.6.1` | PPTX `<a:gradFill>` + `<a:gs>` element generation |
-| `pdf-writer` | `=0.12.0` | PDF `ShadingPattern` for linear gradient |
-| `thiserror` | `=2.0.18` | `LayoutError` extension (if new variants needed) |
+| `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` |
+| `krilla` | `=0.6.0` (pinned in slideforge-pdf/Cargo.toml, NOT workspace) | PDF `paint::LinearGradient` + `Surface::set_fill` + `draw_path` (per export-architecture v1.2) |
+| `thiserror` | `{workspace = true}` (=2.0.18 — centralized in [workspace.dependencies] per ADR-022) | `LayoutError` extension (if new variants needed) |
 
 ## File Structure Requirements
 
@@ -190,7 +190,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 | `crates/slideforge-syntax/src/shape.rs` (or equivalent) | Modify | Add `fill gradient` parser branch; remove E-PAR-016 guard |
 | `crates/slideforge-layout/src/shapes.rs` | Modify | Verify gradient passthrough (should be no-op if match is exhaustive-safe) |
 | `crates/slideforge-pptx/src/shape.rs` (or equivalent) | Modify | Emit `<a:gradFill>` for `FillSpec::Gradient` |
-| `crates/slideforge-pdf/src/shape.rs` (or equivalent) | Modify | Emit `ShadingPattern` for `FillSpec::Gradient` |
+| `crates/slideforge-pdf/src/shape.rs` (or equivalent) | Modify | Emit krilla `paint::LinearGradient` via `Surface::set_fill` + `draw_path` for `FillSpec::Gradient` (per export-architecture v1.2) |
 | `crates/slideforge-html/src/shape.rs` (or equivalent) | Modify | Emit CSS `linear-gradient` for `FillSpec::Gradient` |
 | `crates/slideforge-docx/src/shape.rs` (or equivalent) | Modify | Emit solid fallback + lint warning for `FillSpec::Gradient` |
 | `crates/slideforge-layout/tests/gradient_integration.rs` | Create | End-to-end test: gradient shape in Deck → LaidOutDeck |
@@ -212,8 +212,8 @@ errors in exporter code — fix those exhaustive matches in the same story.
 - **Unit tests**: Parser: `fill gradient #FF0000 to #0000FF` → correct `FillSpec::Gradient`;
   hex case-insensitivity preserved for gradient colors; E-PAR-015 still fires on
   short/alpha hex in gradient stops; alt-text enforcement applies.
-- **Snapshot tests**: PPTX XML for a gradient shape — assert `<a:gradFill>` structure
-  with two `<a:gs>` stops at pos=0 and pos=100000.
+- **Snapshot tests**: PPTX XML for a gradient shape — assert `a:gradFill` structure
+  with two `a:gs` stops at pos=0 and pos=100000, emitted via ooxmlsdk `=0.6.1` typed builders.
 - **Integration test**: `.sf` file with `fill gradient #FF0000 to #0000FF` → `.pptx`
   output; `.html` output with `linear-gradient` CSS; `.pdf` output (no panics).
 - **Lint test**: DOCX output for a gradient shape produces a lint warning string
@@ -243,3 +243,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml`.
 |---------|------|--------|---------|
 | 1.0 | 2026-05-28 | story-writer | Initial creation — deferred surface from BC-3.04.001 v1.3 "Deferred Surfaces" section; resolves STORY-TBD-shape-gradient-fills placeholder |
 | 1.1 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-001): removed false "ALREADY exists / placeholder" claims — FillSpec::Gradient is NOT in v1.0 codebase per BC-3.04.001 v1.4.2 and code audit; rewrote Dependency Anchor, Summary, Previous Story Intelligence to describe ADDING the variant as the first task; updated E-PAR-014 references to E-PAR-016 and E-PAR-013 references to E-PAR-015 per F-P9-HIGH-002 namespace collision resolution; corrected file path from specs.rs → shape_types.rs |
+| 1.2 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: removed pdf-writer direct dep (krilla=0.6.0 wraps it; direct dep causes version-skew risk per export-architecture v1.2); updated AC-004 PDF row and PDF task to use krilla paint::LinearGradient + Surface::set_fill + draw_path API; updated AC-004 PPTX row and PPTX task to use ooxmlsdk=0.6.1 typed builders for a:gradFill/a:gsLst/a:gs/a:lin; changed thiserror to {workspace=true} form (=2.0.18 per ADR-022). |

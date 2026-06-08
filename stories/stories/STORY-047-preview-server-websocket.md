@@ -45,7 +45,8 @@ from `slideforge-html` (STORY-046) for SVG slide output.
 ## Summary
 
 Implement the `slideforge-preview` crate: a local development HTTP/WebSocket server
-that serves a live deck preview using `axum 0.8.1`:
+that serves a live deck preview using `axum 0.8.9` (note: 0.8.2 was yanked; minimum
+safe 0.8.x is 0.8.9). The async runtime is `tokio 1.52.3` introduced per ADR-021.
 
 1. `PreviewServer` struct that starts an axum server on `localhost:<port>` (default 3000).
 2. HTTP `GET /` serves the initial HTML page with the deck preview (SVG slides).
@@ -69,18 +70,27 @@ that serves a live deck preview using `axum 0.8.1`:
 ### AC-001: HTTP server starts and serves initial preview
 (traces to BC-4.03.004 postcondition 1)
 
-`PreviewServer::start(port: u16, initial_deck: &LaidOutDeck) -> JoinHandle<()>`
-starts the axum server on `localhost:<port>`. `GET /` returns a 200 OK response
-with `Content-Type: text/html` containing the initial deck preview (SVG slides).
+`PreviewServer::start(port: u16, initial_deck: &LaidOutDeck) -> Result<PreviewHandle, PreviewError>`
+starts the axum server on `localhost:<port>` and returns a `PreviewHandle` that wraps
+the `JoinHandle<()>`. `GET /` returns a 200 OK response with `Content-Type: text/html`
+containing the initial deck preview (SVG slides).
 Integration test: `reqwest::get("http://localhost:<port>/")` returns 200 with body
 containing `<!DOCTYPE html>`.
+
+Note: `start()` returns `Result<PreviewHandle, PreviewError>` rather than bare
+`JoinHandle<()>` so that port-in-use errors (AC-009) can be surfaced at call time
+before the server task is fully spawned. `PreviewHandle` wraps the `JoinHandle<()>`
+for join/abort access.
 
 ### AC-002: WebSocket endpoint accepts browser connections
 (traces to BC-4.03.004 postcondition 2)
 
-`GET /live` upgrades to a WebSocket connection within 1 second of server start.
-Integration test: `tokio-tungstenite` client connects to `ws://localhost:<port>/live`
-and receives a connection-established event within 1 second.
+`GET /{id}` (axum 0.8 path syntax) — specifically `GET /live` — upgrades to a
+WebSocket connection within 1 second of server start. axum 0.8 provides built-in
+WebSocket support via `axum::extract::ws::WebSocketUpgrade`; `tokio-tungstenite` is
+NOT used at runtime (it is a dev-dep test client only).
+Integration test: `tokio-tungstenite =0.29.0` (dev-dep) client connects to
+`ws://localhost:<port>/live` and receives a connection-established event within 1 second.
 
 ### AC-003: reload message pushed on deck update
 (traces to BC-4.03.004 postcondition 3a and 3b)
@@ -142,6 +152,10 @@ If `localhost:<port>` is already bound, `PreviewServer::start()` returns
 `Err(PreviewError::PortInUse { port })`. The error message includes the hint:
 "Use --port <N> to specify a different port." The server does not panic.
 
+This is consistent with the AC-001 return type: `start() -> Result<PreviewHandle, PreviewError>`
+where `PreviewError::PortInUse` is the `Err` variant. The `PreviewHandle` returned on
+success wraps the `JoinHandle<()>` for lifecycle management.
+
 ## Tasks
 
 - [ ] **[Task 1 — Workspace scaffold]** Create the `crates/slideforge-preview/` crate
@@ -151,12 +165,21 @@ If `localhost:<port>` is already bound, `PreviewServer::start()` returns
   added to the workspace at the start of Wave 5 before their respective stories are
   dispatched. The CI workspace build gate for Wave 5 requires both crates to compile.
 - [ ] Create `crates/slideforge-preview/Cargo.toml`:
-  `axum = "=0.8.1"`, `tokio = { version = "=1.44.0", features = ["full"] }`,
-  `tokio-tungstenite = "=0.26.1"`, `serde = { version = "=1.0.217", features = ["derive"] }`,
-  `serde_json = "=1.0.138"`, `slideforge-html` (workspace), `slideforge-types` (workspace)
+  - Runtime deps: `axum = { version = "=0.8.9", features = ["ws"] }` (note: 0.8.2 was yanked;
+    axum 0.8 has built-in WebSocket via `axum::extract::ws::WebSocketUpgrade`; path syntax `/{id}`;
+    graceful shutdown via `axum::serve(l, app).with_graceful_shutdown(...)`),
+    `tokio = { version = "=1.52.3", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs", "io-util"] }`
+    (NOT features = ["full"]; curated features per ADR-021 async runtime introduction),
+    `serde = { workspace = true }` (=1.0.228 per ADR-022),
+    `serde_json = { workspace = true }` (=1.0.150 per ADR-022),
+    `thiserror = { workspace = true }` (=2.0.18 per ADR-022),
+    `slideforge-html` (workspace), `slideforge-types` (workspace)
+  - Dev deps: `tokio-tungstenite = "=0.29.0"` (test WebSocket client only — NOT a runtime dep;
+    axum 0.8 built-in WebSocket replaces tungstenite at runtime)
 - [ ] Create `crates/slideforge-preview/src/lib.rs` — re-export `PreviewServer`
 - [ ] Create `crates/slideforge-preview/src/server.rs` — `PreviewServer` struct:
-  - `pub fn start(port: u16, initial: &LaidOutDeck) -> JoinHandle<()>`
+  - `pub fn start(port: u16, initial: &LaidOutDeck) -> Result<PreviewHandle, PreviewError>`
+    (`PreviewHandle` wraps `JoinHandle<()>`; `PortInUse` is the `Err` variant — consistent with AC-001/AC-009)
   - `pub fn push_update(&self, slides: Vec<SlideHtml>)`
   - `pub fn push_error(&self, errors: Vec<DiagnosticMessage>)`
   - Internal: axum router with `GET /` and `GET /live`
@@ -200,19 +223,32 @@ to be extensible from the start: use a `type` discriminator field.
    filesystem writes. This is verified by the integration test in AC-006.
 4. **SVG canvas (BC-4.03.003 invariant 2)**: The initial page served by `GET /`
    uses the same SVG-based rendering as `slideforge-html`. No `<canvas>` elements.
+5. **Async runtime (ADR-021)**: Tokio is the exclusive async runtime for this crate.
+   Use `tokio =1.52.3` with curated features (`rt-multi-thread,macros,net,time,sync,
+   signal,fs,io-util`), NOT `features = ["full"]`. Graceful shutdown via
+   `axum::serve(listener, app).with_graceful_shutdown(shutdown_signal())` where
+   `shutdown_signal()` awaits `tokio::signal::ctrl_c()` and (cfg(unix))
+   `tokio::signal::unix::signal(SignalKind::terminate())`.
+6. **NFR-002 DEFERRED**: The <50ms incremental rebuild gate (NFR-002) is deferred to
+   v1.x (see nfr-catalog NFR-002 for rationale). The v1.0 cold-build gate (NFR-001,
+   <500ms for 25-slide deck) remains active and must be met.
 
 ## Library & Framework Requirements
 
 | Library | Version | Purpose |
 |---------|---------|---------|
-| `axum` | `=0.8.1` | HTTP server + WebSocket upgrade |
-| `tokio` | `=1.44.0` | Async runtime (features: full) |
-| `tokio-tungstenite` | `=0.26.1` | WebSocket protocol (test client) |
-| `serde` | `=1.0.217` | JSON message serialization |
-| `serde_json` | `=1.0.138` | JSON encoding of WebSocket messages |
+| `axum` | `=0.8.9` (note: 0.8.2 yanked) | HTTP server + built-in WebSocket (`axum::extract::ws::WebSocketUpgrade`); feature "ws"; path syntax `/{id}`; graceful shutdown via `axum::serve(...).with_graceful_shutdown(...)` |
+| `tokio` | `=1.52.3` (ADR-021) | Async runtime — features: `rt-multi-thread,macros,net,time,sync,signal,fs,io-util` (NOT "full") |
+| `tokio-tungstenite` | `=0.29.0` (DEV-DEP ONLY) | Test WebSocket client only — NOT a runtime dep; axum 0.8 built-in WebSocket replaces it at runtime |
+| `serde` | `{ workspace = true }` = `=1.0.228` (ADR-022) | JSON message serialization |
+| `serde_json` | `{ workspace = true }` = `=1.0.150` (ADR-022) | JSON encoding of WebSocket messages |
 | `slideforge-html` | workspace | `render_slide_to_html()` for initial page and updates |
 | `slideforge-types` | workspace | `LaidOutDeck`, `DiagnosticMessage` |
-| `thiserror` | `=2.0.12` | `PreviewError` enum |
+| `thiserror` | `{ workspace = true }` = `=2.0.18` (ADR-022) | `PreviewError` enum |
+
+All workspace-pinned crates centralized in `[workspace.dependencies]` per ADR-022.
+NFR-002 (<50ms incremental gate) is DEFERRED to v1.x — see nfr-catalog NFR-002.
+NFR-001 (<500ms cold build, 25-slide deck) remains active for v1.0.
 
 ## File Structure Requirements
 
@@ -235,7 +271,7 @@ to be extensible from the start: use a `type` discriminator field.
 | This story spec | ~2,800 |
 | BC-4.03.004 | ~1,400 |
 | slideforge-html render functions (STORY-046) | ~1,500 |
-| axum 0.8.1 WebSocket API docs | ~2,000 |
+| axum 0.8.9 WebSocket API docs | ~2,000 |
 | tokio broadcast channel docs | ~800 |
 | Test files to write | ~2,500 |
 | **Total** | **~11,000** |
@@ -263,7 +299,10 @@ Context budget: ~11% of a 100k-token context window. Within limit.
 
 ## Forbidden Dependencies
 
-`slideforge-preview` MUST NOT depend on:
+`slideforge-preview` MUST NOT depend on (runtime):
 - `slideforge-pptx`, `slideforge-docx`, `slideforge-pdf` (no cross-exporter deps)
 - Any file-writing crate for output purposes (only reads LaidOutDeck, writes to WebSocket)
-- `warp` or `actix-web` (axum 0.8.1 is the canonical choice per ADR-008)
+- `warp` or `actix-web` (axum 0.8.9 is the canonical choice per ADR-008)
+- `tokio-tungstenite` as a runtime (non-dev) dependency — axum 0.8 built-in WebSocket
+  (`axum::extract::ws::WebSocketUpgrade`) is the server-side implementation; tungstenite
+  is allowed ONLY as a dev-dependency for test clients (`=0.29.0`)

@@ -1,10 +1,12 @@
 ---
 document_type: architecture-section
 section: system-overview
-version: "1.0"
+version: "1.1"
 status: approved
 producer: architect
 timestamp: 2026-05-24T00:00:00
+modified: 2026-06-07
+modification_note: "NFR-002 incremental-rebuild gate deferred to v1.x (human-approved 2026-06-07; nfr-catalog v1.3)"
 traces_to: ARCH-INDEX.md
 ---
 
@@ -63,9 +65,15 @@ In `slideforge watch` / `slideforge serve`, the pipeline re-runs on change:
 - Changed files trigger re-evaluation from the earliest changed stage
 - LaidOutDeck delta is pushed to connected browsers via WebSocket
 
-The incremental rebuild budget (NFR-002: < 50ms) is satisfied by:
+The cold-build budget (NFR-001: < 500ms) is the active v1.0 performance gate:
 - Parse-only time for 25 slides: 71µs (S4 benchmark)
 - Total NFR-001 (< 500ms cold) leaves ~429ms for eval + layout + export
+
+NFR-002 (incremental rebuild < 50ms via comemo) is **DEFERRED to v1.x**
+(human-approved 2026-06-07; recorded in nfr-catalog v1.3). The architecture
+supports comemo-based incremental compilation through `Arc<str>` + integer-EMU
+IR types and `Hash + Eq + Clone` on all IR structs, but comemo integration is a
+post-v1.0 feature. NFR-002 is not a v1.0 CI gate.
 
 ## Single-Binary Architecture
 

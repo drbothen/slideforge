@@ -140,12 +140,28 @@ Key responsibilities:
   OTLP endpoint. When the flag is absent, no OTel dependency is activated — the default
   `tracing-subscriber` fmt layer is used instead. The `tracing-opentelemetry` feature is
   gated behind a Cargo feature flag (`otel`) so that builds without OTel export have no
-  additional transitive dependencies.
+  additional transitive dependencies. Cite ADR-021 (tokio async runtime required by
+  `opentelemetry_sdk` rt-tokio feature).
+
+  OTel initialization uses the current builder API (NOT the deprecated `new_pipeline()`):
+  ```rust
+  let exporter = opentelemetry_otlp::SpanExporter::builder()
+      .with_tonic()
+      .with_endpoint(endpoint_url)
+      .build()?;
+  let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+      .with_batch_exporter(exporter)
+      .build();
+  let tracer = provider.tracer("slideforge");
+  let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+  ```
+  Do NOT use the deprecated `opentelemetry::global::set_text_map_propagator()` or
+  `new_pipeline().install_batch()` pattern — these are removed in opentelemetry 0.32.
   (traces to NFR-032 — opentelemetry-compatible export hooks required by quality bar)
 
 ## Tasks
 
-1. Define the root `Cli` struct with global flags using `clap` 4.5 derive:
+1. Define the root `Cli` struct with global flags using `clap` derive (`{workspace = true}`, =4.6.1):
    ```rust
    #[derive(Parser)]
    #[command(name = "slideforge", version, about)]
@@ -204,7 +220,8 @@ Key responsibilities:
    ```
 3. Implement `run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode` in
    `src/commands/build.rs`:
-   - Detect TTY: `use_color = atty::is(Stream::Stderr) && !global.no_color && !global.json`
+   - Detect TTY: `use_color = std::io::stderr().is_terminal() && !global.no_color && !global.json`
+     (use `std::io::IsTerminal` — do NOT add the `atty` crate; `atty` is unmaintained and the stdlib trait is stable since Rust 1.70)
    - Construct `CompileOptions` from flags; call `slideforge::compile(options)`
    - On `Ok(outputs)`: write files to `output_dir`; print success summary
    - On `Err(sink)`: call `DiagnosticRenderer::render_all()`; return exit code from
@@ -222,8 +239,11 @@ Key responsibilities:
    }
    ```
 5. Add `tracing-subscriber` initialization in `main()`:
-   - Use `tracing_subscriber::fmt()` by default; structured JSON format when `--json`
-   - Honor `RUST_LOG` env var for filtering
+   - Use `tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env())` by default;
+     structured JSON format when `--json`. Requires `tracing-subscriber` with feature `env-filter`.
+   - `RUST_LOG` env var drives `EnvFilter`; CLI verbosity sets the fallback level if `RUST_LOG` is absent.
+   - Guard initialization with `std::sync::OnceLock` or call `try_init()` (returns `Err` on second
+     init; guard so tests can call it safely without panic).
    - Emit `tracing::info_span!("parse")`, `("evaluate")`, `("brand")`, `("validate")`,
      `("layout")`, `("export")` within the pipeline orchestration in the root crate
      `slideforge::compile()`
@@ -243,8 +263,12 @@ Key responsibilities:
 - `crates/slideforge-cli/src/exit_code.rs` — `exit_code_for_severity()`, exit code constants
 - `crates/slideforge-cli/src/output.rs` — output file writing + atomicity
 - `crates/slideforge-cli/src/tracing_setup.rs` — tracing-subscriber initialization
-- `crates/slideforge-cli/Cargo.toml` — add: `clap`, `miette`, `tracing`, `tracing-subscriber`
-  (use `std::io::IsTerminal` for TTY detection — no `atty` crate needed on Rust 1.70+)
+- `crates/slideforge-cli/Cargo.toml` — add `{workspace = true}` deps: `clap` (=4.6.1),
+  `miette` (=7.6.0), `tracing` (=0.1.44), `tracing-subscriber` (=0.3.23 env-filter),
+  `thiserror` (=2.0.18), `serde_json` (=1.0.150); add optional `otel` feature deps:
+  `opentelemetry =0.32.0`, `opentelemetry_sdk =0.32.0`, `opentelemetry-otlp =0.32.0`,
+  `tracing-opentelemetry =0.33.0`.
+  TTY detection: use `std::io::IsTerminal` — no `atty` crate.
 - `crates/slideforge-cli/tests/build_integration.rs` — integration tests
 
 ## Token Budget Estimate
@@ -331,7 +355,9 @@ Context budget: 24 000 / 200 000 ≈ 12% — within limit.
    path. Never write partial output.
 5. `#![forbid(unsafe_code)]` must be present at the crate root.
 6. `tracing_subscriber` must NOT be initialized more than once per process — guard with
-   `std::sync::OnceLock` or `tracing_subscriber::fmt().try_init()`.
+   `std::sync::OnceLock` or `tracing_subscriber::fmt().try_init()`. Note: `try_init()` returns
+   `Err(SetLoggerError)` on a second call; in production wrap in `OnceLock`; in tests call
+   `try_init()` and discard the error so concurrent test threads do not panic.
 
 **Forbidden dependencies for `slideforge-cli`:**
 - Must NOT import `chumsky` directly — parsing is SS-01's domain.
@@ -343,14 +369,16 @@ Context budget: 24 000 / 200 000 ≈ 12% — within limit.
 
 | Library | Pinned Version | Usage |
 |---------|---------------|-------|
-| `clap` | `=4.5` | CLI arg parsing, derive macros |
-| `miette` | `=7.2` | Diagnostic rendering with source snippets |
-| `tracing` | `=0.1` | Span instrumentation |
-| `tracing-subscriber` | `=0.3` | Tracing setup and filtering |
-| `thiserror` | `=2.0` | Error derives for CLI-layer errors |
-| `serde_json` | `=1.0` | JSON diagnostic output for `--json` mode |
-| `tracing-opentelemetry` | `=0.27` | OTel subscriber layer (optional; gated behind `otel` feature flag) |
-| `opentelemetry-otlp` | `=0.27` | OTLP gRPC/HTTP exporter for `--otel-endpoint` (optional; `otel` feature) |
+| `clap` | `{workspace = true}` (=4.6.1) | CLI arg parsing, derive macros. Centralized in `[workspace.dependencies]` per ADR-022. |
+| `miette` | `{workspace = true}` (=7.6.0) | Diagnostic rendering with source snippets. Centralized per ADR-022. |
+| `tracing` | `{workspace = true}` (=0.1.44) | Span instrumentation. Centralized per ADR-022. |
+| `tracing-subscriber` | `{workspace = true}` (=0.3.23, feature `env-filter`) | Tracing setup and `EnvFilter` for `RUST_LOG`. Centralized per ADR-022. |
+| `thiserror` | `{workspace = true}` (=2.0.18) | Error derives for CLI-layer errors. Centralized per ADR-022. |
+| `serde_json` | `{workspace = true}` (=1.0.150) | JSON diagnostic output for `--json` mode. Centralized per ADR-022. |
+| `opentelemetry` | `=0.32.0` (feature `otel` only) | OTel API — gated behind `otel` Cargo feature. |
+| `opentelemetry_sdk` | `=0.32.0` (feature `rt-tokio`; `otel` only) | OTel SDK — gated behind `otel` Cargo feature. Cite ADR-021 (tokio async runtime). |
+| `opentelemetry-otlp` | `=0.32.0` (features `trace,grpc-tonic`; `otel` only) | OTLP gRPC exporter for `--otel-endpoint`. Gated behind `otel` feature. |
+| `tracing-opentelemetry` | `=0.33.0` (intentionally one minor ahead of opentelemetry; `otel` only) | OTel subscriber layer. Gated behind `otel` feature. |
 
 ## File Structure Requirements
 

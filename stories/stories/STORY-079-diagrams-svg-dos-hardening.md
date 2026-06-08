@@ -118,10 +118,19 @@ rejection MUST occur before any heap allocation proportional to the SVG size.
 
 When `usvg_normalize` is called with a `RawDiagramSvg` containing more than
 `MAX_SVG_NESTING_DEPTH` (64) nested `<g>` elements (measured as the maximum depth
-of the `<g>` nesting tree), it MUST return `Err(DiagramError::SvgNormalizationFailed)`
+of the `Group` nesting tree), it MUST return `Err(DiagramError::SvgNormalizationFailed)`
 after the usvg parse step but before `tree.to_string()` is called. The error `cause`
 MUST contain the detected depth and the limit. The depth scan MUST be iterative
-(stack-based or index-based), not recursive — no unbounded call stack depth.
+(stack-based), not recursive — no unbounded call stack depth.
+
+**usvg 0.47.0 API (verified):** usvg 0.47.0 preserves source `<g>` nesting 1:1 in the
+parsed `Tree` (dummy-group removal was dropped in usvg 0.30.0). The depth scan MUST
+operate on the parsed `usvg::Tree`, NOT on the raw SVG string. Traverse using
+`Group::children()` — each child is a `usvg::Node` enum; match `usvg::Node::Group(g)`
+to descend. The root `Tree::root()` is itself a `Group` counted as depth 1. Use an
+iterative stack-based DFS: push `(group_ref, current_depth)` tuples; track
+`max_depth: usize`; return error if `max_depth > MAX_SVG_NESTING_DEPTH`. (per
+export-architecture v1.2)
 
 ### AC-003: Valid SVG within limits passes through unaffected (traces to BC-1.12.003 postcondition 7)
 
@@ -163,7 +172,7 @@ Architecture section files:
 - [ ] Add `MAX_SVG_BYTES: usize = 50 * 1024 * 1024` constant to `normalize.rs` with SEC-002 doc comment
 - [ ] Add `MAX_SVG_NESTING_DEPTH: usize = 64` constant to `normalize.rs` with SEC-001 doc comment
 - [ ] Insert byte-size guard at top of `usvg_normalize` body (before `font_db()` call)
-- [ ] Implement iterative `<g>`-depth counter (scan the usvg Tree node list, not the raw string — usvg Tree's `node_count()` / child iteration is the correct API surface)
+- [ ] Implement iterative `<g>`-depth counter scanning the parsed `usvg::Tree` (NOT the raw string): use an explicit stack of `(&Group, usize)` tuples; call `group.children()` and match `usvg::Node::Group(child_group)` to recurse; root group (`tree.root()`) counts as depth 1; track `max_depth`; usvg 0.47.0 preserves source `<g>` nesting 1:1 (per export-architecture v1.2)
 - [ ] Insert depth guard after `usvg::Tree::from_str` succeeds, before `tree.to_string()`
 - [ ] Add `tracing::warn!` events for both rejection paths
 - [ ] Write `test_sec_dos_svg_oversize_rejected` (size cap test)
@@ -182,9 +191,14 @@ SEC-001/SEC-002 pattern used here. Verbatim key implementation notes:
    the allocation-heavy parse. Check `svg_str.len() > MAX_SVG_BYTES` and return
    `Err(...)` immediately. Do NOT parse first and check size later.
 
-2. **Depth guard is iterative, not recursive** — the STORY-043 implementation uses
-   a stack-based DFS over the usvg node tree. Use the same approach here. A recursive
-   depth counter would be ironic (replacing one stack-exhaustion path with another).
+2. **Depth guard is iterative, not recursive, and scans the parsed Tree** — the
+   STORY-043 implementation uses a stack-based DFS over the usvg node tree via
+   `Group::children()` matching `usvg::Node::Group`. Use the same approach here.
+   usvg 0.47.0 preserves `<g>` nesting 1:1 in the Tree (confirmed; dummy-group
+   removal was dropped in usvg 0.30.0), so counting `Group` depth in the parsed
+   Tree is equivalent to counting raw `<g>` depth. Do NOT scan the raw string —
+   scan the parsed Tree. A recursive depth counter would be ironic (replacing one
+   stack-exhaustion path with another). (per export-architecture v1.2)
 
 3. **The test for oversize does NOT allocate 50 MiB** — in STORY-043 the test uses
    a technique of wrapping a minimal SVG with enough whitespace padding to cross the
@@ -226,10 +240,10 @@ All version pins from `Cargo.lock` / workspace `Cargo.toml`:
 
 | Dependency | Version | Usage |
 |------------|---------|-------|
-| `usvg` | `=0.47.0` (workspace) | existing dependency — `usvg::Tree` node iteration for depth check |
-| `tracing` | `=0.1.41` (workspace) | `tracing::warn!` for rejection events |
-| `miette` | `=7.2.0` (workspace) | `SourceSpan::from(0..0)` for position-less errors |
-| `thiserror` | `=2.0.12` (workspace) | `DiagramError` is already `#[derive(thiserror::Error)]` |
+| `usvg` | `{workspace = true}` (=0.47.0 — centralized in [workspace.dependencies] per ADR-022) | existing dependency — `usvg::Tree` / `Group::children()` / `usvg::Node::Group` iteration for depth check |
+| `tracing` | `{workspace = true}` (=0.1.44 — centralized in [workspace.dependencies] per ADR-022) | `tracing::warn!` for rejection events |
+| `miette` | `{workspace = true}` (=7.6.0 — centralized in [workspace.dependencies] per ADR-022) | `SourceSpan::from(0..0)` for position-less errors |
+| `thiserror` | `{workspace = true}` (=2.0.18 — centralized in [workspace.dependencies] per ADR-022) | `DiagramError` is already `#[derive(thiserror::Error)]` |
 
 No new dependencies. All listed crates are already in `slideforge-diagrams/Cargo.toml`.
 
@@ -296,3 +310,10 @@ Compared to STORY-034 (5 pts, full `usvg_normalize` implementation + OnceLock + 
 resolver + re-injection pipeline): this story adds ~30 lines of production code and
 ~80 lines of test code to an already-implemented function. Estimated 1 day including
 adversarial cascade.
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0 | 2026-05-31 | story-writer | Initial creation from STATE.md drift item DI-4; applies SEC-001/SEC-002 pattern from STORY-043 to slideforge-diagrams. |
+| 1.1 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: confirmed usvg 0.47.0 preserves source `<g>` nesting 1:1 (dummy-group removal dropped in usvg 0.30.0); updated AC-002 and depth-guard task to use `Group::children()` matching `usvg::Node::Group` on the parsed Tree (not raw string); removed raw-string ambiguity from Previous Story Intelligence; fixed three stale version pins: tracing =0.1.41→{workspace=true} (=0.1.44), thiserror =2.0.12→{workspace=true} (=2.0.18), miette =7.2.0→{workspace=true} (=7.6.0) per ADR-022. Cited export-architecture v1.2. |
