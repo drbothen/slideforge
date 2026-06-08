@@ -287,14 +287,52 @@ fn alt_text_str(alt: &AltText) -> &str {
     }
 }
 
+/// Returns `true` if the given SVG element local name is on the SVG blocklist.
+///
+/// Blocked elements are those that can execute code in an HTML context:
+/// - `script` — executes JavaScript
+/// - `foreignObject` — embeds arbitrary HTML/script content
+///
+/// F-005 (XSS): these are stripped when inline SVG is embedded in HTML output.
+fn is_blocked_svg_element(local_name: &[u8]) -> bool {
+    matches!(local_name, b"script" | b"foreignObject")
+}
+
+/// Returns `true` if the given attribute key is safe to emit in inline SVG.
+///
+/// Strips:
+/// - Event handler attributes (`on*` — e.g., `onload`, `onclick`, `onmouseover`)
+/// - `href` / `xlink:href` with `javascript:` scheme (checked separately at value level)
+///
+/// F-005 (XSS): event handlers execute JavaScript when inline SVG is parsed by browsers.
+fn is_safe_svg_attribute_key(key: &str) -> bool {
+    // Block all on* event handler attributes (case-insensitive).
+    !key.to_ascii_lowercase().starts_with("on")
+}
+
+/// Returns `true` if the given attribute value is safe for the given key.
+///
+/// For `href` and `xlink:href`, rejects values beginning with `javascript:` (case-insensitive).
+/// F-005 (XSS): `javascript:` href in SVG `<a>` or `<use>` executes in browser context.
+fn is_safe_svg_attribute_value(key: &str, value: &[u8]) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    if key_lower == "href" || key_lower == "xlink:href" {
+        let val_str = std::str::from_utf8(value).unwrap_or("");
+        return !val_str.trim().to_ascii_lowercase().starts_with("javascript:");
+    }
+    true
+}
+
 /// Inject `role=\"img\"` and `<title>alt text</title>` into an SVG string.
 ///
 /// This function performs raw XML manipulation via `quick-xml` to:
 /// 1. Parse the SVG string.
-/// 2. Inject `role="img"` on the outer `<svg>` element.
-/// 3. Prepend a `<title>alt_text</title>` child as the first child of `<svg>`.
-/// 4. Mark all inner `<svg>` elements (nested SVGs) with `aria-hidden="true"`.
-/// 5. Return the modified SVG string.
+/// 2. **Sanitize:** strip `<script>`, `<foreignObject>`, event-handler attributes
+///    (`on*`), and `javascript:` hrefs (F-005 / XSS prevention).
+/// 3. Inject `role="img"` on the outer `<svg>` element.
+/// 4. Prepend a `<title>alt_text</title>` child as the first child of `<svg>`.
+/// 5. Mark all inner `<svg>` elements (nested SVGs) with `aria-hidden="true"`.
+/// 6. Return the modified SVG string.
 ///
 /// ## Why NOT the usvg tree API (export-architecture v1.2 / AC-003/AC-005)
 ///
@@ -310,6 +348,11 @@ fn alt_text_str(alt: &AltText) -> &str {
 /// exposes the accessible name to assistive technologies. Inner SVG elements
 /// (chart axes, diagram sub-groups) receive `aria-hidden="true"` so they do not
 /// pollute the accessibility tree (EC-002 / AC-005).
+///
+/// ## Security (F-005 / XSS)
+///
+/// Inline SVG executes script in HTML context. This function strips all elements
+/// and attributes that can execute code before the SVG is placed in the HTML output.
 ///
 /// # Returns
 ///
@@ -327,6 +370,9 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
     let mut writer = Writer::new(Vec::new());
     let mut depth: u32 = 0;
     let mut outer_svg_done = false;
+    // F-005: track depth inside blocked elements (script/foreignObject).
+    // When blocked_depth > 0, ALL events are skipped until the matching end tag.
+    let mut blocked_depth: u32 = 0;
 
     loop {
         match reader.read_event() {
@@ -340,19 +386,56 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
             },
             Ok(Event::Start(elem)) => {
                 let local_name = elem.name().local_name();
+
+                // F-005: if we are inside a blocked element, skip all events.
+                if blocked_depth > 0 {
+                    if is_blocked_svg_element(local_name.as_ref()) {
+                        blocked_depth += 1;
+                    }
+                    continue;
+                }
+
+                // F-005: if this element starts a blocked subtree, enter blocked mode.
+                if is_blocked_svg_element(local_name.as_ref()) {
+                    blocked_depth += 1;
+                    tracing::warn!(
+                        element = %String::from_utf8_lossy(local_name.as_ref()),
+                        "render_svg_chart: F-005 blocked element stripped from SVG"
+                    );
+                    continue;
+                }
+
                 let is_svg = local_name.as_ref() == b"svg";
 
                 if is_svg && !outer_svg_done {
-                    // Outer <svg>: inject role="img", remove existing role if present.
+                    // Outer <svg>: inject role="img", sanitize + copy existing attrs.
                     outer_svg_done = true;
                     let mut new_elem = BytesStart::new("svg");
-                    // Copy existing attributes, except role (we re-inject it).
-                    // F-010: if an attribute key is not valid UTF-8, skip it cleanly
-                    // rather than silently mapping to "" which could false-match "role".
+                    // F-010: skip non-UTF-8 keys; F-005: skip event handlers + drop role.
                     for attr in elem.attributes().flatten() {
                         match std::str::from_utf8(attr.key.as_ref()) {
                             Ok("role") => {}, // drop — we inject below
-                            Ok(_) => new_elem.push_attribute(attr),
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler attribute stripped \
+                                     from outer <svg>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(
+                                    key,
+                                    attr.value.as_ref(),
+                                ) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe attribute value stripped \
+                                         from outer <svg>"
+                                    );
+                                }
+                            },
                             Err(_) => {
                                 tracing::warn!(
                                     "render_svg_chart: non-UTF-8 attribute key skipped \
@@ -388,13 +471,30 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
 
                     depth = 1;
                 } else if is_svg && depth > 0 {
-                    // Inner <svg>: inject aria-hidden="true", remove existing aria-hidden.
+                    // Inner <svg>: inject aria-hidden="true", sanitize + copy attrs.
                     let mut new_elem = BytesStart::new("svg");
-                    // F-010: skip non-UTF-8 attribute keys cleanly.
+                    // F-005 + F-010: sanitize attributes.
                     for attr in elem.attributes().flatten() {
                         match std::str::from_utf8(attr.key.as_ref()) {
                             Ok("aria-hidden") => {}, // drop — we inject below
-                            Ok(_) => new_elem.push_attribute(attr),
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler attribute stripped \
+                                     from inner <svg>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe attribute value stripped \
+                                         from inner <svg>"
+                                    );
+                                }
+                            },
                             Err(_) => {
                                 tracing::warn!(
                                     "render_svg_chart: non-UTF-8 attribute key skipped \
@@ -411,10 +511,36 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     }
                     depth += 1;
                 } else {
+                    // Other element: sanitize attributes (F-005), then emit.
+                    let elem_name_bytes = elem.name();
+                    let elem_name_str =
+                        std::str::from_utf8(elem_name_bytes.as_ref()).unwrap_or("element");
+                    let mut new_elem = BytesStart::new(elem_name_str);
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler attribute stripped"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe attribute value stripped"
+                                    );
+                                }
+                            },
+                            Err(_) => {}, // skip non-UTF-8 key
+                        }
+                    }
                     if depth > 0 {
                         depth += 1;
                     }
-                    if let Err(e) = writer.write_event(Event::Start(elem)) {
+                    if let Err(e) = writer.write_event(Event::Start(new_elem)) {
                         tracing::warn!(error = %e, "render_svg_chart: write error on elem start");
                         return svg_str.to_owned();
                     }
@@ -422,17 +548,49 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
             },
             Ok(Event::Empty(elem)) => {
                 let local_name = elem.name().local_name();
+
+                // F-005: if inside a blocked subtree, skip empty elements too.
+                if blocked_depth > 0 {
+                    continue;
+                }
+
+                // F-005: self-closing blocked elements (e.g., <script/>) — skip.
+                if is_blocked_svg_element(local_name.as_ref()) {
+                    tracing::warn!(
+                        element = %String::from_utf8_lossy(local_name.as_ref()),
+                        "render_svg_chart: F-005 self-closing blocked element stripped"
+                    );
+                    continue;
+                }
+
                 let is_svg = local_name.as_ref() == b"svg";
 
                 if is_svg && !outer_svg_done {
                     // Outer self-closing <svg/>: inject role="img" and a <title>.
                     outer_svg_done = true;
                     let mut new_elem = BytesStart::new("svg");
-                    // F-010: skip non-UTF-8 attribute keys cleanly.
+                    // F-005 + F-010: sanitize attributes.
                     for attr in elem.attributes().flatten() {
                         match std::str::from_utf8(attr.key.as_ref()) {
                             Ok("role") => {}, // drop — we inject below
-                            Ok(_) => new_elem.push_attribute(attr),
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler stripped from \
+                                     self-closing outer <svg/>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe value stripped from \
+                                         self-closing outer <svg/>"
+                                    );
+                                }
+                            },
                             Err(_) => {
                                 tracing::warn!(
                                     "render_svg_chart: non-UTF-8 attribute key skipped \
@@ -472,11 +630,28 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                     // F-007 (EC-002): inner self-closing <svg/> at depth > 0 must
                     // receive aria-hidden="true" (same as inner Start <svg>).
                     let mut new_elem = BytesStart::new("svg");
-                    // F-010: skip non-UTF-8 attribute keys cleanly.
+                    // F-005 + F-010: sanitize attributes.
                     for attr in elem.attributes().flatten() {
                         match std::str::from_utf8(attr.key.as_ref()) {
                             Ok("aria-hidden") => {}, // drop — we inject below
-                            Ok(_) => new_elem.push_attribute(attr),
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler stripped from \
+                                     self-closing inner <svg/>"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe value stripped from \
+                                         self-closing inner <svg/>"
+                                    );
+                                }
+                            },
                             Err(_) => {
                                 tracing::warn!(
                                     "render_svg_chart: non-UTF-8 attribute key skipped \
@@ -491,12 +666,48 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                         tracing::warn!(error = %e, "render_svg_chart: write error on inner self-closing svg");
                         return svg_str.to_owned();
                     }
-                } else if let Err(e) = writer.write_event(Event::Empty(elem)) {
-                    tracing::warn!(error = %e, "render_svg_chart: write error on empty elem");
-                    return svg_str.to_owned();
+                } else {
+                    // Other self-closing element: sanitize attributes (F-005).
+                    let elem_name_bytes = elem.name();
+                    let elem_name_str =
+                        std::str::from_utf8(elem_name_bytes.as_ref()).unwrap_or("element");
+                    let mut new_elem = BytesStart::new(elem_name_str);
+                    for attr in elem.attributes().flatten() {
+                        match std::str::from_utf8(attr.key.as_ref()) {
+                            Ok(key) if !is_safe_svg_attribute_key(key) => {
+                                tracing::warn!(
+                                    key = %key,
+                                    "render_svg_chart: F-005 event-handler stripped from empty elem"
+                                );
+                            },
+                            Ok(key) => {
+                                if is_safe_svg_attribute_value(key, attr.value.as_ref()) {
+                                    new_elem.push_attribute(attr);
+                                } else {
+                                    tracing::warn!(
+                                        key = %key,
+                                        "render_svg_chart: F-005 unsafe value stripped from \
+                                         empty elem"
+                                    );
+                                }
+                            },
+                            Err(_) => {}, // skip non-UTF-8 key
+                        }
+                    }
+                    if let Err(e) = writer.write_event(Event::Empty(new_elem)) {
+                        tracing::warn!(error = %e, "render_svg_chart: write error on empty elem");
+                        return svg_str.to_owned();
+                    }
                 }
             },
             Ok(Event::End(elem)) => {
+                // F-005: if inside a blocked subtree, handle end tag.
+                if blocked_depth > 0 {
+                    if is_blocked_svg_element(elem.name().local_name().as_ref()) {
+                        blocked_depth = blocked_depth.saturating_sub(1);
+                    }
+                    continue;
+                }
                 if depth > 0 {
                     depth = depth.saturating_sub(1);
                 }
@@ -506,6 +717,10 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
                 }
             },
             Ok(other) => {
+                // F-005: skip text/cdata inside blocked elements.
+                if blocked_depth > 0 {
+                    continue;
+                }
                 if let Err(e) = writer.write_event(other) {
                     tracing::warn!(error = %e, "render_svg_chart: write error on other event");
                     return svg_str.to_owned();
@@ -899,6 +1114,62 @@ mod tests {
     }
 
         // ─────────────────────────────────────────────────────────────────────────
+    // F-005 — SVG sanitization: strip <script>, <foreignObject>, event handlers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-005 (XSS): render_svg_chart must strip <script> elements from input SVG.
+    #[test]
+    fn test_F005_render_svg_chart_strips_script_elements() {
+        let malicious_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><script>alert('xss')</script><rect x="0" y="0" width="100" height="100"/></svg>"#;
+        let result = render_svg_chart(malicious_svg, "chart");
+        assert!(
+            !result.contains("<script>"),
+            "F-005: <script> elements must be stripped from SVG; got: {result}"
+        );
+        assert!(
+            !result.contains("alert("),
+            "F-005: script content must be stripped; got: {result}"
+        );
+    }
+
+    /// F-005 (XSS): render_svg_chart must strip <foreignObject> elements.
+    #[test]
+    fn test_F005_render_svg_chart_strips_foreign_object() {
+        let malicious_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><foreignObject width="100" height="100"><div>evil</div></foreignObject></svg>"#;
+        let result = render_svg_chart(malicious_svg, "chart");
+        assert!(
+            !result.contains("foreignObject"),
+            "F-005: <foreignObject> must be stripped from SVG; got: {result}"
+        );
+    }
+
+    /// F-005 (XSS): render_svg_chart must strip event handler attributes (onload=, onclick=).
+    #[test]
+    fn test_F005_render_svg_chart_strips_event_handlers() {
+        let malicious_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" onload="alert(1)"><rect onclick="evil()"/></svg>"#;
+        let result = render_svg_chart(malicious_svg, "chart");
+        assert!(
+            !result.contains("onload="),
+            "F-005: onload= event handler must be stripped; got: {result}"
+        );
+        assert!(
+            !result.contains("onclick="),
+            "F-005: onclick= event handler must be stripped; got: {result}"
+        );
+    }
+
+    /// F-005 (XSS): render_svg_chart must strip href="javascript:..." attributes.
+    #[test]
+    fn test_F005_render_svg_chart_strips_javascript_href() {
+        let malicious_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><a href="javascript:alert(1)"><rect/></a></svg>"#;
+        let result = render_svg_chart(malicious_svg, "chart");
+        assert!(
+            !result.contains("javascript:"),
+            "F-005: javascript: href must be stripped; got: {result}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // F-007 — self-closing nested <svg/> inside chart must get aria-hidden="true"
     // ─────────────────────────────────────────────────────────────────────────
 
