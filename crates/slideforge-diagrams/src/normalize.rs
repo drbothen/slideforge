@@ -83,7 +83,6 @@ use crate::xml_escape::{xml_attr_escape, xml_text_escape};
 /// `crates/slideforge-pdf/src/svg_embed.rs`. Both constants enforce the same
 /// security policy at different pipeline stages (defense-in-depth). If one is
 /// changed, the other MUST be updated in the same commit.
-// STORY-079: SEC-002 constant — size cap guard (not yet wired into usvg_normalize)
 const MAX_SVG_BYTES: usize = 50 * 1024 * 1024;
 
 /// Maximum `<g>` group nesting depth accepted by [`usvg_normalize`].
@@ -104,7 +103,6 @@ const MAX_SVG_BYTES: usize = 50 * 1024 * 1024;
 /// `crates/slideforge-pdf/src/svg_embed.rs`. Both constants enforce the same
 /// security policy at different pipeline stages (defense-in-depth). If one is
 /// changed, the other MUST be updated in the same commit.
-// STORY-079: SEC-001 constant — nesting-depth guard (not yet wired into usvg_normalize)
 const MAX_SVG_NESTING_DEPTH: usize = 64;
 
 /// Lazily-initialized system font database for usvg text normalization.
@@ -211,6 +209,30 @@ pub fn usvg_normalize(
     raw: &RawDiagramSvg,
     slide_title: &str,
 ) -> Result<NormalizedDiagramSvg, DiagramError> {
+    // SEC-002 (CWE-400): byte-size guard — reject oversized input BEFORE any
+    // allocation-heavy parse or font-DB load. A pathologically large SVG payload
+    // from a compromised mermaid renderer or malicious @data source could
+    // exhaust heap memory if passed to usvg::Tree::from_str. The check fires on
+    // the raw byte length before touching the font database.
+    let raw_len = raw.as_str().len();
+    if raw_len > MAX_SVG_BYTES {
+        tracing::warn!(
+            bytes = raw_len,
+            limit = MAX_SVG_BYTES,
+            "usvg_normalize: SVG rejected — exceeds size cap"
+        );
+        return Err(DiagramError::SvgNormalizationFailed {
+            slide_title: Arc::from(slide_title),
+            cause: Arc::from(
+                format!(
+                    "SVG input too large: {raw_len} bytes exceeds the {MAX_SVG_BYTES}-byte limit"
+                )
+                .as_str(),
+            ),
+            span: SourceSpan::from(0..0),
+        });
+    }
+
     // Build usvg options, always loading the system font database.
     //
     // System fonts are required so that usvg preserves <text> elements as text
@@ -357,6 +379,53 @@ pub fn usvg_normalize(
             span,
         }
     })?;
+
+    // SEC-001 (CWE-674): iterative nesting-depth guard — scan the parsed usvg
+    // Tree for excessive <g> Group nesting BEFORE re-serialization. A recursive
+    // scan would replace one stack-exhaustion path with another; this
+    // implementation uses an explicit heap-allocated stack (iterative DFS).
+    //
+    // usvg 0.47.0 preserves source <g> nesting 1:1 in the parsed Tree (dummy-group
+    // removal was dropped in usvg 0.30.0), so counting Group depth in the Tree is
+    // equivalent to counting raw <g> depth. (per export-architecture v1.2)
+    //
+    // Root `Tree::root()` is itself a Group and counts as depth 1. Each nested
+    // child `Node::Group` increments the depth counter. Nodes other than Group
+    // (Path, Image, Text) are leaves and do not increase nesting depth.
+    {
+        let mut max_depth: usize = 0;
+        // Stack items: (group reference, current depth).
+        // Root group is depth 1.
+        let mut stack: Vec<(&usvg::Group, usize)> = vec![(tree.root(), 1)];
+        while let Some((group, depth)) = stack.pop() {
+            if depth > max_depth {
+                max_depth = depth;
+            }
+            for child in group.children() {
+                if let usvg::Node::Group(child_group) = child {
+                    stack.push((child_group, depth + 1));
+                }
+            }
+        }
+        if max_depth > MAX_SVG_NESTING_DEPTH {
+            tracing::warn!(
+                depth = max_depth,
+                limit = MAX_SVG_NESTING_DEPTH,
+                "usvg_normalize: SVG rejected — exceeds nesting depth cap"
+            );
+            return Err(DiagramError::SvgNormalizationFailed {
+                slide_title: Arc::from(slide_title),
+                cause: Arc::from(
+                    format!(
+                        "SVG group nesting depth {max_depth} exceeds the \
+                         {MAX_SVG_NESTING_DEPTH}-level limit; possible DoS input"
+                    )
+                    .as_str(),
+                ),
+                span: SourceSpan::from(0..0),
+            });
+        }
+    }
 
     // Re-serialize the parsed tree back to SVG. This produces a normalized
     // form with all usvg guarantees applied (no foreignObject, no script,
@@ -1583,9 +1652,8 @@ mod tests {
         //     </g>
         //   </svg>
         let nesting = MAX_SVG_NESTING_DEPTH; // one extra <g> beyond the root Group
-        let mut svg = String::from(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">",
-        );
+        let mut svg =
+            String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
         for _ in 0..nesting {
             svg.push_str("<g>");
         }
@@ -1663,7 +1731,7 @@ mod tests {
     ///
     /// Including this test in the Red Gate suite is required by the story spec
     /// (AC-003 non-vacuity requirement). It is intentionally listed here with
-    /// the DoS tests so the implementer sees all three together.
+    /// the `DoS` tests so the implementer sees all three together.
     #[test]
     fn test_bc_1_12_003_sec_dos_svg_valid_input_unaffected() {
         // Use the existing simple_geometry_svg fixture (geometry-only, no text).
@@ -1683,7 +1751,7 @@ mod tests {
         // The result MUST be Ok — the guards must not reject valid input.
         let normalized = result.expect(
             "usvg_normalize MUST return Ok for a valid SVG well within both limits; \
-             the size/depth guards must not reject legitimate input"
+             the size/depth guards must not reject legitimate input",
         );
 
         // The Ok value must be a non-empty NormalizedDiagramSvg.
