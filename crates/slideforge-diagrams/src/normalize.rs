@@ -1654,13 +1654,14 @@ mod tests {
     /// outcome means this test FAILS (asserting `Err` on an `Ok`) — proving
     /// the Red Gate.
     ///
-    /// ## LOW-1 hardening (adversary Pass-1)
+    /// ## LOW-1 hardening (adversary Pass-1, updated adv Pass-2 OBS-1)
     ///
-    /// Each nested `<g>` carries `transform="translate(0,0)"` so that usvg
-    /// cannot collapse attribute-less dummy groups. A future usvg upgrade that
-    /// elides empty groups would otherwise make this fixture vacuous — the
-    /// depth count would silently drop below 65 and the guard would never fire.
-    /// Identity transforms are preserved 1:1 through usvg's Group model.
+    /// Each nested `<g>` carries `transform="translate(0,N)"` where N = i+1
+    /// (starting at 1, not 0) so EVERY group has a strictly non-identity
+    /// transform. A future usvg upgrade that elides identity or empty groups
+    /// would otherwise make this fixture vacuous — the depth count would
+    /// silently drop below 65 and the guard would never fire. Non-identity
+    /// transforms are preserved 1:1 through usvg's Group model.
     #[test]
     fn test_bc_1_12_003_sec_dos_svg_deep_nesting_rejected() {
         // Construct an SVG with exactly MAX_SVG_NESTING_DEPTH + 1 nested <g> elements.
@@ -1670,10 +1671,10 @@ mod tests {
         //
         // Structure:
         //   <svg>                                <- root Group (depth 1 per AC-002 spec)
-        //     <g transform="translate(0,0)">    <- depth 2
-        //       <g transform="translate(0,0)">  <- depth 3
+        //     <g transform="translate(0,1)">    <- depth 2
+        //       <g transform="translate(0,2)">  <- depth 3
         //         ...
-        //           <g transform="translate(0,0)">  <- depth MAX_SVG_NESTING_DEPTH + 1
+        //           <g transform="translate(0,N)">  <- depth MAX_SVG_NESTING_DEPTH + 1
         //             <rect ... />
         //           </g>
         //         ...
@@ -1681,16 +1682,16 @@ mod tests {
         //     </g>
         //   </svg>
         //
-        // The identity transform="translate(0,0)" attribute prevents usvg from
-        // collapsing dummy groups, ensuring the fixture is non-vacuous against
-        // future usvg upgrades (LOW-1, adversary Pass-1).
+        // Each transform="translate(0,N)" (N >= 1) is strictly non-identity,
+        // preventing usvg from collapsing any group as a no-op container —
+        // future usvg upgrades that elide identity or empty groups cannot make
+        // this fixture vacuous (LOW-1, adversary Pass-1; OBS-1 closure Pass-2).
         let nesting = MAX_SVG_NESTING_DEPTH; // one extra <g> beyond the root Group
         let mut svg =
             String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
         for i in 0..nesting {
-            // Each group carries a unique identity transform so usvg preserves
-            // the nesting 1:1 — no group can be collapsed as a no-op container.
-            let _ = write!(svg, "<g transform=\"translate(0,{i})\">");
+            // i+1 ensures every group has a non-identity transform (no translate(0,0)).
+            let _ = write!(svg, "<g transform=\"translate(0,{})\">", i + 1);
         }
         svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"red\"/>");
         for _ in 0..nesting {
@@ -1859,8 +1860,10 @@ mod tests {
     /// If the guard were `>=` instead of `>`, this fixture (depth == 64) would
     /// be rejected instead of passing, and this test would catch the regression.
     ///
-    /// Each `<g>` carries `transform="translate(0,N)"` to prevent usvg from
-    /// collapsing attribute-less dummy groups on future usvg upgrades.
+    /// Each `<g>` carries `transform="translate(0,N)"` where N = i+1 (starting
+    /// at 1, never 0) so every group has a strictly non-identity transform —
+    /// preventing usvg from collapsing any group on future usvg upgrades
+    /// (OBS-1 closure, adversary Pass-2).
     #[test]
     fn test_bc_1_12_003_sec_depth_exact_boundary_passes() {
         // Root Tree::root() is depth 1.  We want total max depth == MAX_SVG_NESTING_DEPTH.
@@ -1870,8 +1873,8 @@ mod tests {
         let mut svg =
             String::from("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">");
         for i in 0..nested_g_count {
-            // Identity-preserving transforms prevent usvg from collapsing these groups.
-            let _ = write!(svg, "<g transform=\"translate(0,{i})\">");
+            // i+1 ensures every group has a non-identity transform (no translate(0,0)).
+            let _ = write!(svg, "<g transform=\"translate(0,{})\">", i + 1);
         }
         svg.push_str("<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"blue\"/>");
         for _ in 0..nested_g_count {
