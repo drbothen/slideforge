@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: nfr-catalog
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
-timestamp: 2026-05-28T00:00:00
+timestamp: 2026-06-07T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [architect, performance-engineer]
@@ -24,17 +24,19 @@ primary_consumers: [architect, performance-engineer]
 | NFR-ID | Category | Requirement | Numerical Target | Validation Method | Risk Source |
 |--------|---------|-------------|-----------------|------------------|------------|
 | NFR-001 | Performance | Cold build time for a 25-slide deck with brand.toml synthesis | < 500ms wall-clock | CI criterion benchmark on Linux x86_64 GitHub Actions runner | R-005, ASM-011 |
-| NFR-002 | Performance | Incremental rebuild in watch mode (single .sf file change, no data re-fetch) | < 50ms wall-clock | CI criterion benchmark | R-005 |
+| NFR-002 | Performance | Incremental rebuild in watch mode (single .sf file change, no data re-fetch) | < 50ms wall-clock | CI criterion benchmark | R-005 | **v1.0 scope: DEFERRED to v1.x** — comemo-based incremental compilation is a v1.x roadmap item (per CLAUDE.md Version Roadmap). `compile_incremental`/`CompileOptions { warm_cache }` do not exist in v1.0. This NFR is tracked for v1.x planning but is NOT a v1.0 release gate. Human-approved 2026-06-07 (Wave-5 remove-uncertainty pass). |
 | NFR-003 | Performance | Diagram cold font DB scan (mermaid-rs-renderer first call per process) | < 200ms wall-clock | Unit benchmark | S14 finding: 124ms on M-series |
 | NFR-004 | Performance | Warm diagram render per diagram (mermaid-rs-renderer, font DB cached) | < 10ms per diagram | Unit benchmark (Criterion) | S14 finding: < 3ms typical |
 | NFR-005 | Performance | PPTX/DOCX serialization for a 25-slide deck | < 200ms wall-clock | CI criterion benchmark | R-005 |
 | NFR-006 | Performance | Memory usage peak for a 25-slide deck with @data sources | < 256MB resident | CI memory profiling (heaptrack or valgrind) | R-005 |
 
-**Validation workflow for NFR-001/002:**
+**Validation workflow for NFR-001 (v1.0 gate):**
 1. Implement the criterion benchmark in `crates/slideforge-cli/benches/build_bench.rs`
 2. The benchmark fixture: 25 slides using at least 10 slide types, brand.toml synthesis, 2 @data sources (file-based)
 3. CI uses `cargo bench` and compares vs threshold; fails PR if threshold exceeded
 4. Gate: **blocking** — PR cannot merge if NFR-001 is violated
+
+**NFR-002 deferral note (2026-06-07):** NFR-002 is deferred to v1.x. The `slideforge::compile_incremental` entry point and `CompileOptions { warm_cache }` field required to benchmark and verify this NFR do not exist in v1.0, as comemo-based incremental compilation is explicitly listed as a v1.x roadmap feature. STORY-059 AC-003 must be revised by story-writer to remove the incremental benchmark AC and cite this deferral. Canonical deferred NFR ID: **NFR-002**.
 
 ---
 

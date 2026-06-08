@@ -1,7 +1,7 @@
 ---
 document_type: architecture-section
 section: export-architecture
-version: "1.1"
+version: "1.2"
 status: approved
 producer: architect
 timestamp: 2026-05-24T00:00:00
@@ -12,6 +12,12 @@ modified:
      Reconciles spec-vs-OOXML-reality defect found at STORY-082 start (bare p:sectionLst in story
      XML snippet is wrong; correct form is p14:sectionLst under p:extLst/p:ext). Story-writer
      updates STORY-082 XML snippet from this record."
+  - "2026-06-07: v1.2 — Wave-5 remove-uncertainty clarifications: PDF gradient route (krilla only;
+     pdf-writer must NOT be a direct dep); usvg 0.47.0 STRIPS non-presentation attributes (ARIA
+     injection via raw SVG string manipulation, not usvg tree); usvg 0.47.0 preserves source nesting
+     1:1 (DoS depth-guard design confirmed sound); ooxmlsdk 0.6.1 HAS typed builders for DrawingML
+     run-properties + gradients (raw XML injection only for genuine extension particles, not standard
+     elements); quick-xml push_attribute auto-escapes (no pre-escaping in callers)."
 traces_to: ARCH-INDEX.md
 ---
 
@@ -275,6 +281,144 @@ namespace declarations deep in the tree that some parsers handle poorly.
 
 When `SectionListBuilder` injects the `p:extLst`, it must also patch the
 `<p:presentation` opening tag to include the `p14` namespace declaration.
+
+## Wave-5 Remove-Uncertainty Clarifications (2026-06-07)
+
+### PDF Gradient Route — krilla Only; pdf-writer MUST NOT Be a Direct Dep (STORY-072)
+
+PDF gradients in slideforge-pdf route exclusively through krilla 0.6.0. The draw API:
+
+```rust
+use krilla::surface::Surface;
+use krilla::paint::{LinearGradient, Stop, Fill};
+
+// Correct: gradients via krilla Surface
+surface.set_fill(Fill::Paint(
+    LinearGradient { stops: vec![Stop { color, offset }, ...], ... }.into()
+));
+```
+
+`pdf-writer` MUST NOT be declared as a direct production dependency of `slideforge-pdf`.
+krilla wraps pdf-writer internally at `pdf-writer = "=0.14.0"`. Adding `pdf-writer` as
+a direct dep in `slideforge-pdf` risks version skew: if `slideforge-pdf` pins
+`pdf-writer = "=0.14.0"` and krilla internally upgrades to `pdf-writer = "=0.15.0"`,
+Cargo compiles both versions — two incompatible pdf-writer instances in the same binary.
+The correct constraint: `slideforge-pdf` depends on `krilla = "=0.6.0"` ONLY; pdf-writer
+is a transitive dep resolved through krilla.
+
+If a future story requires low-level PDF structure tree access not exposed by krilla's
+API (e.g., extending the `/StructTreeRoot` beyond krilla's experimental tagged PDF
+hooks), the correct route is to extend krilla's API via a PR or vendor krilla with a
+local patch — NOT to introduce a parallel pdf-writer dependency at a different version.
+
+### usvg 0.47.0 — Non-Presentation Attribute Stripping (STORY-046 Chart SVG Accessibility)
+
+`usvg = "=0.47.0"` normalizes SVG geometry for rendering and strips non-presentation
+attributes during tree construction. Specifically: `role`, `aria-label`, `aria-hidden`,
+`data-*`, and all other non-SVG-presentation attributes are stripped by usvg's tree
+parser. This is by design — usvg operates on the SVG geometry/rendering model, not the
+accessibility model.
+
+**Consequence for STORY-046 (chart SVG accessibility):** Injecting
+`role="img"` and a `<title>` element into a chart SVG MUST be done by manipulating the
+raw SVG markup string (quick-xml writer or roxmltree edit), NOT by modifying the usvg
+tree. usvg is used only for geometry normalization and validation; the accessibility
+annotation pass operates on the raw SVG bytes AFTER usvg produces its normalized output.
+
+Implementation sequence:
+1. `plotters` generates chart SVG bytes.
+2. Pass SVG bytes through `usvg::Tree::from_data()` for geometry validation (optional
+   — only if normalization is needed before embedding).
+3. On the raw SVG bytes (not the usvg tree), inject:
+   - `role="img"` on the root `<svg>` element
+   - `<title id="chart-title-{id}">{alt_text}</title>` as the first child of `<svg>`
+   - `aria-labelledby="chart-title-{id}"` on the root `<svg>` element
+4. Use `quick-xml` or `roxmltree` for the injection step (not string concatenation
+   — attribute values must be properly escaped).
+
+If a future usvg version preserves non-presentation attributes, step 3 MAY migrate to
+the usvg tree API. Until then, raw-string injection is the ONLY correct approach.
+
+### usvg 0.47.0 — Preserved Source Nesting (STORY-079 DoS Depth-Guard Design Confirmed Sound)
+
+usvg 0.47.0 preserves source `<g>` nesting 1:1 in the parsed tree. The "dummy group
+removal" optimization was removed in usvg 0.30.0. A deeply nested SVG input
+(e.g., 10,000 nested `<g>` elements) produces a usvg tree 10,000 nodes deep.
+
+**Consequence for STORY-079 DoS protection:** The depth-scan-the-parsed-tree design is
+SOUND. The guard must walk the usvg tree post-parse and reject inputs exceeding the
+depth limit BEFORE the tree is passed to any renderer. The correct walk:
+
+```rust
+use usvg::{Node, Group};
+
+fn max_depth(group: &Group, current: usize) -> usize {
+    group.children().iter().fold(current, |acc, child| {
+        match child {
+            Node::Group(g) => max_depth(g, acc + 1).max(acc),
+            _ => acc,
+        }
+    })
+}
+```
+
+If `max_depth(&tree.root(), 0) > DEPTH_LIMIT`, return a validation error before any
+rendering step.
+
+This design is NOT a false positive — usvg does NOT collapse nested groups in 0.47.0,
+so the depth measured on the parsed tree accurately reflects the source SVG structure.
+
+### ooxmlsdk 0.6.1 — Typed Builders for Run-Properties and Gradients; Raw XML Only for Extension Particles
+
+ooxmlsdk 0.6.1 provides typed builder APIs for standard DrawingML and WordprocessingML
+elements. The following are available as typed builders — raw XML injection is WRONG
+for these:
+
+**DrawingML run properties (`a:rPr`):**
+- Bold: `RunProperties::new().bold(true)`
+- Italic: `RunProperties::new().italic(true)`
+- Strikethrough: `RunProperties::new().strikethrough(true)`
+- Fill: `RunProperties::new().solid_fill(SolidFill::new(...))`
+
+**DrawingML gradients:**
+- `GradientFill` → `GradientStopList` → `GradientStop` (with color + position)
+- Linear gradient angle: `LinearGradientFill::new().angle(5400000)` (EMU angle: 60° = 5400000)
+
+**WordprocessingML run properties (`w:rPr`):**
+- `w:b` (bold): `RunProperties::new().bold(Bold::new())`
+- `w:i` (italic): `RunProperties::new().italic(Italic::new())`
+- `w:rStyle`: `RunProperties::new().run_style(RunStyle::new().val("Emphasis"))`
+- `w:vertAlign` (superscript/subscript): typed enum
+- `w:strike`, `w:highlight`: typed builders
+
+Raw XML injection via `xml_children` is required ONLY for genuine extension particles:
+- p14 namespace elements (e.g., `p14:sectionLst` — no typed support, see PPTX Slide Sections above)
+- `mc:AlternateContent` / `mc:Choice` blocks (markup compatibility)
+- p14/p15/p16-style future-feature extensions
+- Any element with namespace prefix not in ECMA-376 Part 1 core
+
+The STORY-082 `sectionLst` precedent (p14 extension, no typed support) is the model for
+when raw XML is appropriate. Standard run-properties and gradient fills are NOT in this
+category — they have typed ooxmlsdk builders.
+
+### quick-xml push_attribute Auto-Escaping
+
+`quick-xml`'s `Writer::write_event` and attribute construction via `push_attribute` (and
+`Attribute::from`) perform XML attribute value escaping automatically. Code MUST NOT
+pre-escape attribute values before passing them to quick-xml. Double-escaping produces
+visible artifacts in rendered output (e.g., `&amp;amp;` instead of `&amp;`).
+
+```rust
+// WRONG — pre-escaped (produces double-escape):
+element.push_attribute(("title", "&amp;My Title"));
+
+// CORRECT — raw value, quick-xml escapes:
+element.push_attribute(("title", "& My Title"));
+```
+
+This applies to all quick-xml usage across the workspace: `slideforge-pptx`
+(`SectionListBuilder`), `slideforge-docx`, `slideforge-brand` (TOML extraction +
+serialization), and any story using quick-xml for OOXML or SVG construction.
 
 ## Format Matrix
 

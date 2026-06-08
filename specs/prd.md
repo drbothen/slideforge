@@ -1,10 +1,10 @@
 ---
 document_type: prd
 level: L3
-version: "1.0"
+version: "1.1"
 status: draft
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-06-07T00:00:00
 phase: 1a
 inputs:
   - .factory/specs/domain-spec/L2-INDEX.md
@@ -248,7 +248,7 @@ Options (build):
 > | NFR-ID | Category | Requirement | Target |
 > |--------|---------|-------------|--------|
 > | NFR-001 | Performance | Cold build time for 25-slide deck | < 500ms |
-> | NFR-002 | Performance | Incremental rebuild (watch mode, 1 slide change) | < 50ms |
+> | NFR-002 | Performance | Incremental rebuild (watch mode, 1 slide change) | < 50ms — **DEFERRED to v1.x** (comemo not in v1.0; human-approved 2026-06-07) |
 > | NFR-007 | Visual Parity | PPTX SSIM vs reference PNG (LibreOffice) | ≥ 0.99 per slide |
 > | NFR-008 | Visual Parity | PPTX PSNR vs reference PNG (LibreOffice) | ≥ 35dB per slide |
 > | NFR-012 | Accessibility | PDF/UA-1 compliance (veraPDF) | Zero violations |
@@ -410,7 +410,7 @@ Options (build):
 | Phase 4 holdout mean satisfaction | ≥ 0.85 | holdout-evaluator agent Phase 4 |
 | Phase 4 holdout must-pass rate | ≥ 0.60 | holdout-evaluator agent Phase 4 |
 | Cold build time (25-slide deck) | < 500ms | CI benchmark (criterion) |
-| Incremental rebuild (watch mode) | < 50ms | CI benchmark |
+| Incremental rebuild (watch mode) — NFR-002 | < 50ms — **DEFERRED to v1.x** (comemo not in v1.0; see nfr-catalog.md NFR-002) | CI benchmark (v1.x) |
 | PPTX LibreOffice SSIM vs reference | ≥ 0.99 per slide | CI visual regression job |
 | PPTX LibreOffice PSNR vs reference | ≥ 35dB per slide | CI visual regression job |
 | PDF/UA-1 compliance | 0 veraPDF violations | CI veraPDF gate |

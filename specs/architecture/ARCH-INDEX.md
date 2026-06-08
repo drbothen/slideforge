@@ -120,6 +120,8 @@ axum process but this is a local development feature, not a deployed service.
 | ADR-018 | Post-layout validation pass for ContentBlock-level accessibility checks | Accepted (2026-06-05) |
 | ADR-019 | Stage 2b — post-eval field-to-block threading pass in slideforge-eval | Accepted (2026-06-05) |
 | ADR-020 | FieldDef type-annotation extension — FieldType enum + expected_type field for schema-driven field-value validation | Accepted (2026-06-07) |
+| ADR-021 | Async runtime adoption — tokio for preview server, watch-mode HTTP, interactive keypress, and OTLP export | Accepted (2026-06-07) |
+| ADR-022 | Workspace dependency centralization and major-version adoption with merged-crate migration plan | Accepted (2026-06-07) |
 
 ---
 

@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: draft
 producer: product-owner
-timestamp: 2026-05-25T00:00:00
+timestamp: 2026-06-07T00:00:00
 phase: 1a
 inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
@@ -14,7 +14,7 @@ subsystem: SS-05
 capability: CAP-010
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — pass-10 sweep (F-P10-HIGH-001): Frame.bounding_box → Frame.bbox in postcondition 2 to match production types.rs:214 (pub bbox: BoundingBox)"]
+modified: ["v1.2 — pass-10 sweep (F-P10-HIGH-001): Frame.bounding_box → Frame.bbox in postcondition 2 to match production types.rs:214 (pub bbox: BoundingBox)", "v1.3 — 2026-06-07: clarified comemo reference in Description — NFR-002 incremental gate deferred to v1.x (human-approved); determinism contract itself is a v1.0 requirement"]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -32,7 +32,7 @@ removal_reason: null
 produce an identical `LaidOutDeck` — including all `BoundingBox` coordinates, `TextFlow`
 values, `PageSize`, and `speaker_notes` content. No randomness, no global mutable state,
 no timestamp injection, no filesystem reads occur inside `layout::run`. This property
-enables reproducible builds and is required for comemo incremental compilation.
+enables reproducible builds and is required for comemo incremental compilation (a v1.x roadmap feature — NFR-002 incremental gate deferred to v1.x per human-approved decision 2026-06-07; this BC's determinism contract remains a v1.0 requirement).
 
 ## Preconditions
 
