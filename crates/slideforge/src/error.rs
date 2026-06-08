@@ -63,7 +63,8 @@ pub enum PluginError {
 ///
 /// ## Non-exhaustive
 ///
-/// New pipeline stages (e.g., HTML exporter in STORY-050) may add variants.
+/// New pipeline stages may add variants. All four export formats (pptx, docx,
+/// pdf, html) are registered in the default plugin registry.
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -161,6 +162,92 @@ pub enum BuildError {
         count: usize,
     },
 
+    /// Both the evaluator and one or more validators reported `Error`-severity
+    /// diagnostics in the same strict-mode build run.
+    ///
+    /// This variant is produced when `compile_inner` accumulates non-fatal eval
+    /// errors (e.g. `E-EVL-001` undefined variable — evaluator returns `Some(Deck)`
+    /// rather than `None`) AND the subsequent validator stage also produces
+    /// `Error`-severity diagnostics (e.g. `E-A11-001` missing alt text).
+    ///
+    /// Both groups of diagnostics are carried so that the CLI (and any other
+    /// caller) can render ALL errors in a single pass — satisfying
+    /// BC-1.15.002 PC1 ("all N errors reported in a single build output") and
+    /// invariant 3 ("accumulation applies to parser, evaluator, validators
+    /// COLLECTIVELY").
+    ///
+    /// ## Rendering
+    ///
+    /// The CLI uses `eval_sort_keys` (parallel to `eval_diagnostics`) and
+    /// `slideforge_plugin_api::Diagnostic::span` to merge-sort the two sets in
+    /// source-file order (ascending `(file, line, col)`) at render time.
+    /// This satisfies BC-1.15.002 PC2 (HIGH-P3-001 fix).
+    ///
+    /// `eval_severities` (parallel to `eval_diagnostics`) carries the ACTUAL
+    /// [`slideforge_syntax::ParseSeverity`] of each eval diagnostic. The JSON
+    /// renderer uses this to emit the correct `"severity"` field instead of
+    /// hardcoding `"error"` for all eval entries (OBS-P4-003 fix).
+    ///
+    /// ## Exit code
+    ///
+    /// Exit code 2 — same as `EvalFailed` and `ValidationFailed`.
+    ///
+    /// ## Traceability
+    ///
+    /// - BC-1.15.002 PC1, PC2, invariant 3
+    /// - STORY-055 AC-006 / F-P2-MED-001 fix
+    /// - HIGH-P3-001 fix (source-order interleaving)
+    /// - OBS-P4-003 fix (eval severity fidelity in JSON output)
+    #[error(
+        "build failed with {eval_count} eval error(s) and {validator_count} validator \
+         error(s); run with --warn-only to demote to warnings"
+    )]
+    MultistageFailed {
+        /// Eval-stage diagnostics (from `DiagnosticSink` — `Box<dyn miette::Diagnostic>`).
+        ///
+        /// Contains all non-fatal eval errors (e.g. `E-EVL-001` undefined variable)
+        /// that were accumulated when `eval_deck_with_variant` returned `Some(Deck)`.
+        ///
+        /// Sorted by `(file, line, col)` ascending before being placed here
+        /// (HIGH-P3-001 fix in `compile_inner`).
+        eval_diagnostics: Vec<slideforge_syntax::BoxDiagnostic>,
+
+        /// Source positions `(file, line, col)` parallel to `eval_diagnostics`.
+        ///
+        /// `eval_sort_keys[i]` is the sort key for `eval_diagnostics[i]`.
+        /// Used by the CLI renderer to interleave eval and validator diagnostics
+        /// in source-file order (BC-1.15.002 PC2 / HIGH-P3-001 fix).
+        ///
+        /// Avoids the need to downcast `BoxDiagnostic` at render time.
+        eval_sort_keys: Vec<(String, u32, u32)>,
+
+        /// Per-diagnostic severity parallel to `eval_diagnostics`.
+        ///
+        /// `eval_severities[i]` is the [`slideforge_syntax::ParseSeverity`] for
+        /// `eval_diagnostics[i]`, captured at push time from the `DiagnosticSink`.
+        /// Always the same length as `eval_diagnostics` and `eval_sort_keys`.
+        ///
+        /// Used by the JSON renderer to emit the ACTUAL `"severity"` field (e.g.
+        /// `"warning"`, `"error"`) for each eval entry rather than hardcoding
+        /// `"error"` (OBS-P4-003 fix).
+        eval_severities: Vec<slideforge_syntax::ParseSeverity>,
+
+        /// Validator-stage diagnostics (from all registered `Validator` plugins).
+        ///
+        /// Contains all diagnostics (Error + Warning) from Stage 5 + Stage 6b
+        /// validators — same set that `ValidationFailed` would carry.
+        ///
+        /// Sorted by `(span.file, span.line, span.col)` ascending and deduped
+        /// (BC-1.15.002 PC2, EC-004) before being placed here.
+        validator_diagnostics: Vec<Diagnostic>,
+
+        /// Count of `Error`-severity diagnostics in `eval_diagnostics`.
+        eval_count: usize,
+
+        /// Count of `Error`-severity diagnostics in `validator_diagnostics`.
+        validator_count: usize,
+    },
+
     /// The `Deck` could not be laid out into a `LaidOutDeck`.
     ///
     /// Wraps [`slideforge_layout::LayoutError`].
@@ -171,7 +258,7 @@ pub enum BuildError {
     ///
     /// `format` is the format string from [`crate::BuildOptions::format`]
     /// (or `"pptx"` if none was set).
-    #[error("no exporter registered for format '{0}'; supported: pptx, docx, pdf")]
+    #[error("no exporter registered for format '{0}'; supported: pptx, docx, pdf, html")]
     UnknownFormat(String),
 
     /// The export stage failed to produce output bytes.

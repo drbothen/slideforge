@@ -235,6 +235,122 @@ fn test_bc_5_02_001_ec004_register_fields_do_not_break_build() {
     );
 }
 
+// ── BC-1.15.002 TV-13.1: cross-stage eval + validator error accumulation ─────
+
+/// BC-1.15.002 TV-13.1: eval Error (non-fatal, deck returned Some) AND validator
+/// Error (missing alt) both reported in a single strict-mode build run.
+///
+/// This is the load-bearing end-to-end test for F-P2-MED-001: cross-stage error
+/// accumulation broken. Before the fix, `compile_inner` early-returned `EvalFailed`
+/// as soon as eval had non-fatal Error diagnostics — BEFORE the validator loop ran.
+/// Decks with both an eval Error and a validator Error reported only the eval error.
+///
+/// After the fix: eval non-fatal errors do NOT cause an early return. Validators
+/// run, all diagnostics are merged, and the strict gate fires once with all errors.
+///
+/// Fixture: `test-eval-and-validator-errors.sf`
+///   - 2x E-EVL-001 (undefined variables in title fields) — non-fatal eval errors
+///   - 1x E-A11-001 (missing alt on chart block) — validator error
+///
+/// BC-1.15.002 PC1: all 3 errors appear in the merged result.
+/// BC-1.15.002 invariant 3: accumulation applies to evaluator + validators collectively.
+/// BC-1.15.002 canonical test vector TV-13.1.
+#[test]
+fn test_bc_1_15_002_cross_stage_eval_and_validator_errors_both_reported() {
+    let brand = BrandTmpDir::new("bc_1_15_002_tv13");
+    let source = fixture_source("test-eval-and-validator-errors.sf");
+    let opts = brand.build_options("pptx", true); // strict=true
+
+    let result = slideforge::build(&source, &opts);
+
+    // Must be an Err (strict mode, errors present).
+    assert!(
+        result.is_err(),
+        "BC-1.15.002 TV-13.1: strict build with eval Error + validator Error must \
+         return Err; got: {result:?}"
+    );
+
+    // The error must carry BOTH the eval diagnostics (E-EVL-001) and the
+    // validator diagnostics (E-A11-001). Inspect the merged error variant.
+    let err = result.unwrap_err();
+    match &err {
+        slideforge::error::BuildError::MultistageFailed {
+            eval_diagnostics,
+            validator_diagnostics,
+            ..
+        } => {
+            // PC1: eval diagnostics must contain E-EVL-001.
+            let has_evl = eval_diagnostics.iter().any(|d| {
+                d.code()
+                    .is_some_and(|c| c.to_string().contains("E-EVL-001"))
+            });
+            assert!(
+                has_evl,
+                "BC-1.15.002 TV-13.1 PC1: MultistageFailed.eval_diagnostics must contain \
+                 E-EVL-001; got codes: {:?}",
+                eval_diagnostics
+                    .iter()
+                    .map(|d| d.code().map(|c| c.to_string()).unwrap_or_default())
+                    .collect::<Vec<_>>()
+            );
+
+            // PC1: validator diagnostics must contain E-A11-001.
+            let has_a11 = validator_diagnostics
+                .iter()
+                .any(|d| d.code.as_ref() == "E-A11-001");
+            assert!(
+                has_a11,
+                "BC-1.15.002 TV-13.1 PC1: MultistageFailed.validator_diagnostics must \
+                 contain E-A11-001; got codes: {:?}",
+                validator_diagnostics
+                    .iter()
+                    .map(|d| d.code.as_ref())
+                    .collect::<Vec<_>>()
+            );
+
+            // Invariant: at least 2 E-EVL-001 entries (2 undefined vars in fixture).
+            let evl_count = eval_diagnostics
+                .iter()
+                .filter(|d| {
+                    d.code()
+                        .is_some_and(|c| c.to_string().contains("E-EVL-001"))
+                })
+                .count();
+            assert!(
+                evl_count >= 2,
+                "BC-1.15.002 TV-13.1: eval_diagnostics must contain at least 2 E-EVL-001 \
+                 entries (2 undefined variables in fixture); got {evl_count}"
+            );
+        },
+        other => {
+            panic!(
+                "BC-1.15.002 TV-13.1: expected BuildError::MultistageFailed for a deck \
+                 with both eval and validator errors; got: {other:?}"
+            );
+        },
+    }
+}
+
+/// BC-1.15.002 TV-13.1 warn-only variant: strict=false must NOT return an error
+/// even when the deck has both eval and validator errors.
+///
+/// In warn-only mode, all diagnostics are demoted to warnings and the build
+/// continues to produce output.
+#[test]
+fn test_bc_1_15_002_cross_stage_warn_only_succeeds_despite_errors() {
+    let brand = BrandTmpDir::new("bc_1_15_002_warnonly");
+    let source = fixture_source("test-eval-and-validator-errors.sf");
+    let opts = brand.build_options("pptx", false); // strict=false (warn-only)
+
+    let result = slideforge::build(&source, &opts);
+
+    assert!(
+        result.is_ok(),
+        "BC-1.15.002 TV-13.1 warn-only: build with strict=false must succeed \
+         (eval + validator errors demoted to warnings); got: {result:?}"
+    );
+}
+
 // ── EC-002: @include graceful failure ────────────────────────────────────────
 
 /// EC-002: a source with an `@include` directive (unimplemented or pointing to

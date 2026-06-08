@@ -14,10 +14,58 @@ readme = "../../README.md"
 name = "slideforge"
 path = "src/main.rs"
 
+[lib]
+name = "slideforge_cli"
+path = "src/lib.rs"
+
+[features]
+## Enable OpenTelemetry OTLP trace export via `--otel-endpoint`.
+##
+## When this feature is enabled, `tracing-opentelemetry`, `opentelemetry`,
+## `opentelemetry_sdk`, and `opentelemetry-otlp` are activated.
+## When disabled (the default), the binary has zero OTel transitive dependencies.
+##
+## Cite ADR-021: tokio async runtime is required by `opentelemetry_sdk`'s
+## `rt-tokio` feature.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tokio",
+]
+
 [dependencies]
 slideforge = { workspace = true }
 clap = { workspace = true }
 miette = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+
+## OTel deps — only compiled when the `otel` feature is active.
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+## tokio: required by opentelemetry_sdk's rt-tokio feature for the batch span
+## processor.  Only activated when the `otel` feature is on; the default
+## (non-otel) binary has zero tokio dependency.
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+## tracing-test: capture tracing spans/events in tests for AC-011 assertions.
+## no-env-filter: required so the subscriber captures INFO events from the
+## production code path without filtering by test crate target name.
+tracing-test = { version = "=0.2.5", features = ["no-env-filter"] }
+## tempfile: create temporary directories for integration test fixtures.
+tempfile = { workspace = true }
+## slideforge-plugin-api: for Diagnostic, DiagnosticSeverity, ExportError in unit tests.
+## Required for unit tests in commands/build.rs that construct BuildError::ValidationFailed
+## and BuildError::Export — these variants hold plugin-api types.
+slideforge-plugin-api = { workspace = true }
+## slideforge-types: for SourceSpan used in Diagnostic construction in unit tests.
+slideforge-types = { workspace = true }
+## tokio: required for `#[tokio::test]` on the AC-015 otel integration test.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

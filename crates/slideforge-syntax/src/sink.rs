@@ -185,6 +185,39 @@ impl DiagnosticSink {
         &self.diagnostics
     }
 
+    /// Return the source positions `(file, line, col)` captured at push time,
+    /// parallel to [`DiagnosticSink::errors`].
+    ///
+    /// Each entry corresponds to the diagnostic at the same index in `errors()`.
+    /// For [`crate::SyntaxError`] diagnostics the position comes from the
+    /// variant's source-span fields. For other diagnostic types the position
+    /// defaults to `("<unknown>", 0, 0)`.
+    ///
+    /// This slice is used by `slideforge` (the root crate) to thread sort keys
+    /// into `OwnedDiag` wrappers so that eval diagnostics can be interleaved
+    /// with validator diagnostics in source-file order (BC-1.15.002 PC2).
+    #[must_use]
+    pub fn positions(&self) -> &[(String, u32, u32)] {
+        &self.positions
+    }
+
+    /// Return the severities captured at push time, parallel to
+    /// [`DiagnosticSink::errors`].
+    ///
+    /// Each entry corresponds to the diagnostic at the same index in `errors()`.
+    /// Severities are captured eagerly at push time (while the concrete type is
+    /// still available) and are never recomputed — the slice is always the same
+    /// length as `errors()`.
+    ///
+    /// Used by the root `slideforge` crate to thread per-diagnostic severity
+    /// into the root crate's `BuildError::MultistageFailed` variant
+    /// so that the CLI JSON renderer can emit the ACTUAL severity of each eval
+    /// diagnostic rather than hardcoding `"error"` (OBS-P4-003 fix).
+    #[must_use]
+    pub fn severities(&self) -> &[ParseSeverity] {
+        &self.severities
+    }
+
     /// Return the count of diagnostics with [`ParseSeverity::Error`] or
     /// [`ParseSeverity::Fatal`] severity.
     ///

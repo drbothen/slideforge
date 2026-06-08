@@ -1,0 +1,23 @@
+# BC-1.15.002 TV-13.1 fixture: eval Error + validator Error in the same deck.
+#
+# This deck produces:
+#   1. E-EVL-001 (undefined variable `undef_var` in title) — eval non-fatal Error
+#      The deck is still returned from eval (Some), so validators run.
+#   2. E-EVL-001 (undefined variable `another_undef` in second slide title)
+#   3. E-A11-001 (missing alt text on chart block) — validator Error
+#
+# BC-1.15.002 postcondition 1 (PC1): all 3 errors must be reported in one run.
+# BC-1.15.002 invariant 3: accumulation applies to evaluator + validators collectively.
+# Canonical test vector TV-13.1.
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Hello {{ undef_var }}"
+
+slide chart:
+  title "Revenue {{ another_undef }}"
+  chart_type "bar"
+  data "revenue.json"
+  # no alt attribute — E-A11-001 from AltTextValidator
