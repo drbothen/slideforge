@@ -2016,6 +2016,284 @@ mod tests {
         );
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-1 (MED) — empty/whitespace deck-title → "Presentation" fallback
+    // AC-008 check (d); BC-4.03.003 PC-7 / canonical test vector
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Helper: build a deck with an arbitrary title value (possibly empty / whitespace).
+    fn make_deck_with_title(title: Option<&str>) -> Deck {
+        Deck {
+            slides: vec![],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: title.map(Arc::from),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    /// B-1 (d): chart-only deck with `deck.metadata.title = Some("")` → step-4 path:
+    /// synthetic `<h1 class="sf-visually-hidden">` text is exactly "Presentation"
+    /// (empty string falls back to the hardcoded default) and the synthesizing warn
+    /// is emitted.
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_empty_title_falls_back_to_Presentation() {
+        let exporter = HtmlExporter::new();
+        // Empty string title triggers the "" → "Presentation" fallback in step 4.
+        let deck = make_deck_with_title(Some(""));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1: empty-title deck must produce exactly one <h1 class=\"sf-visually-hidden\">; \
+             got {count} h1 elements in: {html}",
+            count = h1_elements.len()
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Presentation",
+            "B-1: empty deck title must fall back to 'Presentation'; got h1 text: {h1_text:?}"
+        );
+
+        // The synthesizing warn must be emitted (step 4 path).
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1: empty-title chart-only deck must emit tracing::warn! about synthesizing"
+        );
+    }
+
+    /// B-1: chart-only deck with `deck.metadata.title = Some("   ")` (whitespace-only)
+    /// → synthetic h1 text is exactly "Presentation" (trimmed whitespace falls back).
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_whitespace_only_title_falls_back_to_Presentation() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("   "));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1: whitespace-only-title deck must produce exactly one \
+             <h1 class=\"sf-visually-hidden\">; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Presentation",
+            "B-1: whitespace-only deck title must fall back to 'Presentation'; \
+             got h1 text: {h1_text:?}"
+        );
+
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1: whitespace-only-title chart-only deck must emit synthesizing warn"
+        );
+    }
+
+    /// B-1 (sanity): chart-only deck with `deck.metadata.title = Some("Q3 Charts")` →
+    /// synthetic h1 text is exactly "Q3 Charts" (non-empty title is used verbatim).
+    ///
+    /// AC-008 check (d) / BC-4.03.003 PC-7 / STORY-046 Pass-5 B-1.
+    #[tracing_test::traced_test]
+    #[test]
+    fn test_B1_P5_non_empty_title_used_verbatim_in_synthetic_h1() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("Q3 Charts"));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-1 sanity: \"Q3 Charts\" deck must produce exactly one \
+             <h1 class=\"sf-visually-hidden\">; got: {html}"
+        );
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert_eq!(
+            h1_text.trim(),
+            "Q3 Charts",
+            "B-1 sanity: non-empty deck title must appear verbatim in synthetic h1; \
+             got h1 text: {h1_text:?}"
+        );
+
+        assert!(
+            logs_contain("synthesizing"),
+            "B-1 sanity: chart-only deck with any title must emit synthesizing warn"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-2 (MED) — empty-deck must have h1 count == 0 (AC-008 check (e);
+    // BC-4.03.003 PC-7 empty-deck exception)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B-2: zero-slide deck must produce NO `<h1>` elements in the exported HTML
+    /// (empty-deck exception: no slides, no headings, no synthetic h1).
+    ///
+    /// Strengthens `test_MED1_zero_slide_deck_no_promotion_warn_no_panic` which
+    /// only checked result.is_ok() and warn absence. This test uses scraper to
+    /// assert h1 count == 0.
+    ///
+    /// AC-008 check (e) / BC-4.03.003 PC-7 empty-deck exception / STORY-046 Pass-5 B-2.
+    #[test]
+    fn test_B2_P5_zero_slide_deck_has_zero_h1_elements() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck("en-US");
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("zero-slide export must not fail");
+        let html = String::from_utf8(bytes).expect("output must be valid UTF-8");
+
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1").expect("valid selector");
+        assert_eq!(
+            doc.select(&sel_h1).count(),
+            0,
+            "B-2: zero-slide deck must have h1 count == 0 in exported HTML; got: {html}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // B-3 (OBS) — synthetic-h1 XSS-escape invariant
+    // The template uses `{{ synthetic_h1 | safe }}` relying on Rust-side
+    // html_escape::encode_text. A future drop of the escape would be a stored-XSS
+    // sink.  This test pins the escape so any regression is caught.
+    // STORY-046 Pass-5 B-3.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// B-3: chart-only deck with `deck.metadata.title = Some("<script>alert(1)</script>")`
+    /// → the exported HTML must contain `&lt;script&gt;` and must NOT contain a literal
+    /// `<script>` inside the synthetic h1.
+    ///
+    /// This pins the Rust-side `html_escape::encode_text` invariant. If a future change
+    /// drops the escape before passing to the `| safe` filter the XSS would be caught here.
+    ///
+    /// STORY-046 Pass-5 B-3 / AC-008 / CWE-79.
+    #[test]
+    fn test_B3_P5_synthetic_h1_xss_escaped() {
+        let exporter = HtmlExporter::new();
+        let deck = make_deck_with_title(Some("<script>alert(1)</script>"));
+        let laid_out = LaidOutDeck {
+            page_size: slideforge_layout::PageSize::default(),
+            slides: vec![make_chart_only_slide()],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        let html = String::from_utf8(bytes).expect("valid UTF-8");
+
+        // The synthetic h1 must contain the escaped form.
+        assert!(
+            html.contains("&lt;script&gt;"),
+            "B-3: synthetic h1 title must be HTML-escaped; \
+             expected '&lt;script&gt;' to appear in output; got snippet: {:?}",
+            &html[..html.len().min(2000)]
+        );
+
+        // Find the h1 element and assert no literal <script> appears inside it.
+        let doc = scraper::Html::parse_document(&html);
+        let sel_h1 = scraper::Selector::parse("h1.sf-visually-hidden").expect("valid selector");
+        let h1_elements: Vec<_> = doc.select(&sel_h1).collect();
+        assert_eq!(
+            h1_elements.len(),
+            1,
+            "B-3: must have exactly one synthetic h1; got: {html}"
+        );
+        // scraper text() returns decoded text — the tag should not appear as a script element
+        // because it is encoded as HTML entities. The best check is on the raw HTML string:
+        // confirm that there is no <script> child inside the h1's raw HTML span.
+        let h1_outer = h1_elements[0].html();
+        assert!(
+            !h1_outer.contains("<script>"),
+            "B-3: h1 outer HTML must NOT contain a literal <script> element; \
+             got h1 outer HTML: {h1_outer}"
+        );
+        // Belt-and-suspenders: the decoded text that scraper sees should be the raw
+        // string (since html_escape turns < to &lt; the browser decodes it as text,
+        // not as a tag — scraper also decodes &lt; back to <, so text() will contain '<').
+        let h1_text = h1_elements[0].text().collect::<String>();
+        assert!(
+            h1_text.contains("<script>"),
+            "B-3: scraper-decoded h1 text must contain literal '<script>' \
+             (the entity-decoded text string, NOT a real tag); got: {h1_text:?}"
+        );
+    }
+
     /// HIGH-1 / SF-VISUALLY-HIDDEN: the page template must include the
     /// `.sf-visually-hidden` CSS rule (position:absolute; width:1px; ...).
     #[test]
