@@ -53,12 +53,27 @@ fn should_shutdown(changed: &Result<(), watch::error::RecvError>, current_value:
 /// The upgrade must complete within 1 second of server start. axum's
 /// `WebSocketUpgrade::on_upgrade` is non-blocking and delegates to the async
 /// runtime, so this constraint is trivially satisfied.
-pub async fn ws_upgrade_handler(
+///
+/// Note: `server.rs`'s `live_handler` now calls `handle_ws_connection_inner`
+/// directly (to manage the `WsConnGuard` RAII lifetime inside the upgraded
+/// future). This wrapper is kept for API compatibility with existing tests.
+pub fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
     rx: broadcast::Receiver<String>,
     shutdown_rx: watch::Receiver<bool>,
 ) -> Response {
     ws.on_upgrade(move |socket| handle_ws_connection(socket, rx, shutdown_rx))
+}
+
+/// Inner WebSocket message loop, exposed `pub(crate)` so `server::live_handler`
+/// can call it directly and place the connection-cap RAII guard inside the
+/// upgraded future's scope.
+pub(crate) async fn handle_ws_connection_inner(
+    socket: WebSocket,
+    rx: broadcast::Receiver<String>,
+    shutdown_rx: watch::Receiver<bool>,
+) {
+    handle_ws_connection(socket, rx, shutdown_rx).await;
 }
 
 /// Drive a single WebSocket connection, forwarding broadcast messages to the client.

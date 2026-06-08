@@ -18,6 +18,14 @@ description = "Live web preview server for slideforge — axum HTTP + WebSocket 
 # 0.8.2 was yanked; minimum safe 0.8.x is 0.8.9. feature "ws" enables WebSocket.
 axum = { workspace = true }
 
+# Cryptographic random bytes for CSP nonce generation (SEC-001).
+# Already a transitive dep (via uuid/rand chain); pinned to the version in Cargo.lock.
+getrandom = { version = "=0.3.4" }
+
+# Base64 encoding for the CSP nonce (SEC-001).
+# Already a transitive dep (via axum's tungstenite base64 upgrade handshake); pinned to lock version.
+base64 = { version = "=0.22.1" }
+
 # Async runtime — curated feature set per ADR-021 (NOT "full").
 tokio = { version = "=1.52.3", features = [
     "rt-multi-thread",

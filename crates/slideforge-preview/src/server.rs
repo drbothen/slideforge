@@ -28,20 +28,58 @@ use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use base64::Engine as _;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
 use crate::error::PreviewError;
 use crate::messages::{DiagnosticMessage, SlideHtml, WebSocketMessage};
-use crate::ws_handler::ws_upgrade_handler;
+
+/// Maximum simultaneous WebSocket connections the preview server will accept.
+///
+/// A localhost dev tool does not need more than 64 simultaneous browser tabs.
+/// Beyond this limit, the upgrade is rejected with 503 Service Unavailable.
+/// This bounds per-server goroutine/task counts and protects against accidental
+/// runaway loops in automated tooling.
+const MAX_WS_CONNECTIONS: usize = 64;
+
+/// Generate a cryptographically random 16-byte nonce and return it as a
+/// URL-safe base64 string (no padding) suitable for use in a CSP header.
+///
+/// Uses `getrandom::fill` which calls the OS CSPRNG (getrandom(2) on Linux,
+/// arc4random on macOS/BSDs, `BCryptGenRandom` on Windows).
+///
+/// # Errors
+///
+/// Returns [`PreviewError::Nonce`] if the OS CSPRNG is unavailable (extremely
+/// rare — only happens in a severely broken OS environment).
+fn generate_csp_nonce() -> Result<String, PreviewError> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| PreviewError::Nonce(e.to_string()))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+/// RAII guard that decrements the WebSocket connection counter when dropped.
+///
+/// Ensures the active-connection count is always decremented, even if the
+/// handler returns early due to a client disconnect, panic unwind, or
+/// cooperative shutdown.
+struct WsConnGuard(Arc<AtomicUsize>);
+
+impl Drop for WsConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 /// Capacity of the broadcast channel for WebSocket messages.
 ///
@@ -52,8 +90,9 @@ const BROADCAST_CAPACITY: usize = 16;
 /// Shared application state for axum route handlers.
 ///
 /// Holds the broadcast sender so that WebSocket handlers can subscribe to it,
-/// the initial HTML to serve at `GET /`, and the shutdown watch receiver so
-/// every WS connection can cooperatively close on server shutdown.
+/// the initial HTML to serve at `GET /`, the shutdown watch receiver so
+/// every WS connection can cooperatively close on server shutdown, the
+/// per-server-start CSP nonce, and the active WebSocket connection counter.
 #[derive(Clone)]
 struct AppState {
     /// Broadcast sender; WebSocket handlers call `.subscribe()` to receive messages.
@@ -62,6 +101,20 @@ struct AppState {
     initial_html: Arc<String>,
     /// Shutdown watch receiver; when value becomes `true` WS handlers close with 1001.
     shutdown_rx: watch::Receiver<bool>,
+    /// Per-server-start CSP nonce (SEC-001).
+    ///
+    /// Generated once at `start_with_shutdown` time via the OS CSPRNG.  The same
+    /// nonce is embedded in the inline `<script nonce="…">` tag and sent as the
+    /// `script-src 'nonce-…'` directive in the `Content-Security-Policy` response
+    /// header. Because the nonce changes on every server restart an injected
+    /// `<script>` from slide HTML will never have a matching nonce.
+    csp_nonce: Arc<str>,
+    /// Active WebSocket connection counter (SEC-004).
+    ///
+    /// Incremented before the WS upgrade handler is spawned; decremented via
+    /// [`WsConnGuard`] RAII on handler exit. When the count reaches
+    /// [`MAX_WS_CONNECTIONS`] the next upgrade request returns 503.
+    conn_count: Arc<AtomicUsize>,
 }
 
 /// Handle returned by [`PreviewServer::start`] for lifecycle management.
@@ -164,6 +217,7 @@ impl PreviewServer {
     ///
     /// - [`PreviewError::PortInUse`] if the port is already bound.
     /// - [`PreviewError::Io`] for other I/O errors.
+    /// - [`PreviewError::Nonce`] if the OS CSPRNG is unavailable.
     pub fn start_with_shutdown(
         &self,
         port: u16,
@@ -188,16 +242,25 @@ impl PreviewServer {
             .set_nonblocking(true)
             .map_err(PreviewError::Io)?;
 
-        // Render the initial HTML page.
-        let initial_html = build_initial_html(initial_deck);
+        // Generate a per-server-start CSP nonce (SEC-001).
+        // Must happen before build_initial_html so the nonce can be embedded in <script>.
+        let csp_nonce: Arc<str> = generate_csp_nonce()?.into();
+
+        // Render the initial HTML page (nonce embedded in the inline <script> tag).
+        let initial_html = build_initial_html(initial_deck, &csp_nonce);
 
         // Shutdown watch: WS handlers select! on this to send Close(1001) on shutdown.
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        // Shared connection counter (SEC-004).
+        let conn_count = Arc::new(AtomicUsize::new(0));
 
         let state = AppState {
             tx: self.tx.clone(),
             initial_html: Arc::new(initial_html),
             shutdown_rx,
+            csp_nonce,
+            conn_count,
         };
 
         let join_handle = tokio::spawn(async move {
@@ -311,10 +374,49 @@ fn build_router(state: AppState) -> Router {
 /// # AC-001 / BC-4.03.004 postcondition 1
 ///
 /// Returns 200 OK with `Content-Type: text/html` containing the deck preview.
+///
+/// # Security headers (SEC-001 / SEC-002 / SEC-003)
+///
+/// - **Content-Security-Policy** with `script-src 'nonce-<N>'` — blocks any
+///   inline script that does not carry the server-generated nonce.  An
+///   injected `<script>` from slide HTML will never have the nonce and thus
+///   cannot execute, regardless of whether `slideforge_html::render_slide_to_html`
+///   ever emits malicious markup (defence-in-depth against SEC-001 XSS).
+/// - **X-Content-Type-Options: nosniff** — prevents MIME-sniffing attacks.
+/// - **X-Frame-Options: DENY** — prevents click-jacking via `<iframe>`.
 async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let csp = format!(
+        "default-src 'none'; \
+         connect-src ws://127.0.0.1:* ws://localhost:*; \
+         script-src 'nonce-{nonce}'; \
+         style-src 'unsafe-inline'; \
+         img-src data:",
+        nonce = state.csp_nonce,
+    );
+    // SAFETY: the nonce is base64url (alphanumeric + '-' + '_') so it is always
+    // a valid HTTP header value. The format! output is ASCII.
+    let csp_value = HeaderValue::from_str(&csp)
+        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
     (
         StatusCode::OK,
-        [("Content-Type", "text/html; charset=utf-8")],
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            ),
+            (
+                axum::http::header::HeaderName::from_static("content-security-policy"),
+                csp_value,
+            ),
+            (
+                axum::http::header::HeaderName::from_static("x-content-type-options"),
+                HeaderValue::from_static("nosniff"),
+            ),
+            (
+                axum::http::header::HeaderName::from_static("x-frame-options"),
+                HeaderValue::from_static("DENY"),
+            ),
+        ],
         Html((*state.initial_html).clone()),
     )
 }
@@ -322,9 +424,35 @@ async fn root_handler(State(state): State<AppState>) -> impl IntoResponse {
 /// `GET /live` — upgrades to a WebSocket connection.
 ///
 /// # AC-002 / BC-4.03.004 postcondition 2
+///
+/// # SEC-004 — connection cap
+///
+/// Enforces [`MAX_WS_CONNECTIONS`] simultaneous WebSocket connections.
+/// If the cap is already reached, returns 503 Service Unavailable immediately
+/// without spawning a handler task.  The count is decremented via [`WsConnGuard`]
+/// RAII so it is always accurate even on early-return or panic-unwind.
 async fn live_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    // Attempt to claim a connection slot (compare-and-swap loop).
+    // fetch_add then check: if we exceed the cap, immediately give the slot back.
+    let prev = state.conn_count.fetch_add(1, Ordering::Relaxed);
+    if prev >= MAX_WS_CONNECTIONS {
+        state.conn_count.fetch_sub(1, Ordering::Relaxed);
+        tracing::warn!(
+            limit = MAX_WS_CONNECTIONS,
+            "WebSocket connection cap reached — rejecting upgrade"
+        );
+        return (StatusCode::SERVICE_UNAVAILABLE, "Connection limit reached").into_response();
+    }
+
+    // RAII guard: decrements conn_count when the async handler future completes
+    // (or is cancelled / panics during unwind — Drop is called in all paths).
+    let guard = WsConnGuard(Arc::clone(&state.conn_count));
     let rx = state.tx.subscribe();
-    ws_upgrade_handler(ws, rx, state.shutdown_rx).await
+    ws.on_upgrade(move |socket| async move {
+        // Move guard into the handler future so it lives as long as the connection.
+        let _guard = guard;
+        crate::ws_handler::handle_ws_connection_inner(socket, rx, state.shutdown_rx).await;
+    })
 }
 
 /// Build a minimal [`slideforge_types::Brand`] for use when rendering preview HTML.
@@ -361,7 +489,14 @@ fn make_preview_brand() -> slideforge_types::Brand {
 ///
 /// Uses `slideforge_html::render::render_slide_to_html()` to render each slide.
 /// This crate does NOT re-implement slide rendering.
-fn build_initial_html(deck: &slideforge_layout::LaidOutDeck) -> String {
+///
+/// # CSP nonce (SEC-001)
+///
+/// The `nonce` parameter is embedded in the `<script nonce="…">` attribute so
+/// that only this server-generated inline script is allowed to execute under
+/// the `Content-Security-Policy: script-src 'nonce-…'` header returned by
+/// [`root_handler`].  The value is a URL-safe base64 string with no padding.
+fn build_initial_html(deck: &slideforge_layout::LaidOutDeck, nonce: &str) -> String {
     use slideforge_html::render::{HeadingLevel, render_slide_to_html};
 
     let brand = make_preview_brand();
@@ -395,7 +530,7 @@ fn build_initial_html(deck: &slideforge_layout::LaidOutDeck) -> String {
 <main id="sf-preview" aria-label="Deck preview">
 {slides_html}
 </main>
-<script>
+<script nonce="{nonce}">
 (function() {{
   var ws = new WebSocket("ws://" + location.host + "/live");
   ws.onmessage = function(evt) {{

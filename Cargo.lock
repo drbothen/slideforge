@@ -3760,7 +3760,9 @@ name = "slideforge-preview"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "futures-util",
+ "getrandom 0.3.4",
  "reqwest",
  "serde",
  "serde_json",

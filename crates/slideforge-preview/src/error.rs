@@ -26,4 +26,11 @@ pub enum PreviewError {
     /// An I/O error occurred while binding the TCP listener.
     #[error("I/O error binding preview server: {0}")]
     Io(#[from] std::io::Error),
+
+    /// The OS CSPRNG was unavailable and a CSP nonce could not be generated.
+    ///
+    /// This is extremely rare and indicates a severely broken OS environment.
+    /// Carries the underlying `getrandom` error string.
+    #[error("Failed to generate CSP nonce (OS CSPRNG unavailable): {0}")]
+    Nonce(String),
 }

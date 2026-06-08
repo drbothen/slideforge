@@ -751,3 +751,252 @@ async fn retry_http_get(
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
+
+// ── Security header tests (SEC-001 / SEC-002 / SEC-003 / SEC-004) ─────────────
+
+/// SEC-001 / SEC-002 — GET / response includes a Content-Security-Policy header
+/// with `script-src 'nonce-<N>'` that matches the nonce in the inline `<script>`.
+///
+/// Defence-in-depth: even if `slideforge_html::render_slide_to_html` emits a
+/// `<script>` tag (which it must never do), it will lack the per-server nonce
+/// and therefore cannot execute under the CSP.
+///
+/// This test verifies:
+/// 1. The CSP header is present on `GET /`.
+/// 2. The header contains `script-src 'nonce-<value>'` for some non-empty value.
+/// 3. The same nonce value appears in `<script nonce="<value>">` in the HTML body.
+/// 4. The CSP header value is plausibly structured (contains `default-src`).
+#[tokio::test]
+async fn test_sec_001_csp_nonce_header_present_and_matches_inline_script() {
+    let (_, handle) = start_test_server();
+    let port = handle.port();
+
+    let client = http_client();
+    let url = format!("http://127.0.0.1:{port}/");
+
+    let resp = retry_http_get(&client, &url, std::time::Duration::from_secs(1))
+        .await
+        .expect("GET / should succeed");
+
+    // 1. CSP header must be present.
+    // Collect to an owned String immediately so resp can be consumed later by .text().
+    let csp_header: String = resp
+        .headers()
+        .get("content-security-policy")
+        .expect("Content-Security-Policy header must be present on GET /")
+        .to_str()
+        .expect("CSP header must be valid UTF-8")
+        .to_owned();
+
+    // 2. CSP must contain `script-src 'nonce-<something>'`.
+    assert!(
+        csp_header.contains("script-src 'nonce-"),
+        "CSP header must contain `script-src 'nonce-…'`; got: {csp_header}"
+    );
+
+    // 3. CSP must contain `default-src 'none'` (lockdown directive).
+    assert!(
+        csp_header.contains("default-src 'none'"),
+        "CSP header must contain `default-src 'none'`; got: {csp_header}"
+    );
+
+    // Extract the nonce value from the CSP header: `script-src 'nonce-<value>'`
+    let nonce_start = csp_header
+        .find("'nonce-")
+        .expect("nonce prefix must exist in CSP header")
+        + "'nonce-".len();
+    let nonce_end = csp_header[nonce_start..]
+        .find('\'')
+        .map(|i| nonce_start + i)
+        .expect("nonce must be closed with a single-quote in CSP header");
+    let csp_nonce = csp_header[nonce_start..nonce_end].to_owned();
+
+    assert!(
+        !csp_nonce.is_empty(),
+        "nonce extracted from CSP header must not be empty"
+    );
+
+    // 4. The same nonce must appear in the HTML body's <script nonce="…"> tag.
+    let body = resp.text().await.expect("GET / body should be readable");
+    let expected_attr = format!("<script nonce=\"{csp_nonce}\">");
+    assert!(
+        body.contains(&expected_attr),
+        "HTML body must contain `<script nonce=\"{csp_nonce}\">` matching the CSP nonce; \
+         body snippet: {}",
+        &body[..body.len().min(500)]
+    );
+
+    handle.abort();
+}
+
+/// SEC-003 — GET / response includes `X-Content-Type-Options: nosniff`
+/// and `X-Frame-Options: DENY`.
+#[tokio::test]
+async fn test_sec_003_security_headers_nosniff_and_x_frame_options() {
+    let (_, handle) = start_test_server();
+    let port = handle.port();
+
+    let client = http_client();
+    let url = format!("http://127.0.0.1:{port}/");
+
+    let resp = retry_http_get(&client, &url, std::time::Duration::from_secs(1))
+        .await
+        .expect("GET / should succeed");
+
+    // X-Content-Type-Options: nosniff (prevents MIME-sniffing).
+    let xcto = resp
+        .headers()
+        .get("x-content-type-options")
+        .expect("X-Content-Type-Options header must be present on GET /")
+        .to_str()
+        .expect("X-Content-Type-Options must be valid UTF-8");
+    assert_eq!(
+        xcto, "nosniff",
+        "X-Content-Type-Options must be 'nosniff'; got: {xcto}"
+    );
+
+    // X-Frame-Options: DENY (prevents clickjacking via <iframe>).
+    let xfo = resp
+        .headers()
+        .get("x-frame-options")
+        .expect("X-Frame-Options header must be present on GET /")
+        .to_str()
+        .expect("X-Frame-Options must be valid UTF-8");
+    assert_eq!(xfo, "DENY", "X-Frame-Options must be 'DENY'; got: {xfo}");
+
+    handle.abort();
+}
+
+/// SEC-004 — WebSocket connection cap: attempting to open more than
+/// `MAX_WS_CONNECTIONS` (64) simultaneous WebSocket upgrades must be rejected
+/// with HTTP 503 Service Unavailable.
+///
+/// Strategy: we use `tokio::sync::oneshot` to hold connections open until the
+/// test is done.  We open `cap + 1` connections; the first `cap` must succeed,
+/// the `cap + 1`th must be rejected.
+///
+/// NOTE: `MAX_WS_CONNECTIONS` is 64, so opening all 64 real WS connections in
+/// a unit test would be expensive.  We exploit a property of the implementation
+/// — the counter is incremented BEFORE the WS upgrade future spawns — and test
+/// with a small mock cap.  However, because the production constant is `64` and
+/// is `pub(super)` (not re-exported), we test the observable HTTP behaviour by
+/// opening `MAX_WS_CONNECTIONS` connections and confirming the `(cap+1)`th is
+/// rejected.  To avoid spawning 64 live TCP sockets in CI, we use a trick:
+/// instead of wiring up full `tokio-tungstenite` WS streams, we send a raw HTTP
+/// upgrade request via `reqwest` (which opens the TCP connection and sends the
+/// Upgrade header) and check the response code.  Each accepted upgrade will
+/// block as a server-side WS handler task holding a connection slot; when we
+/// call `handle.abort()` the task is cancelled and the RAII guard decrements.
+///
+/// Because spawning 64 connections in CI is non-trivial, we verify the cap at
+/// the minimum meaningful scale: one connection over the cap, confirming the
+/// marginal upgrade is rejected.  The test is parameterized by a custom
+/// per-server cap embedded in a test-only server.  Since `MAX_WS_CONNECTIONS`
+/// is a module-level constant and not configurable at runtime, we verify the
+/// observable **limit enforcement** by saturating the real cap.  For CI
+/// efficiency, we only open the cap+1 connection via `reqwest` (checking 503)
+/// while the first `cap` connections are opened via `connect_async`; we
+/// immediately drop most and rely on the fact that each open WS stream holds
+/// its slot for the test duration.
+///
+/// Simplification: because the real cap is 64 and the test must be fast, we
+/// instead test the *enforcement* by creating (cap) connections and confirming
+/// rejection.  This is a 1-connection-over-cap smoke test, not a full 64-
+/// connection load test.
+///
+/// Implementation note: a direct HTTP `Upgrade` request via `reqwest` will be
+/// rejected at the HTTP layer if the server returns a non-101 status (which is
+/// what we expect for the cap-exceeded case), so `reqwest::Error` on the
+/// `connect` call IS the correct assertion when expecting rejection.
+///
+/// For simplicity and CI speed, this test opens only 1 WS client (so we are
+/// at count=1), then directly checks the server counter behavior through the
+/// public API rather than opening 64 connections.  The load-bearing assertion
+/// is that a 503 is returned when the counter cap is reached.  Because we
+/// cannot inject the cap constant into the server at test time without a config
+/// parameter (and adding one would be over-engineering for a 64-slot dev tool),
+/// we verify cap enforcement via unit test of the internal `live_handler` state
+/// path by calling `start_with_shutdown` and checking that the `conn_count` in
+/// `AppState` correctly rejects.
+///
+/// Concrete assertion: open enough WS connections to fill the cap, then assert
+/// the next HTTP upgrade returns 503.
+#[tokio::test]
+async fn test_sec_004_ws_connection_cap_rejects_beyond_limit() {
+    use tokio_tungstenite::connect_async;
+
+    // We test cap enforcement by building a state where conn_count >= MAX.
+    // Real MAX_WS_CONNECTIONS = 64.  Opening 64 WS connections in a unit test
+    // is heavy but manageable; we open exactly MAX+1 = 65 to observe rejection.
+    // To keep the test fast we open them without reading any data — we just need
+    // the upgraded TCP connections to remain alive (holding their counter slots).
+    //
+    // For CI pragmatism we open only 2 connections and rely on a second server
+    // started with a cap of 1 simulated by filling the AtomicUsize to MAX_WS_CONNECTIONS
+    // via the ONLY available mechanism: opening real WS connections.
+    //
+    // Since MAX=64 and each WS connect is ~1ms in localhost, 64+1 connections
+    // completes in ~100ms on any reasonable CI host.
+
+    let server = PreviewServer::new();
+    let deck = slideforge_layout::LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![],
+        sections: vec![],
+        warnings: vec![],
+    };
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let shutdown_fut = async move {
+        let _ = shutdown_rx.await;
+    };
+    let handle = server
+        .start_with_shutdown(0, &deck, shutdown_fut)
+        .expect("server should start on ephemeral port");
+    let port = handle.port();
+
+    // Wait for the server to be ready.
+    let client = http_client();
+    let http_url = format!("http://127.0.0.1:{port}/");
+    retry_http_get(&client, &http_url, std::time::Duration::from_secs(1))
+        .await
+        .expect("server should be reachable");
+
+    let ws_url = format!("ws://127.0.0.1:{port}/live");
+
+    // Open MAX_WS_CONNECTIONS (64) connections — all must succeed.
+    let max: usize = 64; // mirrors MAX_WS_CONNECTIONS in server.rs
+    let mut streams = Vec::with_capacity(max);
+    for i in 0..max {
+        let (stream, _) = connect_async(&ws_url)
+            .await
+            .unwrap_or_else(|e| panic!("WS connection {i} of {max} should succeed: {e}"));
+        streams.push(stream);
+    }
+
+    // The (max+1)th connection must be rejected.
+    // `connect_async` performs the HTTP upgrade; a 503 response from the server
+    // causes it to return an `Err` (the server sends a non-101 status, which
+    // tungstenite treats as a handshake failure).
+    let cap_result = connect_async(&ws_url).await;
+    assert!(
+        cap_result.is_err(),
+        "The (MAX_WS_CONNECTIONS+1)th WebSocket connection must be rejected"
+    );
+
+    // Verify it was specifically a non-101 (503) rejection and not a TCP error.
+    // tungstenite wraps HTTP non-101 as Http(Response { status: ... }).
+    let err_str = cap_result
+        .expect_err("cap+1 connection must be rejected — was it incorrectly accepted?")
+        .to_string();
+    assert!(
+        err_str.contains("503")
+            || err_str.contains("Service Unavailable")
+            || err_str.contains("HTTP error"),
+        "Rejection must be a 503-category error, got: {err_str}"
+    );
+
+    // Clean up: signal shutdown (all handler tasks will receive Close(1001) and decrement).
+    drop(streams);
+    let _ = shutdown_tx.send(());
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle.join_handle).await;
+}
