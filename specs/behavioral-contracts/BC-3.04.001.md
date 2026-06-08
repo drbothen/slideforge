@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.6"
+version: "1.7"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-023
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section", "v1.5.0 — pass-18 spec adjudication (F-P18-HIGH-001): added Invariant 11 (alt-wins over decorative when both supplied); updated Precondition 3 wording from exclusive-OR to explicit precedence; added EC-018 and canonical test vector for alt+decorative conflict; updated slideforge-validate handoff note. WCAG canonical: explicit alt text supersedes implicit-decorative inference.", "v1.5.1 — pass-19 prose fix (F-P19-MED-003): Invariant 11 reworded to remove ambiguous 'slideforge-validate W-A11-001' phrase (W-A11-001 is a deprecated warning code, NOT a validator name). Now reads: the slideforge-validate alt-text validator MUST emit W-A11-002 (replacing deprecated W-A11-001 from BC-5.01.002 §3 prior to v1.2).", "v1.5.2 — F-P20-LOW-003 prose precision: Invariant 11 rewritten to clarify that ShapeSpec.decorative is NOT mutated; the alt-wins effect is achieved via the typed ShapeFrame.alt enum (AltText::Provided) at layout resolution time. EC-018 canonical test vector updated to assert on ShapeFrame.alt typed enum instead of ShapeSpec.decorative field mutation. Canonical test vector row for alt+decorative conflict updated to match. STORY-028 AC-BC-A10 updated.", "v1.6 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001): Invariant 11 domain-scope clarification. Invariant 11 (alt-first) applies ONLY to the shape DSL alt-resolution path (ShapeSpec → ShapeFrame via layout_shapes). It does NOT govern Stage-2b thread_fields_to_blocks::resolve_alt for ChartSpec/ImageSpec/DiagramSpec, which is governed by BC-1.16.001 PC-12 (decorative-first). The two BCs cover non-overlapping implementation domains. W-A11-002 for the shape path is emitted by slideforge-validate; W-A11-002 for Stage-2b is emitted by resolve_alt via tracing::warn!. Domain-scope note added to Invariant 11 body."]
+modified: ["v1.2 — adversary pass 1 adjudication: codified ShapeSpec position schema, hex color contract, shape_type closed vocabulary, off-canvas boundary semantics, gradient deferral, MissingAlt span, multi-error accumulation", "v1.3 — roundRect added to closed vocabulary per Q7 decision example", "v1.3.1 — STORY-TBD-shape-gradient-fills placeholder resolved to STORY-072", "v1.3.2 — VP propagation burst: assigned VP-037 through VP-042 to all VP-TBD entries", "v1.4 — adversary pass 2 adjudications M/N/O/P/Q/R/T: ArithmeticOverflow Result return, LayoutError::Multiple uniformity, LaidOutDeck warnings field, fill+text fields on ShapeSpec, canonical test vectors, uppercase normalization phrasing, shape frame order enforcement", "v1.4.1 — pass-7 drift fix (F-P7-HIGH-004): slide_index → source_slide_index in EC-001 and EC-003 per AC-BC-A9 canonical field name", "v1.4.2 — pass-8 fix (F-P8-MED-001): Deferred Surfaces section rewritten to be consistent with Postcondition 1 — FillSpec::Gradient is NOT in the v1.0 enum (code confirmed absent); removed contradictory claim that variant is defined in IR", "v1.4.3 — pass-9 fix (F-P9-HIGH-002): E-PAR-013 → E-PAR-015 (hex color invalid) and E-PAR-014 → E-PAR-016 (gradient unsupported) to resolve namespace collision with parser template codes; updated precondition 5, EC-008, EC-009, EC-011, canonical test vectors, and Deferred Surfaces section", "v1.5.0 — pass-18 spec adjudication (F-P18-HIGH-001): added Invariant 11 (alt-wins over decorative when both supplied); updated Precondition 3 wording from exclusive-OR to explicit precedence; added EC-018 and canonical test vector for alt+decorative conflict; updated slideforge-validate handoff note. WCAG canonical: explicit alt text supersedes implicit-decorative inference.", "v1.5.1 — pass-19 prose fix (F-P19-MED-003): Invariant 11 reworded to remove ambiguous 'slideforge-validate W-A11-001' phrase (W-A11-001 is a deprecated warning code, NOT a validator name). Now reads: the slideforge-validate alt-text validator MUST emit W-A11-002 (replacing deprecated W-A11-001 from BC-5.01.002 §3 prior to v1.2).", "v1.5.2 — F-P20-LOW-003 prose precision: Invariant 11 rewritten to clarify that ShapeSpec.decorative is NOT mutated; the alt-wins effect is achieved via the typed ShapeFrame.alt enum (AltText::Provided) at layout resolution time. EC-018 canonical test vector updated to assert on ShapeFrame.alt typed enum instead of ShapeSpec.decorative field mutation. Canonical test vector row for alt+decorative conflict updated to match. STORY-028 AC-BC-A10 updated.", "v1.6 — STORY-086 pass-5 adjudication (F-086-P5-CRIT-001): Invariant 11 domain-scope clarification. Invariant 11 (alt-first) applies ONLY to the shape DSL alt-resolution path (ShapeSpec → ShapeFrame via layout_shapes). It does NOT govern Stage-2b thread_fields_to_blocks::resolve_alt for ChartSpec/ImageSpec/DiagramSpec, which is governed by BC-1.16.001 PC-12 (decorative-first). The two BCs cover non-overlapping implementation domains. W-A11-002 for the shape path is emitted by slideforge-validate; W-A11-002 for Stage-2b is emitted by resolve_alt via tracing::warn!. Domain-scope note added to Invariant 11 body.", "v1.7 — STORY-072 adversary Pass-1 MED-002/OBS-072-P1-001: (MED-002) corrected EC-011 example from brand-token placeholder syntax to correct quoted-hex form (`fill gradient \"#FF0000\" to \"#0000FF\"`); rewrote Deferred Surfaces gradient-fill paragraph to use quoted-hex syntax and added lexer-comment-character note explaining `#` is a line-comment when unquoted; (OBS-001) added shape-pipeline-wiring deferral paragraph to Deferred Surfaces noting pre-existing gap (Stage-2b does not emit ContentBlock::Shape for any shape; STORY-072 scope is parser branch + structural FillSpec::Gradient + 5 exporter renderers verified via constructed-ShapeSpec tests; end-to-end DSL path requires FU-SHAPE-PIPELINE-WIRING)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -234,7 +234,7 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 | EC-008 | shape: with fill "#F60" (short-form #RGB) | E-PAR-015: "Invalid hex color '#F60' at `<file>:<line>:<col>`. Expected 6-digit hex (#RRGGBB). Short-form #RGB is not supported." |
 | EC-009 | shape: with fill "#FF6F00FF" (alpha #RRGGBBAA) | E-PAR-015: "Invalid hex color '#FF6F00FF' at `<file>:<line>:<col>`. 8-digit alpha hex not supported. Use fill-opacity: attribute for transparency." |
 | EC-010 | Slide with two shapes where both lack alt | Both `MissingAlt` errors accumulated; function returns `Err(LayoutError::Multiple { inner: vec![MissingAlt{...}, MissingAlt{...}] })`. ALSO: a slide with ONE shape lacking alt returns `Err(LayoutError::Multiple { inner: vec![MissingAlt{...}] })` — uniform wrapper even for single errors (Item N). |
-| EC-011 | shape: with gradient fill (e.g., `fill gradient(brand.primary, brand.accent1)`) | E-PAR-016: "Shape gradient fill is not supported in v1.0. Use a solid hex color or 'none'. Gradient fill is planned for a future release (STORY-072)." |
+| EC-011 | shape: with gradient fill before STORY-072 ships (e.g., `fill gradient "#FF0000" to "#0000FF"` — correct quoted syntax) | E-PAR-016: "Shape gradient fill is not supported in v1.0. Use a solid hex color or 'none'. Gradient fill is planned for a future release (STORY-072)." Note: hex values MUST be quoted strings; `#` is a line-comment character when unquoted. After STORY-072 ships, E-PAR-016 is removed and this syntax is accepted. |
 | EC-012 | shape: in DOCX export | Shape rendered as floating `<w:drawing>` inline image (SVG rasterized at 150 DPI) |
 | EC-013 | `title_content` slide with 1 placeholder region and 1 `shape:` block | `frames[0]` = placeholder frame, `frames[1]` = shape frame; `shape_frame_index (1) >= region_count (1)` — shape is appended AFTER all placeholder frames. |
 | EC-014 | `ShapeUnit::Inches(i64::MAX)` passed to EMU conversion | `layout_shapes` returns `Err(LayoutError::Multiple { inner: [LayoutError::ArithmeticOverflow { source_slide_index, span }] })`. E-LAY-006 is reported with source span. Saturating-silent behavior is FORBIDDEN. |
@@ -263,17 +263,28 @@ coordinates. ALL errors from a slide's shape set are accumulated before returnin
 
 ## Deferred Surfaces
 
-The following surface is explicitly deferred to a future story. It is NOT silently
-missing — it is a planned feature with a spec boundary:
+The following surfaces are explicitly deferred to future stories. They are NOT silently
+missing — they are planned features with spec boundaries:
 
-**Gradient fills** (`fill gradient(from, to)`): The `FillSpec::Gradient { from: Rgb, to: Rgb }`
+**Gradient fills** (`fill gradient "#RRGGBB" to "#RRGGBB"`): The `FillSpec::Gradient { from: Rgb, to: Rgb }`
 variant is NOT in the v1.0 `FillSpec` enum (see Postcondition 1). The enum contains only
 `SolidColor(Rgb)` and `None` in v1.0. Any attempt to use gradient syntax at the DSL level
 produces E-PAR-016 ("Shape gradient fill is not supported in v1.0.").
+Note on syntax: hex values MUST be quoted strings — the lexer treats `#` as a line-comment
+character when unquoted, so `fill gradient #FF0000 to #0000FF` is NOT parseable; the correct
+form is `fill gradient "#FF0000" to "#0000FF"`.
 Target story: **STORY-072** (`STORY-072-shape-gradient-fills.md`).
 When that story ships, it will: (1) add `FillSpec::Gradient { from: Rgb, to: Rgb }` to the
-enum in `slideforge-types`, (2) add gradient parsing to the DSL parser, (3) remove E-PAR-016,
-(4) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
+enum in `slideforge-types`, (2) add gradient parsing to the DSL parser with quoted-hex syntax,
+(3) remove E-PAR-016, (4) implement `FillSpec::Gradient` handling in PPTX/PDF/HTML exporters.
+
+**Shape-pipeline end-to-end wiring** (pre-existing gap, OBS-072-P1-001): Even after STORY-072
+ships the parser branch, structural `FillSpec::Gradient`, and all 5 exporter renderers, the
+full DSL→output path for ANY shape block (not just gradient) is not wired in production:
+Stage-2b (`thread_fields_to_blocks`) does not yet emit `ContentBlock::Shape` (see BC-1.16.001
+inv-4). STORY-072's exporter rendering is verified via directly-constructed `ShapeSpec` unit
+tests. The end-to-end DSL→output pipeline for shapes requires a separate shape-pipeline-wiring
+story (filed as FU-SHAPE-PIPELINE-WIRING; route to wave-gate).
 
 ## Verification Properties
 

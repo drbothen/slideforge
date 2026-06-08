@@ -9,7 +9,7 @@ points: 3
 priority: P2
 tdd_mode: strict
 status: draft
-spec_version: "1.1"
+spec_version: "1.3"
 behavioral_contracts: [BC-3.04.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024, NFR-025]
@@ -77,22 +77,56 @@ The DSL parser accepts the gradient fill syntax:
 shape:
   type rect
   position x 1.0in y 1.0in width 3.0in height 2.0in
-  fill gradient #FF0000 to #0000FF
+  fill gradient "#FF0000" to "#0000FF"
   alt "Gradient background"
 ```
 
-The parser produces `FillSpec::Gradient { from: Rgb { r: 255, g: 0, b: 0 }, to:
-Rgb { r: 0, g: 0, b: 255 } }` in the `ShapeSpec` IR. The E-PAR-016 error is
-removed. Color syntax follows the same hex rules as solid fills: 6-digit only,
-case-insensitive, short/alpha forms rejected with E-PAR-015.
+Note: hex color values MUST be quoted strings (the lexer treats `#` as a line
+comment character when unquoted). Color syntax follows the same hex rules as
+solid fills: 6-digit only, case-insensitive, short/alpha forms rejected with
+E-PAR-015. The parser records the gradient in the AST (`ShapeNode.fill` stores
+the interim string `"gradient \"#FF0000\" to \"#0000FF\""`); the structural
+`FillSpec::Gradient { from: Rgb, to: Rgb }` is constructed at the
+`ShapeNode → ShapeSpec` decode boundary (see AC-002). The E-PAR-016 error is
+removed by this story.
 
-### AC-002: FillSpec::Gradient in ShapeSpec IR
+### AC-002: FillSpec::Gradient in ShapeSpec IR — two-step AST→IR decode
 (traces to BC-3.04.001 postcondition 1 — ShapeSpec.fill populated)
 
-When the parser processes a `fill gradient #RRGGBB to #RRGGBB` declaration, the
-resulting `ShapeSpec.fill` field is `FillSpec::Gradient { from: Rgb, to: Rgb }`.
-Both colors follow the same hex parsing rules as `FillSpec::SolidColor`: uppercase
-or lowercase 6-digit hex, normalized to `Rgb { r, g, b }` in the IR.
+Gradient fill is produced through a two-step process:
+
+1. **Parser step (AST):** When the parser processes a
+   `fill gradient "#RRGGBB" to "#RRGGBB"` declaration (quoted hex required — `#`
+   is a comment character when unquoted), it records the fill in `ShapeNode.fill`
+   as an interim AST string representation (e.g.,
+   `"gradient \"#FF0000\" to \"#0000FF\""`). The parser does NOT directly
+   construct `FillSpec::Gradient`.
+
+2. **Decode step (IR):** At the `ShapeNode → ShapeSpec` decode boundary
+   (implemented in `slideforge-syntax` or whichever crate owns `ShapeNode`
+   lowering to `ShapeSpec`), the interim AST string is parsed and the structural
+   `FillSpec::Gradient { from: Rgb, to: Rgb }` IR variant is constructed. This
+   is the form consumed by `slideforge-layout`, `slideforge-pptx`,
+   `slideforge-pdf`, `slideforge-html`, and `slideforge-docx`.
+
+Both colors follow the same hex parsing rules as `FillSpec::SolidColor`: quoted
+6-digit hex (`"#RRGGBB"`), uppercase or lowercase, normalized to
+`Rgb { r: u8, g: u8, b: u8 }` integers. Short form `"#RGB"` and alpha form
+`"#RRGGBBAA"` are rejected with E-PAR-015 at the decode step.
+
+> **Shape-pipeline-wiring dependency note (OBS-072-P1-001):** STORY-072 delivers
+> (a) the parser branch that records gradient syntax in `ShapeNode.fill`, (b) the
+> `ShapeNode → ShapeSpec` decode that produces `FillSpec::Gradient`, and (c) the
+> gradient rendering logic in all 5 exporters (PPTX/PDF/HTML/DOCX-fallback/layout
+> passthrough). These are verified via unit tests constructed with a direct
+> `ShapeSpec { fill: FillSpec::Gradient { ... }, ... }`. However, the
+> end-to-end DSL path from a `.sf` source file through to rendered output is NOT
+> wired in production: Stage-2b (`thread_fields_to_blocks`) does not yet emit
+> `ContentBlock::Shape` for any shape block (pre-existing gap, broader than
+> gradients — see BC-1.16.001 inv-4). The full DSL→output pipeline requires a
+> separate shape-pipeline-wiring story (route to wave-gate as
+> FU-SHAPE-PIPELINE-WIRING). Do NOT claim a working end-to-end DSL path in tests
+> or implementation claims.
 
 ### AC-003: Layout passthrough — gradient frame in LaidOutDeck
 (traces to BC-3.04.001 postcondition 3 — shape appears in LaidOutDeck)
@@ -128,7 +162,7 @@ does not change the alt-text contract.
 ## Tasks
 
 - [ ] Add `Gradient { from: Rgb, to: Rgb }` variant to `FillSpec` in `slideforge-types/src/shape_types.rs` (variant does NOT exist yet — must be added as the FIRST task; confirm it derives `Debug + Clone + PartialEq + Eq + Hash` for comemo compatibility)
-- [ ] Extend DSL parser (in `slideforge-syntax` or `slideforge-eval` — whichever owns `shape:` parsing) to accept `fill gradient #RRGGBB to #RRGGBB` and produce `FillSpec::Gradient`
+- [ ] Extend DSL parser (in `slideforge-syntax` or `slideforge-eval` — whichever owns `shape:` parsing) to accept `fill gradient "#RRGGBB" to "#RRGGBB"` (quoted hex — `#` is a line-comment when unquoted) and decode to `FillSpec::Gradient`
 - [ ] Remove E-PAR-016 error code from the parser (the "gradient not supported" guard)
 - [ ] Update `layout::run()` shape pass to pass `FillSpec::Gradient` through to `ShapeFrame` (likely already correct — passthrough logic in STORY-028 should be variant-agnostic)
 - [ ] Implement PPTX gradient: use ooxmlsdk `=0.6.1` typed builders for `a:gradFill` / `a:gsLst` / `a:gs` / `a:lin` — typed API, not raw XML
@@ -136,7 +170,7 @@ does not change the alt-text contract.
 - [ ] Implement HTML gradient: emit `background: linear-gradient(to bottom, ...)` CSS
 - [ ] Implement DOCX fallback: solid `from` color + lint warning
 - [ ] Write unit tests:
-  - Parser: `fill gradient #FF0000 to #0000FF` → `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`
+  - Parser: `fill gradient "#FF0000" to "#0000FF"` → AST `ShapeNode.fill = "gradient \"#FF0000\" to \"#0000FF\""` then decoded to `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`
   - Layout passthrough: gradient preserved in `ShapeFrame.fill`
   - Alt-text enforcement still applies to gradient shapes
 - [ ] Write snapshot tests: PPTX XML output for a gradient shape (verify `<a:gradFill>` structure)
@@ -209,13 +243,21 @@ errors in exporter code — fix those exhaustive matches in the same story.
 
 ## Test Strategy
 
-- **Unit tests**: Parser: `fill gradient #FF0000 to #0000FF` → correct `FillSpec::Gradient`;
-  hex case-insensitivity preserved for gradient colors; E-PAR-015 still fires on
-  short/alpha hex in gradient stops; alt-text enforcement applies.
+- **Unit tests**: Parser: `fill gradient "#FF0000" to "#0000FF"` → AST interim string
+  in `ShapeNode.fill`; then decoded at `ShapeNode → ShapeSpec` boundary to correct
+  `FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }`; hex case-insensitivity
+  preserved for gradient colors; E-PAR-015 still fires on short/alpha quoted hex in
+  gradient stops; alt-text enforcement applies. Tests use constructed `ShapeSpec` directly
+  (not end-to-end DSL pipeline — see shape-pipeline-wiring dependency note in AC-002).
 - **Snapshot tests**: PPTX XML for a gradient shape — assert `a:gradFill` structure
   with two `a:gs` stops at pos=0 and pos=100000, emitted via ooxmlsdk `=0.6.1` typed builders.
-- **Integration test**: `.sf` file with `fill gradient #FF0000 to #0000FF` → `.pptx`
-  output; `.html` output with `linear-gradient` CSS; `.pdf` output (no panics).
+- **Constructed-ShapeSpec integration test**: Directly construct
+  `ShapeSpec { fill: FillSpec::Gradient { from: Rgb(255,0,0), to: Rgb(0,0,255) }, ... }`
+  and drive it through `layout::run()` → exporter → `.pptx` output (assert `<a:gradFill>`);
+  `.html` output (assert `linear-gradient` CSS); `.pdf` output (no panics); `.docx` output
+  (assert solid fallback + lint warning). Note: an end-to-end `.sf` source file integration
+  test (DSL → output) requires the shape-pipeline-wiring story (FU-SHAPE-PIPELINE-WIRING)
+  and is out of STORY-072's scope.
 - **Lint test**: DOCX output for a gradient shape produces a lint warning string
   containing "gradient fill downgraded to solid".
 
@@ -227,7 +269,7 @@ errors in exporter code — fix those exhaustive matches in the same story.
 | EC-002 | Gradient with short-form hex (e.g., `#F00 to #00F`) | E-PAR-015 on the short-form stop |
 | EC-003 | Gradient in DOCX output | Solid fallback (`from` color) + lint warning |
 | EC-004 | Gradient shape in multi-shape slide where another shape has missing alt | Both errors accumulated per DI-018 |
-| EC-005 | Same `from` and `to` color (e.g., `#FF0000 to #FF0000`) | Valid — equivalent to solid fill; no error; output is a flat gradient (visually solid) |
+| EC-005 | Same `from` and `to` color (e.g., `"#FF0000" to "#FF0000"`) | Valid — equivalent to solid fill; no error; output is a flat gradient (visually solid) |
 | EC-006 | Gradient shape with `decorative: true` | `AltText::Decorative`; PDF Artifact tag; HTML `alt=""` — gradient fill does not affect decorative semantics |
 
 ## Forbidden Dependencies
@@ -244,3 +286,4 @@ Build MUST fail if those crates appear in `slideforge-layout/Cargo.toml`.
 | 1.0 | 2026-05-28 | story-writer | Initial creation — deferred surface from BC-3.04.001 v1.3 "Deferred Surfaces" section; resolves STORY-TBD-shape-gradient-fills placeholder |
 | 1.1 | 2026-05-29 | product-owner | Pass-9 sweep (F-P9-HIGH-001): removed false "ALREADY exists / placeholder" claims — FillSpec::Gradient is NOT in v1.0 codebase per BC-3.04.001 v1.4.2 and code audit; rewrote Dependency Anchor, Summary, Previous Story Intelligence to describe ADDING the variant as the first task; updated E-PAR-014 references to E-PAR-016 and E-PAR-013 references to E-PAR-015 per F-P9-HIGH-002 namespace collision resolution; corrected file path from specs.rs → shape_types.rs |
 | 1.2 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: removed pdf-writer direct dep (krilla=0.6.0 wraps it; direct dep causes version-skew risk per export-architecture v1.2); updated AC-004 PDF row and PDF task to use krilla paint::LinearGradient + Surface::set_fill + draw_path API; updated AC-004 PPTX row and PPTX task to use ooxmlsdk=0.6.1 typed builders for a:gradFill/a:gsLst/a:gs/a:lin; changed thiserror to {workspace=true} form (=2.0.18 per ADR-022). |
+| 1.3 | 2026-06-08 | product-owner | Adversary Pass-1 MED-001/MED-002/OBS-072-P1-001 fixes: (MED-002) corrected ALL unquoted gradient hex examples to quoted form (`"#FF0000"` not `#FF0000`) — lexer treats `#` as line-comment when unquoted, making unquoted examples unparseable; fixed in AC-001 DSL block, AC-001 prose, Tasks unit-test bullet, Test Strategy unit-test line, Test Strategy integration-test line; (MED-001) rewrote AC-002 to accurately describe two-step AST→IR reality: parser stores interim string in `ShapeNode.fill`, structural `FillSpec::Gradient` is constructed at the `ShapeNode→ShapeSpec` decode boundary; (OBS-001) added shape-pipeline-wiring dependency note in AC-002 clarifying STORY-072 scope (parser branch + structural FillSpec + 5 exporter renderers verified via constructed-ShapeSpec tests) vs. end-to-end DSL path blocked by pre-existing FU-SHAPE-PIPELINE-WIRING gap; updated Test Strategy integration-test to constructed-ShapeSpec form. |
