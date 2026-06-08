@@ -347,6 +347,8 @@ fn make_preview_brand() -> slideforge_types::Brand {
             heading: Arc::from("Calibri"),
             body: Arc::from("Calibri"),
             mono: Arc::from("Courier New"),
+            // 457_200 EMU = 36pt body font (STORY-074 default; preview uses generic brand)
+            font_size_emu: 457_200,
         },
         layouts: vec![],
         span: SourceSpan::default(),
