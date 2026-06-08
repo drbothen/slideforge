@@ -45,7 +45,7 @@
 //!
 //! This file was originally created for STORY-034 AC-008 as a single 200ms
 //! `#[test]`.  STORY-080 restructured it into the three-test form above to
-//! eliminate spurious CI failures under CPU contention (EC-001 / EC-005),
+//! eliminate spurious CI failures under CPU contention (EC-002 / EC-005),
 //! while preserving both correctness coverage (always-on) and precision timing
 //! coverage (on-demand).  AC-008 traced to NFR-003; NFR-003 is now enforced in
 //! CI via `test_cold_budget_catastrophic_regression_gate`.
