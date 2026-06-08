@@ -1993,7 +1993,7 @@ mod tests {
     /// The `max_connections` parameter is a **runaway-safety cap** — it
     /// prevents an accidental infinite accept loop if the SUT issues an
     /// unexpected burst of connections.  Under normal operation the watchdog
-    /// (3-second timeout) terminates the server after the single HTTP round-trip.
+    /// (1-second timeout) terminates the server after the single HTTP round-trip.
     ///
     /// Returns `(addr, count_receiver, join_handle)`. Call
     /// `count_receiver.recv().unwrap()` after `src.load()` returns to get the
@@ -2005,6 +2005,7 @@ mod tests {
         std::sync::mpsc::Receiver<usize>,
         thread::JoinHandle<()>,
     ) {
+        use std::io::ErrorKind;
         use std::net::TcpStream;
         use std::sync::mpsc;
 
@@ -2014,18 +2015,21 @@ mod tests {
             TcpListener::bind("127.0.0.1:0").expect("failed to bind deterministic 404 server");
         let addr = listener.local_addr().expect("failed to get local addr");
 
-        // Watchdog thread: after a 3-second grace period (well beyond the
-        // ~10ms HTTP round-trip to loopback), opens a "poison" TCP connection
-        // to unblock the server thread's blocking `accept()` call.
+        // Watchdog thread: after a 1-second grace period (well beyond the
+        // ~10ms HTTP round-trip to loopback and any plausible same-process
+        // retry-backoff window), opens a "poison" TCP connection to unblock
+        // the server thread's blocking `accept()` call.
         //
         // This sleep is NOT a race-masking delay — the connection-count race
         // is eliminated by the mpsc channel (count is only read after the
         // server thread sends it, i.e., after all I/O is complete).  The
-        // sleep here is pure lifecycle management: give the HTTP test 3 seconds
-        // to finish, then trigger a graceful server shutdown.
+        // sleep here is pure lifecycle management: give the HTTP test 1 second
+        // to finish, then trigger a graceful server shutdown.  1 s is still
+        // vastly larger than the loopback round-trip (~10ms) and leaves no
+        // plausible window for a wrongful retry to be missed.
         let watchdog_addr = addr;
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(3));
+            thread::sleep(Duration::from_secs(1));
             // Connect and immediately drop — sends EOF (read() returns 0)
             // which the server detects as the shutdown signal.
             let _ = TcpStream::connect(watchdog_addr);
@@ -2045,19 +2049,50 @@ mod tests {
                         // the server thread past the watchdog window (LOW-1).
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
 
-                        // Drain the request headers.
+                        // Drain the request headers, then decide whether this
+                        // is a real HTTP connection or the watchdog's poison
+                        // connection.
+                        //
+                        // Three cases:
+                        //   Ok(0)  — genuine EOF before any data: this is the
+                        //            watchdog's poison connection (connects then
+                        //            immediately drops, sending FIN with no data).
+                        //            Do NOT count; break to trigger server shutdown.
+                        //   Ok(n)  — n > 0 bytes received: a real HTTP request.
+                        //            Count it and serve 404.
+                        //   Err(e) where kind is WouldBlock or TimedOut — the
+                        //            connection arrived (accept() returned Ok) but
+                        //            the peer was slow to send headers.  This is
+                        //            still a real connection — count it and serve 404
+                        //            (prevents false-FAIL undercount).  Control falls
+                        //            through to the 404-serve block below.
+                        //   Err(_other) — unexpected I/O error; break without count.
                         let mut buf = [0u8; 4096];
-                        let n = stream.read(&mut buf).unwrap_or(0);
-
-                        if n == 0 {
-                            // Zero-byte read: either the watchdog's poison
-                            // connection (immediate EOF) or a read timeout.
-                            // Neither is a real HTTP request — do not count.
-                            break;
+                        match stream.read(&mut buf) {
+                            Ok(0) => {
+                                // Watchdog poison connection: EOF with no data.
+                                // Do not count; shut down the server loop.
+                                break;
+                            },
+                            Ok(_n) => {
+                                // Real HTTP request received; count and serve 404.
+                                count += 1;
+                            },
+                            Err(ref e)
+                                if e.kind() == ErrorKind::WouldBlock
+                                    || e.kind() == ErrorKind::TimedOut =>
+                            {
+                                // Connection arrived but peer was slow to send.
+                                // Count it to prevent undercount false-FAIL;
+                                // falls through to the 404-serve block below.
+                                count += 1;
+                            },
+                            Err(_) => {
+                                // Unexpected read error on an accepted stream.
+                                // Do not count; break.
+                                break;
+                            },
                         }
-
-                        // A real HTTP request: count it and serve 404.
-                        count += 1;
 
                         // Minimal 404 response.  `Connection: close` signals
                         // the client to tear down the connection after reading

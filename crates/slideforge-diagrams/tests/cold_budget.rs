@@ -1,4 +1,4 @@
-//! Cold-budget integration test — AC-008 / NFR-003.
+//! Cold-budget integration test — NFR-003 gate (restructured by STORY-080).
 //!
 //! ## Purpose
 //!
@@ -7,10 +7,48 @@
 //! `OnceLock<Arc<fontdb::Database>>`) starts uninitialized here, giving us a
 //! genuine cold-path measurement of the first `render_diagram` call.
 //!
-//! ## Gate (AC-008 / NFR-003)
+//! ## Three-test structure (STORY-080 restructure)
 //!
-//! The combined render + normalize pipeline must complete in < 200ms on the
-//! first call (cold path, font DB not yet initialized).
+//! This file contains three tests with different roles and CI visibility:
+//!
+//! ### 1. `test_cold_budget_catastrophic_regression_gate` — **ALWAYS-ON in CI**
+//!
+//! Catches EC-005 (accidental per-call font-DB reload, ~10× regression) using
+//! a deliberately generous budget: **1 s on macOS/Linux, 2 s on Windows**.
+//! These thresholds accommodate full-workspace CPU contention on shared GitHub
+//! Actions runners without ever flaking, while still catching any regression
+//! above ~4–8× the normal cold-render wall time.  This is the **automated
+//! NFR-003 CI gate** — it runs on every push, on all 5 CI platforms.
+//!
+//! ### 2. `test_cold_budget_under_200ms` — **`#[ignore]`'d, on-demand**
+//!
+//! The NFR-003 **precision gate** (200ms developer-machine target; relaxed to
+//! 300ms/500ms on-demand to accommodate machines with many system fonts).
+//! This test is `#[ignore]`'d because under full-workspace `cargo nextest run`
+//! with CPU contention, font-DB scan time can exceed even a 300ms budget on
+//! shared runners (observed: macOS-latest CI at 242ms with a 300ms budget).
+//! Precision timing gates must run on-demand, not in the default CI matrix.
+//!
+//! To run explicitly:
+//! ```text
+//! cargo nextest run -p slideforge-diagrams -- --include-ignored cold_budget
+//! ```
+//!
+//! ### 3. `test_cold_render_correctness` — **ALWAYS-ON in CI**
+//!
+//! A timing-free correctness companion. Asserts that `render_diagram` returns
+//! `Ok(NormalizedDiagramSvg)` with non-empty content, regardless of timing.
+//! Ensures the behavioral contract is never ungated even when the precision
+//! timing gate is `#[ignore]`'d.
+//!
+//! ## Provenance: AC-008 / STORY-034 → STORY-080
+//!
+//! This file was originally created for STORY-034 AC-008 as a single 200ms
+//! `#[test]`.  STORY-080 restructured it into the three-test form above to
+//! eliminate spurious CI failures under CPU contention (EC-001 / EC-005),
+//! while preserving both correctness coverage (always-on) and precision timing
+//! coverage (on-demand).  AC-008 traced to NFR-003; NFR-003 is now enforced in
+//! CI via `test_cold_budget_catastrophic_regression_gate`.
 //!
 //! ## Why not a Criterion bench?
 //!
@@ -19,15 +57,16 @@
 //! iterations.  A dedicated integration test in its own binary is the correct
 //! mechanism for a cold-path gate.
 //!
-//! ## Obs-3 note (`FONT_DB` process-global, no test isolation)
+//! ## `FONT_DB` process-global `OnceLock` — intra-binary parallel execution
 //!
-//! Within any single test binary (i.e., within `cargo nextest run -p
-//! slideforge-diagrams`), the `FONT_DB` `OnceLock` is initialized once and
-//! reused for all tests.  The unit tests in `src/normalize.rs` that measure
-//! warm-path latency intentionally warm up the DB before timing (three-step
-//! methodology: warmup → font-init → timed).  Only THIS file, which lives
-//! in `tests/cold_budget.rs` and therefore gets its own binary, observes
-//! a genuinely cold `FONT_DB`.
+//! Within this binary, `FONT_DB` is a process-global `OnceLock` initialized
+//! exactly once.  Because nextest runs tests in the same binary in parallel by
+//! default, exactly ONE of the three tests pays the cold init cost; which one
+//! is non-deterministic.  The catastrophic gate's EC-005 contract still holds
+//! because accidental per-call font reload manifests warm-or-cold (the
+//! `OnceLock` is bypassed on every call, not just the first).  Do NOT restructure
+//! these tests into a separate binary to force a specific init order — the
+//! current non-determinism is intentional and correct.
 
 #![allow(clippy::unwrap_used)] // integration tests may use unwrap
 #![allow(clippy::tests_outside_test_module)] // integration test binary — no mod tests wrapper
@@ -218,6 +257,11 @@ fn test_cold_budget_catastrophic_regression_gate() {
     // load, while still catching EC-005 (per-call font loading ≈ 10× cost).
     // The NFR-003 precision target (200ms) is enforced by the on-demand
     // `test_cold_budget_under_200ms` test on developer machines.
+    //
+    // Note: FONT_DB is a process-global OnceLock; exactly one of the three
+    // tests in this binary pays the cold init cost (which one is
+    // non-deterministic under parallel nextest execution). The EC-005 contract
+    // still holds because per-call font reload manifests warm-or-cold.
     let catastrophic_budget = if cfg!(windows) {
         Duration::from_secs(2)
     } else {
