@@ -129,13 +129,16 @@ where
                         to_span(name_tspan, file_id)
                     ),
                 ));
-                // Produce a sentinel BlockItem that is filtered out in the deck pass.
-                // Using a real node with a sentinel name is safer than returning None.
-                // The deck_parser discards nodes with empty names.
+                // HIGH-A fix (STORY-082 pass-2): preserve slide children in the sentinel.
+                // The deck_parser filters out the SectionGroupNode (empty name),
+                // but it MUST rescue the slide children as ungrouped deck-level items
+                // so that authored slides inside `section "":` are NOT silently lost in
+                // --warn-only mode (SOUL #4: no silent data loss).
                 return BlockItem::SectionGroup(Spanned::new(
                     SectionGroupNode {
                         name: Spanned::new(Arc::from(""), to_span(name_tspan, file_id)),
-                        slides: vec![],
+                        // Preserve children so deck_parser can rescue them.
+                        slides: slide_children,
                     },
                     group_span,
                 ));

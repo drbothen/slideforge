@@ -621,7 +621,17 @@ where
                             let name = group_node.name.value();
                             if name.is_empty() {
                                 // Empty name was already reported by section_group_parser.
-                                // Drop the sentinel node — do NOT push to deck.items.
+                                // HIGH-A fix (STORY-082 pass-2): rescue slide children as
+                                // ungrouped deck-level items.  The SECTION GROUPING is
+                                // discarded (E-PAR-023 already emitted) but the SLIDES must
+                                // NOT be silently lost (SOUL #4 — no silent data loss).
+                                // In --warn-only mode the build continues and these slides
+                                // must appear in Deck.slides.
+                                for child in group_node.slides.iter().cloned() {
+                                    let expanded = expand_block_item(child, &alias_reg);
+                                    deck.items.push(expanded);
+                                }
+                                // Do NOT push the SectionGroup sentinel itself.
                                 continue;
                             }
                             // STORY-082 AC-011: duplicate name detection (W-PAR-002).

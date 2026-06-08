@@ -885,6 +885,269 @@ section "Background":
     }
 }
 
+// ─── OBS: EC-004 escape coverage for < and > ─────────────────────────────────
+
+/// OBS (STORY-082 pass-2) — `<` and `>` in section names are XML-escaped.
+///
+/// The existing AC-005 test covers `&` → `&amp;`.  This test covers the
+/// remaining special XML characters `<` (→ `&lt;`) and `>` (→ `&gt;`) so that
+/// the EC-004 escape coverage is non-vacuous.
+///
+/// Traces to BC-4.01.003 EC-004.
+#[test]
+fn test_BC_4_01_003_ec004_lt_gt_in_section_name_are_xml_escaped() {
+    let sections = vec![SlideSectionEntry {
+        name: std::sync::Arc::from("A <b> & C > D"),
+        slide_ids: vec![256],
+    }];
+    let result = SectionListBuilder::inject(stub_presentation_xml(), &sections)
+        .expect("inject must succeed");
+    let xml_str = String::from_utf8(result).expect("must be valid UTF-8");
+
+    assert!(
+        xml_str.contains("&lt;b&gt;"),
+        "< and > must be XML-escaped as &lt; and &gt; in p14:section name; got:\n{xml_str}"
+    );
+    assert!(
+        xml_str.contains("&amp;"),
+        "& must be XML-escaped as &amp; in p14:section name; got:\n{xml_str}"
+    );
+
+    // Verify no raw < or > appear inside the p14:section element (outside of tag syntax).
+    // We look specifically in the sectionLst block.
+    let ext_start = xml_str
+        .find("<p:extLst>")
+        .expect("p:extLst must be present");
+    let ext_end = xml_str
+        .find("</p:extLst>")
+        .map(|i| i + "</p:extLst>".len())
+        .expect("</p:extLst> must be present");
+    let ext_xml = &xml_str[ext_start..ext_end];
+
+    // The section name attribute value must not contain unescaped & < >
+    // We parse the attribute value by looking for the name="..." attribute.
+    let name_attr_start = ext_xml.find("name=\"").expect("must have name= attr");
+    let name_attr_val_start = name_attr_start + "name=\"".len();
+    let name_attr_val_end = ext_xml[name_attr_val_start..]
+        .find('"')
+        .expect("closing quote for name attr");
+    let name_val = &ext_xml[name_attr_val_start..name_attr_val_start + name_attr_val_end];
+
+    assert!(
+        !name_val.contains('<'),
+        "name attribute must not contain raw '<'; got: {name_val}"
+    );
+    assert!(
+        !name_val.contains('>'),
+        "name attribute must not contain raw '>'; got: {name_val}"
+    );
+    assert!(
+        !name_val.contains('&')
+            || name_val.contains("&amp;")
+            || name_val.contains("&lt;")
+            || name_val.contains("&gt;"),
+        "name attribute '&' must be escaped; got: {name_val}"
+    );
+}
+
+// ─── CRIT-A regression test: @for before section → correct slide IDs ─────────
+
+/// CRIT-A (STORY-082 pass-2) — `@for` loop BEFORE a `section "Name":` must not
+/// corrupt the section's slide IDs.
+///
+/// When `@for x in [1, 2]:` appears before `section "Background":`, the `@for`
+/// expands to 2 slides (flat indices 0 and 1, IDs 256 and 257).  The Background
+/// section slide is at flat index 2 → ID 258.  The old `extract_slide_sections`
+/// walk could not model `@for` expansion and incorrectly assigned ID 256 to the
+/// Background slide.
+///
+/// This test:
+/// 1. Builds a deck with `@for` (2 iterations) → `section "Background": slide`
+///    → `@for` inside the section (2 more iterations).
+/// 2. Drives the full pipeline: eval → layout → PPTX export.
+/// 3. Re-parses `ppt/presentation.xml` from the produced ZIP.
+/// 4. Asserts that `<p14:sldId id="258"/>` (not 256) appears in the Background
+///    section, and that the `<p:sldIdLst>` and `<p14:sectionLst>` are consistent.
+///
+/// Traces to BC-4.01.003 PC-5 (sectionLst groups slides by correct slide IDs).
+// This is a full-pipeline test; its length reflects the multi-step assertion
+// chain required to prove CRIT-A correctness end-to-end.
+#[allow(clippy::too_many_lines)]
+#[test]
+fn test_BC_4_01_003_crit_a_for_before_section_correct_slide_ids() {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+    use slideforge_eval::{EvalConfig, eval_deck};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_syntax::DiagnosticSink;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+    // Deck layout:
+    //   @for x in [1, 2]: → 2 slides (flat idx 0, 1 → IDs 256, 257)
+    //   section "Background":
+    //     slide title: "Background Slide"   ← flat idx 2 → ID 258
+    //     @for y in [10, 20]: → 2 slides    ← flat idx 3, 4 → IDs 259, 260
+    //   slide title: "Ungrouped"             ← flat idx 5 → ID 261
+    let src = r#"slideforge_version "1"
+lang "en-US"
+@for x in [1, 2]:
+  slide content:
+    title "Loop slide {{ x }}"
+section "Background":
+  slide title:
+    title "Background Slide"
+  @for y in [10, 20]:
+    slide content:
+      title "Inner loop {{ y }}"
+slide title:
+  title "Ungrouped"
+"#;
+
+    let mut sm = SourceMap::default();
+    let file_id = sm.add_file(std::sync::Arc::from("crit_a.sf"), std::sync::Arc::from(src));
+    let parse_result =
+        slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed for valid DSL");
+
+    let mut sink = DiagnosticSink::new();
+    let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+        .expect("eval must succeed");
+    assert!(
+        !sink.has_fatal(),
+        "eval must produce no fatal errors; got: {:?}",
+        sink.errors()
+    );
+
+    // Deck must have 6 slides total: 2 (@for) + 1 (section title) + 2 (@for inside section) + 1 (ungrouped)
+    assert_eq!(
+        deck.slides.len(),
+        6,
+        "CRIT-A: Deck must contain 6 slides; got {}",
+        deck.slides.len()
+    );
+
+    // slide_sections must have exactly 1 entry: "Background"
+    assert_eq!(
+        deck.slide_sections.len(),
+        1,
+        "CRIT-A: Deck must have 1 section entry; got {}",
+        deck.slide_sections.len()
+    );
+    assert_eq!(deck.slide_sections[0].name.as_ref(), "Background");
+    // Background section contains flat indices 2, 3, 4 → IDs 258, 259, 260
+    assert_eq!(
+        deck.slide_sections[0].slide_ids,
+        vec![258, 259, 260],
+        "CRIT-A: Background section must have IDs [258, 259, 260] (not [256, ...]); got {:?}",
+        deck.slide_sections[0].slide_ids
+    );
+
+    let brand = Brand {
+        name: std::sync::Arc::from("test"),
+        palette: BrandPalette {
+            primary: std::sync::Arc::from("#003087"),
+            secondary: std::sync::Arc::from("#0066CC"),
+            accent: std::sync::Arc::from("#FF6B35"),
+            neutral: std::sync::Arc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: std::sync::Arc::from("Calibri"),
+            body: std::sync::Arc::from("Calibri"),
+            mono: std::sync::Arc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: SourceSpan::default(),
+    };
+    let laid_out = layout_run(&deck, &brand).expect("layout::run must succeed");
+
+    // LaidOutDeck slide_sections must match
+    assert_eq!(laid_out.slide_sections.len(), 1);
+    assert_eq!(laid_out.slide_sections[0].slide_ids, vec![258, 259, 260]);
+
+    let exporter = crate::PptxExporter::new();
+    let pptx_bytes = exporter
+        .export(&deck, &laid_out, &brand, &ExportOptions::default())
+        .expect("PPTX export must succeed");
+
+    // Extract and re-parse presentation.xml
+    let cursor = std::io::Cursor::new(pptx_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("must be valid ZIP");
+    let mut prs_xml_bytes = Vec::new();
+    {
+        let mut prs_file = zip
+            .by_name("ppt/presentation.xml")
+            .expect("ppt/presentation.xml must be present");
+        std::io::Read::read_to_end(&mut prs_file, &mut prs_xml_bytes)
+            .expect("must read presentation.xml");
+    }
+    let prs_xml = String::from_utf8(prs_xml_bytes).expect("presentation.xml must be valid UTF-8");
+
+    // Gather all p14:sldId values from the sectionLst
+    let mut section_sld_ids: Vec<u32> = Vec::new();
+    let mut reader = Reader::from_str(&prs_xml);
+    reader.config_mut().trim_text(true);
+    let mut in_section_lst = false;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+                let prefix_bytes = e
+                    .name()
+                    .prefix()
+                    .map(|p| p.as_ref().to_vec())
+                    .unwrap_or_default();
+                let prefix = std::str::from_utf8(&prefix_bytes).unwrap_or("");
+                let local_name_owned = e.name().local_name().as_ref().to_vec();
+                let local = std::str::from_utf8(&local_name_owned).unwrap_or("");
+                match (prefix, local) {
+                    ("p14", "sectionLst") => in_section_lst = true,
+                    ("p14", "sldId") if in_section_lst => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"id" {
+                                let val = std::str::from_utf8(&attr.value).unwrap_or("");
+                                if let Ok(id) = val.parse::<u32>() {
+                                    section_sld_ids.push(id);
+                                }
+                            }
+                        }
+                    },
+                    _ => {},
+                }
+            },
+            Ok(Event::End(ref e)) => {
+                let end_local_owned = e.name().local_name().as_ref().to_vec();
+                if std::str::from_utf8(&end_local_owned).unwrap_or("") == "sectionLst" {
+                    in_section_lst = false;
+                }
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => panic!("XML parse error: {e}"),
+            _ => {},
+        }
+    }
+
+    // The sectionLst must list IDs 258, 259, 260 — NOT 256, 257, 258.
+    // This is the CRIT-A correctness proof: @for expansion is accounted for.
+    assert_eq!(
+        section_sld_ids,
+        vec![258, 259, 260],
+        "CRIT-A: section sldId list in presentation.xml must be [258, 259, 260]; \
+         got {:?}. The @for before the section must advance the flat slide index.",
+        section_sld_ids
+    );
+
+    // Also verify the sectionLst IDs are consistent with the sldIdLst.
+    // The p:sldIdLst must contain all 6 slide IDs 256..=261.
+    assert!(
+        prs_xml.contains(r#"id="258""#),
+        "CRIT-A: presentation.xml sldIdLst must contain id=258"
+    );
+    assert!(
+        !prs_xml.contains(r#"<p14:sldId id="256""#),
+        "CRIT-A: Background section must NOT reference id=256 (that is a @for slide)"
+    );
+}
+
 /// `format_guid` produces correct 8-4-4-4-12 brace-wrapped uppercase GUID.
 #[test]
 fn test_BC_4_01_003_format_guid_produces_correct_format() {

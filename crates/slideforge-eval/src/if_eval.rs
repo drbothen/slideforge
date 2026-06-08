@@ -81,7 +81,7 @@ use crate::config::EvalConfig;
 use crate::env::Env;
 use crate::error::EvalError;
 use crate::expr::eval_expr;
-use crate::for_eval::eval_block_items;
+use crate::for_eval::{eval_block_items, eval_block_items_with_sections};
 
 // ─── eval_if_chain ───────────────────────────────────────────────────────────
 
@@ -160,6 +160,79 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
             // All conditions were false: evaluate @else body if present, else empty.
             if let Some(else_body) = &if_node.else_body {
                 eval_block_items(env, else_body, set_rule_defaults, config, sink)
+            } else {
+                vec![]
+            }
+        },
+    }
+}
+
+/// Evaluate one `@if/@elif/@else` chain with section-membership tracking.
+///
+/// This is the inner implementation called by [`eval_block_items_with_sections`]
+/// when a `@if` block is encountered.  All slides produced by the taken branch
+/// are tagged with `section_tag` in `membership`.
+///
+/// See [`eval_if_chain`] for algorithm details.
+///
+/// ## CRIT-A fix (STORY-082 pass-2)
+///
+/// When a `@if` block appears inside a `section "Name":` body, every slide
+/// the taken branch produces receives the section tag.  This ensures that
+/// `@if`-conditional slides inside a section are correctly grouped — even when
+/// the `@if` condition depends on variables set by a preceding `@for` loop.
+// section_tag is owned because each branch call needs its own owned copy.
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
+    env: &mut Env,
+    if_node: &IfNode,
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
+    config: &EvalConfig,
+    sink: &mut DiagnosticSink,
+    section_tag: Option<Arc<str>>,
+    membership: &mut Vec<Option<Arc<str>>>,
+) -> Vec<Slide> {
+    let if_span = span_to_source_span(if_node.condition.span());
+    match eval_bool_condition(env, if_node.condition.value(), if_span, sink) {
+        None => vec![],
+        Some(true) => eval_block_items_with_sections(
+            env,
+            &if_node.then_body,
+            set_rule_defaults,
+            config,
+            sink,
+            section_tag,
+            membership,
+        ),
+        Some(false) => {
+            for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
+                let elif_span = span_to_source_span(elif_condition_spanned.span());
+                match eval_bool_condition(env, elif_condition_spanned.value(), elif_span, sink) {
+                    None => return vec![],
+                    Some(true) => {
+                        return eval_block_items_with_sections(
+                            env,
+                            elif_body,
+                            set_rule_defaults,
+                            config,
+                            sink,
+                            section_tag,
+                            membership,
+                        );
+                    },
+                    Some(false) => {},
+                }
+            }
+            if let Some(else_body) = &if_node.else_body {
+                eval_block_items_with_sections(
+                    env,
+                    else_body,
+                    set_rule_defaults,
+                    config,
+                    sink,
+                    section_tag,
+                    membership,
+                )
             } else {
                 vec![]
             }
