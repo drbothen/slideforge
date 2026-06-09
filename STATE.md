@@ -29,11 +29,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "7 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75). 15 stories remain. In-flight (4 active worktrees): STORY-072 (adversary 2/3 streak — passes 4,5 strict-CLEAN; pass 6 pending), STORY-082 (adversary 0/3 streak — pass 4 pending), STORY-088 (adversary 0/3 streak — pass 4 pending), STORY-081 (adversary 0/3 streak — pass 2 pending after full re-impl)."
-develop_sha: "95f23df3"
-develop_pr_count: 75
+wave_5_status: "8 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76). 14 stories remain. In-flight (3 active worktrees): STORY-082 (adversary 0/3 — pass 4 pending), STORY-088 (adversary 0/3 — pass 4 pending), STORY-081 (adversary 0/3 — pass 2 pending after full re-impl)."
+develop_sha: "2667987e"
+develop_pr_count: 76
 error_taxonomy_version: "v2.26"
-workspace_tests: "~3690+ pass / 18 skip (develop 95f23df3); cold_budget flake PERMANENTLY FIXED (STORY-080 PR#73)"
+workspace_tests: "~3807+ pass / 21 skip (develop 2667987e)"
 workspace_test_failures: 0
 ---
 
@@ -44,24 +44,17 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `95f23df3` (75 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `2667987e` (76 merged PRs, 0 open PRs).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-047 MERGED PR #75 (95f23df3). 7 of 22 done. 15 stories remain.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-072 MERGED PR #76 (2667987e). 8 of 22 done. 14 stories remain.
 
 ---
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**4 active worktrees. ALL are based on cbebfd57 and MUST rebase onto develop 95f23df3 at PR step.**
-
-### STORY-072 — Shape Gradient Fills (EPIC-07, BC-3.04.001)
-- **Worktree:** `.worktrees/STORY-072` | **Branch:** `feature/STORY-072` | **HEAD:** `ad13830d`
-- **Adversary streak:** **2/3** (passes 4 and 5 were strict-CLEAN)
-- **History:** Passes 1-3 found+fixed: PDF paper-fix, DOCX warn test, PPTX ordering, HTML CSS-background-paints-nothing → SVG `<linearGradient>` fix, AC-002 paper-deliverable, type-doc/AC-prose drift. Story v1.5, BC-3.04.001 v1.8.
-- **NEXT ACTION:** Run adversary **Pass 6** (convergence attempt — no code change since Pass 4). If strict-CLEAN → streak becomes **3/3 CONVERGED** → demo-recorder (per-AC) → rebase onto develop `95f23df3` → pr-manager 9-step → orchestrator dispatches security-reviewer + pr-reviewer → STANDING MERGE AUTH if CI-green + security CLEAN + pr-reviewer APPROVE.
-- **CRITICAL NOTE:** Shape-DSL→exporter pipeline is unwired pre-existing (FU-SHAPE-PIPELINE-WIRING, wave-gate). Gradient verified via constructed-ShapeSpec tests, NOT end-to-end DSL. Do NOT re-flag this — it is a known, scoped deferral.
+**3 active worktrees. ALL based on cbebfd57 and MUST rebase onto develop 2667987e at PR step.**
 
 ### STORY-082 — PPTX Slide-Grouping Sections (EPIC-08, BC-4.01.003)
 - **Worktree:** `.worktrees/STORY-082` | **Branch:** `feature/STORY-082` | **HEAD:** `d161715d`
@@ -86,7 +79,7 @@ workspace_test_failures: 0
 
 ## WAVE 5 DELIVERY SUMMARY
 
-**7 of 22 done (develop 95f23df3, 75 PRs):**
+**8 of 22 done (develop 2667987e, 76 PRs):**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation. FieldSchemaValidator live. error-taxonomy v2.24. ADR-020.
 - **STORY-046 MERGED** PR #70 (fa85d113): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. BC-4.03.003 v1.4. STORY-047 + STORY-081 UNLOCKED.
@@ -95,9 +88,10 @@ workspace_test_failures: 0
 - **STORY-080 MERGED** PR #73 (e08f2f80): deflake cross-platform tests. cold_budget PERMANENTLY FIXED. LOCAL 3/3 (passes 5-6-7).
 - **STORY-074 MERGED** PR #74 (3f7f99ed): brand-aware em sizing. `font_size_emu` (i64). DEFAULT_EM_IN_EMU removed from lib. LOCAL 3/3 (passes 11-13 of 13).
 - **STORY-047 MERGED** PR #75 (95f23df3): preview WS server + CSP nonce security hardening. BC-4.03.004. axum WS. LOCAL 3/3 (passes 4-6). STORY-056 + STORY-048 UNLOCKED.
+- **STORY-072 MERGED** PR #76 (2667987e): shape gradient fills — `FillSpec::Gradient { from, to }` end-to-end (parser→IR→layout→PPTX/PDF/HTML/DOCX). BC-3.04.001 v1.8. LOCAL 3/3 strict-CLEAN (passes 4-5-6). Security CLEAN; pr-reviewer APPROVE; CI 25/25 green. Rebased over STORY-074 em-sizing interaction (font_size_emu sibling sweep).
 - **DEP-PREP MERGED** PR #69 (3e3a978f): [workspace.dependencies] centralized + ADR-022 migrations done.
 
-**15 stories remain. 4 active worktrees (see IN-FLIGHT section above).**
+**14 stories remain. 3 active worktrees (see IN-FLIGHT section above).**
 
 **HELD (next batch after in-flight 4 merge):**
 - STORY-057/058/064 (slideforge-cli same-crate conflict — deliver AFTER this batch, serialized)
@@ -109,10 +103,10 @@ workspace_test_failures: 0
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `95f23df3`, 75 merged PRs). 7 of 22 done. 15 stories remain. 90 stories / 556 pts total.
+Phase 3, **Wave 5 IN PROGRESS** (develop `2667987e`, 76 merged PRs). 8 of 22 done. 14 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 4 — STORY-072/081/082/088 in `.worktrees/` on `feature/STORY-<NNN>`. STORY-074/079/080/047 cleaned up post-merge. Open PRs: 0.
-- Workspace: ~3690+ pass, 18 skip (cold_budget PERMANENTLY FIXED by STORY-080 PR#73).
+- Active worktrees: 3 — STORY-081/082/088 in `.worktrees/` on `feature/STORY-<NNN>`. STORY-072/074/079/080/047 cleaned up post-merge. Open PRs: 0.
+- Workspace: ~3807+ pass, 21 skip (cold_budget PERMANENTLY FIXED by STORY-080 PR#73).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -121,14 +115,14 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `95f23df3`, 75 merged PRs). 7 of 22 don
 
 **RESUME PROCEDURE (zero context):**
 1. Run `vsdd-factory:factory-worktree-health`
-2. Verify `git rev-parse develop` == origin/develop == `95f23df3`
-3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3690+ pass, 18 skip; cold_budget PERMANENTLY FIXED)
+2. Verify `git rev-parse develop` == origin/develop == `2667987e`
+3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3807+ pass, 21 skip; cold_budget PERMANENTLY FIXED)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-072 (Pass 6, may converge this pass), then STORY-082 + STORY-088 (Pass 4 each), then STORY-081 (Pass 2 after full re-impl). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-082 + STORY-088 (Pass 4 each), then STORY-081 (Pass 2 after full re-impl). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
-adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `95f23df3` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
+adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `2667987e` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
 
 **APPLY LESSON-21 to EVERY story exit gate** (prevents post-convergence CI-fix cycles): nextest + `cargo test --workspace --all-features` (shared-process) + `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` + cross-platform filesystem test discipline.
 
@@ -151,28 +145,27 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **7/22 done** (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75). 4 in-flight worktrees. 15 stories remain. | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **8/22 done** (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76). 3 in-flight worktrees. 14 stories remain. | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ---
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 95f23df3 (75 merged PRs). STORY-047 merged PR #75. 4 worktrees active. 15 stories remain.**
+**Wave 5 IN PROGRESS. develop 2667987e (76 merged PRs). STORY-072 merged PR #76. 3 worktrees active. 14 stories remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-08 |
-| **develop SHA** | `95f23df3` (75 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Merged this session** | STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75 |
-| **Active worktrees** | 4 — STORY-072/081/082/088, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`. Cleaned up: STORY-074/079/080/047. |
-| **STORY-072 state** | HEAD `ad13830d`; adversary 2/3 streak (passes 4,5 strict-CLEAN); NEXT: Pass 6 |
+| **develop SHA** | `2667987e` (76 merged PRs; origin/develop confirmed; 0 open PRs) |
+| **Merged this session** | STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76 |
+| **Active worktrees** | 3 — STORY-081/082/088, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`. Cleaned up: STORY-072/074/079/080/047. |
 | **STORY-082 state** | HEAD `d161715d`; adversary 0/3 (3 passes done, last had HIGH-1); NEXT: Pass 4 |
 | **STORY-088 state** | HEAD `3b0c6295`; adversary 0/3 (3 passes done, last MED fixed); NEXT: Pass 4 |
 | **STORY-081 state** | HEAD `c11d6468`; adversary 0/3 (full re-impl after Pass-1 4-CRIT); NEXT: Pass 2 |
-| **Workspace tests** | ~3690+ pass / 18 skip (cold_budget PERMANENTLY FIXED) |
+| **Workspace tests** | ~3807+ pass / 21 skip (cold_budget PERMANENTLY FIXED) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Check each worktree HEAD vs table above. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 95f23df3 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting active: dispatch adversary/review passes ONE AT A TIME. Apply LESSON-21 exit gate to every story. HELD next batch: STORY-056/048 (now unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | Check each worktree HEAD vs table above. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 2667987e → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting active: dispatch adversary/review passes ONE AT A TIME. Apply LESSON-21 exit gate to every story. HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -223,6 +216,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-08 | STORY-072-MERGE | PR #76 squash-merged → develop `2667987e` (76 merged PRs). Shape gradient fills: `FillSpec::Gradient { from, to }` added to slideforge-types; E-PAR-016 path removed; wired parser→IR→layout passthrough→4 exporters (PPTX `<a:gradFill>`, PDF krilla LinearGradient, HTML SVG `<linearGradient>`+`url()`, DOCX solid fallback+warn). LOCAL 3/3 strict-CLEAN (passes 4-5-6). Security CLEAN (2 informational suggestions); pr-reviewer APPROVE (3 non-blocking nits); CI 25/25 green. Rebased onto develop resolving STORY-074 `font_size_emu` interaction (LESSON-19 sibling sweep: gradient_integration.rs import + 3 BrandFonts test literals). KNOWN DEFERRAL intact: ShapeNode→ShapeSpec decode + end-to-end DSL path NOT wired (FU-SHAPE-PIPELINE-WIRING wave-gate). Follow-ups registered: FU-072-SEC002-FILLATTR-INVARIANT (add doc-comment invariant on render.rs fill_attr for pre-escaped values), FU-072-PDF-PUBCRATE (tighten draw_gradient_rect pub→pub(crate)), FU-072-EPAR016-DOC-STALE (E-PAR-016 description stale post-STORY-072 — cleanup when convenient). SEC-001 → links to existing FU-SHAPE-PIPELINE-WIRING (eval decode of gradient string); no duplicate created. |
 | 2026-06-08 | STORY-047-MERGE | PR #75 squash-merged → develop `95f23df3` (75 merged PRs). Web Preview Server + CSP nonce security hardening: axum WS endpoint; CSP nonce per-response; BC-4.03.004. LOCAL 3/3 strict-CLEAN (passes 4-6). Security CLEAN; pr-reviewer APPROVE; CI green (disk-space infra flake on snapshots job cleared on re-run — NOT a code defect; FU-047-DEPS-AWSLC registered). Follow-ups: FU-047-SEC005-PATH (DiagnosticMessage.file path normalization), FU-047-DF1-CLIENT-RECONCILE, FU-047-DF2-SCR007-CHROME, FU-047-ADR008-AXUM, FU-047-DEADFN (dead pub ws_upgrade_handler), FU-047-DEPS-AWSLC. STORY-056 + STORY-048 now UNBLOCKED (←047 merged). |
 | 2026-06-08 | STORY-074-MERGE | PR #74 squash-merged → develop `3f7f99ed` (74 merged PRs). Brand-aware em sizing: `font_size_emu` (i64) on `Brand` drives em→EMU shape resolution; `DEFAULT_EM_IN_EMU` removed from compiled lib (confined to `#[cfg(test)]`); backward-compatible default 457_200. LOCAL 3/3 strict-CLEAN (passes 11-13; 13 total — code converged since pass 3). Security CLEAN (3 LOW deferrals), pr-reviewer APPROVE, CI green. Follow-ups: FU-074-SEC003-PALETTE-FALLBACK, FU-047-ADR008-AXUM. |
 | 2026-06-08 | STORY-080-MERGE | PR #73 squash-merged → develop `e08f2f80` (73 merged PRs). Deflake cross-platform tests. cold_budget PERMANENTLY FIXED. LOCAL 3/3 (passes 5-6-7). Security CLEAN, pr-reviewer APPROVE, CI green. |
