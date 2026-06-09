@@ -20,7 +20,7 @@ depends_on:
   - STORY-078
 blocks: []
 estimated_days: 2
-spec_version: "1.1"
+spec_version: "1.2"
 ---
 
 # STORY-082: PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter
@@ -90,7 +90,7 @@ of BC-4.01.003 (human-authorized scope split 2026-06-04).
    is required because `ooxmlsdk =0.6.1` has no typed `p14` structs and silently drops
    unknown extension children (same pattern as the existing W1/W2 post-processing
    workarounds in this crate). GUIDs are generated deterministically from section names
-   via the `sha2 =0.10.9` algorithm below — NOT `Uuid::new_v4()`. Section names are
+   via the `sha2 =0.11.0` algorithm below — NOT `Uuid::new_v4()`. Section names are
    XML-escaped.
 
 ### BC-1.14.003 Non-Interference Constraint
@@ -312,8 +312,10 @@ present in output IR; (c) both `p14:section/@id` attributes are identical string
 - [ ] **slideforge-pptx**: Promote `quick-xml =0.36.0` from dev-dependency to production
   dependency in `slideforge-pptx/Cargo.toml` (required for raw-XML injection in
   `SectionListBuilder`; previously dev-only)
-- [ ] **slideforge-pptx**: Promote `sha2 =0.10.9` from dev-dependency to production
-  dependency in `slideforge-pptx/Cargo.toml` (deferred from STORY-040 scope split)
+- [ ] **slideforge-pptx**: Add `sha2 = { workspace = true }` as a production dependency
+  in `slideforge-pptx/Cargo.toml` (workspace pin `=0.11.0`, shared with slideforge-math;
+  deferred from STORY-040 scope split — already consumed via `workspace = true`, no
+  version override needed at the crate level)
 - [ ] **slideforge-syntax**: Implement empty-name detection in the `section "Name":`
   parser combinator; emit `ParseError::EmptySectionGroupName` (E-PAR-023) and produce
   no `SectionGroupNode` for the rejected block
@@ -407,14 +409,16 @@ function from STORY-077.
 |---------|---------|---------|
 | `ooxmlsdk` | `=0.6.1` | Base `p:presentation` serialization (already in slideforge-pptx). Does NOT handle p14 ext — raw injection required. |
 | `quick-xml` | `=0.36.0` | Build `p:extLst`/`p14:sectionLst` block and inject into presentation bytes. **Promote from dev-dep to production dep** of `slideforge-pptx` in this story. |
-| `sha2` | `=0.10.9` | Deterministic GUID derivation from section names. **Promote from dev-dep to production dep** of `slideforge-pptx` in this story (deferred from STORY-040 scope split). |
+| `sha2` | `=0.11.0` | Deterministic GUID derivation from section names. **Add as production dep** of `slideforge-pptx` via `sha2 = { workspace = true }` (workspace pin `=0.11.0`, shared with slideforge-math; deferred from STORY-040 scope split). |
 | `zip` | `=4.2.0` | ZIP assembly (already in slideforge-pptx) |
 | `chumsky` | `=0.10.1` | Parser extension (already in slideforge-syntax) |
 | `slideforge-types` | workspace | `SlideSectionEntry`, `LaidOutDeck` |
 
 Notes:
-- `sha2 =0.10.9`: was intentionally deferred from STORY-040 per the scope split; promoted
-  to production dep in this story.
+- `sha2 =0.11.0`: canonical workspace pin (line 73 of root Cargo.toml), shared with
+  slideforge-math (STORY-030). Was intentionally deferred from STORY-040 per the scope
+  split; added as `sha2 = { workspace = true }` production dep in this story — resolves
+  to `=0.11.0` via workspace inheritance. No per-crate version override is used.
 - `quick-xml =0.36.0`: was a dev-dep; promoted to production dep in this story because
   `SectionListBuilder`'s raw-XML injection runs in production code, not only tests.
 - `ooxmlsdk =0.6.1`: retained, but does NOT handle the `p14` extension namespace. The
@@ -431,7 +435,7 @@ Notes:
 | `crates/slideforge-eval/src/section_groups.rs` | Create | Eval-stage mapping: `SectionGroupNode` → `LaidOutDeck.slide_sections` population |
 | `crates/slideforge-pptx/src/sections.rs` | Create | `SectionListBuilder` — builds `p:extLst`/`p14:sectionLst` XML block via `quick-xml`; deterministic GUID derivation via `sha2`; injects block + `xmlns:p14` into presentation bytes |
 | `crates/slideforge-pptx/src/presentation.rs` | Modify | Pass serialized `presentation.xml` bytes through `SectionListBuilder` post-processing step; `xmlns:p14` is injected here when sections exist |
-| `crates/slideforge-pptx/Cargo.toml` | Modify | Promote `quick-xml =0.36.0` and `sha2 =0.10.9` from `[dev-dependencies]` to `[dependencies]` |
+| `crates/slideforge-pptx/Cargo.toml` | Modify | Add `quick-xml = { workspace = true }` and `sha2 = { workspace = true }` to `[dependencies]` (workspace pins `=0.36.0` and `=0.11.0` respectively) |
 | `crates/slideforge-pptx/src/tests/sections_tests.rs` | Create | AC-001 through AC-011 tests |
 
 ## Token Budget Estimate
@@ -488,3 +492,4 @@ Notes:
 |---------|------|--------|--------|
 | 1.0 | 2026-06-04 | story-writer | Initial story decomposition |
 | 1.1 | 2026-06-08 | story-writer | Pass-5 IMP-1: AC-010 E-PAR-023 exit code corrected 2→1 to match BC-4.01.003 v1.4 + error-taxonomy v2.28; EC-010 table exit code corrected 2→1; BC version references updated v1.3→v1.4 |
+| 1.2 | 2026-06-08 | story-writer | Pass-8 F-P8-MED-1: corrected sha2 pin =0.10.9→=0.11.0 (canonical workspace pin line 73 of root Cargo.toml, shared with slideforge-math via STORY-030) in 4 locations: Scope Overview §4 prose, Tasks sha2 task, Library table sha2 row, Library Notes sha2 note, File Structure table Cargo.toml row; framing updated from "promote from dev-dep" to "add as workspace = true production dep" to match actual crate Cargo.toml; full version-pin sweep performed — quick-xml =0.36.0, ooxmlsdk =0.6.1, chumsky =0.10.1, zip =4.2.0 all confirmed MATCH. |
