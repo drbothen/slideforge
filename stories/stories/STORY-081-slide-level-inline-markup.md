@@ -23,6 +23,7 @@ depends_on:
   - STORY-046
 blocks: []
 estimated_days: 6
+spec_version: "1.3"
 # BC status: BC-3.02.002 postcondition 8 covers the observable-consequence clause (bold renders as bold
 # in ALL output formats). Product-owner is amending BC-3.02.002 to PC8 v1.5 wording per DIR-077-002 §9.1
 # (parallel burst). This story MUST NOT be marked ready until that amendment lands and BC version >= 1.5.
@@ -54,8 +55,10 @@ estimated_days: 6
   `usWeightClass`/`fsSelection` bits) — not filenames — for reliable cross-platform
   resolution. Fallback on no match: `tracing::warn!` then use the plain regular face
   (non-silent). `BrandFonts` is NOT modified for this story — `ResolvedFontSet` is
-  internal to `slideforge-pdf`. Super/subscript via per-glyph `KrillaGlyph.y_offset` in
-  `Surface::draw_glyphs` (normalized by units_per_em; no text-rise setter in 0.6.0).
+  internal to `slideforge-pdf`. Super/subscript via two `surface.draw_text()` calls with
+  `font_size * 0.583` (SUPER_SUB_SCALE) and baseline_y shifted by `±(font_size * 0.333)` in
+  point-space (no text-rise setter and no public shaping API in 0.6.0; draw_glyphs requires
+  GlyphId from a shaper that krilla does not expose publicly). (per ADR-023 amendment 2026-06-09)
   (per export-architecture v1.2 + ADR-023)
 - SS-07 (HTML Exporter) — `<strong>` for Bold, `<em>` for Italic, `<code>` for Code,
   `<a href="...">` for Link, `<sup>` for Superscript, `<sub>` for Subscript,
@@ -138,8 +141,9 @@ output format violates the production-grade default). It MUST land before v1.0 s
      using `fontdb =0.23.0` metadata-aware lookup (ADR-023). `draw_frame` receives
      `&ResolvedFontSet` and dispatches: `Bold` → `font_set.bold.or(font_set.regular)`;
      `Italic` → `font_set.italic.or(font_set.regular)`; `Code` → `font_set.mono.or(font_set.regular)`;
-     URL annotations for Link; per-glyph `KrillaGlyph.y_offset` (normalized by units_per_em)
-     for Super/Subscript via `Surface::draw_glyphs`. (per export-architecture v1.2 + ADR-023)
+     URL annotations for Link; `surface.draw_text()` at shifted baseline
+     (`±font_size * 0.333`) with reduced font size (`font_size * 0.583`) for
+     Super/Subscript. (per export-architecture v1.2 + ADR-023 amendment 2026-06-09)
    - HTML: `<strong>`, `<em>`, `<code>`, `<a href>`, `<sup>`, `<sub>`, `<del>`, `<mark>`.
 
 ### PPTX Single-Run Title Constraint (Binding)
@@ -233,15 +237,29 @@ mechanism (per ADR-023):
 - **Code (monospace)**: resolved via `ResolvedFontSet.mono` — fontdb lookup on
   `brand.fonts.mono` family at `Weight::NORMAL`. Falls back to `ResolvedFontSet.regular`
   with `tracing::warn!` if not found.
-- **Superscript / Subscript**: rendered via `Surface::draw_glyphs` with per-glyph
-  `y_offset` on each `KrillaGlyph` (normalized by `units_per_em`). There is NO
-  text-rise setter in krilla 0.6.0 — offset is applied per-glyph.
+- **Superscript / Subscript**: rendered via `surface.draw_text()` with two adjusted
+  parameters: (1) `font_size * SUPER_SUB_SCALE` (0.583 — standard typographic super/subscript
+  size ratio per Unicode TR #25); (2) baseline_y shifted by `-(font_size * 0.333)` for
+  Superscript (raise) or `+(font_size * 0.333)` for Subscript (drop). The shift is computed
+  against the PARENT span's font size. No text-rise setter exists in krilla 0.6.0; `draw_glyphs`
+  is public but requires a GlyphId from a shaping step that krilla does not expose publicly
+  (`naive_shape` is `pub(crate)`). (per ADR-023 amendment 2026-06-09)
 
 Unit test (deterministic, CI-safe): construct a `ResolvedFontSet` from two distinct bundled
 fixture OTF byte buffers (`test-regular.otf`, `test-bold.otf` in
 `crates/slideforge-pdf/tests/fixtures/`). Call `export_uncompressed(...)`. Assert that
 both fixture PostScript font names appear in the uncompressed PDF bytes — confirming that
 two distinct font resources were embedded (C2-NEW distinctness assertion).
+
+**PASS condition for Superscript/Subscript (size + position, BC-3.02.002 PC8):**
+A unit test constructs a slide with a superscript span (parent `font_size = 12.0`) and
+asserts the draw_text call uses `font_size = 12.0 * 0.583 ≈ 6.996` (SMALLER than the
+parent — NOT the same size) and `baseline_y = parent_baseline - (12.0 * 0.333) ≈
+parent_baseline - 3.996` (RAISED above parent baseline). A matching test for subscript
+asserts `font_size ≈ 6.996` (smaller) and `baseline_y = parent_baseline + 3.996` (LOWERED).
+This directly validates BC-3.02.002 PC8: "super appears raised and smaller, sub appears
+lowered and smaller." Shipping super/sub at full parent font size would fail this PASS condition.
+
 A PDF snapshot fixture test asserts structural equivalence. (per export-architecture v1.2 + ADR-023)
 
 ### AC-005: HTML exporter renders all 8 inline markup forms as semantic HTML elements
@@ -362,8 +380,12 @@ split is acceptable: sub-burst A (eval + layout), sub-burst B (PPTX + DOCX), sub
   - `InlineNode::Bold(_)` → `font_set.bold.as_ref().or(font_set.regular.as_ref())`
   - `InlineNode::Italic(_)` → `font_set.italic.as_ref().or(font_set.regular.as_ref())`
   - `InlineNode::Code(s)` → `font_set.mono.as_ref().or(font_set.regular.as_ref())`, render `s` directly
-  - `InlineNode::Superscript/Subscript(_)` → `font_set.regular`, render via
-    `Surface::draw_glyphs` with `KrillaGlyph { y_offset: ±(units_per_em / 3), .. }` (NO text-rise setter in 0.6.0)
+  - `InlineNode::Superscript(_)` → `font_set.regular`, call `surface.draw_text()` at
+    `baseline_y - (font_size * 0.333)` with `font_size * 0.583`;
+    `InlineNode::Subscript(_)` → `font_set.regular`, call `surface.draw_text()` at
+    `baseline_y + (font_size * 0.333)` with `font_size * 0.583`. Define module-level
+    constants `SUPER_SUB_SCALE: f32 = 0.583` and `SUPER_RISE_FRACTION: f32 = 0.333` /
+    `SUB_DROP_FRACTION: f32 = 0.333`. (per ADR-023 amendment 2026-06-09)
   - `InlineNode::Link` → URL annotation via krilla link annotation API
   - All other variants → `font_set.regular`
 - [ ] Replace `extract_inline_text` call-sites in `draw_frame` with a span-aware render
@@ -418,8 +440,9 @@ text-rise setter. Bold requires a separate `krilla::text::Font` instance for the
 italic requires a separate instance for the italic face. These instances are obtained from a
 `ResolvedFontSet` populated by `resolve_font_set()` via `fontdb =0.23.0` metadata-aware
 lookup (ADR-023) — NOT from `fonts.bold_data` / `fonts.italic_data` / `fonts.mono_data`
-fields, which DO NOT EXIST on `BrandFonts`. Superscript / subscript are rendered via
-`Surface::draw_glyphs` with per-glyph `KrillaGlyph.y_offset` (normalized by `units_per_em`).
+fields, which DO NOT EXIST on `BrandFonts`. Superscript / subscript are rendered via `surface.draw_text()` at a shifted baseline
+(`±font_size * 0.333`) with reduced font size (`font_size * 0.583`). `draw_glyphs` is public
+in 0.6.0 but requires glyph IDs from `naive_shape` which is `pub(crate)` — not usable downstream.
 If fontdb cannot find a styled face, it falls back to the regular face with `tracing::warn!`
 (non-silent degradation).
 
@@ -455,7 +478,7 @@ If fontdb cannot find a styled face, it falls back to the regular face with `tra
 | `slideforge-eval` (workspace) | workspace | `chunks_to_inline_nodes` (reused from STORY-077) |
 | `slideforge-layout` (workspace) | workspace | `FrameContent::TextRun` type update |
 | `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:rPr` (b/i/strike/fill) and DOCX typed builders for `w:rPr` (w:b/w:i/w:rStyle/w:vertAlign/w:strike/w:highlight) — typed API, not raw XML |
-| `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font` instances from `ResolvedFontSet`; `Surface::draw_glyphs` + `KrillaGlyph.y_offset` for super/subscript |
+| `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font` instances from `ResolvedFontSet`; `surface.draw_text()` with `font_size * 0.583` + `baseline_y ± (font_size * 0.333)` for super/subscript (draw_glyphs is public but requires GlyphId from a non-public shaping API) |
 | `fontdb` | `=0.23.0` (direct dep in `crates/slideforge-pdf/Cargo.toml`; already in Cargo.lock as transitive dep of `usvg =0.47.0` — no new supply-chain surface) | PDF: `fontdb::Database::load_system_fonts()` + metadata-aware (OS/2 table) style query used by `resolve_font_set()` to populate `ResolvedFontSet` (ADR-023) |
 
 `fontdb =0.23.0` is the only new direct dependency introduced by this story. It is already
@@ -585,3 +608,4 @@ snapshot/visual regression gating).
 | 1.0 | 2026-06-02 | story-writer | Initial creation per DIR-077-002 §4 and human authorization (2026-06-02). Follow-up to STORY-077. Covers eval + layout + all-exporter inline markup rendering for slide-level fields. Assigned Wave 5, P0, 13 points. Blocks v1.0 release. |
 | 1.1 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: fixed krilla mislabel — krilla=0.6.0 is pinned in slideforge-pdf/Cargo.toml (NOT workspace; per export-architecture v1.2); updated AC-004, Subsystem Anchor SS-06, Summary PDF description, and Phase-5 tasks to reflect correct krilla 0.6.0 API: bold/italic via separate Font::new(data,index) faces (no set_bold/set_italic toggle), super/subscript via KrillaGlyph.y_offset in Surface::draw_glyphs (no text-rise setter); updated AC-003 and Phase-4 DOCX tasks to use ooxmlsdk=0.6.1 typed builders for w:rPr; updated EC-008 PPTX highlight to typed-builder approach; removed axum Library table row (slideforge-html uses minijinja/usvg, not axum; axum belongs to STORY-047 only); cited export-architecture v1.2 throughout. |
 | 1.2 | 2026-06-09 | story-writer | Mechanism correction per ADR-023 (approved 2026-06-09): replaced non-existent BrandFonts field references (fonts.bold_data, fonts.italic_data, fonts.mono_data) with the ADR-023 ResolvedFontSet / fontdb =0.23.0 metadata-aware resolution approach throughout — Subsystem Anchor SS-06, Summary PDF bullet, AC-004 mechanism text, Phase-5 Tasks, Previous Story Intelligence (STORY-043 lesson), Architecture Compliance Rule 1, Library table (added fontdb row), References (added ADR-023). Observable AC-004 contract UNCHANGED: bold renders in a distinct bold face, code in monospace, super/sub offset in output PDF. No BC change. |
+| 1.3 | 2026-06-09 | story-writer | ADR-023 amendment (2026-06-09 architect ruling): super/subscript mechanism changed from `Surface::draw_glyphs` + `KrillaGlyph.y_offset` (unimplementable — `naive_shape` is `pub(crate)` in krilla 0.6.0) to `surface.draw_text()` with `font_size * 0.583` (SUPER_SUB_SCALE) and `baseline_y ± (font_size * 0.333)` baseline shift. Updated: Subsystem Anchor SS-06, Summary PDF dispatch bullet, AC-004 mechanism bullet + added explicit PASS condition asserting reduced size (not just offset), Phase-5 Tasks draw_frame dispatch list (split into separate Superscript/Subscript bullets with module-level constants), Library table krilla row, Previous Story Intelligence STORY-043 lesson. Observable contract BC-3.02.002 PC8 UNCHANGED: super appears raised+smaller, sub lowered+smaller, bold/italic/mono use distinct faces. No BC change. |

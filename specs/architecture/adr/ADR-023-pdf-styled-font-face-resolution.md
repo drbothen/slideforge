@@ -101,18 +101,49 @@ For `mono`: resolve `brand.fonts.mono` with `fontdb::Weight::NORMAL`,
 `draw_frame` and its text-drawing sub-functions receive `&ResolvedFontSet` instead of
 `Option<&krilla::text::Font>`. When iterating `InlineNode` variants:
 
-| InlineNode variant | Font used |
-|-------------------|-----------|
-| `Plain` | `regular` |
-| `Bold(_)` | `bold.or(regular)` |
-| `Italic(_)` | `italic.or(regular)` |
-| `Code(s)` | `mono.or(regular)` |
-| `Superscript(_)` | `regular` with per-glyph `y_offset = +(units_per_em / 3)` via `draw_glyphs` |
-| `Subscript(_)` | `regular` with per-glyph `y_offset = -(units_per_em / 3)` via `draw_glyphs` |
-| All others | `regular` |
+| InlineNode variant | Font used | Rendering mechanism |
+|-------------------|-----------|---------------------|
+| `Plain` | `regular` | `surface.draw_text()` at baseline_y |
+| `Bold(_)` | `bold.or(regular)` | `surface.draw_text()` at baseline_y |
+| `Italic(_)` | `italic.or(regular)` | `surface.draw_text()` at baseline_y |
+| `Code(s)` | `mono.or(regular)` | `surface.draw_text()` at baseline_y |
+| `Superscript(_)` | `regular` at reduced font size | `surface.draw_text()` at `baseline_y - (font_size * SUPER_RISE_FRACTION)` with `font_size * SUPER_SUB_SCALE` |
+| `Subscript(_)` | `regular` at reduced font size | `surface.draw_text()` at `baseline_y + (font_size * SUB_DROP_FRACTION)` with `font_size * SUPER_SUB_SCALE` |
+| All others | `regular` | `surface.draw_text()` at baseline_y |
 
-Superscript/Subscript use `Surface::draw_glyphs` with `KrillaGlyph { y_offset, .. }`
-per AC-004 (there is no text-rise setter in krilla 0.6.0).
+**Amendment 2026-06-09 — Super/Subscript mechanism correction (Pass-4 ruling):**
+The original dispatch table specified `Surface::draw_glyphs` with `KrillaGlyph { y_offset:
+±(units_per_em / 3) }` for Superscript/Subscript. This was incorrect as written:
+- `KrillaGlyph.y_offset` and `units_per_em` ARE present in the public krilla 0.6.0 API
+  (`krilla::text::KrillaGlyph` is re-exported via `krilla::text::*`; `Font::units_per_em()`
+  is `pub`). The `draw_glyphs` path is technically implementable.
+- However, `draw_glyphs` requires: (1) a shaping step to obtain glyph IDs from text
+  (krilla exposes no public shaping API — shaping is internal to `draw_text`), and
+  (2) constructing `KrillaGlyph` with a `GlyphId` that must be obtained from HarfBuzz
+  or skrifa — neither of which is a direct dep of `slideforge-pdf`. The `naive_shape`
+  function in krilla is `pub(crate)` and unavailable to downstream consumers.
+- The `KrillaGlyph.y_offset` field is documented as normalized (already divided by
+  `units_per_em`), so the ADR's prescription of `y_offset = +(units_per_em / 3)` was
+  dimensionally wrong regardless: the correct normalized value is `1.0/3.0` (a fraction
+  of em), not `units_per_em / 3` (which would equal ~682 for a 2048-upem TrueType font).
+
+**Blessed mechanism (post-amendment):** Superscript and Subscript are rendered via two
+independent `surface.draw_text()` calls with adjusted parameters — matching how the
+implemented code approaches inline spans:
+- **Font size:** `font_size * SUPER_SUB_SCALE` where `SUPER_SUB_SCALE = 0.583` (the
+  standard typographic superscript/subscript size ratio per Unicode Technical Report #25;
+  used by major browsers and LibreOffice).
+- **Baseline shift (Superscript):** `baseline_y - (font_size * SUPER_RISE_FRACTION)` where
+  `SUPER_RISE_FRACTION = 0.333` (1/3 em expressed in point-space at the parent font size).
+- **Baseline shift (Subscript):** `baseline_y + (font_size * SUB_DROP_FRACTION)` where
+  `SUB_DROP_FRACTION = 0.333` (symmetric drop below baseline).
+- The offset is computed in point-space at the PARENT span's font size — NOT the reduced
+  size — so the shift is proportional to the reading context, not the glyph size.
+- No `units_per_em` division is required. No HarfBuzz/skrifa shaping step is required.
+  The mechanism is a pure `surface.draw_text()` call with two adjusted scalar parameters.
+
+The observable contract is unchanged: Superscript text appears raised and smaller;
+Subscript text appears lowered and smaller. The mechanism change is internal.
 
 ### `extract_inline_text` retirement
 
@@ -191,3 +222,4 @@ via the ADR-014 decision for `mermaid-rs-renderer` (which pulls the same `fontdb
 |------|--------|------|
 | 2026-06-09 | architect | Initial ADR draft produced in response to Pass-3 adversary finding C2-NEW. |
 | 2026-06-09 | human | Approved. Status promoted DRAFT → Accepted. STORY-081 Phase 5 implementation proceeds. |
+| 2026-06-09 | architect | **Amendment — Pass-4 mechanism ruling.** Superscript/Subscript dispatch table entry corrected. `draw_glyphs` + `KrillaGlyph.y_offset` is public in krilla 0.6.0 but unusable without a glyph-ID shaping step (`naive_shape` is `pub(crate)`; no public shaping API exists). The `y_offset = +(units_per_em / 3)` prescription was dimensionally wrong (krilla normalizes `y_offset` by upem at construction; `upem/3` ≈ 682 for a 2048-upem font would be nonsensical). Blessed mechanism amended to: two `surface.draw_text()` calls with `font_size * 0.583` and a `±(font_size * 0.333)` baseline shift in point-space. Observable contract (raised+smaller super, lowered+smaller sub) unchanged. Size-reduction is now an explicit requirement (was absent from original dispatch table). See Pass-4 ruling for full analysis. Story-spec AC-004 and tasks must be corrected to match; see Pass-4 ruling for exact text. |
