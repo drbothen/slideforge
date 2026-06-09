@@ -20,7 +20,7 @@ depends_on:
   - STORY-078
 blocks: []
 estimated_days: 2
-spec_version: "1.2"
+spec_version: "1.3"
 ---
 
 # STORY-082: PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter
@@ -33,7 +33,9 @@ spec_version: "1.2"
   `section "Name":` group and populate `LaidOutDeck.slide_sections`. SS-02 owns eval-stage
   IR population.
 - **SS-05 (slideforge-layout)**: A new `slide_sections` field is added to `LaidOutDeck` in
-  `slideforge-layout`. SS-05 owns the IR struct definition.
+  `slideforge-layout`. `SlideSectionEntry` is DEFINED in `slideforge-types/src/deck.rs`
+  (SS-01 types crate) and RE-EXPORTED from `slideforge-layout/src/lib.rs`. SS-05 owns
+  the `LaidOutDeck` field addition and the re-export.
 - **SS-06 (slideforge-pptx)**: The `SectionListBuilder` receives the serialized
   `presentation.xml` bytes from `PresentationSerializer`, constructs the
   `p:extLst`/`p14:sectionLst` block via raw-XML injection (quick-xml), and injects it
@@ -71,8 +73,12 @@ of BC-4.01.003 (human-authorized scope split 2026-06-04).
    disambiguate: bare-ident after `section` → document-structure block (existing, STORY-078);
    quoted-string after `section` → slide-grouping block (new, this story).
 
-2. **New IR field** (`crates/slideforge-layout`): `slide_sections: Vec<SlideSectionEntry>`
-   on `LaidOutDeck`. `SlideSectionEntry` holds `name: Arc<str>` + `slide_ids: Vec<u32>`.
+2. **New IR field** (`crates/slideforge-types/src/deck.rs` + `crates/slideforge-layout`):
+   `slide_sections: Vec<SlideSectionEntry>` on `LaidOutDeck`. `SlideSectionEntry` is
+   DEFINED in `crates/slideforge-types/src/deck.rs` (shared IR type in the canonical
+   types crate) and RE-EXPORTED from `crates/slideforge-layout/src/lib.rs` so that
+   `slideforge_layout::SlideSectionEntry` continues to resolve. `SlideSectionEntry` holds
+   `name: Arc<str>` + `slide_ids: Vec<u32>`.
    This field MUST NOT reuse `LaidOutDeck.sections` (which carries DOCX/PDF
    `GeneratedSection` entries — a different concept at a different abstraction level).
 
@@ -302,8 +308,11 @@ present in output IR; (c) both `p14:section/@id` attributes are identical string
   - Parser disambiguates: quoted-string after `section` → `SectionGroupNode`; bare-ident → existing `SectionBlock` (STORY-078)
   - `SectionGroupNode` carries `name: Arc<str>` + `Vec<SlideNode>` children
   - Update error recovery: unknown content under `section "Name":` yields a structured error
-- [ ] **slideforge-layout**: Add `SlideSectionEntry` struct and `slide_sections: Vec<SlideSectionEntry>` field to `LaidOutDeck`
+- [ ] **slideforge-types**: Define `SlideSectionEntry` struct in `crates/slideforge-types/src/deck.rs`
   - `SlideSectionEntry { name: Arc<str>, slide_ids: Vec<u32> }` (must derive `Hash + Eq + Clone`)
+  - This is the canonical definition location (shared IR type; avoids an eval→layout dependency inversion since eval imports from `slideforge_types`)
+- [ ] **slideforge-layout**: Re-export `SlideSectionEntry` from `crates/slideforge-layout/src/lib.rs` and add `slide_sections: Vec<SlideSectionEntry>` field to `LaidOutDeck`
+  - Re-export keeps `slideforge_layout::SlideSectionEntry` resolving for existing consumers
   - Do NOT repurpose or reuse `LaidOutDeck.sections` — that field is for DOCX `GeneratedSection` entries
 - [ ] **slideforge-eval**: Add eval-stage mapping from `SectionGroupNode` to `LaidOutDeck.slide_sections`
   - Walk deck's parsed nodes; for each `SectionGroupNode`, collect its slide children and their assigned slide IDs
@@ -400,8 +409,9 @@ function from STORY-077.
 - `slideforge-pptx` must not gain deps on `slideforge-docx`, `slideforge-html`, or
   `slideforge-pdf` (these are sibling crates; exporter cross-deps are forbidden).
 - `SectionListBuilder` must not be imported from any crate other than `slideforge-pptx`.
-- `slideforge-layout`'s new `SlideSectionEntry` type is permitted in `slideforge-eval`
-  (eval populates it) and `slideforge-pptx` (exporter reads it).
+- `SlideSectionEntry` (defined in `slideforge-types`, re-exported from `slideforge-layout`)
+  is permitted as a dependency in `slideforge-eval` (eval populates it) and
+  `slideforge-pptx` (exporter reads it).
 
 ## Library & Framework Requirements
 
@@ -431,7 +441,8 @@ Notes:
 |------|--------|---------|
 | `crates/slideforge-syntax/src/parser/section_group.rs` | Create | `SectionGroupNode` AST node + `section "Name":` parser combinator |
 | `crates/slideforge-syntax/src/parser/section_block.rs` | Modify | Disambiguation: quoted-string → SectionGroupNode; bare-ident → existing SectionBlock |
-| `crates/slideforge-layout/src/lib.rs` | Modify | Add `SlideSectionEntry` struct; add `slide_sections: Vec<SlideSectionEntry>` to `LaidOutDeck` |
+| `crates/slideforge-types/src/deck.rs` | Modify | DEFINE `SlideSectionEntry` struct here (canonical types crate; shared IR type) |
+| `crates/slideforge-layout/src/lib.rs` | Modify | Re-export `SlideSectionEntry` from `slideforge_types`; add `slide_sections: Vec<SlideSectionEntry>` field to `LaidOutDeck` |
 | `crates/slideforge-eval/src/section_groups.rs` | Create | Eval-stage mapping: `SectionGroupNode` → `LaidOutDeck.slide_sections` population |
 | `crates/slideforge-pptx/src/sections.rs` | Create | `SectionListBuilder` — builds `p:extLst`/`p14:sectionLst` XML block via `quick-xml`; deterministic GUID derivation via `sha2`; injects block + `xmlns:p14` into presentation bytes |
 | `crates/slideforge-pptx/src/presentation.rs` | Modify | Pass serialized `presentation.xml` bytes through `SectionListBuilder` post-processing step; `xmlns:p14` is injected here when sections exist |
@@ -460,8 +471,9 @@ Notes:
   (disambiguation from bare-ident form; regression for all STORY-078 section-block tests),
   AC-010 (empty name `""` → E-PAR-023, no SectionGroupNode produced, correct span),
   AC-011 (duplicate name → W-PAR-002 warning, both sections in AST, same GUID).
-- **Unit tests (slideforge-layout)**: `SlideSectionEntry` hash/eq/clone derivation; field
-  presence on `LaidOutDeck`.
+- **Unit tests (slideforge-types)**: `SlideSectionEntry` hash/eq/clone derivation (defined here).
+- **Unit tests (slideforge-layout)**: `slide_sections` field presence on `LaidOutDeck`;
+  re-export of `SlideSectionEntry` resolves correctly.
 - **Unit tests (slideforge-eval)**: Eval correctly maps slides to section groups; ungrouped
   slides are absent from `slide_sections`.
 - **Unit tests (slideforge-pptx)**: AC-003 (`p14:sectionLst` present under `p:extLst` with
@@ -493,3 +505,4 @@ Notes:
 | 1.0 | 2026-06-04 | story-writer | Initial story decomposition |
 | 1.1 | 2026-06-08 | story-writer | Pass-5 IMP-1: AC-010 E-PAR-023 exit code corrected 2→1 to match BC-4.01.003 v1.4 + error-taxonomy v2.28; EC-010 table exit code corrected 2→1; BC version references updated v1.3→v1.4 |
 | 1.2 | 2026-06-08 | story-writer | Pass-8 F-P8-MED-1: corrected sha2 pin =0.10.9→=0.11.0 (canonical workspace pin line 73 of root Cargo.toml, shared with slideforge-math via STORY-030) in 4 locations: Scope Overview §4 prose, Tasks sha2 task, Library table sha2 row, Library Notes sha2 note, File Structure table Cargo.toml row; framing updated from "promote from dev-dep" to "add as workspace = true production dep" to match actual crate Cargo.toml; full version-pin sweep performed — quick-xml =0.36.0, ooxmlsdk =0.6.1, chumsky =0.10.1, zip =4.2.0 all confirmed MATCH. |
+| 1.3 | 2026-06-09 | story-writer | Pass-15 OBS-P15-1: corrected SlideSectionEntry file-location anchor — defined in crates/slideforge-types/src/deck.rs, re-exported via crates/slideforge-layout/src/lib.rs (was incorrectly shown as defined in slideforge-layout in Scope Overview §2, Subsystem Anchor §SS-05, Tasks bullet, and File Structure table). File Structure table split into two rows (define-in-types + re-export-from-layout). spec_version bumped 1.2→1.3. |

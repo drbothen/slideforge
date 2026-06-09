@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-06-08
+last_updated: 2026-06-09
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -29,7 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "8 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76). 14 stories remain. In-flight (3 active worktrees): STORY-082 (adversary 0/3 — pass 9 next against spec v1.2/BC-4.01.003 v1.4/v2.28; HEAD 67530b17), STORY-088 (adversary 0/3 — pass 4 pending), STORY-081 (adversary 0/3 — pass 2 pending after full re-impl)."
+wave_5_status: "8 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76). 14 stories remain. In-flight (3 active worktrees): STORY-082 (adversary 0/3 — pass 16 next against spec v1.3/BC-4.01.003 v1.4/v2.28; HEAD e40a410f), STORY-088 (adversary 0/3 — pass 4 pending), STORY-081 (adversary 0/3 — pass 2 pending after full re-impl)."
 develop_sha: "2667987e"
 develop_pr_count: 76
 error_taxonomy_version: "v2.28"
@@ -57,10 +57,11 @@ workspace_test_failures: 0
 **3 active worktrees. ALL based on cbebfd57 and MUST rebase onto develop 2667987e at PR step.**
 
 ### STORY-082 — PPTX Slide-Grouping Sections (EPIC-08, BC-4.01.003)
-- **Worktree:** `.worktrees/STORY-082` | **Branch:** `feature/STORY-082` | **HEAD:** `67530b17` (Pass-4 fix-burst applied)
-- **Adversary streak:** **0/3** (reset by Pass-8 F-P8-MED-1 spec drift — see Decisions Log STORY-082-F-P8-MED1)
-- **History:** Pass-1 found feature NON-FUNCTIONAL end-to-end (dead wiring + silent slide-drop) → full re-implementation (genuine parse→eval→layout→export wiring + keystone e2e). Pass-2 found CRIT-A (section slide-IDs diverged from Deck.slides under @for/@if) → fixed via single-pass section membership. Pass-3 found HIGH-1 (dead "rescue" paper-fix contradicting error-taxonomy "E-PAR always fatal") → removed; message templates + AC-008 full-pipeline test + CRIT-A disjoint+complete assertions strengthened. Pass-4 fix-burst applied (HEAD 67530b17). Pass-5 IMP-1 (HIGH) was a spec defect — E-PAR-023 exit 2→1 corrected in BC-4.01.003 v1.4 + error-taxonomy v2.28 + STORY-082 spec_version 1.1; worktree code UNCHANGED. Passes 6/7 (presumed clean per context). Pass-8 found F-P8-MED-1 (MEDIUM, spec-text drift) — sha2 pin =0.10.9→=0.11.0 in 4 spec locations; spec_version 1.1→1.2; code UNCHANGED (67530b17).
-- **NEXT ACTION:** Run adversary **Pass 9** against corrected spec (STORY-082 spec_version 1.2, BC-4.01.003 v1.4 + error-taxonomy v2.28) → need 3 consecutive strict-CLEAN for convergence.
+- **Worktree:** `.worktrees/STORY-082` | **Branch:** `feature/STORY-082` | **HEAD:** `e40a410f` (Pass-15 F-P15-MED-1 test-assertion-pin fix applied)
+- **Adversary streak:** **0/3** (streak reset by Pass-15 finding; Pass 16 next)
+- **Spec version:** `1.3` (OBS-P15-1 spec-location anchor corrected: `SlideSectionEntry` defined in `slideforge-types/src/deck.rs`, re-exported from `slideforge-layout/src/lib.rs`; corrected across 6 spec locations; spec_version 1.2→1.3; code unchanged)
+- **History (compact):** Passes 1-4: dead wiring → full re-impl → CRIT-A section membership → HIGH-1 paper-fix removed; code HEAD `67530b17`. Pass-5: E-PAR-023 exit-code spec defect (HIGH) → BC/error-taxonomy corrected; code unchanged. Passes 6-7: clean. Pass-8: sha2 pin drift (MED) → 4 spec locations corrected; spec_version 1.1→1.2. Passes 9-10: clean. Pass-11: code confirmed substantively converged. Pass-12: SEC-100 section-name validation (HIGH) fixed. Pass-13: adjacent-dup merge semantics (HIGH) fixed. Pass-14: vacuous AC-010 tests tightened (MED). Pass-15: F-P15-MED-1 assertion-pin fix applied (HEAD e40a410f); OBS-P15-1 spec-location anchor corrected (spec-only, code unchanged).
+- **NEXT ACTION:** Run adversary **Pass 16** against spec_version 1.3 + HEAD `e40a410f` → need 3 consecutive strict-CLEAN for convergence.
 
 ### STORY-088 — Bullets List-Literal DSL (EPIC-02, BC-1.01.002)
 - **Worktree:** `.worktrees/STORY-088` | **Branch:** `feature/STORY-088` | **HEAD:** `3b0c6295`
@@ -156,11 +157,11 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-06-08 |
+| **Date** | 2026-06-09 |
 | **develop SHA** | `2667987e` (76 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76 |
 | **Active worktrees** | 3 — STORY-081/082/088, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`. Cleaned up: STORY-072/074/079/080/047. |
-| **STORY-082 state** | HEAD `67530b17` (Pass-4 fix-burst applied; code UNCHANGED through passes 5-8); adversary 0/3 (Pass-8 F-P8-MED-1 spec drift fixed — sha2 =0.10.9→=0.11.0 in 4 spec locations; spec_version 1.1→1.2; BC-4.01.003 v1.4 + error-taxonomy v2.28 current); NEXT: Pass 9 against spec v1.2 |
+| **STORY-082 state** | HEAD `e40a410f` (Pass-15 F-P15-MED-1 assertion-pin fix); adversary 0/3; spec_version 1.3 (OBS-P15-1: SlideSectionEntry anchor corrected — defined in slideforge-types/src/deck.rs, re-exported via slideforge-layout; 6 spec locations fixed; code unchanged); substantive code converged (passes 9-15 churn: test-rigor + spec-accuracy polish only); NEXT: Pass 16 against spec v1.3 |
 | **STORY-088 state** | HEAD `3b0c6295`; adversary 0/3 (3 passes done, last MED fixed); NEXT: Pass 4 |
 | **STORY-081 state** | HEAD `c11d6468`; adversary 0/3 (full re-impl after Pass-1 4-CRIT); NEXT: Pass 2 |
 | **Workspace tests** | ~3807+ pass / 21 skip (cold_budget PERMANENTLY FIXED) |
@@ -216,6 +217,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-082-OBS-P15-1 | Adversary Pass-15 OBS-P15-1 (LOW, spec-location anchor): STORY-082 spec showed `SlideSectionEntry` defined in `slideforge-layout`; actually defined in `slideforge-types/src/deck.rs`, re-exported via `slideforge-layout/src/lib.rs`. Corrected across 6 spec locations (Subsystem Anchor, Scope Overview §2, Tasks, File Structure table, Forbidden Dependencies, Test Strategy); story spec_version 1.2→1.3. Worktree code unchanged (separately, test fix F-P15-MED-1 landed at HEAD e40a410f). |
 | 2026-06-08 | STORY-082-F-P8-MED1 | Adversary Pass-8 F-P8-MED-1 (MEDIUM, spec-text defect — code correct): STORY-082 spec cited stale `sha2 =0.10.9` in 4 places vs canonical workspace pin `=0.11.0` (shared w/ slideforge-math). Fixed all 4 + reframed to `workspace = true`; full version-pin sweep (quick-xml/ooxmlsdk/chumsky/zip all match). story spec_version 1.1→1.2. Worktree code unchanged (67530b17). Streak reset 0/3 by Pass 8; Pass 9 next against HEAD 67530b17. |
 | 2026-06-08 | STORY-082-IMP1-SPECFIX | Adversary Pass-5 IMP-1 (HIGH, spec defect — code was correct): E-PAR-023 (empty section name) is a parse error → exit 1 per BC-1.15.003 three-tier model, but story AC-010/EC-010, BC-4.01.003 PC7/EC-010, and error-taxonomy E-PAR-023 row wrongly said exit 2. Corrected all 3 artifacts: BC-4.01.003 v1.3→v1.4, error-taxonomy v2.27→v2.28 (+OBS-1 message-prefix), STORY-082 spec_version 1.1. Worktree code UNCHANGED (HEAD 67530b17). STORY-082 streak reset to 0/3; next adversary Pass 6 against corrected spec. |
 | 2026-06-08 | STORY-072-MERGE | PR #76 squash-merged → develop `2667987e` (76 merged PRs). Shape gradient fills: `FillSpec::Gradient { from, to }` added to slideforge-types; E-PAR-016 path removed; wired parser→IR→layout passthrough→4 exporters (PPTX `<a:gradFill>`, PDF krilla LinearGradient, HTML SVG `<linearGradient>`+`url()`, DOCX solid fallback+warn). LOCAL 3/3 strict-CLEAN (passes 4-5-6). Security CLEAN (2 informational suggestions); pr-reviewer APPROVE (3 non-blocking nits); CI 25/25 green. Rebased onto develop resolving STORY-074 `font_size_emu` interaction (LESSON-19 sibling sweep: gradient_integration.rs import + 3 BrandFonts test literals). KNOWN DEFERRAL intact: ShapeNode→ShapeSpec decode + end-to-end DSL path NOT wired (FU-SHAPE-PIPELINE-WIRING wave-gate). Follow-ups registered: FU-072-SEC002-FILLATTR-INVARIANT (add doc-comment invariant on render.rs fill_attr for pre-escaped values), FU-072-PDF-PUBCRATE (tighten draw_gradient_rect pub→pub(crate)), FU-072-EPAR016-DOC-STALE (E-PAR-016 description stale post-STORY-072 — cleanup when convenient). SEC-001 → links to existing FU-SHAPE-PIPELINE-WIRING (eval decode of gradient string); no duplicate created. |
