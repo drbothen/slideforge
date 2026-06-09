@@ -1431,3 +1431,216 @@ fn test_sec100_cwe116_section_name_control_chars_stripped_from_p14_section_attr(
         "quick_xml::Reader must emit at least one event for a non-empty XML block"
     );
 }
+
+// ─── Pass-11 OBS-1: single DSL→XML adjacent-duplicate full-pipeline test ─────
+
+/// Pass-11 OBS-1 — Two ADJACENT `section "Background":` blocks (each ≥1 slide)
+/// driven via DSL through the full pipeline: parse → eval_deck → layout_run →
+/// PptxExporter::export → unzip `ppt/presentation.xml` → quick-xml re-parse.
+///
+/// Asserts:
+/// 1. Exactly TWO `<p14:section>` elements with `name="Background"`.
+/// 2. Their `id` GUID attributes are IDENTICAL (BC-4.01.003 PC-8 / EC-011 /
+///    AC-011: duplicate section names share the same GUID so the navigation
+///    pane displays them under one collapsible header).
+///
+/// The existing adjacent-duplicate coverage uses TWO tests:
+/// - `test_f_p10_high1_adjacent_same_name_sections_produce_two_entries`
+///   (eval-IR level: `deck.slide_sections.len() == 2` from DSL)
+/// - `test_BC_4_01_003_ac011_duplicate_section_name_same_guid`
+///   (hand-built `SectionListBuilder::inject` with two identical-name entries)
+///
+/// This test is the single missing keystone that drives the SAME scenario from
+/// the DSL all the way to the PPTX XML, closing the gap between those two tests.
+///
+/// Traces to BC-4.01.003 AC-011 / EC-011 / PC-8 / OBS-1 (Pass-11).
+// Full-pipeline test; length reflects 6-step assertion chain needed to prove
+// DSL → eval → layout → pptx → XML → GUID-equality end-to-end.
+#[allow(clippy::too_many_lines)]
+#[test]
+fn test_BC_4_01_003_pass11_obs1_adjacent_duplicate_dsl_to_xml_same_guid() {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+    use slideforge_eval::{EvalConfig, eval_deck};
+    use slideforge_layout::run as layout_run;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+    use slideforge_syntax::DiagnosticSink;
+    use slideforge_syntax::span::SourceMap;
+    use slideforge_types::{Brand, BrandFonts, BrandPalette, SourceSpan};
+
+    // Two ADJACENT `section "Background":` blocks, each with one slide.
+    // This is the adjacent-duplicate case from BC-4.01.003 EC-011.
+    let src = r#"slideforge_version "1"
+lang "en-US"
+section "Background":
+  slide title:
+    title "First Background Slide"
+section "Background":
+  slide content:
+    title "Second Background Slide"
+"#;
+
+    // Step 1: Parse
+    let mut sm = SourceMap::default();
+    let file_id = sm.add_file(
+        std::sync::Arc::from("adj_dup.sf"),
+        std::sync::Arc::from(src),
+    );
+    let parse_result = slideforge_syntax::parse(src, file_id, &sm)
+        .expect("parse must succeed — adjacent duplicate sections produce W-PAR-002, not fatal");
+
+    // Step 2: Eval — must produce 2 slides, 2 section entries
+    let mut sink = DiagnosticSink::new();
+    let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+        .expect("eval must succeed");
+    assert!(
+        !sink.has_fatal(),
+        "eval must produce no fatal errors; got: {:?}",
+        sink.errors()
+    );
+    assert_eq!(
+        deck.slides.len(),
+        2,
+        "Pass-11 OBS-1: deck must contain 2 slides (one per section block); got {}",
+        deck.slides.len()
+    );
+    assert_eq!(
+        deck.slide_sections.len(),
+        2,
+        "Pass-11 OBS-1: deck.slide_sections must have 2 entries (adjacent duplicates); got {}",
+        deck.slide_sections.len()
+    );
+    assert_eq!(deck.slide_sections[0].name.as_ref(), "Background");
+    assert_eq!(deck.slide_sections[1].name.as_ref(), "Background");
+    assert_eq!(deck.slide_sections[0].slide_ids, vec![256]);
+    assert_eq!(deck.slide_sections[1].slide_ids, vec![257]);
+
+    // Step 3: Layout
+    let brand = Brand {
+        name: std::sync::Arc::from("test"),
+        palette: BrandPalette {
+            primary: std::sync::Arc::from("#003087"),
+            secondary: std::sync::Arc::from("#0066CC"),
+            accent: std::sync::Arc::from("#FF6B35"),
+            neutral: std::sync::Arc::from("#F5F5F5"),
+        },
+        fonts: BrandFonts {
+            heading: std::sync::Arc::from("Calibri"),
+            body: std::sync::Arc::from("Calibri"),
+            mono: std::sync::Arc::from("Courier New"),
+        },
+        layouts: vec![],
+        span: SourceSpan::default(),
+    };
+    let laid_out = layout_run(&deck, &brand).expect("layout::run must succeed");
+    assert_eq!(
+        laid_out.slide_sections.len(),
+        2,
+        "Pass-11 OBS-1: LaidOutDeck.slide_sections must pass through 2 entries; got {}",
+        laid_out.slide_sections.len()
+    );
+
+    // Step 4: PPTX Export
+    let exporter = crate::PptxExporter::new();
+    let pptx_bytes = exporter
+        .export(&deck, &laid_out, &brand, &ExportOptions::default())
+        .expect("PPTX export must succeed");
+
+    // Step 5: Extract ppt/presentation.xml from the ZIP
+    let cursor = std::io::Cursor::new(pptx_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("must be valid ZIP");
+    let mut prs_xml_bytes = Vec::new();
+    {
+        let mut prs_file = zip
+            .by_name("ppt/presentation.xml")
+            .expect("ppt/presentation.xml must be present in PPTX archive");
+        std::io::Read::read_to_end(&mut prs_file, &mut prs_xml_bytes)
+            .expect("must read presentation.xml");
+    }
+    let prs_xml = String::from_utf8(prs_xml_bytes).expect("presentation.xml must be valid UTF-8");
+
+    // Step 6: Re-parse with quick-xml — collect all p14:section name + id attributes.
+    let mut section_records: Vec<(String, String)> = Vec::new(); // (name, id)
+    let mut reader = Reader::from_str(&prs_xml);
+    reader.config_mut().trim_text(true);
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+                let prefix_bytes = e
+                    .name()
+                    .prefix()
+                    .map(|p| p.as_ref().to_vec())
+                    .unwrap_or_default();
+                let prefix = std::str::from_utf8(&prefix_bytes).unwrap_or("");
+                let local_bytes = e.name().local_name().as_ref().to_vec();
+                let local = std::str::from_utf8(&local_bytes).unwrap_or("");
+
+                if prefix == "p14" && local == "section" {
+                    let mut name_val = String::new();
+                    let mut id_val = String::new();
+                    for attr in e.attributes().flatten() {
+                        match attr.key.as_ref() {
+                            b"name" => {
+                                name_val = String::from_utf8_lossy(&attr.value).into_owned();
+                            },
+                            b"id" => {
+                                id_val = String::from_utf8_lossy(&attr.value).into_owned();
+                            },
+                            _ => {},
+                        }
+                    }
+                    section_records.push((name_val, id_val));
+                }
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => panic!("XML parse error in Pass-11 OBS-1 test: {e}"),
+            _ => {},
+        }
+    }
+
+    // Assertion 1 (load-bearing): exactly 2 p14:section elements with name "Background".
+    assert_eq!(
+        section_records.len(),
+        2,
+        "Pass-11 OBS-1: must find exactly 2 <p14:section> elements in presentation.xml; \
+         got {}; records: {:?}",
+        section_records.len(),
+        section_records
+    );
+
+    let (name0, id0) = &section_records[0];
+    let (name1, id1) = &section_records[1];
+
+    assert_eq!(
+        name0.as_str(),
+        "Background",
+        "Pass-11 OBS-1: first p14:section/@name must be 'Background'; got: {:?}",
+        name0
+    );
+    assert_eq!(
+        name1.as_str(),
+        "Background",
+        "Pass-11 OBS-1: second p14:section/@name must be 'Background'; got: {:?}",
+        name1
+    );
+
+    // Assertion 2 (load-bearing / AC-011 / EC-011): GUIDs are IDENTICAL.
+    // Duplicate section names must produce the same GUID so PowerPoint
+    // navigation renders them under one collapsible section header
+    // (BC-4.01.003 PC-8 / inv-5).
+    assert_eq!(
+        id0, id1,
+        "Pass-11 OBS-1 / AC-011 / EC-011: adjacent duplicate 'Background' sections must \
+         have IDENTICAL @id GUIDs in presentation.xml; \
+         id[0]={:?}, id[1]={:?}",
+        id0, id1
+    );
+
+    // Bonus: GUID must be non-empty and brace-wrapped (sanity check).
+    assert!(
+        id0.starts_with('{') && id0.ends_with('}'),
+        "Pass-11 OBS-1: GUID must be brace-wrapped; got: {:?}",
+        id0
+    );
+}

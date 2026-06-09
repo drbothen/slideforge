@@ -530,6 +530,216 @@ section "Background":
         assert_eq!(deck.slide_sections[1].slide_ids, vec![258]);
     }
 
+    // ─── OBS-13-1: @if-section interaction coverage ───────────────────────────
+
+    /// OBS-13-1 (a) — `section "Conditional":` whose body is `@if <true>: <slide>`
+    /// → the conditionally-emitted slide is tagged into the "Conditional" section.
+    ///
+    /// Tests the `@if`-section membership path: when a `section "Name":` body
+    /// contains an `@if` block whose condition is true, the slide produced by
+    /// that `@if` must be tagged with the section's (`instance_id`, name) — not
+    /// left untagged (ungrouped).
+    ///
+    /// Mirrors the pattern of `test_crit_a_for_inside_section_all_slides_tagged`
+    /// but for the `@if` code path instead of `@for`.
+    ///
+    /// Traces to BC-4.01.003 PC-5/7/8 / OBS-13-1.
+    #[test]
+    fn test_obs13_1a_if_true_inside_section_slide_is_tagged() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        // section "Conditional": body is @if true: <slide>
+        // Expected: 1 slide in deck, slide_sections has 1 entry "Conditional" with ID 256.
+        let src = r#"slideforge_version "1"
+section "Conditional":
+  @if true:
+    slide title:
+      title "Conditional Slide"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(
+            std::sync::Arc::from("obs13_1a.sf"),
+            std::sync::Arc::from(src),
+        );
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed");
+        assert!(!sink.has_fatal(), "no fatal errors expected");
+
+        // The @if(true) branch emits the slide; it must appear in deck.slides.
+        assert_eq!(
+            deck.slides.len(),
+            1,
+            "OBS-13-1(a): @if(true) inside section must produce 1 slide in deck; got {}",
+            deck.slides.len()
+        );
+
+        // KEY ASSERTION: the slide must be tagged into the "Conditional" section.
+        assert_eq!(
+            deck.slide_sections.len(),
+            1,
+            "OBS-13-1(a): slide_sections must have 1 entry; got {}",
+            deck.slide_sections.len()
+        );
+        assert_eq!(
+            deck.slide_sections[0].name.as_ref(),
+            "Conditional",
+            "OBS-13-1(a): section name must be 'Conditional'; got {:?}",
+            deck.slide_sections[0].name
+        );
+        assert_eq!(
+            deck.slide_sections[0].slide_ids,
+            vec![256],
+            "OBS-13-1(a): @if(true) slide inside section must have ID 256; got {:?}",
+            deck.slide_sections[0].slide_ids
+        );
+    }
+
+    /// OBS-13-1 (b) — `section "Conditional":` body contains `@if true: <slide>`
+    /// and `@elif <false>: <slide2>` and `@else: <slide3>` — only the taken
+    /// branch's slide is tagged into the section.
+    ///
+    /// When a section body has a multi-branch @if/@elif/@else, only the slides
+    /// from the TAKEN branch receive the section tag.  Slides from untaken
+    /// branches are never evaluated (lazy evaluation) and thus never appear in
+    /// the membership vec.
+    ///
+    /// Scenario:
+    ///   section "Conditional":
+    ///     @if true:
+    ///       slide title: "taken"         ← taken, must be tagged
+    ///     @elif false:
+    ///       slide content: "not-taken"   ← NOT evaluated (lazy)
+    ///     @else:
+    ///       slide content: "also-not"    ← NOT evaluated (lazy)
+    ///
+    /// Expected: 1 slide (ID 256) in "Conditional" section, title "taken".
+    ///
+    /// Traces to BC-4.01.003 PC-5/7/8 / BC-1.05.001 invariant 2 / OBS-13-1.
+    #[test]
+    fn test_obs13_1b_section_body_if_elif_else_only_taken_branch_tagged() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        let src = r#"slideforge_version "1"
+section "Conditional":
+  @if true:
+    slide title:
+      title "taken"
+  @elif false:
+    slide content:
+      title "not-taken"
+  @else:
+    slide content:
+      title "also-not"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(
+            std::sync::Arc::from("obs13_1b.sf"),
+            std::sync::Arc::from(src),
+        );
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed");
+        assert!(!sink.has_fatal(), "no fatal errors expected");
+
+        // Only the @if(true) branch slide is emitted — @elif and @else are skipped.
+        assert_eq!(
+            deck.slides.len(),
+            1,
+            "OBS-13-1(b): @if(true) inside section must produce 1 slide (lazy eval); got {}",
+            deck.slides.len()
+        );
+
+        // KEY ASSERTION: the taken branch's slide is tagged into "Conditional".
+        assert_eq!(
+            deck.slide_sections.len(),
+            1,
+            "OBS-13-1(b): section_sections must have 1 entry; got {}",
+            deck.slide_sections.len()
+        );
+        assert_eq!(
+            deck.slide_sections[0].name.as_ref(),
+            "Conditional",
+            "OBS-13-1(b): section name must be 'Conditional'; got {:?}",
+            deck.slide_sections[0].name
+        );
+        assert_eq!(
+            deck.slide_sections[0].slide_ids,
+            vec![256],
+            "OBS-13-1(b): taken @if branch slide must have ID 256; got {:?}",
+            deck.slide_sections[0].slide_ids
+        );
+    }
+
+    /// OBS-13-1 (c) — `section "Conditional":` body contains `@if false: <slide>`
+    /// with no @else — when the condition is false and there is no @else, 0 slides
+    /// are emitted and no section entry is produced.
+    ///
+    /// The section block exists in the DSL, but its @if body produces no slides
+    /// (false condition, no @else).  `build_slide_sections_from_membership` only
+    /// creates entries for slides that exist — a section with zero slides cannot
+    /// appear in `slide_sections`.
+    ///
+    /// This tests the "section exists but is logically empty after @if-false"
+    /// edge case that was untested before OBS-13-1.
+    ///
+    /// Traces to BC-4.01.003 PC-5 / OBS-13-1.
+    #[test]
+    fn test_obs13_1c_section_body_if_false_no_slides_no_section_entry() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        let src = r#"slideforge_version "1"
+section "Conditional":
+  @if false:
+    slide title:
+      title "Should Not Appear"
+slide bullets:
+  title "Ungrouped"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(
+            std::sync::Arc::from("obs13_1c.sf"),
+            std::sync::Arc::from(src),
+        );
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed");
+        assert!(!sink.has_fatal(), "no fatal errors expected");
+
+        // Only the ungrouped slide appears (the @if(false) slide is suppressed).
+        assert_eq!(
+            deck.slides.len(),
+            1,
+            "OBS-13-1(c): @if(false) inside section produces 0 slides from section body; \
+             only ungrouped slide appears; got {}",
+            deck.slides.len()
+        );
+
+        // KEY ASSERTION: no section entry when section body is logically empty.
+        assert_eq!(
+            deck.slide_sections.len(),
+            0,
+            "OBS-13-1(c): section with @if(false) body must produce 0 section entries \
+             (no slides to group); got {}",
+            deck.slide_sections.len()
+        );
+    }
+
     /// AC-010 / BC-4.01.003 PC-7 — `parse_checked()` with `section "":` returns
     /// `None` (no AST produced) and pushes a fatal error into the sink.
     ///
