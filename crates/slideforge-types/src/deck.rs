@@ -217,7 +217,7 @@ pub struct Deck {
 
     /// PPTX slide-grouping sections from `section "Name":` DSL blocks (STORY-082).
     ///
-    /// Populated by the evaluator (`slideforge-eval::section_groups::extract_slide_sections`)
+    /// Populated by the evaluator (`slideforge-eval::section_groups::build_slide_sections_from_membership`)
     /// after evaluating the deck. Each entry maps a named section group to the
     /// PPTX slide IDs (starting at 256) of slides that fall within it.
     ///

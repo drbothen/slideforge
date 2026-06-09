@@ -764,7 +764,7 @@ slide title:
         deck.slide_sections.len(),
         2,
         "Deck.slide_sections must have 2 entries (Background + Analysis); \
-         CRIT-2: extract_slide_sections must wire into eval"
+         CRIT-2: build_slide_sections_from_membership must wire into eval"
     );
 
     // Step 3: Layout
@@ -1061,9 +1061,9 @@ fn test_BC_4_01_003_ec004_lt_gt_in_section_name_are_xml_escaped() {
 ///
 /// When `@for x in [1, 2]:` appears before `section "Background":`, the `@for`
 /// expands to 2 slides (flat indices 0 and 1, IDs 256 and 257).  The Background
-/// section slide is at flat index 2 → ID 258.  The old `extract_slide_sections`
-/// walk could not model `@for` expansion and incorrectly assigned ID 256 to the
-/// Background slide.
+/// section slide is at flat index 2 → ID 258.  The superseded AST-walker
+/// approach could not model `@for` expansion and incorrectly assigned ID 256
+/// to the Background slide.
 ///
 /// This test:
 /// 1. Builds a deck with `@for` (2 iterations) → `section "Background": slide`

@@ -144,9 +144,13 @@ section "Background":
 
 // ─── AC-010: empty section name → E-PAR-023 ──────────────────────────────────
 
-/// AC-010 — `section "":` (empty quoted name) produces `E-PAR-023` error.
+/// AC-010 — `section "":` (empty quoted name) produces `E-PAR-023` fatal error.
 ///
-/// Traces to BC-4.01.003 postcondition 7 + invariant 5.
+/// Traces to BC-4.01.003 postcondition 7 + invariant 5 + error-taxonomy.md §24.
+///
+/// Per error-taxonomy.md §24: "Parse Errors (E-PAR) — Always fatal. Build halts
+/// with accumulated errors. No output produced."  `--warn-only` does NOT demote
+/// parse errors.  Only `Err` is spec-compliant; `Ok` is a regression.
 #[test]
 fn test_BC_4_01_003_ac010_empty_section_name_rejected_e_par_023() {
     let src = r#"slideforge_version "1"
@@ -156,46 +160,19 @@ section "":
 "#;
     let mut source_map = SourceMap::default();
     let file_id = source_map.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
-    let result = parse(src, file_id, &source_map);
 
-    match result {
-        Err(errors) => {
-            // Fatal errors must include E-PAR-023.
-            let has_e_par_023 = errors.iter().any(|e| format!("{e}").contains("E-PAR-023"));
-            assert!(
-                has_e_par_023,
-                "parse error for empty section name must include E-PAR-023; got: {errors:?}"
-            );
-        },
-        Ok(parse_result) => {
-            // If parse "succeeded", the warnings must include E-PAR-023
-            // (accumulated non-fatal error).
-            let has_e_par_023 = parse_result
-                .warnings
-                .iter()
-                .any(|w| format!("{w}").contains("E-PAR-023"));
-            // Either fatal error or warning is acceptable — as long as E-PAR-023 appears.
-            // The key invariant is that no empty-named SectionGroupNode appears in AST.
-            let empty_group = parse_result.deck.items.iter().any(|item| {
-                if let BlockItem::SectionGroup(s) = item {
-                    s.value().name.value().is_empty()
-                } else {
-                    false
-                }
-            });
-            assert!(
-                !empty_group,
-                "SectionGroupNode with empty name must NOT appear in AST (BC-4.01.003 inv5)"
-            );
-            if !has_e_par_023 {
-                panic!(
-                    "E-PAR-023 must appear in errors or warnings for empty section name; \
-                     warnings: {:?}",
-                    parse_result.warnings
-                );
-            }
-        },
-    }
+    // E-PAR-023 is always fatal (error-taxonomy.md §24); parse() MUST return Err.
+    let errors = parse(src, file_id, &source_map).expect_err(
+        "parse() MUST return Err for section \"\": — E-PAR-023 is always fatal \
+         (error-taxonomy.md §24: Parse Errors are always fatal; --warn-only does \
+         NOT demote parse errors)",
+    );
+
+    let has_e_par_023 = errors.iter().any(|e| format!("{e}").contains("E-PAR-023"));
+    assert!(
+        has_e_par_023,
+        "parse error for empty section name must include E-PAR-023; got: {errors:?}"
+    );
 }
 
 /// AC-010 — `section "":` produces no `SectionGroupNode` in the AST for the rejected block.

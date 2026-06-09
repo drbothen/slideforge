@@ -18,9 +18,12 @@
 //!
 //! ## Section list
 //!
-//! Slide grouping via `<p:sectionLst>` is deferred to STORY-082. This module
-//! emits no section list (the typed `Presentation` default omits `sectionLst`,
-//! which is correct for presentation.xml when sections are absent).
+//! `PresentationSerializer::build` itself emits no `<p:extLst>` or
+//! `<p14:sectionLst>` — it relies on the typed `Presentation` default, which
+//! omits `sectionLst` (correct for decks with no section groups).
+//! Section-list injection is performed downstream by
+//! `SectionListBuilder::inject` (see `slideforge_pptx::sections`) after
+//! `PresentationSerializer::build` produces the baseline bytes.
 
 use ooxmlsdk::schemas::p::{
     HandoutMasterId, HandoutMasterIdList, NotesMasterId, NotesMasterIdList, Presentation, SlideId,

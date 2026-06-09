@@ -352,12 +352,12 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
 ///
 /// ## CRIT-A fix (STORY-082 pass-2)
 ///
-/// The old `extract_slide_sections` walked the raw `DeckNode` AST independently
-/// and could not model `@for`/`@if` expansion.  This function fixes that by
-/// tracking section membership during the SAME expansion pass that builds
-/// `Deck.slides`, guaranteeing that slide IDs assigned by
-/// `slideforge-pptx::slide_ids` (256 + flat index) exactly match the IDs
-/// recorded in each `SlideSectionEntry`.
+/// The superseded AST-walker approach (removed in pass-4) walked the raw
+/// `DeckNode` independently and could not model `@for`/`@if` expansion.
+/// This function fixes that by tracking section membership during the SAME
+/// expansion pass that builds `Deck.slides`, guaranteeing that slide IDs
+/// assigned by `slideforge-pptx::slide_ids` (256 + flat index) exactly match
+/// the IDs recorded in each `SlideSectionEntry`.
 ///
 /// `section_tag` is taken by value (`Option<Arc<str>>`) because every call site
 /// needs to clone it for the multiple recursive sub-calls.  Taking by value makes
@@ -481,7 +481,7 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                 // produced by this section's body — including those from nested
                 // @for/@if expansions — are tagged with this section's name.
                 // This is the SINGLE SOURCE OF TRUTH for section membership;
-                // `extract_slide_sections` is no longer used for this purpose.
+                // the superseded AST-walker approach has been removed (pass-4).
                 let group = spanned_group.value();
                 let group_name = Arc::clone(group.name.value());
                 let group_slides = eval_block_items_with_sections(
