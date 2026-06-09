@@ -47,11 +47,16 @@ estimated_days: 6
 - SS-05 (DOCX Exporter) owns DOCX rendering: `<w:b/>` for Bold, `<w:i/>` for Italic,
   `<w:rStyle w:val="CodeSpan"/>` for Code, `<w:hyperlink>` for Link, etc.
 - SS-06 (PDF Exporter) — krilla `=0.6.0` text runs (pinned in slideforge-pdf/Cargo.toml,
-  NOT workspace); bold via a separate loaded bold `Font::new(bold_data, index)` face
-  (no set_bold toggle); italic via a separate loaded italic `Font::new(italic_data, index)`
-  face (no set_italic toggle); code via monospace `Font::new(mono_data, index)`;
-  super/subscript via per-glyph `KrillaGlyph.y_offset` in `Surface::draw_glyphs`
-  (normalized by units_per_em; no text-rise setter). (per export-architecture v1.2)
+  NOT workspace); bold/italic/mono faces resolved via a `ResolvedFontSet` struct populated
+  by `resolve_font_set(brand, override_path)` using `fontdb =0.23.0` (already in
+  Cargo.lock as transitive dep of `usvg =0.47.0`; added as a direct pinned dep to
+  `slideforge-pdf/Cargo.toml`). `fontdb` queries font metadata (OS/2 table
+  `usWeightClass`/`fsSelection` bits) — not filenames — for reliable cross-platform
+  resolution. Fallback on no match: `tracing::warn!` then use the plain regular face
+  (non-silent). `BrandFonts` is NOT modified for this story — `ResolvedFontSet` is
+  internal to `slideforge-pdf`. Super/subscript via per-glyph `KrillaGlyph.y_offset` in
+  `Surface::draw_glyphs` (normalized by units_per_em; no text-rise setter in 0.6.0).
+  (per export-architecture v1.2 + ADR-023)
 - SS-07 (HTML Exporter) — `<strong>` for Bold, `<em>` for Italic, `<code>` for Code,
   `<a href="...">` for Link, `<sup>` for Superscript, `<sub>` for Subscript,
   `<del>` for Strikethrough, `<mark>` for Highlight.
@@ -128,11 +133,13 @@ output format violates the production-grade default). It MUST land before v1.0 s
      Code; `<w:hyperlink r:id="...">` for Link; `<w:vertAlign w:val="superscript"/>` for
      Superscript; `<w:vertAlign w:val="subscript"/>` for Subscript; `<w:strike/>` for
      Strikethrough; `<w:highlight w:val="yellow"/>` for Highlight.
-   - PDF (krilla `=0.6.0`, pinned in slideforge-pdf/Cargo.toml): bold via separate loaded
-     bold `Font` face (`Font::new(bold_data, index)`); italic via separate loaded italic
-     `Font` face; monospace font face for Code; URL annotations for Link; per-glyph
-     `KrillaGlyph.y_offset` (normalized by units_per_em) for Super/Subscript via
-     `Surface::draw_glyphs`. (per export-architecture v1.2)
+   - PDF (krilla `=0.6.0`, pinned in slideforge-pdf/Cargo.toml): bold/italic/mono faces
+     resolved via `ResolvedFontSet` populated by `resolve_font_set(brand, override_path)`
+     using `fontdb =0.23.0` metadata-aware lookup (ADR-023). `draw_frame` receives
+     `&ResolvedFontSet` and dispatches: `Bold` → `font_set.bold.or(font_set.regular)`;
+     `Italic` → `font_set.italic.or(font_set.regular)`; `Code` → `font_set.mono.or(font_set.regular)`;
+     URL annotations for Link; per-glyph `KrillaGlyph.y_offset` (normalized by units_per_em)
+     for Super/Subscript via `Surface::draw_glyphs`. (per export-architecture v1.2 + ADR-023)
    - HTML: `<strong>`, `<em>`, `<code>`, `<a href>`, `<sup>`, `<sub>`, `<del>`, `<mark>`.
 
 ### PPTX Single-Run Title Constraint (Binding)
@@ -213,20 +220,29 @@ in WordprocessingML. Use the typed API, not raw XML. Snapshot test on the DOCX X
 ### AC-004: PDF exporter renders Bold/Italic/Code via font switching (traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in PDF)
 
 A slide body containing `InlineNode::Bold` and `InlineNode::Italic` nodes produces
-PDF output where the bold text is rendered with the appropriate font face. In krilla
-`=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace):
+PDF output where the bold text is rendered with a distinct font face from the plain text.
+In krilla `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace), there is
+NO `set_bold()` / `set_italic()` toggle — distinct font face instances are required. The
+mechanism (per ADR-023):
 
-- **Bold**: load the bold font face via `Font::new(bold_font_data, index)` — there is NO
-  `set_bold()` toggle; bold is a separate loaded `Font` face.
-- **Italic**: load the italic font face via `Font::new(italic_font_data, index)` — there is
-  NO `set_italic()` toggle; italic is a separate loaded `Font` face.
-- **Code (monospace)**: load the monospace font face via `Font::new(mono_font_data, index)`.
+- **Bold**: resolved via `ResolvedFontSet.bold` — populated by `resolve_font_set()` using
+  `fontdb =0.23.0` querying the brand body family at `Weight::BOLD`. Falls back to
+  `ResolvedFontSet.regular` with `tracing::warn!` if no bold face is found on the system.
+- **Italic**: resolved via `ResolvedFontSet.italic` — same fontdb lookup at `Style::Italic`.
+  Falls back to `ResolvedFontSet.regular` with `tracing::warn!` if not found.
+- **Code (monospace)**: resolved via `ResolvedFontSet.mono` — fontdb lookup on
+  `brand.fonts.mono` family at `Weight::NORMAL`. Falls back to `ResolvedFontSet.regular`
+  with `tracing::warn!` if not found.
 - **Superscript / Subscript**: rendered via `Surface::draw_glyphs` with per-glyph
   `y_offset` on each `KrillaGlyph` (normalized by `units_per_em`). There is NO
   text-rise setter in krilla 0.6.0 — offset is applied per-glyph.
 
-Unit test uses the krilla API path and verifies the font selector dispatches correctly.
-A PDF snapshot fixture test asserts structural equivalence. (per export-architecture v1.2)
+Unit test (deterministic, CI-safe): construct a `ResolvedFontSet` from two distinct bundled
+fixture OTF byte buffers (`test-regular.otf`, `test-bold.otf` in
+`crates/slideforge-pdf/tests/fixtures/`). Call `export_uncompressed(...)`. Assert that
+both fixture PostScript font names appear in the uncompressed PDF bytes — confirming that
+two distinct font resources were embedded (C2-NEW distinctness assertion).
+A PDF snapshot fixture test asserts structural equivalence. (per export-architecture v1.2 + ADR-023)
 
 ### AC-005: HTML exporter renders all 8 inline markup forms as semantic HTML elements
 (traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in HTML/preview)
@@ -330,14 +346,35 @@ split is acceptable: sub-burst A (eval + layout), sub-burst B (PPTX + DOCX), sub
 - [ ] Snapshot test: DOCX XML for a slide body with all 8 markup forms
 
 ### Phase 5: PDF Exporter (slideforge-pdf)
-- [ ] Add `inline_node_to_krilla_spans(node: &InlineNode, fonts: &FontSet, ...) -> Vec<KrillaGlyph sequence or TextSpan>` dispatching on all 12 variants using krilla `=0.6.0` API (pinned in slideforge-pdf/Cargo.toml, NOT workspace per export-architecture v1.2):
-  - Bold: `Font::new(fonts.bold_data, 0)` — separate loaded font face, no set_bold toggle
-  - Italic: `Font::new(fonts.italic_data, 0)` — separate loaded font face, no set_italic toggle
-  - Code: `Font::new(fonts.mono_data, 0)` — monospace font face
-  - Link: URL annotation via krilla link annotation API
-  - Superscript / Subscript: `Surface::draw_glyphs` with per-glyph `KrillaGlyph { y_offset: ±(units_per_em / 3), .. }` — NO text-rise setter exists in 0.6.0
-- [ ] Wire into slide body text placement
-- [ ] Snapshot test: PDF text span/glyph sequence for Bold + Italic bullet
+- [ ] Add `ResolvedFontSet { regular, bold, italic, mono: Option<krilla::text::Font> }` to
+  `crates/slideforge-pdf/src/font.rs`.
+- [ ] Add `resolve_font_set(brand: &Brand, override_path: Option<&Path>) -> ResolvedFontSet`
+  in `font.rs`, using `fontdb =0.23.0` (already in Cargo.lock as transitive dep of
+  `usvg =0.47.0`) for metadata-aware style lookup. Resolution priority per face: (1) brand
+  override path if `Some`; (2) `fontdb::Database::load_system_fonts()` query on
+  `brand.fonts.body` with the target weight/style (OS/2 table metadata, not filename);
+  (3) fall back to `regular` face with `tracing::warn!(family, style, "styled font face
+  not found on this system; falling back to regular face")` (non-silent, never wrong-face).
+- [ ] Update `generate_pdf_inner` to call `resolve_font_set` instead of `resolve_brand_font`.
+  Pass `&ResolvedFontSet` to `draw_frame` (replacing `Option<&krilla::text::Font>`).
+- [ ] Update `draw_frame` and its text-drawing sub-functions to accept `&ResolvedFontSet`
+  and dispatch on `InlineNode` variant to select the appropriate face:
+  - `InlineNode::Bold(_)` → `font_set.bold.as_ref().or(font_set.regular.as_ref())`
+  - `InlineNode::Italic(_)` → `font_set.italic.as_ref().or(font_set.regular.as_ref())`
+  - `InlineNode::Code(s)` → `font_set.mono.as_ref().or(font_set.regular.as_ref())`, render `s` directly
+  - `InlineNode::Superscript/Subscript(_)` → `font_set.regular`, render via
+    `Surface::draw_glyphs` with `KrillaGlyph { y_offset: ±(units_per_em / 3), .. }` (NO text-rise setter in 0.6.0)
+  - `InlineNode::Link` → URL annotation via krilla link annotation API
+  - All other variants → `font_set.regular`
+- [ ] Replace `extract_inline_text` call-sites in `draw_frame` with a span-aware render
+  that iterates `InlineNode` variants and dispatches to the appropriate font.
+- [ ] Add `fontdb = "=0.23.0"` to `slideforge-pdf/Cargo.toml` `[dependencies]`
+  (makes the existing transitive dep explicit and pinned; no new supply-chain surface).
+- [ ] Unit test (deterministic, CI-safe): construct `ResolvedFontSet` from two distinct
+  bundled fixture OTF byte buffers in `crates/slideforge-pdf/tests/fixtures/`
+  (`test-regular.otf`, `test-bold.otf`). Call `export_uncompressed(...)`. Assert both
+  fixture PostScript font names appear in uncompressed PDF bytes (C2-NEW distinctness assertion).
+- [ ] Snapshot test: PDF text span/glyph sequence for Bold + Italic bullet.
 
 ### Phase 6: HTML Exporter (slideforge-html)
 - [ ] Add `inline_node_to_html(node: &InlineNode) -> HtmlNode` dispatching all 12 variants
@@ -377,16 +414,21 @@ the OOXML schema, not just produce logically correct content.
 
 Key lesson from STORY-043 (PDF): krilla `=0.6.0` (pinned in slideforge-pdf/Cargo.toml,
 NOT workspace — per export-architecture v1.2) has NO `set_bold()` / `set_italic()` /
-text-rise setter. Bold requires loading a separate bold `Font` face via
-`Font::new(bold_font_data, index)`; italic requires loading a separate italic `Font` face.
-Superscript / subscript are rendered via `Surface::draw_glyphs` with per-glyph
-`KrillaGlyph.y_offset` (normalized by `units_per_em`). The implementer must use the
-brand's bold/italic/mono font data (or fall back to system-default faces if no brand
-fonts are configured).
+text-rise setter. Bold requires a separate `krilla::text::Font` instance for the bold face;
+italic requires a separate instance for the italic face. These instances are obtained from a
+`ResolvedFontSet` populated by `resolve_font_set()` via `fontdb =0.23.0` metadata-aware
+lookup (ADR-023) — NOT from `fonts.bold_data` / `fonts.italic_data` / `fonts.mono_data`
+fields, which DO NOT EXIST on `BrandFonts`. Superscript / subscript are rendered via
+`Surface::draw_glyphs` with per-glyph `KrillaGlyph.y_offset` (normalized by `units_per_em`).
+If fontdb cannot find a styled face, it falls back to the regular face with `tracing::warn!`
+(non-silent degradation).
 
 ## Architecture Compliance Rules
 
-1. **No new Cargo edges**: This story does not add new workspace crate dependencies.
+1. **One new direct Cargo dep, zero new supply-chain surface**: `fontdb = "=0.23.0"` is
+   added as a direct pinned dependency to `slideforge-pdf/Cargo.toml`. It is already
+   compiled into the build as a transitive dep of `usvg =0.47.0` — adding it as a direct
+   dep only makes the version pin explicit. No other new Cargo edges are added.
    `slideforge-eval` → `slideforge-syntax` and `slideforge-types` (existing).
    Each exporter already depends on `slideforge-types::InlineNode`. No cross-exporter
    imports (each exporter is independent).
@@ -413,11 +455,14 @@ fonts are configured).
 | `slideforge-eval` (workspace) | workspace | `chunks_to_inline_nodes` (reused from STORY-077) |
 | `slideforge-layout` (workspace) | workspace | `FrameContent::TextRun` type update |
 | `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:rPr` (b/i/strike/fill) and DOCX typed builders for `w:rPr` (w:b/w:i/w:rStyle/w:vertAlign/w:strike/w:highlight) — typed API, not raw XML |
-| `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font::new(data, index)` for bold/italic/mono faces; `Surface::draw_glyphs` + `KrillaGlyph.y_offset` for super/subscript |
+| `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font` instances from `ResolvedFontSet`; `Surface::draw_glyphs` + `KrillaGlyph.y_offset` for super/subscript |
+| `fontdb` | `=0.23.0` (direct dep in `crates/slideforge-pdf/Cargo.toml`; already in Cargo.lock as transitive dep of `usvg =0.47.0` — no new supply-chain surface) | PDF: `fontdb::Database::load_system_fonts()` + metadata-aware (OS/2 table) style query used by `resolve_font_set()` to populate `ResolvedFontSet` (ADR-023) |
 
-No new external dependencies required. All listed crates are already in the respective
-`Cargo.toml` files. Note: `axum` is NOT used by this story — HTML inline-markup rendering
-lives in `slideforge-html` (minijinja/usvg), not axum. `axum` belongs only to STORY-047.
+`fontdb =0.23.0` is the only new direct dependency introduced by this story. It is already
+compiled as a transitive dep of `usvg =0.47.0`; adding it as a direct dep only pins the
+version explicitly per the supply-chain policy. Note: `axum` is NOT used by this story —
+HTML inline-markup rendering lives in `slideforge-html` (minijinja/usvg), not axum.
+`axum` belongs only to STORY-047.
 
 ## File Structure Requirements
 
@@ -522,6 +567,11 @@ snapshot/visual regression gating).
 - **BC-3.02.002 v1.5** (PO amendment per DIR-077-002 §9.1, in-progress) — amended PC8
   covers slide-level bold rendering in all output formats.
 - **ADR-013** — comemo Hash compatibility; `InlineNode` already derives `Hash + Eq + Clone`.
+- **ADR-023** (`.factory/specs/architecture/adr/ADR-023-pdf-styled-font-face-resolution.md`) —
+  PDF styled font-face resolution via `fontdb` metadata-aware lookup. Adopted 2026-06-09.
+  Defines `ResolvedFontSet`, `resolve_font_set()`, dispatch table, graceful degradation
+  semantics, and the fixture-font deterministic test strategy. Supersedes the
+  `fonts.bold_data`/`fonts.italic_data`/`fonts.mono_data` references in v1.1 of this story.
 - **CLAUDE.md OOXML rules** — element ordering is schema-significant; `<a:rPr>` before
   `<a:t>` in `<a:r>` (DrawingML); `<w:rPr>` before `<w:t>` in `<w:r>` (WordprocessingML).
 - **CLAUDE.md forbidden patterns** — "String-prefix-based bold (`"**header**"`) — Anti-pattern
@@ -534,3 +584,4 @@ snapshot/visual regression gating).
 |---------|------|--------|---------|
 | 1.0 | 2026-06-02 | story-writer | Initial creation per DIR-077-002 §4 and human authorization (2026-06-02). Follow-up to STORY-077. Covers eval + layout + all-exporter inline markup rendering for slide-level fields. Assigned Wave 5, P0, 13 points. Blocks v1.0 release. |
 | 1.1 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: fixed krilla mislabel — krilla=0.6.0 is pinned in slideforge-pdf/Cargo.toml (NOT workspace; per export-architecture v1.2); updated AC-004, Subsystem Anchor SS-06, Summary PDF description, and Phase-5 tasks to reflect correct krilla 0.6.0 API: bold/italic via separate Font::new(data,index) faces (no set_bold/set_italic toggle), super/subscript via KrillaGlyph.y_offset in Surface::draw_glyphs (no text-rise setter); updated AC-003 and Phase-4 DOCX tasks to use ooxmlsdk=0.6.1 typed builders for w:rPr; updated EC-008 PPTX highlight to typed-builder approach; removed axum Library table row (slideforge-html uses minijinja/usvg, not axum; axum belongs to STORY-047 only); cited export-architecture v1.2 throughout. |
+| 1.2 | 2026-06-09 | story-writer | Mechanism correction per ADR-023 (approved 2026-06-09): replaced non-existent BrandFonts field references (fonts.bold_data, fonts.italic_data, fonts.mono_data) with the ADR-023 ResolvedFontSet / fontdb =0.23.0 metadata-aware resolution approach throughout — Subsystem Anchor SS-06, Summary PDF bullet, AC-004 mechanism text, Phase-5 Tasks, Previous Story Intelligence (STORY-043 lesson), Architecture Compliance Rule 1, Library table (added fontdb row), References (added ADR-023). Observable AC-004 contract UNCHANGED: bold renders in a distinct bold face, code in monospace, super/sub offset in output PDF. No BC change. |
