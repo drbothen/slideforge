@@ -1884,4 +1884,71 @@ mod tests {
              This may indicate the truncated input was silently accepted, which is wrong."
         );
     }
+
+    // ── OBS-088-P7-001 (4/4): truly-unterminated nested input — None => break ──
+    //
+    // The three tests above (nested-then-valid, valid-then-nested, truncated-EOF)
+    // all exit the depth-tracking loop via the `depth == 0` path: either the inner
+    // `]` is present in the token stream (depth reaches 0) or the outer `delimited_by`
+    // fails after the loop exits cleanly.
+    //
+    // The `None => break` arm is reached ONLY when `inp.next()` returns `None`
+    // (EOF / end of token stream) while `depth` is still > 0 — i.e. the nested
+    // open `[` was never closed at all before the stream was exhausted.
+    //
+    // Input that exercises this arm:
+    //   `bullets [["A"`
+    //
+    // Token walk:
+    //   - Outer `[` consumed by `delimited_by`.
+    //   - `just(LBracket)` consumes the second `[`; depth starts at 1.
+    //   - Loop iteration 1: `inp.next()` → `Some(StringLit("A"))` (the string token);
+    //     matches `Some(_)` → no depth change, continue.
+    //   - Loop iteration 2: `inp.next()` → `None` (EOF — no `]` was ever lexed);
+    //     matches `None => break`.  depth is still 1 at the break point.
+    //
+    // Contrast with the existing truncated test `[["A"]`:
+    //   - Loop sees `Some(StringLit("A"))`, then `Some(RBracket)` → depth 1→0,
+    //     exits via `depth == 0`.  The `None` arm is NEVER reached.
+    //
+    // This test is the ONLY one that genuinely exercises the `None => break` path.
+
+    /// OBS-088-P7-001 (4/4) — EOF-inside-nested-depth-loop: `bullets [["A"` (no
+    /// closing brackets at all) must NOT panic and must produce ≥1 diagnostic.
+    ///
+    /// This is the definitive coverage test for the `None => break` arm of the
+    /// iterative depth-tracking loop in `list_literal.rs::nested_item`.
+    ///
+    /// Token walk that hits `None => break`:
+    ///   - outer `[` consumed by `delimited_by`
+    ///   - `just(LBracket)` consumes the second `[`; depth = 1
+    ///   - `inp.next()` → `Some(string "A")` → `Some(_)` arm, continue
+    ///   - `inp.next()` → `None` (EOF) → **`None => break`** fires with depth = 1
+    ///
+    /// The existing test `[["A"]` exits via `depth == 0` (the `]` reduces depth
+    /// before EOF) and does NOT reach this branch.
+    ///
+    /// Load-bearing assertions:
+    /// 1. No panic — reaching any assertion proves graceful EOF handling.
+    /// 2. `!errors.is_empty()` — ≥1 diagnostic emitted (no silent acceptance).
+    #[test]
+    fn test_obs_088_p7_001_eof_inside_nested_depth_loop_no_panic() {
+        // `bullets [["A"` — outer `[` + inner `[` + string token, then EOF.
+        // No `]` anywhere: the depth loop must reach `inp.next() == None` with
+        // depth == 1 and exit via `None => break` (not via `depth == 0`).
+        let src = concat!("slide content:\n", "  bullets [[\"A\"\n");
+
+        // Load-bearing assertion 1: NO panic.
+        // Reaching this point (and the assert below) proves the `None => break`
+        // branch handled EOF gracefully without aborting the process.
+        let (_deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Load-bearing assertion 2: ≥1 diagnostic (not silent acceptance).
+        assert!(
+            !errors.is_empty(),
+            "OBS-088-P7-001 (None=>break): `bullets [[\"A\"` must produce ≥1 parse error \
+             (unclosed nested list at EOF); got 0. \
+             Silent acceptance of unterminated nested input is a regression."
+        );
+    }
 }
