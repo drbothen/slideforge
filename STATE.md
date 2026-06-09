@@ -30,11 +30,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary Pass 8 DONE — NOT CLEAN: 1 HIGH + 2 OBS; streak RESET 0/3; NEW ADV-P08-HIGH-001: PDF title not bold — AC-006(3) PDF leg unimplemented; DOCX+HTML conform; NEXT: implementer fix burst → Pass 9; PRE-PR BLOCKER: FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary Pass 9 DONE — CLEAN (strict+PR-merge); streak 1/3; ADV-P08-HIGH-001 CONFIRMED closed (load-bearing); NEXT: adversary Pass 10 → Pass 11 → 3/3 convergence; PRE-PR BLOCKER: FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
-workspace_tests: "3761 pass / 20 skip (STORY-081 worktree f1bd9f99; Pass-6 fix burst: face_for_span_kind shared selector — ADV-P06-MED-001 closed; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE)"
+workspace_tests: "3762 pass / 20 skip (HEAD c739d59c; Pass-8 fix burst: PDF rich title via slide_to_krilla_runs+draw_inline_spans — ADV-P08-HIGH-001 closed; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE)"
 workspace_test_failures: 0
 ---
 
@@ -58,16 +58,14 @@ workspace_test_failures: 0
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `f1bd9f99` (Pass-6 fix burst — shared `face_for_span_kind` selector — completed; tests 3761 pass)
-- **Adversary streak:** **0/3** — Pass 8 NOT CLEAN (1 HIGH + 2 OBS; streak RESET).
-- **Pass 8 findings:**
-  - ADV-P08-HIGH-001[HIGH] OPEN — PDF `FrameContent::Title` arm flattens `title_inlines` to plain `String` via `extract_all_inline_text`; renders `font_set.regular` unconditionally; `InlineNode::Bold/Italic/Code` discarded. AC-006 clause 3 + EC-002 + DIR-077-002 §4 all name PDF as required to render bold title. DOCX (`<w:b/>`) and HTML (`<strong>`) conform; PDF is the lone divergent exporter. `SubtitleInlines` path (exporter.rs:766-771) already has the `slide_to_krilla_runs + draw_inline_spans` capability; title simply not wired to it. Coverage gap: zero PDF title-bold load-bearing tests (TD-VSDD-059).
-  - OBS-P08-001[OBS] — PPTX Highlight uses glyph-fill (EC-008 spec-directed); non-blocking.
-  - OBS-P08-002[OBS] — cold_budget + double load_system_fonts (pre-existing FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE); non-blocking.
-- **Pass 7 findings (ALL CONFIRMED SOUND):** body-span axis structurally eliminated; `face_for_span_kind` re-confirmed sound this pass.
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `c739d59c` (Pass-8 fix burst — PDF rich title via `slide_to_krilla_runs+draw_inline_spans` — completed; now checkpointed; tests 3762 pass)
+- **Adversary streak:** **1/3** — Pass 9 CLEAN (strict + PR-merge). ADV-P08-HIGH-001 CONFIRMED closed (load-bearing).
+- **Pass 9 findings:**
+  - OBS-P09-001[OBS] — `slideforge-diagrams` cold_budget timing gate (FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE) + double `load_system_fonts` per PDF export; no causal link to STORY-081 correctness; non-blocking for convergence streak; MUST be resolved before STORY-081 PR.
+- **Pass 8 fix (CONFIRMED SOUND):** `draw_frame` now takes `title_inlines_override: Option<&[InlineNode]>`; `FrameContent::Title` arm renders richly via `slide_to_krilla_runs + draw_inline_spans(..,36.0)`; all 4 call-sites thread `title_inlines_nodes.as_deref()`; load-bearing test `test_BC_3_02_002_adv_p08_high001_pdf_title_bold_uses_distinct_font_resource` asserts Tuffy(bold)+LatinModernMath-Regular.
 - **fontdb pin:** =0.23.0 direct pin retained; cargo deny PASS.
-- **Workspace tests at HEAD f1bd9f99:** 3761 pass / 20 skip.
-- **NEXT ACTION:** Implementer fix burst — wire `FrameContent::Title` to `slide_to_krilla_runs + draw_inline_spans` (mirror `SubtitleInlines`); thread `Vec<InlineNode>` to `draw_frame`; remove rationalization comment; add load-bearing PDF title-bold distinctness test. Then LESSON-21 exit gate → adversary Pass 9. REMINDER: FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE must be resolved before STORY-081 PR.
+- **Workspace tests at HEAD c739d59c:** 3762 pass / 20 skip.
+- **NEXT ACTION:** Adversary Pass 10 (sequential, LESSON-7; same HEAD c739d59c — no code change between clean passes). Need 2 more consecutive strict-CLEAN to converge 3/3. REMINDER: FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE must be resolved before STORY-081 PR.
 
 ---
 
@@ -108,8 +106,8 @@ workspace_test_failures: 0
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `f1bd9f99`. Pass 8 NOT CLEAN (1 HIGH + 2 OBS); streak RESET 0/3. ADV-P08-HIGH-001 OPEN (PDF title-bold — AC-006(3) PDF leg). Implementer fix burst NEXT. Open PRs: 0.
-- Workspace: 3761 pass / 20 skip (STORY-081 worktree at HEAD f1bd9f99; cargo deny PASS; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `c739d59c`. Pass 9 CLEAN (strict + PR-merge); streak 1/3. ADV-P08-HIGH-001 CONFIRMED closed (load-bearing). Adversary Pass 10 NEXT. Open PRs: 0.
+- Workspace: 3762 pass / 20 skip (STORY-081 worktree at HEAD c739d59c; cargo deny PASS; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -122,7 +120,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — Pass 8 NOT CLEAN; HEAD `f1bd9f99`; streak **0/3** (RESET). ADV-P08-HIGH-001 OPEN: PDF title-bold — `FrameContent::Title` flattens `title_inlines` to plain text; DOCX+HTML conform; PDF does not. Fix: wire Title arm to `slide_to_krilla_runs + draw_inline_spans` (mirror `SubtitleInlines` path); thread `Vec<InlineNode>` to `draw_frame`; add load-bearing PDF title-bold distinctness test (TD-VSDD-059). Pass 8 report: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-8.md`. After fix: LESSON-21 exit gate → adversary Pass 9 (fresh 3-clean streak needed). PRE-PR BLOCKER (separate from convergence): FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — Pass 9 CLEAN; HEAD `c739d59c`; streak **1/3**. ADV-P08-HIGH-001 CONFIRMED closed (load-bearing). NEXT: adversary Pass 10 (sequential, LESSON-7; same HEAD c739d59c — no code change between clean passes). Need 2 more consecutive strict-CLEAN to converge 3/3. PRE-PR BLOCKER (separate from convergence): FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE must be resolved before STORY-081 PR. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -155,18 +153,18 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 8 NOT CLEAN — streak RESET 0/3 — implementer fix burst NEXT. 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 9 CLEAN — streak 1/3. 1 worktree active. 12 stories remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-09 |
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `f1bd9f99`. |
-| **STORY-081 state** | HEAD `f1bd9f99`; adversary **0/3**; Pass 8 NOT CLEAN (1 HIGH + 2 OBS). ADV-P08-HIGH-001 OPEN: PDF `FrameContent::Title` flattens `title_inlines` to plain text; DOCX+HTML bold title CONFORM; PDF does not. Fix: wire Title arm to `slide_to_krilla_runs + draw_inline_spans`; add load-bearing PDF title-bold distinctness test. |
-| **Workspace tests** | 3761 pass / 20 skip (HEAD f1bd9f99; cargo deny PASS; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `c739d59c`. |
+| **STORY-081 state** | HEAD `c739d59c`; adversary **1/3**; Pass 9 CLEAN (strict + PR-merge). ADV-P08-HIGH-001 CONFIRMED closed (load-bearing). PDF rich title wired via `slide_to_krilla_runs+draw_inline_spans`; test `test_BC_3_02_002_adv_p08_high001_pdf_title_bold_uses_distinct_font_resource` asserts Tuffy(bold)+LatinModernMath-Regular. Need 2 more consecutive strict-CLEAN to converge 3/3. |
+| **Workspace tests** | 3762 pass / 20 skip (HEAD c739d59c; cargo deny PASS; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 Pass 8 NOT CLEAN; streak 0/3; HEAD f1bd9f99. NEXT: implementer fix burst — (1) thread `Vec<InlineNode>` from `title_inlines` shadow field through `draw_frame`; (2) `FrameContent::Title` arm: render via `slide_to_krilla_runs + draw_inline_spans` when inlines present (mirror `SubtitleInlines` path, exporter.rs:766-771); (3) remove rationalization comment; (4) add load-bearing PDF title-bold distinctness test (mirror C2-NEW pattern). Then LESSON-21 exit gate → adversary Pass 9. PRE-PR BLOCKER (separate from convergence): FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE. Pass 8 report: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-8.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 Pass 9 CLEAN; streak 1/3; HEAD c739d59c. NEXT: adversary Pass 10 (sequential, LESSON-7; same HEAD — no code change between clean passes). Need 2 more consecutive strict-CLEAN for 3/3 convergence. PRE-PR BLOCKER (separate from convergence): FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE must be resolved before STORY-081 PR. After 3/3: demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -217,6 +215,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-081-PASS9 | Pass 9 CLEAN (strict + PR-merge); streak 1/3. ADV-P08-HIGH-001 CONFIRMED closed (load-bearing): `draw_frame` now takes `title_inlines_override: Option<&[InlineNode]>`; `FrameContent::Title` arm renders richly via `slide_to_krilla_runs+draw_inline_spans(..,36.0)` when inlines present; all 4 call-sites thread `title_inlines_nodes.as_deref()`; load-bearing test `test_BC_3_02_002_adv_p08_high001_pdf_title_bold_uses_distinct_font_resource` asserts both Tuffy(bold)+LatinModernMath-Regular. Fresh re-derivation of every seam (eval/layout/PPTX/DOCX/HTML/PDF × body/title/subtitle/caption/description × all-8-forms+Math+nested) found NO new gap. Both body-span axis (P2-P6) and title-leg axis (P8) structurally eliminated + re-confirmed sound. OBS-P09-001 (cold_budget/double load_system_fonts) out-of-scope, non-blocking for streak but pre-PR blocker intact. 2 more consecutive strict-CLEAN passes required to converge 3/3. HEAD c739d59c; tests 3762 pass. |
 | 2026-06-09 | STORY-081-PASS8 | Pass 8 NOT CLEAN — fresh title-seam re-derivation found PDF title-bold gap (AC-006(3) PDF leg half-real since fix-burst-2; HTML real, PDF flattened to plain String). Streak RESET 0/3. ADV-P08-HIGH-001 OPEN: `FrameContent::Title` arm uses `extract_all_inline_text` (discards markup) → `font_set.regular` unconditional; DOCX + HTML both render bold title; PDF does not. `SubtitleInlines` capability (`slide_to_krilla_runs + draw_inline_spans`) exists but title not wired to it. Body-span axis (P2-P7) re-confirmed sound. Process lesson: per-exporter rich-rendering closures need a load-bearing test EACH exporter (not by analogy). FU-EXIT-GATE-DISTINGUISHING-OUTPUT extended to cover multi-exporter per-exporter verification. |
 | 2026-06-09 | STORY-081-PASS7 | Pass 7 CLEAN (strict + PR-merge); streak 1/3. First strictly-clean pass. `face_for_span_kind` shared selector (exporter.rs:1219-1234) structurally eliminated the 5-pass measure≠draw recurrence; called by BOTH measure and draw paths; BoldItalic fallback unified `bold→italic→regular`. ADV-P06-MED-001 CONFIRMED load-bearing (test_adv_p06_med001_bolditalic_measure_uses_same_slot_as_draw_when_bold_absent). No new findings. 2 more consecutive strict-CLEAN passes required to converge 3/3. HEAD f1bd9f99; tests 3761 pass. |
 | 2026-06-09 | STORY-081-PASS6 | Pass 6 NOT CLEAN (1 MED + 2 OBS; zero CRIT/HIGH 2nd consecutive pass). Pass-5 ResolvedFace fixes CONFIRMED load-bearing: `ResolvedFace{font,raw,face_index}` type invariant; `face_index` threaded through `compute_multi_span_x_positions` → `measure_text_width_pt`; load-bearing regression test confirmed. New findings: ADV-P06-MED-001 — BoldItalic span: measure path (`exporter.rs:1243`) uses `bold.or(regular)` while draw path (`exporter.rs:1294`) uses `bold.or(italic).or(regular)`; when `bold=None` & `italic=Some`, measure selects REGULAR, draw selects ITALIC → cursor mis-spacing; reachable via EC-003 nested bold-italic. OBS-P06-001 — cold_budget adjudicated OUT of STORY-081 scope (pre-existing diagrams timing-gate flake, no causal link to STORY-081 font loading). OBS-P06-002 — double `load_system_fonts()` per PDF export (correct-but-slow, ADR-023-deferred); wall-clock timing gates are structural false-green/false-fail vectors; lessons-codification: use deterministic call-count assertions. Severity decaying to MED-only 2nd pass. Shared `face_for_span_kind` helper to end measure≠draw recurrence. cold_budget must be resolved before STORY-081 PR (FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE). Streak 0/3. |
