@@ -142,6 +142,8 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
 /// - [`slideforge_syntax::FieldValue::Ident`]: looked up in env.
 /// - [`slideforge_syntax::FieldValue::Error`]: skipped (error already in sink).
 /// - [`slideforge_syntax::FieldValue::Shape`]: stored as a block (future story).
+/// - [`slideforge_syntax::FieldValue::List`]: each item is evaluated recursively
+///   and collected into `Value::List` (STORY-088, implemented at ~line 300).
 ///
 /// Set-rule defaults (`set_rule_defaults`) are applied after explicit field
 /// evaluation: for each `(slide_type, field_name) -> default_value` entry, if
@@ -230,6 +232,20 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
             FieldValue::Error => {
                 // Error sentinel — already in sink, skip this field.
                 continue;
+            },
+            FieldValue::List(items) => {
+                // STORY-088: evaluate each list item and collect to Value::List.
+                // Items that eval to None (e.g. FieldValue::Error sentinels from
+                // the parser) are silently dropped — the parser already pushed a
+                // diagnostic for them (BC-1.15.001 error accumulation).
+                let vals: Vec<Value> = items
+                    .iter()
+                    .filter_map(|item| {
+                        use crate::eval::eval_field_value_to_value;
+                        eval_field_value_to_value(item, env, sink)
+                    })
+                    .collect();
+                slideforge_types::FieldValue::Literal(Value::List(vals))
             },
         };
         fields.insert(field_name, field_value);

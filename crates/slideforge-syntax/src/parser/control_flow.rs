@@ -33,7 +33,10 @@ use crate::{
     token::Token,
 };
 
-use super::{expr::expr, shape::shape_block, template::template_value};
+use super::{
+    expr::expr, list_literal::list_literal_elements_cf, shape::shape_block,
+    template::template_value,
+};
 
 // ─── Type alias ───────────────────────────────────────────────────────────────
 
@@ -122,7 +125,28 @@ where
         Token::Ident(s) = e if s.as_ref() != "in" => (FieldValue::Ident(s.to_string()), e.span()),
     };
 
-    let value_p = template_val.or(other_val);
+    // List literal: route through the shared list_literal_elements_cf() combinator.
+    //
+    // list_literal_elements_cf() handles:
+    //   - Valid template-string items    → FieldValue::Template
+    //   - Non-string primitives          → E-PAR-024 "got <type>" + FieldValue::Error
+    //   - Nested list `[...]` items      → E-PAR-024 "got nested list" + FieldValue::Error
+    //   - Trailing comma                 → accepted (EC-003)
+    //   - Empty list `[]`                → FieldValue::List([]) with 0 errors
+    //
+    // The `_cf` variant excludes the `"in"` identifier from bare-word items so
+    // that `@for x in coll:` structural keywords are never consumed as list items.
+    //
+    // This replaces the previous local list_item_tval/list_item_other/list_item trio
+    // and the dead FieldValue::List(_) => "nested list" arm (F-088-P5-MED-002 fix).
+    // BC-1.15.001 error accumulation is preserved: parsing continues after each error.
+    let list_val = list_literal_elements_cf().map_with(move |items, e| {
+        let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+        (FieldValue::List(items_fv), e.span())
+    });
+
+    // Priority: list_val first, then template string, then other scalars.
+    let value_p = list_val.or(template_val).or(other_val);
 
     // `shape:` block produces a FieldNode with name "shape" and FieldValue::Shape.
     let shape_field = shape_block(file_id).map_with(move |(val, val_span), e| {
@@ -171,8 +195,20 @@ where
         })
     });
 
-    // Regular field line: `IDENT value NEWLINE`.
+    // Regular field line: `IDENT (':')? value NEWLINE`.
+    //
+    // The colon separator is optional so that both DSL forms are supported:
+    //   `bullets items`     (ident reference, no colon)
+    //   `bullets: items`    (ident reference with colon — STORY-088 Form 2 / spec)
+    //   `bullets ["A","B"]` (inline list literal, no colon)
+    //   `bullets: ["A","B"]`(inline list literal with colon)
+    //
+    // This mirrors the spec's `@var` form example:
+    //   slide content:
+    //     bullets: items
+    // Both colon and non-colon forms produce identical AST nodes.
     let regular_field = any_ident()
+        .then_ignore(just(Token::Colon).or_not())
         .then(value_p)
         .then_ignore(just(Token::Newline).or_not())
         .map(move |((name, name_span), (val, val_span))| {
@@ -1398,5 +1434,521 @@ mod tests {
         let result = parse_str(&src);
         let deck = result.expect("template_expr.sf must parse without errors");
         insta::assert_debug_snapshot!("template_expr_ast", deck);
+    }
+
+    // ── MED-001 (Pass-2): per-type <type> substitution in E-PAR-024 ──────────
+    //
+    // These load-bearing tests verify that E-PAR-024 emits the human-readable
+    // type name (error-taxonomy v2.27 §E-PAR-024 binding format) rather than
+    // the hardcoded string "non-string value".
+    //
+    // These tests exercise the field_line_cf / control_flow path (slide body
+    // list literal), complementing the deck.rs tests that exercise the
+    // vars-block / @var / field_line_parser path.
+
+    /// Helper: parse source string and return raw error reason strings.
+    fn parse_get_errors_cf(src: &str) -> Vec<String> {
+        match parse_str(src) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+        }
+    }
+
+    /// MED-001 (a, cf path) — `bullets [42]` inside a slide body → E-PAR-024
+    /// message contains "integer" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001a_cf_integer_item_produces_e_par_024_with_type_integer() {
+        let src = concat!("slide content:\n", "  bullets [42]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001a (cf): bullets [42] must produce ≥1 parse error; got 0"
+        );
+        let has_integer = errors.iter().any(|msg| msg.contains("integer"));
+        assert!(
+            has_integer,
+            "MED-001a (cf): E-PAR-024 message for bullets [42] must contain 'integer' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (b, cf path) — `bullets [true]` inside a slide body → E-PAR-024
+    /// message contains "boolean" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001b_cf_boolean_item_produces_e_par_024_with_type_boolean() {
+        let src = concat!("slide content:\n", "  bullets [true]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001b (cf): bullets [true] must produce ≥1 parse error; got 0"
+        );
+        let has_boolean = errors.iter().any(|msg| msg.contains("boolean"));
+        assert!(
+            has_boolean,
+            "MED-001b (cf): E-PAR-024 message for bullets [true] must contain 'boolean' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (c, cf path) — `bullets [someident]` inside a slide body → E-PAR-024
+    /// message contains "bare word" (`field_line_cf` / `control_flow` path).
+    #[test]
+    fn test_bc_1_01_002_med001c_cf_bare_word_item_produces_e_par_024_with_type_bare_word() {
+        // `someident` parsed as FieldValue::Ident (unquoted bare identifier).
+        let src = concat!("slide content:\n", "  bullets [someident]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-001c (cf): bullets [someident] must produce ≥1 parse error; got 0"
+        );
+        let has_bare_word = errors.iter().any(|msg| msg.contains("bare word"));
+        assert!(
+            has_bare_word,
+            "MED-001c (cf): E-PAR-024 message for bullets [someident] must contain 'bare word' \
+             (not 'non-string value'); got errors: {errors:?}"
+        );
+    }
+
+    // ── MED-P3-001 (Pass-3, cf path): nested list literal → rejected (not silently accepted) ──
+    //
+    // Same requirement as deck.rs MED-P3-001 but exercising the control_flow
+    // parser path (`slide_body` / `field_line_cf` / `@for`-context list).
+    //
+    // Parser behavior: `[["A"]]` is rejected at the grammar level because `[`
+    // (LBracket) is not a valid token for any list-item alternative. The
+    // `FieldValue::List(_) => "nested list"` arm in the validate hook is
+    // defense-in-depth for direct AST construction; the grammar-level
+    // rejection is the first line of enforcement.
+
+    /// MED-P3-001 (cf path) — `bullets [["A"]]` inside a slide body → ≥1 parse
+    /// error (NOT silently accepted).
+    ///
+    /// Load-bearing: enforces flat-only list scope at the control-flow parser
+    /// path. Verifies the silent-failure ban.
+    #[test]
+    fn test_bc_1_01_002_med_p3_001_cf_nested_list_item_is_not_silently_accepted() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-P3-001 (cf): bullets [[\"A\"]] must produce ≥1 parse error; got 0. \
+             Nested list literals are out of scope (STORY-088 spec); they must be rejected, \
+             not silently accepted as valid."
+        );
+        // The grammar-level rejection produces an ExpectedFound (LBracket not
+        // expected as a list item token). This confirms nested lists are not
+        // silently accepted.
+        let has_lbracket_rejection = errors.iter().any(|msg| {
+            msg.contains("LBracket") || msg.contains("E-PAR-024") || msg.contains("nested")
+        });
+        assert!(
+            has_lbracket_rejection,
+            "MED-P3-001 (cf): error for bullets [[\"A\"]] must reference the rejected \
+             nested bracket token or E-PAR-024; got errors: {errors:?}"
+        );
+    }
+
+    // ── F-088-P5-MED-002: nested list in SLIDE BODY must emit E-PAR-024 "nested list" ──
+    //
+    // F-088-P5-MED-002: `bullets [["A"]]` in slide-body (control_flow path) currently
+    // emits a cryptic `ExpectedFound` (LBracket unexpected) rather than E-PAR-024
+    // with "got nested list". The shared-combinator refactor must use a `recursive`
+    // list_item parser that recognises `[` as a nested-list attempt and emits the
+    // canonical E-PAR-024 message.
+    //
+    // RED GATE: current control_flow path uses `list_item_tval.or(list_item_other)` without
+    // a recursive arm — so `[` is never consumed as a list item and ExpectedFound fires first.
+    // After the refactor: the shared recursive combinator catches `[` → emits E-PAR-024
+    // "nested list" → the error contains "nested list" AND "E-PAR-024".
+
+    /// F-088-P5-MED-002 (a) — `bullets [["A"]]` in slide body → error contains
+    /// "nested list" (not just `LBracket` `ExpectedFound`).
+    ///
+    /// RED GATE: `control_flow` path emits `ExpectedFound` (`LBracket`) instead of
+    /// E-PAR-024 "nested list". After shared-combinator refactor: "nested list" present.
+    #[test]
+    fn test_bc_1_01_002_p5_med002_cf_nested_list_emits_e_par_024_nested_list_message() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-002: bullets [[\"A\"]] must produce ≥1 parse error; got 0"
+        );
+        let has_nested_list_msg = errors.iter().any(|msg| msg.contains("nested list"));
+        assert!(
+            has_nested_list_msg,
+            "P5-MED-002 RED GATE: error for bullets [[\"A\"]] must contain 'nested list' \
+             per error-taxonomy v2.28 §E-PAR-024; \
+             currently emits ExpectedFound(LBracket) instead; \
+             got errors: {errors:?}"
+        );
+    }
+
+    /// F-088-P5-MED-002 (b) — `bullets [["A"]]` in slide body → error contains
+    /// "E-PAR-024" code (not just a structural token error).
+    ///
+    /// RED GATE: `control_flow` `ExpectedFound` lacks the E-PAR-024 code.
+    #[test]
+    fn test_bc_1_01_002_p5_med002_cf_nested_list_emits_e_par_024_code() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-002 (b): bullets [[\"A\"]] must produce ≥1 parse error; got 0"
+        );
+        let has_e_par_024 = errors.iter().any(|msg| msg.contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "P5-MED-002 (b) RED GATE: error for bullets [[\"A\"]] must contain 'E-PAR-024'; \
+             currently emits a structural ExpectedFound without the error code; \
+             got errors: {errors:?}"
+        );
+    }
+
+    // ── MED-P3-002 (Pass-3, cf path): float list item → E-PAR-024 ────────────
+    //
+    // `bullets [1.5]` lexes to FloatLit → FieldValue::Float(1.5). The
+    // `FieldValue::Float(_) => "decimal number"` branch was untested at this site.
+
+    /// MED-P3-002 (cf path) — `bullets [1.5]` inside a slide body → ≥1 error
+    /// containing `"decimal number"`.
+    ///
+    /// Load-bearing: exercises the `FieldValue::Float(_) => "decimal number"` arm
+    /// in the control-flow `list_item` validator.
+    #[test]
+    fn test_bc_1_01_002_med_p3_002_cf_float_item_produces_e_par_024_decimal_number() {
+        let src = concat!("slide content:\n", "  bullets [1.5]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "MED-P3-002 (cf): bullets [1.5] must produce ≥1 parse error; got 0"
+        );
+        let has_decimal = errors.iter().any(|msg| msg.contains("decimal number"));
+        assert!(
+            has_decimal,
+            "MED-P3-002 (cf): E-PAR-024 message for bullets [1.5] must contain \
+             'decimal number'; got errors: {errors:?}"
+        );
+    }
+
+    // ── OBS-088-P7-001: depth-tracker boundary coverage ──────────────────────
+    //
+    // The Pass-6 fix introduced a non-recursive iterative depth-tracking loop
+    // (`custom` combinator) that consumes nested `[...]` tokens with O(1) stack.
+    //
+    // Three boundary conditions require explicit coverage:
+    //
+    //   1. **Nested-then-valid** (`[["A"], "B"]`): depth loop stops at the inner
+    //      `]` (depth 1→0) and does NOT consume the trailing `, "B"`.  The outer
+    //      `separated_by` can then recover `"B"` as a valid Template item.
+    //      A one-bracket over-consumption bug would swallow the `,` or `"B"`,
+    //      producing either a second error or losing the valid item.
+    //
+    //   2. **Valid-then-nested** (`["A", ["B"]]`): depth loop stops at the inner
+    //      `]`, leaving the outer `]` for `delimited_by`.  The preceding `"A"`
+    //      must be unaffected (no spurious error).  A one-bracket under-consumption
+    //      bug would leave a stray `]` that causes a secondary error.
+    //
+    //   3. **Truncated/EOF** (`[["A"]`): the outer `]` is absent.  The depth loop
+    //      sees `"A"` then the lone `]` → depth 1→0, exits normally.  The outer
+    //      `delimited_by` then reaches EOF with no `]` → emits an unclosed-list
+    //      error.  The `None => break` branch in the loop must not panic.
+    //
+    // These three inputs were not covered by the existing single-nested `[[\"A\"]]`
+    // or the 5000-deep stress test (both place the nested structure in the TRAILING
+    // position, which the outer `delimited_by` recovery hides).
+
+    /// Helper: lex `src`, run the full deck parser via the public `parse` API,
+    /// and return `(Option<DeckNode>, Vec<String>)` containing the parsed AST (if
+    /// any) and all error reason strings.  Unlike `parse_str`, this does NOT discard
+    /// the AST when errors are present — allowing tests to inspect partial results.
+    fn parse_deck_and_errors_cf(src: &str) -> (Option<DeckNode>, Vec<String>) {
+        use crate::{lexer::lex, parser::deck::deck_parser, token::Token};
+        use chumsky::Parser as _;
+        use chumsky::input::Input as _;
+        use chumsky::prelude::SimpleSpan;
+
+        let file: Arc<str> = Arc::from("test.sf");
+        let (tokens, _lex_errs) = lex(src, file.clone());
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = crate::span::SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+        let error_strs = parse_errs
+            .iter()
+            .map(|e| format!("{:?}", e.reason()))
+            .collect();
+        (deck_opt, error_strs)
+    }
+
+    /// OBS-088-P7-001 (1/3) — nested-then-valid: `bullets [["A"], "B"]` must emit
+    /// EXACTLY ONE E-PAR-024 "nested list" error and preserve `"B"` as a valid list
+    /// item (no spurious second E-PAR-024 for `"B"`).
+    ///
+    /// This proves the depth loop stops at the inner `]` (depth 1→0) without
+    /// consuming the `, "B"` tokens that follow.  A one-bracket over-consumption
+    /// regression would either produce a second error or lose the `"B"` item.
+    ///
+    /// Load-bearing assertions:
+    /// - nested-list error count == 1 (not 0, not 2+)
+    /// - the resulting list contains exactly 2 items: `FieldValue::Error` sentinel
+    ///   for `["A"]` followed by `FieldValue::Template` for `"B"`
+    #[test]
+    fn test_obs_088_p7_001_nested_then_valid_depth_stops_at_inner_close() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"], \"B\"]\n");
+        let (deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Count occurrences of "nested list" in the error set (not just any error).
+        let nested_list_count = errors
+            .iter()
+            .filter(|msg| msg.contains("nested list"))
+            .count();
+        assert_eq!(
+            nested_list_count, 1,
+            "OBS-088-P7-001 (nested-then-valid): expected EXACTLY 1 E-PAR-024 'nested list' \
+             error; got {nested_list_count}. \
+             errors: {errors:?}"
+        );
+
+        // The deck must be partially recoverable — the bullets field should be present
+        // with 2 items: Error sentinel for [\"A\"] and Template for \"B\".
+        let deck = deck_opt.expect(
+            "OBS-088-P7-001 (nested-then-valid): deck_parser must produce a partial AST \
+             even with errors; got None",
+        );
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!(
+                "OBS-088-P7-001: expected Slide as first item; got: {:?}",
+                deck.items[0]
+            );
+        };
+        let slide = slide_s.value();
+        let bullets = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect(
+                "OBS-088-P7-001 (nested-then-valid): 'bullets' field must be present in partial AST",
+            );
+        let FieldValue::List(items) = bullets.value.value() else {
+            panic!(
+                "OBS-088-P7-001 (nested-then-valid): bullets must be FieldValue::List; \
+                 got: {:?}",
+                bullets.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "OBS-088-P7-001 (nested-then-valid): list must have 2 items \
+             (Error for [\"A\"] + Template for \"B\"); got {}: {items:?}",
+            items.len()
+        );
+        // First item: Error sentinel for the nested list.
+        assert!(
+            matches!(items[0], FieldValue::Error),
+            "OBS-088-P7-001 (nested-then-valid): items[0] must be FieldValue::Error \
+             (nested-list sentinel); got: {:?}",
+            items[0]
+        );
+        // Second item: valid Template for \"B\" — proves the loop did NOT over-consume.
+        assert!(
+            matches!(items[1], FieldValue::Template(_)),
+            "OBS-088-P7-001 (nested-then-valid): items[1] must be FieldValue::Template \
+             for \"B\" (depth loop must stop at inner ']'); got: {:?}. \
+             Over-consumption regression: loop consumed ',' or '\"B\"' as part of the \
+             inner bracket skip.",
+            items[1]
+        );
+    }
+
+    /// OBS-088-P7-001 (2/3) — valid-then-nested: `bullets ["A", ["B"]]` must emit
+    /// EXACTLY ONE E-PAR-024 "nested list" error; `"A"` must be a valid Template item
+    /// with no spurious error; no leftover-token error after the list.
+    ///
+    /// This proves:
+    /// - The depth loop stops at the inner `]`, leaving the outer `]` for
+    ///   `delimited_by` (no under-consumption stray-token regression).
+    /// - `"A"` parsed before the nested sub-list is unaffected.
+    ///
+    /// Load-bearing assertions:
+    /// - nested-list error count == 1 (not 0, not 2+)
+    /// - the resulting list has 2 items: `FieldValue::Template` for `"A"` and
+    ///   `FieldValue::Error` sentinel for `["B"]`
+    #[test]
+    fn test_obs_088_p7_001_valid_then_nested_depth_stops_leaving_outer_close() {
+        let src = concat!("slide content:\n", "  bullets [\"A\", [\"B\"]]\n");
+        let (deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        let nested_list_count = errors
+            .iter()
+            .filter(|msg| msg.contains("nested list"))
+            .count();
+        assert_eq!(
+            nested_list_count, 1,
+            "OBS-088-P7-001 (valid-then-nested): expected EXACTLY 1 E-PAR-024 'nested list' \
+             error; got {nested_list_count}. \
+             errors: {errors:?}"
+        );
+
+        let deck = deck_opt.expect(
+            "OBS-088-P7-001 (valid-then-nested): deck_parser must produce a partial AST; got None",
+        );
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("OBS-088-P7-001: expected Slide; got: {:?}", deck.items[0]);
+        };
+        let slide = slide_s.value();
+        let bullets = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect(
+                "OBS-088-P7-001 (valid-then-nested): 'bullets' field must be present in partial AST",
+            );
+        let FieldValue::List(items) = bullets.value.value() else {
+            panic!(
+                "OBS-088-P7-001 (valid-then-nested): bullets must be FieldValue::List; \
+                 got: {:?}",
+                bullets.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "OBS-088-P7-001 (valid-then-nested): list must have 2 items \
+             (Template for \"A\" + Error for [\"B\"]); got {}: {items:?}",
+            items.len()
+        );
+        // First item: valid Template for \"A\" — proves \"A\" was not affected by the
+        // nested-list processing that follows.
+        assert!(
+            matches!(items[0], FieldValue::Template(_)),
+            "OBS-088-P7-001 (valid-then-nested): items[0] must be FieldValue::Template \
+             for \"A\"; got: {:?}",
+            items[0]
+        );
+        // Second item: Error sentinel for the nested list.
+        assert!(
+            matches!(items[1], FieldValue::Error),
+            "OBS-088-P7-001 (valid-then-nested): items[1] must be FieldValue::Error \
+             (nested-list sentinel for [\"B\"]); got: {:?}. \
+             Under-consumption regression: outer ']' not left for delimited_by.",
+            items[1]
+        );
+    }
+
+    /// OBS-088-P7-001 (3/3) — truncated/EOF branch: `bullets [["A"]` (missing outer
+    /// `]`) must NOT panic and must produce ≥1 error.
+    ///
+    /// This is the load-bearing test for the `None => break` branch in the
+    /// `custom` depth-tracking loop.  Without that branch, a malformed input that
+    /// reaches EOF while inside the inner bracket skip would loop forever or
+    /// return an unexpected `Ok(())` leaving the outer `delimited_by` with a
+    /// missing close-bracket.
+    ///
+    /// The input is:
+    ///   `slide content:`
+    ///   `  bullets [["A"]`   ← only ONE `]` present; outer list is unclosed
+    ///
+    /// The `custom` loop: opens at depth=1 (outer `[` consumed by `just(LBracket)`),
+    /// sees `"A"`, sees `]` → depth 0, exits normally (no EOF hit here because the
+    /// one `]` closes the inner list before EOF).  Then the outer `delimited_by`
+    /// cannot find its closing `]` → emits an unclosed-list / E-PAR-024 error.
+    ///
+    /// The no-panic guarantee is the primary load-bearing assertion — reaching any
+    /// assertion proves the `None => break` branch fired without aborting.
+    #[test]
+    fn test_obs_088_p7_001_truncated_eof_branch_no_panic_produces_error() {
+        // One `]` present: closes the inner `["A"]`, but the outer `[` has no match.
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]\n");
+        // Must NOT panic — reaching this line proves the parser handles truncated
+        // nested input gracefully (no stack overflow, no process abort).
+        let (_deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Must produce ≥1 error: either the nested-list E-PAR-024 or the
+        // unclosed outer list, or both.
+        assert!(
+            !errors.is_empty(),
+            "OBS-088-P7-001 (truncated/EOF): truncated input `[[\"A\"]` must produce ≥1 \
+             parse error (unclosed list or E-PAR-024); got 0. \
+             This may indicate the truncated input was silently accepted, which is wrong."
+        );
+    }
+
+    // ── OBS-088-P7-001 (4/4): truly-unterminated nested input — None => break ──
+    //
+    // The three tests above (nested-then-valid, valid-then-nested, truncated-EOF)
+    // all exit the depth-tracking loop via the `depth == 0` path: either the inner
+    // `]` is present in the token stream (depth reaches 0) or the outer `delimited_by`
+    // fails after the loop exits cleanly.
+    //
+    // The `None => break` arm is reached ONLY when `inp.next()` returns `None`
+    // (EOF / end of token stream) while `depth` is still > 0 — i.e. the nested
+    // open `[` was never closed at all before the stream was exhausted.
+    //
+    // Input that exercises this arm:
+    //   `bullets [["A"`
+    //
+    // Token walk:
+    //   - Outer `[` consumed by `delimited_by`.
+    //   - `just(LBracket)` consumes the second `[`; depth starts at 1.
+    //   - Loop iteration 1: `inp.next()` → `Some(StringLit("A"))` (the string token);
+    //     matches `Some(_)` → no depth change, continue.
+    //   - Loop iteration 2: `inp.next()` → `None` (EOF — no `]` was ever lexed);
+    //     matches `None => break`.  depth is still 1 at the break point.
+    //
+    // Contrast with the existing truncated test `[["A"]`:
+    //   - Loop sees `Some(StringLit("A"))`, then `Some(RBracket)` → depth 1→0,
+    //     exits via `depth == 0`.  The `None` arm is NEVER reached.
+    //
+    // This test is the ONLY one that genuinely exercises the `None => break` path.
+
+    /// OBS-088-P7-001 (4/4) — EOF-inside-nested-depth-loop: `bullets [["A"` (no
+    /// closing brackets at all) must NOT panic and must produce ≥1 diagnostic.
+    ///
+    /// This is the definitive coverage test for the `None => break` arm of the
+    /// iterative depth-tracking loop in `list_literal.rs::nested_item`.
+    ///
+    /// Token walk that hits `None => break`:
+    ///   - outer `[` consumed by `delimited_by`
+    ///   - `just(LBracket)` consumes the second `[`; depth = 1
+    ///   - `inp.next()` → `Some(string "A")` → `Some(_)` arm, continue
+    ///   - `inp.next()` → `None` (EOF) → **`None => break`** fires with depth = 1
+    ///
+    /// The existing test `[["A"]` exits via `depth == 0` (the `]` reduces depth
+    /// before EOF) and does NOT reach this branch.
+    ///
+    /// Load-bearing assertions:
+    /// 1. No panic — reaching any assertion proves graceful EOF handling.
+    /// 2. `!errors.is_empty()` — ≥1 diagnostic emitted (no silent acceptance).
+    #[test]
+    fn test_obs_088_p7_001_eof_inside_nested_depth_loop_no_panic() {
+        // `bullets [["A"` — outer `[` + inner `[` + string token, then EOF.
+        // No `]` anywhere: the depth loop must reach `inp.next() == None` with
+        // depth == 1 and exit via `None => break` (not via `depth == 0`).
+        let src = concat!("slide content:\n", "  bullets [[\"A\"\n");
+
+        // Load-bearing assertion 1: NO panic.
+        // Reaching this point (and the assert below) proves the `None => break`
+        // branch handled EOF gracefully without aborting the process.
+        let (_deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Load-bearing assertion 2: ≥1 diagnostic (not silent acceptance).
+        assert!(
+            !errors.is_empty(),
+            "OBS-088-P7-001 (None=>break): `bullets [[\"A\"` must produce ≥1 parse error \
+             (unclosed nested list at EOF); got 0. \
+             Silent acceptance of unterminated nested input is a regression."
+        );
     }
 }

@@ -110,6 +110,21 @@ pub enum FieldValue {
     /// This variant enables the evaluator to place arbitrary shapes on a slide
     /// without conflating them with string or numeric field values.
     Shape(Box<ShapeNode>),
+    /// A list-literal value: `["A", "B", "C"]`.
+    ///
+    /// Produced when a `[...]` list-literal appears as a field value or as the
+    /// right-hand side of a `vars:` / `@var` assignment.
+    ///
+    /// # STORY-088
+    ///
+    /// The evaluator maps `FieldValue::List(items)` → `Value::List(vals)` by
+    /// evaluating each item through the normal `FieldValue` dispatch. For the
+    /// `bullets:` field, Stage 2b in `thread_fields_to_blocks` then routes
+    /// `Value::List(items)` → `ContentBlock::Bullets(items)` (BC-1.16.001 PC-7).
+    ///
+    /// Only flat lists of string literals are required for v1.0; nested
+    /// `FieldValue::List` items are not expected from the parser.
+    List(Vec<FieldValue>),
     /// Sentinel produced by the error-recovery path when a value could not be parsed.
     Error,
 }
@@ -234,6 +249,21 @@ pub enum SetRuleValue {
     Bool(bool),
     /// An unquoted bare identifier.
     Ident(String),
+    /// A list-literal value: `["A", "B", "C"]`.
+    ///
+    /// Produced when a `[...]` list-literal appears as the right-hand side of a
+    /// `set <slide_type>: <field> [...]` rule. Items are [`FieldValue`] so that
+    /// the evaluator can map each to a `Value` (from `slideforge-types`) via the
+    /// standard `eval_field_value_to_value` dispatch.
+    ///
+    /// # STORY-088 AC-012
+    ///
+    /// `set content: bullets ["A", "B"]` → `SetRuleValue::List(vec![FieldValue::Template(...), ...])`.
+    /// The evaluator maps this to `Value::List(vec![Value::Str("A"), Value::Str("B")])`,
+    /// which flows through `thread_fields_to_blocks` (BC-1.16.001 PC-7) to
+    /// `ContentBlock::Bullets` when the `bullets` field is resolved via the
+    /// set-rule default-merge mechanism.
+    List(Vec<FieldValue>),
     /// Sentinel produced by error recovery.
     Error,
 }
@@ -1049,5 +1079,94 @@ mod tests {
         assert_ne!(shape_fv, ident_fv);
         let template_fv = FieldValue::Template(vec![TemplateChunk::Literal("shape".to_string())]);
         assert_ne!(shape_fv, template_fv);
+    }
+
+    // ── STORY-088: FieldValue::List variant trait bounds ─────────────────────
+
+    /// BC-1.01.002 — `FieldValue::List` must implement `Hash + Eq + Clone + Debug`.
+    ///
+    /// The `List` variant wraps `Vec<FieldValue>` so all four derives must hold
+    /// transitively. This test constructs a 3-item list and verifies each bound.
+    #[test]
+    fn test_bc_1_01_002_field_value_list_derives_hash_eq_clone_debug() {
+        // Construct a FieldValue::List containing three Template items.
+        let items = vec![
+            FieldValue::Template(vec![TemplateChunk::Literal("Item A".to_string())]),
+            FieldValue::Template(vec![TemplateChunk::Literal("Item B".to_string())]),
+            FieldValue::Template(vec![TemplateChunk::Literal("Item C".to_string())]),
+        ];
+        let fv = FieldValue::List(items);
+        let fv2 = fv.clone();
+
+        // Eq
+        assert_eq!(fv, fv2, "FieldValue::List must implement Eq");
+
+        // Debug
+        let _ = format!("{fv:?}");
+
+        // Hash (via HashSet insertion)
+        let mut set = HashSet::new();
+        set.insert(fv);
+        assert_eq!(set.len(), 1, "FieldValue::List must be hashable");
+    }
+
+    /// BC-1.01.002 — empty `FieldValue::List([])` is valid and distinct from other variants.
+    #[test]
+    fn test_bc_1_01_002_field_value_list_empty_is_valid_and_distinct() {
+        let empty_list = FieldValue::List(vec![]);
+        let empty_template = FieldValue::Template(vec![]);
+        let error = FieldValue::Error;
+
+        // Empty list is distinct from empty Template and from Error.
+        assert_ne!(empty_list, empty_template);
+        assert_ne!(empty_list, error);
+
+        // Clone of empty list equals itself.
+        let cloned = empty_list.clone();
+        assert_eq!(empty_list, cloned);
+    }
+
+    /// BC-1.01.002 — `FieldValue::List` is distinct from `FieldValue::Ident`.
+    ///
+    /// A single-item list `["Only"]` must not compare equal to `Ident("Only")`.
+    /// This guards against the forbidden "single-item list treated as bare string"
+    /// anti-pattern described in AC-003.
+    #[test]
+    fn test_bc_1_01_002_field_value_list_single_item_is_not_ident() {
+        let list = FieldValue::List(vec![FieldValue::Template(vec![TemplateChunk::Literal(
+            "Only".to_string(),
+        )])]);
+        let ident = FieldValue::Ident("Only".to_string());
+
+        assert_ne!(list, ident, "single-item List must not equal Ident");
+    }
+
+    /// BC-1.01.002 — `FieldValue::List` items are `FieldValue` themselves (nested support).
+    ///
+    /// The `Vec<FieldValue>` inner type means the variant can technically hold
+    /// nested lists. This test verifies that the type system accepts nesting even
+    /// though the v1.0 parser only produces flat lists.
+    #[test]
+    fn test_bc_1_01_002_field_value_list_inner_items_are_field_values() {
+        // Each item is a FieldValue::Template wrapping a single Literal chunk.
+        let items: Vec<FieldValue> = vec![
+            FieldValue::Template(vec![TemplateChunk::Literal("A".to_string())]),
+            FieldValue::Template(vec![TemplateChunk::Literal("B".to_string())]),
+        ];
+        let fv = FieldValue::List(items.clone());
+
+        // Verify we can destructure and check inner items.
+        let FieldValue::List(inner) = &fv else {
+            panic!("expected FieldValue::List");
+        };
+        assert_eq!(inner.len(), 2, "List must hold 2 items");
+        assert_eq!(
+            inner[0],
+            FieldValue::Template(vec![TemplateChunk::Literal("A".to_string())])
+        );
+        assert_eq!(
+            inner[1],
+            FieldValue::Template(vec![TemplateChunk::Literal("B".to_string())])
+        );
     }
 }

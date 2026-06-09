@@ -101,3 +101,10 @@ mod e2e_wave4_gate5_image_alt;
 // Regression intent: chart without `data` → strict Ok (chart.data → optional per architect).
 #[path = "e2e/story_089_field_schema.rs"]
 mod e2e_story_089_field_schema;
+
+// STORY-088 — BC-1.01.002 bullets list-literal DSL syntax E2E tests.
+// AC-007 (direct list-literal): `bullets: ["Item A", "Item B", "Item C"]` produces
+//   ≥3 <a:r> text runs in PPTX output (no @var binding — direct field literal).
+// RED GATE: value_parser() has no [...]  arm → build() returns Err(ParseFailed).
+#[path = "e2e/story_088_bullets_list_literal.rs"]
+mod e2e_story_088_bullets_list_literal;

@@ -29,6 +29,7 @@ pub mod alias;
 pub mod control_flow;
 pub mod deck;
 pub mod expr;
+pub mod list_literal;
 pub mod section;
 pub mod section_group;
 pub mod shape;

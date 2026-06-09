@@ -1,0 +1,20 @@
+# STORY-088 fixture: content slide with a DIRECT list-literal bullets field.
+#
+# This fixture uses the spec-canonical colon form delivered by STORY-088:
+#
+#   bullets: ["Item A", "Item B", "Item C"]
+#
+# The colon separator is the spec-canonical form per the DSL spec and AC-007.
+# The no-colon form (bullets ["Item A", ...]) is also accepted by the parser,
+# and is covered by unit tests in deck.rs and control_flow.rs.
+#
+# This fixture is used by:
+#   test_bc_1_01_002_ac007_direct_list_literal_bullets_produces_ge3_text_runs_pptx
+#   (crates/slideforge/tests/e2e/story_088_bullets_list_literal.rs)
+
+slideforge_version "1"
+lang "en-US"
+
+slide content:
+  title "Agenda"
+  bullets: ["Item A", "Item B", "Item C"]
