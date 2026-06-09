@@ -3200,6 +3200,7 @@ mod story_072_tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -3215,6 +3216,7 @@ mod story_072_tests {
     fn make_gradient_deck(from: Rgb, to: Rgb, alt: AltText) -> LaidOutDeck {
         LaidOutDeck {
             page_size: PageSize::default(),
+            slide_sections: vec![],
             slides: vec![LaidOutSlide {
                 source_index: 0,
                 slide_type_keyword: Arc::from("title"),
@@ -3312,6 +3314,7 @@ mod story_072_tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let empty_bytes = PdfExporter::new()
             .export(&deck, &empty_laid_out, &brand, &opts)
