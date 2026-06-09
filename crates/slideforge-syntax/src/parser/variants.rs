@@ -978,9 +978,15 @@ mod tests {
     }
 
     /// BC-1.01.002 AC-013 (nested list rejection) — `vars: items: [["A"]]`
-    /// (nested list) produces ≥1 parse error. Not silently accepted.
+    /// (nested list) produces E-PAR-024 "nested list". Not silently accepted.
     ///
     /// Nested list literals are out of scope (STORY-088 spec).
+    ///
+    /// Strengthened (F-088-P6-MED-002): asserts that the error message contains
+    /// BOTH "E-PAR-024" AND "nested list", confirming the shared-combinator path
+    /// emits the canonical diagnostic (not merely any non-empty error). Matches
+    /// the assertion contract of the cf sibling test to make the "uniform across
+    /// 4 positions" claim load-bearing.
     #[test]
     fn test_bc_1_01_002_ac013_variant_vars_nested_list_is_rejected() {
         let src = concat!(
@@ -1002,6 +1008,19 @@ mod tests {
         assert!(
             !errors.is_empty(),
             "AC-013 nested: error list must not be empty"
+        );
+        // The shared combinator (parser/list_literal.rs) must emit E-PAR-024
+        // "got nested list" — not a generic ExpectedFound. Both substrings
+        // required: "E-PAR-024" catches code-prefix loss; "nested list" catches
+        // type-substitution loss.
+        let has_e_par_024_nested = errors.iter().any(|e| {
+            let msg = e.to_string();
+            msg.contains("E-PAR-024") && msg.contains("nested list")
+        });
+        assert!(
+            has_e_par_024_nested,
+            "AC-013 nested: error must contain 'E-PAR-024' AND 'nested list'; \
+             got: {errors:?}"
         );
     }
 }

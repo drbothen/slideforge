@@ -2082,33 +2082,33 @@ mod tests {
         );
     }
 
-    // ── MED-P3-001 (Pass-3): nested list literal → rejected (not silently accepted) ──
+    // ── MED-P3-001 (Pass-3 / P6 update): nested list literal → E-PAR-024 ────────
     //
-    // STORY-088 spec line ~185: "Nested list-literals are NOT in scope; only
-    // flat lists." The no-silent-failure ban requires that `[["A"]]` is never
-    // silently accepted and passed through as a valid bullet list.
+    // STORY-088 spec: "Nested list-literals are NOT in scope; only flat lists."
+    // The no-silent-failure ban requires that `[["A"]]` is never silently accepted
+    // and passed through as a valid bullet list.
     //
-    // Parser behavior: `[["A"]]` is rejected at the grammar level because `[`
-    // (LBracket) is not a valid token for any list-item alternative in the
-    // `value_parser` list_item grammar (chumsky produces an `ExpectedFound`
-    // error before the validate() hook fires). This is structurally correct:
-    // the grammar enforces flat-only lists, meaning `FieldValue::List(_)` as
-    // a list item is unreachable from user input.
+    // Parser behavior (post Pass-5 shared-combinator refactor): `[["A"]]` is
+    // handled by the shared `list_literal_elements` combinator in
+    // `parser/list_literal.rs`. When `[` is encountered at list-item position,
+    // the `nested_item` arm fires — NOT a grammar-level `ExpectedFound`. The
+    // shared combinator:
+    //   1. Detects the inner `[` via `just(Token::LBracket)`.
+    //   2. Consumes the inner content iteratively (O(1) stack, no recursion).
+    //   3. Emits E-PAR-024 "non-string list item … got nested list" via `validate`.
     //
-    // The `FieldValue::List(_) => "nested list"` arm in the validate hook is
-    // defense-in-depth for direct AST construction in tests; the grammar-level
-    // rejection is the first line of enforcement.
-    //
-    // This test verifies the ENFORCED PROPERTY: `[["A"]]` is not silently accepted
-    // (produces ≥1 error). The exact error code is ExpectedFound from chumsky,
-    // not E-PAR-024, because the grammar rejects it before the validator fires.
+    // This test verifies the ENFORCED PROPERTY: `[["A"]]` produces E-PAR-024
+    // with the "nested list" message. The assertion is load-bearing — it would
+    // catch a regression to the old `ExpectedFound(LBracket)` behavior (where the
+    // error was silent about the E-PAR-024 code) or to silent acceptance.
 
-    /// MED-P3-001 (deck path) — `bullets [["A"]]` → ≥1 parse error (NOT silently
-    /// accepted).
+    /// MED-P3-001 (deck path) — `bullets [["A"]]` → E-PAR-024 "nested list".
     ///
-    /// Load-bearing: enforces flat-only list scope at the deck-level parser.
-    /// Verifies the silent-failure ban: nested syntax must produce a diagnostic,
-    /// not silently produce a valid AST.
+    /// Load-bearing: enforces the shared-combinator E-PAR-024 contract for
+    /// nested list items at the deck-level `value_parser` path.
+    /// Strengthened (F-088-P6-MED-001): assertion requires both "E-PAR-024" AND
+    /// "nested list" in the error message — catches regressions to
+    /// `ExpectedFound(LBracket)` or silent acceptance.
     #[test]
     fn test_bc_1_01_002_med_p3_001_deck_nested_list_item_is_not_silently_accepted() {
         let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
@@ -2119,17 +2119,18 @@ mod tests {
              Nested list literals are out of scope (STORY-088 spec); they must be rejected, \
              not silently accepted as valid."
         );
-        // The grammar-level rejection produces an ExpectedFound (LBracket not
-        // expected as a list item token). This confirms nested lists are not
-        // silently accepted — an error IS produced, just not E-PAR-024
-        // (chumsky rejects the token before the validate() hook can fire).
-        let has_lbracket_rejection = errors.iter().any(|msg| {
-            msg.contains("LBracket") || msg.contains("E-PAR-024") || msg.contains("nested")
-        });
+        // The shared combinator (parser/list_literal.rs) must emit E-PAR-024
+        // "non-string list item … got nested list" — NOT an ExpectedFound.
+        // Both substrings are required: "E-PAR-024" catches code-prefix loss;
+        // "nested list" catches type-substitution loss.
+        let has_e_par_024_nested = errors
+            .iter()
+            .any(|msg| msg.contains("E-PAR-024") && msg.contains("nested list"));
         assert!(
-            has_lbracket_rejection,
-            "MED-P3-001 (deck): error for bullets [[\"A\"]] must reference the rejected \
-             nested bracket token or E-PAR-024; got errors: {errors:?}"
+            has_e_par_024_nested,
+            "MED-P3-001 (deck): error for bullets [[\"A\"]] must contain both \
+             'E-PAR-024' and 'nested list'; \
+             got errors: {errors:?}"
         );
     }
 
@@ -2392,23 +2393,35 @@ mod tests {
     // ── Consistency matrix: same malformed element → same E-PAR-024 core (all 4 positions) ──
     //
     // The regression guard against future drift: the SAME malformed list element
-    // in ANY of the 4 value-position parsers must produce the SAME E-PAR-024
-    // message fragment ("List items must be quoted string literals; got integer").
-    // This test matrix fires if any single parser deviates from the canonical form.
+    // in ANY of the 4 value-position parsers must produce the SAME canonical
+    // E-PAR-024 message fragment.
+    //
+    // Strengthened (F-088-P6-MED-003): each position asserts BOTH "E-PAR-024"
+    // (code prefix) AND "List items must be quoted string literals; got integer"
+    // (canonical phrasing).  A position that drops the code prefix OR silently
+    // changes the phrasing will fail this matrix — making the "uniform across 4
+    // positions" claim load-bearing.
 
     /// Consistency matrix — `[42]` in all 4 value-position parsers all produce
-    /// a message containing "integer" (canonical per-type substitution).
+    /// the canonical E-PAR-024 fragment "List items must be quoted string
+    /// literals; got integer".
     ///
-    /// Positions: (1) `field_line_cf`/slide-body, (2) `vars_block`/deck-level `value_parser`,
-    /// (3) `set_rule_value_parser`, (4) `variant_value`.
-    ///
-    /// RED GATE for positions 3 and 4: they currently use the generic message.
+    /// Positions: (1) `field_line_cf`/slide-body, (2) `vars_block`/deck-level
+    /// `value_parser`, (3) `set_rule_value_parser`, (4) `variant_value`.
     #[test]
     fn test_bc_1_01_002_consistency_matrix_integer_item_all_4_positions_same_message_fragment() {
+        // Canonical fragment that EVERY position must produce (error-taxonomy v2.28 §E-PAR-024).
+        const CANON: (&str, &str) = (
+            "E-PAR-024",
+            "List items must be quoted string literals; got integer",
+        );
+
         // Position 1: slide-body (control_flow::field_line_cf).
         let src_body = concat!("slide content:\n", "  bullets [42]\n");
         let errors_body = parse_get_errors(src_body);
-        let has_integer_body = errors_body.iter().any(|msg| msg.contains("integer"));
+        let has_canon_body = errors_body
+            .iter()
+            .any(|msg| msg.contains(CANON.0) && msg.contains(CANON.1));
 
         // Position 2: vars_block (deck.rs::value_parser via vars_block_parser).
         let src_vars = concat!(
@@ -2418,7 +2431,9 @@ mod tests {
             "  title \"T\"\n",
         );
         let errors_vars = parse_get_errors(src_vars);
-        let has_integer_vars = errors_vars.iter().any(|msg| msg.contains("integer"));
+        let has_canon_vars = errors_vars
+            .iter()
+            .any(|msg| msg.contains(CANON.0) && msg.contains(CANON.1));
 
         // Position 3: set_rule_value_parser.
         let src_set = concat!(
@@ -2427,11 +2442,12 @@ mod tests {
             "  title \"T\"\n",
         );
         let (_deck_set, errors_set) = parse_set_rule_list(src_set);
-        let has_integer_set = errors_set.iter().any(|msg| msg.contains("integer"));
+        let has_canon_set = errors_set
+            .iter()
+            .any(|msg| msg.contains(CANON.0) && msg.contains(CANON.1));
 
-        // Position 4: variant_value (tested via parse_deck in variants module).
-        // We use parse_get_errors (deck-level) which routes through deck_parser and then
-        // through variants_block → variant_value.
+        // Position 4: variant_value (routed through deck_parser → variants_block
+        // → variant_value → shared list_literal_elements combinator).
         let src_variant = concat!(
             "variants:\n",
             "  short:\n",
@@ -2441,25 +2457,29 @@ mod tests {
             "  title \"T\"\n",
         );
         let errors_variant = parse_get_errors(src_variant);
-        let has_integer_variant = errors_variant.iter().any(|msg| msg.contains("integer"));
+        let has_canon_variant = errors_variant
+            .iter()
+            .any(|msg| msg.contains(CANON.0) && msg.contains(CANON.1));
 
         assert!(
-            has_integer_body,
-            "consistency: position 1 (slide-body) [42] must contain 'integer'; got: {errors_body:?}"
+            has_canon_body,
+            "consistency: position 1 (slide-body) [42] must contain E-PAR-024 + \
+             canonical fragment; got: {errors_body:?}"
         );
         assert!(
-            has_integer_vars,
-            "consistency: position 2 (vars_block) [42] must contain 'integer'; got: {errors_vars:?}"
+            has_canon_vars,
+            "consistency: position 2 (vars_block) [42] must contain E-PAR-024 + \
+             canonical fragment; got: {errors_vars:?}"
         );
         assert!(
-            has_integer_set,
-            "consistency: position 3 (set-rule) [42] must contain 'integer'; \
-             RED GATE — set_rule_value_parser uses generic message; got: {errors_set:?}"
+            has_canon_set,
+            "consistency: position 3 (set-rule) [42] must contain E-PAR-024 + \
+             canonical fragment; got: {errors_set:?}"
         );
         assert!(
-            has_integer_variant,
-            "consistency: position 4 (variant) [42] must contain 'integer'; \
-             RED GATE — variant_value uses generic message; got: {errors_variant:?}"
+            has_canon_variant,
+            "consistency: position 4 (variant) [42] must contain E-PAR-024 + \
+             canonical fragment; got: {errors_variant:?}"
         );
     }
 
