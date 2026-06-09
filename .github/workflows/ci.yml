@@ -142,10 +142,13 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: test-${{ matrix.target.name }}
-          # save-always: true — persist the cache even when later steps fail.
-          # Combined with the timeout bump above, this ensures the arm64 cache
-          # is populated on the first successful run so subsequent runs are warm.
-          save-always: "true"
+          # cache-on-failure: "true" — sets CACHE_ON_FAILURE=true so the
+          # rust-cache post-step runs even when nextest fails (post-if:
+          # success() || env.CACHE_ON_FAILURE == 'true'). This breaks the
+          # cold-build-timeout self-perpetuating loop on linux-arm64: the
+          # compiled artifacts are cached on failure so the NEXT run is warm.
+          # (save-always is an actions/cache keyword, not a rust-cache input.)
+          cache-on-failure: "true"
       - name: Install core fonts (Linux only — required for usvg text normalization)
         if: runner.os == 'Linux'
         run: |
