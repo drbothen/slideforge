@@ -5,6 +5,7 @@ created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
 last_updated: 2026-06-09
+state_version: "1.1"
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
 phase_1_convergence: "17 passes, 69 findings, 3/3 clean (passes 15-16-17)"
@@ -29,11 +30,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — Pass 3 DONE NOT CLEAN 2 CRIT+1 HIGH+1 OBS; C1-NEW/C2-NEW font-face dead-wiring; H1-NEW misleading docstrings; OBS-1 exit-gate gap; ADR-023 Accepted 2026-06-09; NEXT: implementer fix burst per ADR-023). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — ADR-023 fix burst DONE HEAD 626ae472; C1-NEW[ResolvedFontSet+resolve_font_set()+fontdb=0.23.0+KrillaTextSpan.face/.y_offset_units consumed]/C2-NEW[build()-driven font-distinctness test Tuffy.ttf fixture]/H1-NEW[docstrings corrected] CLOSED; fontdb =0.23.0 direct pin; cargo deny PASS; 3755 pass 0 fail; NEXT: adversary Pass 4 — fresh 3-clean streak attempt; WATCH: upem=1000 hardcode for TT fonts; cold_budget flake recurrence). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
-workspace_tests: "3754 pass / 0 fail (STORY-081 worktree 885d8302; LESSON-21 exit gate ALL GREEN: fmt clean, clippy pedantic+unwrap_used clean, nextest 3754, shared-process cargo test pass, rustdoc -D warnings clean; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE)"
+workspace_tests: "3755 pass / 0 fail (STORY-081 worktree 626ae472; LESSON-21 exit gate ALL GREEN: fmt clean, clippy pedantic+unwrap_used clean, nextest 3755, shared-process cargo test pass, rustdoc -D warnings clean; cargo deny PASS; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE)"
 workspace_test_failures: 0
 ---
 
@@ -57,15 +58,20 @@ workspace_test_failures: 0
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `885d83027295946f97bcca71f1ece620fc6dd533` (Pass-3 reviewed this HEAD; new fix burst pending)
-- **Adversary streak:** **0/3** — Pass 3 DONE NOT CLEAN. ADR-023 Accepted 2026-06-09. Story spec v1.2.
-- **Pass 3 findings (OPEN — 4 total):**
-  - C1-NEW[CRIT] PDF inline font-face rendering dead-wired; `extract_all_inline_text` discards every `KrillaTextSpan` field except `.text`; `FontFaceKind`+`y_offset_units` have zero production readers. Fix per ADR-023: `ResolvedFontSet` + fontdb =0.23.0; consume `.face`/`.y_offset_units`; draw super/sub via `Surface::draw_glyphs`. Flatten sites: exporter.rs:1212,1222,1341,1355,772,760-764,331-341/749.
-  - C2-NEW[CRIT] PDF tests vacuous for AC-004 font-face claim; `build()`-driven test asserts only text + `/ActualText`, not glyph face. Fix: build()-driven assertion distinguishing bold-span font resource from plain-span in PDF content stream.
-  - H1-NEW[HIGH] Misleading docstrings assert font-switching that does not occur (story_081_inline_markup_e2e.rs:206-208; slide_pdf.rs:25-27). Fix alongside C1-NEW.
-  - OBS-1[process-gap] Exit-gate anti-pattern recurred 3rd time; route to FU-EXIT-GATE-DISTINGUISHING-OUTPUT (see OPEN FOLLOW-UPS).
-- **Pass 3 adjudication:** Title shadow-field vs SubtitleInlines variant = ACCEPTABLE (not a defect). PPTX/DOCX/HTML/eval subtitle threading: SOUND.
-- **NEXT ACTION:** Implementer fix burst per ADR-023: implement `ResolvedFontSet` (fontdb =0.23.0 direct pin); `resolve_font_set()`; consume `KrillaTextSpan .face/.y_offset_units` in PDF production draw path (body/bullets/subtitle/title); draw super/sub via `Surface::draw_glyphs`; replace `extract_all_inline_text` flattening at all flatten sites; add `build()`-driven font-distinctness test (C2-NEW, fixture-font deterministic); correct misleading docstrings (H1-NEW). Then LESSON-21 exit gate → adversary Pass 3 re-run (fresh 3-clean streak).
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `626ae472b4a6f9f0f44096fbc032e35d675b59dd` (ADR-023 fix burst DONE)
+- **Adversary streak:** **0/3** — ADR-023 fix burst complete. Pass 3 findings CLOSED. NEXT: adversary Pass 4 (fresh-context, new 3-clean streak attempt).
+- **Pass 3 findings (ALL CLOSED):**
+  - C1-NEW[CRIT] CLOSED — `ResolvedFontSet` + `resolve_font_set()` implemented via fontdb =0.23.0 OS/2-metadata query in `slideforge-pdf/src/font.rs`; `font_for_span()` dispatch + `draw_inline_spans_at_y()` consume `KrillaTextSpan .face + .y_offset_units` in body/bullets/subtitle/title production paths; super/sub via per-glyph y_offset.
+  - C2-NEW[CRIT] CLOSED — `build()`-driven `test_BC_3_02_002_ac004_pdf_bold_span_uses_distinct_font_resource` injects fixture fonts (LatinModernMath-Regular + Tuffy); asserts both distinct font resources embedded. Fixture `crates/slideforge-pdf/tests/fixtures/Tuffy.ttf` added.
+  - H1-NEW[HIGH] CLOSED — docstrings corrected; all "future enhancement"/"for now" MVP comments removed.
+  - OBS-1[process-gap] ROUTED → FU-EXIT-GATE-DISTINGUISHING-OUTPUT (see OPEN FOLLOW-UPS).
+- **fontdb pin:** =0.23.0 promoted transitive→direct pin in `slideforge-pdf/Cargo.toml`; cargo deny PASS (advisories/bans/licenses/sources ok); no new crates added.
+- **Non-silent fallback:** `tracing::warn!` emitted in `resolve_font_set` when styled face unavailable; falls back to regular face.
+- **LESSON-21 exit gate:** ALL GREEN — fmt; clippy pedantic+unwrap_used; nextest 3755 pass; shared-process cargo test 0 fail; rustdoc -D warnings; cargo deny.
+- **WATCH ITEMS for adversary Pass 4:**
+  1. `units_per_em=1000` hardcoded for super/sub offset normalization (krilla 0.6.0 does not expose `units_per_em`). Correct for CFF/OTF; TrueType commonly uses 2048 upem — potential offset-halving on TT fonts.
+  2. `slideforge-diagrams` cold_budget test: `cold_budget` PERMANENTLY FIXED by STORY-080 PR#73; any genuine recurrence is a regression, not a flake.
+- **NEXT ACTION:** Adversary Pass 4 — fresh-context re-review at HEAD `626ae472`. Beginning fresh 3-clean streak (0/3).
 
 ---
 
@@ -105,8 +111,8 @@ workspace_test_failures: 0
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `885d8302`. Adversary Pass 3 DONE NOT CLEAN. ADR-023 Accepted. Implementer fix burst pending. STORY-072/074/079/080/047/082/088 cleaned up post-merge. Open PRs: 0.
-- Workspace: 3754 pass / 0 fail (STORY-081 worktree at HEAD 885d8302; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. ADR-023 fix burst DONE. Pass 3 all findings CLOSED. Adversary Pass 4 NEXT (fresh 3-clean streak). Open PRs: 0.
+- Workspace: 3755 pass / 0 fail (STORY-081 worktree at HEAD 626ae472; LESSON-21 exit gate ALL GREEN; cargo deny PASS; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -119,7 +125,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — Pass 3 DONE NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS; HEAD still 885d8302). ADR-023 Accepted 2026-06-09. NEXT: implementer fix burst per ADR-023 (ResolvedFontSet + fontdb =0.23.0; consume .face/.y_offset_units; build()-driven font-distinctness test; correct misleading docstrings). After fix burst + LESSON-21 exit gate → adversary Pass 3 re-run (fresh 3-clean streak from 0). Pass 3 findings in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Arch asymmetry adjudicated: ACCEPTABLE. Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — ADR-023 fix burst DONE (HEAD `626ae472`; Pass 3 all findings CLOSED; 3755 pass; cargo deny PASS). NEXT: adversary Pass 4 — fresh-context re-review at HEAD `626ae472`, beginning fresh 3-clean streak (0/3). TWO WATCH ITEMS for Pass 4: (1) `units_per_em=1000` hardcoded — correct for CFF/OTF, may halve offset on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080; any recurrence is a regression. Pass 3 findings archived in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -152,20 +158,20 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 3 DONE NOT CLEAN — ADR-023 Accepted — implementer fix burst pending. 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 ADR-023 fix burst DONE — Pass 4 NEXT (fresh 3-clean streak). 1 worktree active. 12 stories remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-09 |
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `885d8302`. Cleaned up: STORY-088 (+ previously 072/074/079/080/047/082). |
-| **STORY-081 state** | HEAD `885d8302`; adversary 0/3; Pass 3 DONE NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS); ADR-023 Accepted 2026-06-09; story spec v1.2 (commit f55cb58d); NEXT: implementer fix burst per ADR-023 |
-| **STORY-081 Pass 3 findings** | C1-NEW[CRIT] font-face dead-wired (`extract_all_inline_text` discards FontFaceKind+y_offset_units; zero production readers; flatten sites exporter.rs:1212,1222,1341,1355,772,760-764,331-341/749); C2-NEW[CRIT] PDF tests vacuous (assert text+/ActualText, not glyph face); H1-NEW[HIGH] misleading docstrings; OBS-1[process-gap] exit-gate gap → FU-EXIT-GATE-DISTINGUISHING-OUTPUT |
-| **STORY-081 arch adjudication** | Title shadow-field vs SubtitleInlines variant = ACCEPTABLE. PPTX/DOCX/HTML/eval: SOUND. |
-| **Workspace tests** | 3754 pass / 0 fail (STORY-081 worktree at HEAD 885d8302; cold_budget PERMANENTLY FIXED; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. Cleaned up: STORY-088 (+ previously 072/074/079/080/047/082). |
+| **STORY-081 state** | HEAD `626ae472`; adversary 0/3; ADR-023 fix burst DONE; Pass 3 all findings CLOSED (C1-NEW/C2-NEW/H1-NEW CLOSED; OBS-1 routed to FU); fontdb =0.23.0 direct pin; cargo deny PASS; 3755 pass 0 fail; story spec v1.2 (commit f55cb58d) |
+| **STORY-081 fix burst summary** | ResolvedFontSet + resolve_font_set() via fontdb =0.23.0 OS/2-metadata query; font_for_span() + draw_inline_spans_at_y() consume KrillaTextSpan .face/.y_offset_units; super/sub via per-glyph y_offset; build()-driven font-distinctness test (Tuffy.ttf fixture); docstrings corrected |
+| **STORY-081 Pass 4 watch items** | (1) units_per_em=1000 hardcoded — correct CFF/OTF, may halve super/sub offset on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080 — any recurrence = regression |
+| **Workspace tests** | 3755 pass / 0 fail (STORY-081 worktree at HEAD 626ae472; LESSON-21 ALL GREEN; cargo deny PASS; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 Pass 3 done (NOT CLEAN). ADR-023 approved 2026-06-09 (fontdb =0.23.0 + ResolvedFontSet, confined to slideforge-pdf). NEXT: dispatch implementer fix burst — implement ResolvedFontSet; consume KrillaTextSpan .face/.y_offset_units in PDF draw path (body/bullets/subtitle/title); draw super/sub via Surface::draw_glyphs; replace extract_all_inline_text at all flatten sites; add build()-driven font-distinctness test (C2-NEW, fixture-font); correct misleading docstrings (H1-NEW). LESSON-21 exit gate then adversary Pass 3 re-run (fresh 3-clean streak from 0). Pass 3 findings: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 ADR-023 fix burst DONE (HEAD 626ae472; 3755 pass; cargo deny PASS; LESSON-21 ALL GREEN). NEXT: dispatch adversary Pass 4 — fresh-context re-review at HEAD 626ae472, starting fresh 3-clean streak (0/3). TWO watch items for adversary: (1) units_per_em=1000 hardcode for TT-font super/sub offset; (2) cold_budget — must be PERMANENTLY FIXED, flag any recurrence as regression. Pass 3 findings: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -216,6 +222,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-081-ADR023-FIXBURST | STORY-081 ADR-023 implementer fix burst COMPLETE. HEAD 626ae472b4a6f9f0f44096fbc032e35d675b59dd (was 885d8302). Pass-3 findings ALL CLOSED: C1-NEW — ResolvedFontSet + resolve_font_set() via fontdb =0.23.0 OS/2-metadata query in slideforge-pdf/src/font.rs; font_for_span() dispatch + draw_inline_spans_at_y() consume KrillaTextSpan .face + .y_offset_units in body/bullets/subtitle/title production paths; super/sub via per-glyph y_offset. C2-NEW — build()-driven test_BC_3_02_002_ac004_pdf_bold_span_uses_distinct_font_resource injects LatinModernMath-Regular + Tuffy fixture fonts, asserts both distinct embedded font resources; fixture crates/slideforge-pdf/tests/fixtures/Tuffy.ttf added. H1-NEW — docstrings corrected; all "future enhancement"/"for now" MVP comments removed. fontdb =0.23.0 promoted transitive→direct pin; cargo deny PASS. Non-silent fallback: tracing::warn! in resolve_font_set when styled face unavailable. LESSON-21 exit gate ALL GREEN (fmt/clippy pedantic+unwrap_used/nextest 3755/shared-process cargo test/rustdoc -D warnings/cargo deny). TWO watch items for Pass 4: (1) units_per_em=1000 hardcoded — potential offset-halving on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080 — any recurrence = regression. Adversary streak 0/3; NEXT: adversary Pass 4 fresh-context re-review. |
 | 2026-06-09 | ADR-023-APPROVED | Human approved ADR-023 (PDF styled font-face resolution via fontdb metadata-aware ResolvedFontSet, Option C, fontdb =0.23.0 promoted from transitive to direct pin, confined to slideforge-pdf, no BC change). Story spec corrected to v1.2 (commit f55cb58d). |
 | 2026-06-09 | STORY-081-PASS3 | Pass 3 NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS). C1-NEW: font-face dead-wiring deeper layer — `extract_all_inline_text` discards FontFaceKind+y_offset_units, zero production readers. C2-NEW: PDF tests vacuous for AC-004 font-face claim. H1-NEW: misleading docstrings. OBS-1: exit-gate gap (non-test caller must consume distinguishing output, not just exist). Architectural asymmetry (SubtitleInlines vs title shadow-field) adjudicated ACCEPTABLE. Streak 0/3. |
 | 2026-06-09 | STORY-081-FIX-BURST | STORY-081 implementer fix burst COMPLETE. HEAD 885d83027295946f97bcca71f1ece620fc6dd533 (was c11d6468). All 5 Pass-2 findings CLOSED: C1 PDF body/bullet dead-wiring (extract_all_inline_text routed through live draw path; dead extract_inline_text removed); C2 build()-driven PDF assertion with ActualText proof; C3 FrameContent::SubtitleInlines(Vec<InlineNode>) new variant wired through layout + all 4 exporters; HTML/PDF rich title AC-006(3) via existing title_inlines shadow-field (matching sound DOCX path; FrameContent::Title NOT widened ~118 sites); I1 PPTX InlineNode::Math tracing::warn! EC-008 pattern. LESSON-21 exit gate ALL GREEN (fmt/clippy pedantic+unwrap_used/nextest 3754 pass 0 fail/cargo test shared-process/rustdoc -D warnings). Adversary streak: 0/3 (fix burst does not advance). NEXT: adversary Pass 3 (fresh-context). Arch asymmetry (SubtitleInlines variant exists, no TitleInlines; title uses shadow field) flagged for Pass-3 adjudication. PDF per-span font switching for subtitle/title not implemented (consistent with PDF body inline limitation; candidate follow-up). |
