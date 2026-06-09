@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.3"
+version: "1.4"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -31,6 +31,10 @@ modified:
     table. Added postcondition 7 (non-empty name validation) and invariant 5
     (duplicate-name behavior: warning + deterministic identical GUID). Error codes
     E-PAR-023 and W-PAR-002 allocated in error-taxonomy.md v2.24 in the same burst."
+  - "2026-06-08: v1.4 — Pass-5 IMP-1 spec correction. Corrected E-PAR-023 exit code
+    2→1 in PC-7 and EC-010. E-PAR-023 is a parse error; per BC-1.15.003 three-tier model
+    (parse errors → exit 1), consistent with every other E-PAR row in the taxonomy and
+    with exit_code.rs mapping E-PAR → EXIT_PARSE_ERROR = 1."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -138,7 +142,7 @@ Multi-renderer parity tests for this element are EXPLICITLY EXCLUDED.
 **Postconditions 7-8 (owned by STORY-082 / slide-grouping follow-up):**
 
 7. A `section "":` construct (empty quoted name) is rejected at parse time with
-   `E-PAR-023` (`ParseError::EmptySectionGroupName`), exit 2. No `SectionGroupNode`
+   `E-PAR-023` (`ParseError::EmptySectionGroupName`), exit 1. No `SectionGroupNode`
    is produced for the rejected block. The error is accumulated; the parser continues
    past the rejected block to find additional errors. (EC-010)
 
@@ -184,7 +188,7 @@ Multi-renderer parity tests for this element are EXPLICITLY EXCLUDED.
 | EC-004 | Section name contains XML special characters (<, >, &) | Section name XML-escaped in `<p:sectionLst>` attribute |
 | EC-005 | Two sections containing a single slide each | Both sections present; each slide assigned to its section; no overlap |
 | EC-006 | `section "Name":` construct present but deck built for non-PPTX format | sectionLst logic skipped; DOCX/HTML/PDF unaffected (PPT-only element) |
-| EC-010 | Section name that is an empty string `""` — e.g. `section "":` | Fatal parse error E-PAR-023 (`ParseError::EmptySectionGroupName`); exit 2 (strict). Error accumulated; no `SectionGroupNode` produced; build halts after error reporting. Span on the opening `"` of the empty name. [STORY-082] |
+| EC-010 | Section name that is an empty string `""` — e.g. `section "":` | Fatal parse error E-PAR-023 (`ParseError::EmptySectionGroupName`); exit 1 (strict). Error accumulated; no `SectionGroupNode` produced; build halts after error reporting. Span on the opening `"` of the empty name. [STORY-082] |
 | EC-011 | Two `section "Name":` blocks with identical quoted names | Non-fatal parse warning W-PAR-002 (`ParseWarning::DuplicateSectionGroupName`) emitted for the second (and subsequent) occurrence(s); exit 0. Both sections are emitted to the IR and included in `LaidOutDeck.slide_sections`. Each receives the same deterministic GUID (sha2 hash of the name — identical names → identical GUIDs). No crash; no section is dropped. The `<name>` and `<file>:<line>:<col>` placeholders identify the duplicate occurrence. [STORY-082] |
 
 ## Canonical Test Vectors

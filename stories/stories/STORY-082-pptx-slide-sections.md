@@ -20,6 +20,7 @@ depends_on:
   - STORY-078
 blocks: []
 estimated_days: 2
+spec_version: "1.1"
 ---
 
 # STORY-082: PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter
@@ -185,7 +186,7 @@ is FORBIDDEN (non-deterministic; violates BC-4.01.003 invariant 3).
 
 | BC | Title | Covered ACs |
 |----|-------|-------------|
-| BC-4.01.003 v1.3 | PPTX: slide sections (Half B — postcondition 5, postcondition 7, postcondition 8, invariants 3-5, EC-002/004/005/006/010/011) | AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-009, AC-010, AC-011 |
+| BC-4.01.003 v1.4 | PPTX: slide sections (Half B — postcondition 5, postcondition 7, postcondition 8, invariants 3-5, EC-002/004/005/006/010/011) | AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-009, AC-010, AC-011 |
 | BC-1.14.003 | Register routing non-interference — sectionLst must not carry register content | AC-008 |
 
 ## Acceptance Criteria
@@ -273,7 +274,7 @@ brace-wrapped uppercase hex value on both runs.
 (traces to BC-4.01.003 postcondition 7 + invariant 5 — empty name rejected at parse time)
 
 A source file containing `section "":` (empty quoted name) produces a parse error
-`E-PAR-023` (`ParseError::EmptySectionGroupName`), exits with code 2 in strict mode,
+`E-PAR-023` (`ParseError::EmptySectionGroupName`), exits with code 1 in strict mode,
 and includes the message `section group name must be non-empty at <file>:<line>:<col>.
 Provide a quoted, non-empty name, e.g. section "Background":`. The error is accumulated
 (parsing continues to find additional errors). No `SectionGroupNode` is produced for
@@ -438,7 +439,7 @@ Notes:
 | Component | Estimated Tokens |
 |-----------|-----------------|
 | This story spec | ~3,500 |
-| BC-4.01.003 v1.3 (Half B postconditions 5/7/8 + invariants 3-5 + EC-002/004/005/006/010/011) | ~1,400 |
+| BC-4.01.003 v1.4 (Half B postconditions 5/7/8 + invariants 3-5 + EC-002/004/005/006/010/011) | ~1,400 |
 | BC-1.14.003 (postconditions 3 + 5) | ~800 |
 | export-architecture.md §PPTX Slide Sections (raw-injection impl decision) | ~800 |
 | error-taxonomy E-PAR-023 + W-PAR-002 notes | ~400 |
@@ -478,5 +479,12 @@ Notes:
 | EC-004 | Section name with XML special characters (`&`, `<`, `>`) | XML-escaped in `<p14:section name="...">` attribute |
 | EC-005 | Two sections each containing one slide | Both sections in sectionLst; each with one sldId |
 | EC-006 | `section "Name":` present but deck built for DOCX/HTML/PDF | sectionLst logic skipped; non-PPTX output unaffected |
-| EC-010 | Section name that is an empty string `""` | Parse error **E-PAR-023** (`ParseError::EmptySectionGroupName`): `section group name must be non-empty at <file>:<line>:<col>. Provide a quoted, non-empty name, e.g. section "Background":`. Severity: broken, exit 2. Error accumulated; no `SectionGroupNode` produced. |
+| EC-010 | Section name that is an empty string `""` | Parse error **E-PAR-023** (`ParseError::EmptySectionGroupName`): `section group name must be non-empty at <file>:<line>:<col>. Provide a quoted, non-empty name, e.g. section "Background":`. Severity: broken, exit 1. Error accumulated; no `SectionGroupNode` produced. |
 | EC-011 | Two `section "Name":` blocks with identical names | Warning **W-PAR-002** (`ParseWarning::DuplicateSectionGroupName`): `warning: [W-PAR-002] Duplicate section group name '<name>' at <file>:<line>:<col>. Both sections are emitted with the same GUID. Consider using distinct names.` Severity: cosmetic, exit 0. Both sections emitted; identical GUID (same name → same SHA-256 derivation). |
+
+## Revision History
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-06-04 | story-writer | Initial story decomposition |
+| 1.1 | 2026-06-08 | story-writer | Pass-5 IMP-1: AC-010 E-PAR-023 exit code corrected 2→1 to match BC-4.01.003 v1.4 + error-taxonomy v2.28; EC-010 table exit code corrected 2→1; BC version references updated v1.3→v1.4 |
