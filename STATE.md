@@ -53,6 +53,34 @@ workspace_test_failures: 0
 
 ---
 
+## DURABLE RESUME — SAME MACHINE OR FRESH CLONE
+
+Both branches are on origin (durable, machine-independent):
+
+- `origin/factory-artifacts` @ `e5f19e96` — all `.factory/` state, all 9 STORY-081 adversary pass reports, ADR-023.
+- `origin/feature/STORY-081` @ `c739d59c` — all 11 STORY-081 implementation commits; based on develop `cbebfd57`; MUST rebase onto develop `15838de1` at PR step.
+
+**Same-machine resume:** `.factory/` and `.worktrees/STORY-081/` worktrees already exist on disk.
+1. Run `vsdd-factory:factory-worktree-health`
+2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `c739d59c`
+3. Continue at NEXT ACTION: adversary Pass 10.
+
+**Fresh-clone (different machine) resume — exact commands:**
+```
+git clone https://github.com/drbothen/slideforge.git && cd slideforge
+git fetch origin factory-artifacts feature/STORY-081
+git worktree add .factory factory-artifacts
+git worktree add .worktrees/STORY-081 feature/STORY-081
+git rev-parse develop   # must equal origin/develop == 15838de1
+```
+Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
+
+**Exact resume point:** Phase 3 / Wave 5 / STORY-081 adversary convergence at **streak 1/3** (Pass 9 strict-CLEAN). NEXT: adversary Pass 10 at unchanged HEAD `c739d59c` (sequential, LESSON-7; no code change between clean passes) → Pass 11 → 3/3 CONVERGED → demo-recorder per-AC → rebase onto develop `15838de1` → pr-manager 9-step.
+
+**PRE-PR BLOCKER** (must resolve before STORY-081 PR, independent of convergence streak): `FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE` — flaky wall-clock timing gate in `slideforge-diagrams/tests/cold_budget.rs` (likely same root as FU-CI-ARM64-TEST-FAILURE). Convert to deterministic `load_count == 1` assertion or widen/remove the wall-clock bound.
+
+---
+
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
