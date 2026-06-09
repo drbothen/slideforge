@@ -74,6 +74,7 @@ fn demo_deck(title: &str) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -236,6 +237,7 @@ fn main() {
         slides: slides.clone(),
         sections: sections.clone(),
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     let docx_bytes = export(&deck, &laid_out);
@@ -404,6 +406,7 @@ fn main() {
         )],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let empty_docx = export(&deck, &empty_laid_out);
     let empty_doc_xml = read_zip_member(&empty_docx, "word/document.xml");
@@ -472,6 +475,7 @@ fn main() {
         slides: vec![make_slide(0, "Risk Overview", "20 identified risks.")],
         sections: vec![risk_20],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let docx_20 = export(&deck_20, &laid_out_20);
     let xml_20 = read_zip_member(&docx_20, "word/document.xml");

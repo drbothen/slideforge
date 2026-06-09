@@ -88,6 +88,7 @@ fn make_deck_with_lang(lang: &str) -> Deck {
         metadata: make_metadata_with_lang(lang),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -109,6 +110,7 @@ fn make_deck_no_lang() -> Deck {
         metadata: make_metadata_no_lang(),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -192,6 +194,7 @@ fn make_laid_out_deck_with_image_alt(alt: &str) -> LaidOutDeck {
         slides: vec![make_slide_with_image_alt(0, alt)],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -202,6 +205,7 @@ fn make_laid_out_deck_with_decorative_image() -> LaidOutDeck {
         slides: vec![make_slide_with_decorative_image(0)],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -224,6 +228,7 @@ fn make_laid_out_deck_with_lang_only() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -258,6 +263,7 @@ fn make_laid_out_deck_with_chart_frame(alt: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -294,6 +300,7 @@ fn make_laid_out_deck_with_diagram_frame(alt: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -331,6 +338,7 @@ fn make_laid_out_deck_with_chart_decorative() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -371,6 +379,7 @@ fn make_laid_out_deck_with_diagram_decorative() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

@@ -57,6 +57,7 @@ fn make_deck(lang: Option<&str>) -> Deck {
         metadata: make_metadata(lang),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -111,6 +112,7 @@ fn make_laid_out_deck_image(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -134,6 +136,7 @@ fn make_laid_out_deck_chart(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -164,6 +167,7 @@ fn make_laid_out_deck_diagram(alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -187,6 +191,7 @@ fn make_laid_out_deck_lang_only() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

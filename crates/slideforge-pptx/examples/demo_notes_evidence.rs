@@ -122,6 +122,7 @@ fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
         metadata: make_metadata(),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -137,6 +138,7 @@ fn make_laid_out_deck(notes_per_slide: &[Option<&str>]) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -673,6 +675,7 @@ fn evidence_rich(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let pptx = export_pptx(&deck, &laid_out);
 
@@ -770,6 +773,7 @@ fn evidence_safeurl(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let pptx = export_pptx(&deck, &laid_out);
 
@@ -875,6 +879,7 @@ fn evidence_link(out_dir: &std::path::Path) {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let pptx = export_pptx(&deck, &laid_out);
 

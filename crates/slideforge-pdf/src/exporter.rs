@@ -1637,6 +1637,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -1687,6 +1688,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -1726,6 +1728,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -1984,6 +1987,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let opts = ExportOptions::default();
 
@@ -2105,6 +2109,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
 
         let exporter = PdfExporter::new();
@@ -2333,6 +2338,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = Brand {
             name: Arc::from("TestBrand"),
@@ -2437,6 +2443,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = minimal_brand();
         let opts = ExportOptions::default();
@@ -2835,6 +2842,7 @@ mod tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let opts = ExportOptions::default();
 
@@ -2997,6 +3005,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let laid_out = minimal_laid_out_deck();
         let brand = minimal_brand();
@@ -3044,6 +3053,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         };
         let laid_out = minimal_laid_out_deck();
         let brand = minimal_brand();
@@ -3190,6 +3200,7 @@ mod story_072_tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -3205,6 +3216,7 @@ mod story_072_tests {
     fn make_gradient_deck(from: Rgb, to: Rgb, alt: AltText) -> LaidOutDeck {
         LaidOutDeck {
             page_size: PageSize::default(),
+            slide_sections: vec![],
             slides: vec![LaidOutSlide {
                 source_index: 0,
                 slide_type_keyword: Arc::from("title"),
@@ -3302,6 +3314,7 @@ mod story_072_tests {
             }],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let empty_bytes = PdfExporter::new()
             .export(&deck, &empty_laid_out, &brand, &opts)

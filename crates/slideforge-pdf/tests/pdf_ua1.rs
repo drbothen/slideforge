@@ -109,6 +109,7 @@ fn deck_with_lang(lang: &str) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -126,6 +127,7 @@ fn deck_without_lang() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -170,6 +172,7 @@ fn n_slide_deck(n: usize) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -223,6 +226,7 @@ fn title_and_body_slide() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -265,6 +269,7 @@ fn figure_slide_with_alt(alt_text: &str) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -295,6 +300,7 @@ fn decorative_only_slide() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -547,6 +553,7 @@ fn test_bc_4_03_001_diagram_frame_alt_text_from_spec() {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     // Use uncompressed export to scan content stream for Artifact markers.
@@ -633,6 +640,7 @@ fn test_bc_4_03_001_chart_frame_alt_text_from_spec() {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     // Use uncompressed export to scan content stream.
@@ -873,6 +881,7 @@ fn test_bc_4_03_001_decorative_artifact_content_tag_present() {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     // Use uncompressed export so content stream operators are scannable.
@@ -1219,6 +1228,7 @@ fn test_bc_4_03_001_ua1_export_proxy_validation() {
         slides,
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     let deck = deck_with_lang("en-US");
@@ -1732,6 +1742,7 @@ fn deck_with_slides(slides: Vec<Slide>) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -1752,6 +1763,7 @@ fn deck_without_doc_title() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -2099,6 +2111,7 @@ fn test_bc_4_03_001_subtitle_h2_carries_own_text_as_title_attribute() {
         slides: vec![subtitle_slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     // Use with_font_path for deterministic font resolution (same as F-006 fix).
@@ -2831,6 +2844,7 @@ fn test_f_p4_001_mixed_block_body_text_math_bullets_each_gets_tagged_region() {
         slides: vec![body_slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let deck = deck_with_lang("en-US");
     let brand = minimal_brand();
@@ -2930,6 +2944,7 @@ fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     };
 
     // Minimal LaidOutDeck: one slide, source_index 0.

@@ -228,6 +228,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 

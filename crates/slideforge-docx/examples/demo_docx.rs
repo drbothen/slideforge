@@ -75,6 +75,7 @@ fn main() {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     };
 
     // ── Slide 1: Q1 Review — report + notes + detail + inline + hyperlink ────
@@ -160,6 +161,7 @@ fn main() {
         slides: vec![slide1, slide2],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     // ── Run the exporter ──────────────────────────────────────────────────────

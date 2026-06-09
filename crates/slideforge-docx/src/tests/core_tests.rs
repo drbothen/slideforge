@@ -100,6 +100,7 @@ fn minimal_deck() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -132,6 +133,7 @@ fn make_laid_out_deck(slides: Vec<LaidOutSlide>) -> LaidOutDeck {
         slides,
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -1657,6 +1659,7 @@ fn make_progress_bar_deck_with_colorbar(percent_input: u8, total_width_emu: i64)
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

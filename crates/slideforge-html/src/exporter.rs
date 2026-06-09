@@ -518,6 +518,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -527,6 +528,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -960,6 +962,7 @@ mod tests {
             slides: vec![title_slide, content_slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1403,6 +1406,7 @@ mod tests {
             ],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1434,6 +1438,7 @@ mod tests {
             ],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1472,6 +1477,7 @@ mod tests {
             ],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1502,6 +1508,7 @@ mod tests {
             slides: vec![make_title_slide(), make_title_slide(), make_title_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1553,6 +1560,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1591,6 +1599,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1640,6 +1649,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1836,6 +1846,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1887,6 +1898,7 @@ mod tests {
             slides: vec![chart_slide, body_slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1939,6 +1951,7 @@ mod tests {
             slides: vec![empty_body, text_body],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -1988,6 +2001,7 @@ mod tests {
             slides: vec![table_slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2040,6 +2054,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2076,6 +2091,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -2096,6 +2112,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2144,6 +2161,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2191,6 +2209,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2246,6 +2265,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2289,6 +2309,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2347,6 +2368,7 @@ mod tests {
             slides: vec![make_chart_only_slide()],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2422,6 +2444,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2499,6 +2522,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2535,6 +2559,7 @@ mod tests {
             slides: vec![make_body_only_slide("Real content")],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2620,6 +2645,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2693,6 +2719,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2753,6 +2780,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2831,6 +2859,7 @@ mod tests {
             slides: vec![slide0, slide1],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();
@@ -2885,6 +2914,7 @@ mod tests {
             slides: vec![slide],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let brand = make_brand();
         let opts = ExportOptions::default();

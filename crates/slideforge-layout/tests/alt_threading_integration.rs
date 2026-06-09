@@ -72,6 +72,7 @@ fn make_deck(slides: Vec<Slide>) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

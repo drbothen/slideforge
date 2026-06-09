@@ -40,6 +40,9 @@ use crate::env::Env;
 use crate::error::EvalError;
 use crate::expr::eval_expr;
 use crate::filters::format_float_display;
+// eval_block_items is imported here for test helpers that call it directly via
+// the for_eval module path.
+#[allow(unused_imports)]
 use crate::for_eval::eval_block_items;
 use crate::include_cycle::{IncludeGraph, check_include_cycles};
 use crate::register_routing::{KNOWN_SECTION_TYPES, extract_section_register_content};
@@ -371,7 +374,26 @@ pub fn eval_deck_with_variant(
     }
 
     // ── Step 4: Evaluate all top-level block items ──
-    let mut slides = eval_block_items(&mut env, &deck_node.items, &set_rule_defaults, config, sink);
+    // CRIT-A fix (STORY-082 pass-2): use the section-tracking variant so that
+    // slide membership is derived from the SAME expansion pass that builds
+    // Deck.slides.  `membership_tags[i]` is Some((instance_id, section_name))
+    // for slides inside a `section "Name":` body, None for ungrouped slides.
+    // The instance_id disambiguates adjacent same-named blocks (F-P10-HIGH-1 fix).
+    let mut membership_tags: Vec<Option<(u32, std::sync::Arc<str>)>> = Vec::new();
+    // Deck-wide counter: incremented once per SectionGroup block entered, giving
+    // each block a unique instance_id so adjacent same-named blocks are not merged
+    // in build_slide_sections_from_membership (F-P10-HIGH-1 fix, STORY-082 pass-5).
+    let mut section_group_counter: u32 = 0;
+    let mut slides = crate::for_eval::eval_block_items_with_sections(
+        &mut env,
+        &deck_node.items,
+        &set_rule_defaults,
+        config,
+        sink,
+        None,
+        &mut membership_tags,
+        &mut section_group_counter,
+    );
 
     // ── Step 4c: Evaluate section blocks (STORY-077) ──
     // For each top-level BlockItem::Section, run eval_section_nodes to:
@@ -471,12 +493,26 @@ pub fn eval_deck_with_variant(
         deck_vars_ordered.insert(k.clone(), v.clone());
     }
 
+    // ── Step 8: Build slide-section groupings from membership tags (STORY-082 / CRIT-A) ──
+    // membership_tags was populated in Step 4 during the SAME expansion pass
+    // that built `slides`.  `membership_tags[i]` corresponds to `slides[i]`.
+    // The PPTX exporter assigns slide ID = 256 + flat_index, so
+    // build_slide_sections_from_membership produces SlideSectionEntry values
+    // whose slide_ids exactly match what the PPTX exporter will emit.
+    //
+    // NOTE: After the slide cap truncation in Step 4b, `slides` may be shorter
+    // than `membership_tags` if `max_total_slides` was hit.  Truncate to match.
+    membership_tags.truncate(slides.len());
+    let slide_sections =
+        crate::section_groups::build_slide_sections_from_membership(&membership_tags);
+
     Some(Deck {
         slides,
         vars: deck_vars_ordered,
         metadata,
         registers: OrderedMap::new(),
         section_blocks,
+        slide_sections,
     })
 }
 

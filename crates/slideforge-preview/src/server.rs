@@ -734,6 +734,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         // Port 0 = ephemeral (OS assigns free port).
         let handle = server
@@ -762,6 +763,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
 
         // Inject a oneshot as the shutdown signal so tests control timing.

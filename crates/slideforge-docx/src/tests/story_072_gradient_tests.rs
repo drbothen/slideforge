@@ -90,6 +90,7 @@ fn make_deck_one_slide() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -126,6 +127,7 @@ fn make_gradient_deck(from: Rgb, to: Rgb, alt: AltText) -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

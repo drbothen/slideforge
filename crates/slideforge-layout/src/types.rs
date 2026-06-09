@@ -28,6 +28,13 @@ pub use slideforge_types::{AltText, FillSpec, LayoutWarning, Rgb, ShapeType};
 
 use crate::sections::GeneratedSection;
 
+// `SlideSectionEntry` is defined in `slideforge-types` (the leaf crate) so that
+// both `Deck` (semantic IR) and `LaidOutDeck` (geometric IR) can reference it
+// without creating a circular dependency.  Re-export it here so that all callers
+// of `slideforge-layout` see it at the familiar `slideforge_layout::SlideSectionEntry`
+// path (backward-compatible).
+pub use slideforge_types::SlideSectionEntry;
+
 /// The default canvas width for the layout engine (10 inches = 9,144,000 EMU).
 ///
 /// This is the canvas width used by the layout engine when the active `Brand`
@@ -140,6 +147,23 @@ pub struct LaidOutDeck {
     /// (BC-3.04.001 EC-002) and the inline validation pass
     /// (BC-3.05.001 EC-002 / AC-007).
     pub warnings: Vec<LayoutWarning>,
+
+    /// PPTX slide-grouping sections from `section "Name":` DSL blocks.
+    ///
+    /// Populated by the eval pass (STORY-082 / BC-4.01.003). Each entry maps
+    /// a named section group to the PPTX slide IDs (starting at 256) of slides
+    /// that fall within it.
+    ///
+    /// An empty `Vec` means no `section "Name":` grouping blocks were present.
+    /// When empty, `SectionListBuilder` returns `presentation.xml` bytes
+    /// unchanged — no `<p:extLst>` or `<p14:sectionLst>` is emitted.
+    ///
+    /// ## Invariant (BC-4.01.003 invariant 4)
+    ///
+    /// This field is populated ONLY from slide-grouping sections.
+    /// It MUST NOT alias or draw from [`LaidOutDeck::sections`]
+    /// (`GeneratedSection` entries for DOCX/PDF — a distinct concept).
+    pub slide_sections: Vec<SlideSectionEntry>,
 }
 
 /// Slide page dimensions in EMU.
@@ -738,6 +762,7 @@ mod tests {
             slides: vec![],
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         };
         let deck2 = deck.clone();
         assert_eq!(deck, deck2);

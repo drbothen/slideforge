@@ -37,6 +37,7 @@ use super::{
     alias::{AliasRegistry, alias_decl},
     control_flow::block_item,
     section::section_block_parser,
+    section_group::section_group_parser,
     template::template_value,
     variants::variants_block,
 };
@@ -463,6 +464,8 @@ enum DeckItem {
     Include(BlockItem),
     /// A `section <type>: ...` block (STORY-078).
     Section(BlockItem),
+    /// A `section "Name": ...` slide-grouping block (STORY-082).
+    SectionGroup(BlockItem),
     /// A block item: `slide`, `@for`, or `@if` block.
     Block(BlockItem),
 }
@@ -508,10 +511,15 @@ where
     });
     // STORY-008: @include directive
     let include = include_directive_parser(file_id).map(DeckItem::Include);
-    // STORY-078: section block
+    // STORY-078: section block (bare-ident form: `section methodology:`)
     let section = section_block_parser(file_id).map(DeckItem::Section);
     // Use block_item() to handle slide, @for, and @if at deck level.
     let block = block_item(file_id).map(DeckItem::Block);
+    // STORY-082: section group (quoted-string form: `section "Name":`)
+    // block_item(file_id) is passed as the sub-parser so that section bodies
+    // can contain the same slide/control-flow productions as the top-level deck.
+    let section_group =
+        section_group_parser(file_id, block_item(file_id)).map(DeckItem::SectionGroup);
 
     // Orphan Dedent tokens can appear at deck level when a malformed indented
     // block (e.g. a `@for` with a bad header) leaves its body's closing Dedents
@@ -531,6 +539,14 @@ where
                 .or(variants)
                 .or(alias)
                 .or(include)
+                // STORY-082: section_group must come BEFORE section to avoid
+                // ambiguity — both start with "section" keyword. The section_group
+                // parser matches `section STRING:` (quoted string); the section
+                // parser matches `section IDENT:` (bare identifier). They are
+                // disambiguated by the second token: STRING vs IDENT. chumsky's
+                // or() is ordered — section_group is tried first so that quoted
+                // strings don't fall through to section_block_parser.
+                .or(section_group)
                 .or(section)
                 .or(block)
                 .recover_with(skip_then_retry_until(
@@ -550,6 +566,10 @@ where
             let mut deck = DeckNode::default();
             // Alias registry — local to this parse, consumed during expansion.
             let mut alias_reg = AliasRegistry::new();
+            // STORY-082: duplicate section-group name detection (AC-011 / EC-011).
+            // Tracks section group names seen so far; emits W-PAR-002 on collision.
+            let mut seen_section_group_names: std::collections::HashSet<std::sync::Arc<str>> =
+                std::collections::HashSet::new();
 
             for item in items {
                 match item {
@@ -590,6 +610,45 @@ where
                     },
                     DeckItem::Section(bi) => {
                         // Section blocks are top-level items; no alias expansion needed.
+                        deck.items.push(bi);
+                    },
+                    DeckItem::SectionGroup(bi) => {
+                        // STORY-082 AC-010: discard empty-name SectionGroupNode (sentinel).
+                        // E-PAR-023 is always fatal (error-taxonomy.md §24 — "Parse Errors
+                        // (E-PAR) — Always fatal. Build halts with accumulated errors. No
+                        // output produced."). parse() returns Err when E-PAR-023 is emitted,
+                        // so the AST is never used after an empty-named section is encountered.
+                        // The sentinel (slides: vec![]) is simply dropped here; no rescue is
+                        // needed because no output path survives a fatal parse error.
+                        if let crate::ast::BlockItem::SectionGroup(ref spanned) = bi {
+                            let group_node = spanned.value();
+                            let name = group_node.name.value();
+                            if name.is_empty() {
+                                // Discard the sentinel. E-PAR-023 already halts the build.
+                                continue;
+                            }
+                            // STORY-082 AC-011: duplicate name detection (W-PAR-002).
+                            // Both sections are emitted; warning is cosmetic (exit 0).
+                            // HIGH-2 fix: use the real name span so the rendered message
+                            // has correct file:line:col (not 0..0 sentinel span).
+                            let name_arc: std::sync::Arc<str> = std::sync::Arc::clone(name);
+                            if seen_section_group_names.contains(&name_arc) {
+                                // The name span from the AST carries the real byte offset.
+                                let name_span = group_node.name.span();
+                                let name_simple_span =
+                                    SimpleSpan::from(name_span.start..name_span.end);
+                                emitter.emit(Rich::custom(
+                                    name_simple_span,
+                                    format!(
+                                        "W-PAR-002: Duplicate section group name '{name_arc}'. \
+                                         Both sections are emitted with the same GUID. \
+                                         Consider using distinct names."
+                                    ),
+                                ));
+                            } else {
+                                seen_section_group_names.insert(name_arc);
+                            }
+                        }
                         deck.items.push(bi);
                     },
                     DeckItem::Block(bi) => {
@@ -684,7 +743,11 @@ fn expand_block_item(item: BlockItem, reg: &AliasRegistry) -> BlockItem {
             if_node.else_body = expanded_else;
             BlockItem::If(Spanned::new(if_node, span))
         },
-        BlockItem::Section(_) => item, // sections don't contain slides
+        // Section (bare-ident form, STORY-078) and SectionGroup (quoted-string
+        // form, STORY-082) are returned unchanged — neither contains slides
+        // that require alias expansion. SectionGroup slide children are
+        // expanded during the STORY-082 eval pass.
+        BlockItem::Section(_) | BlockItem::SectionGroup(_) => item,
     }
 }
 

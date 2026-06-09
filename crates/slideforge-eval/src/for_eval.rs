@@ -103,89 +103,23 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
-    // Evaluate the collection expression.
-    let Some(collection_val) = eval_expr(env, collection_expr, sink) else {
-        return vec![];
-    };
-
-    // Verify the collection is a list or map.
-    // For Map: iterate entries, binding each as a Map { "key": k, "value": v }
-    // so {{ item.key }} and {{ item.value }} work inside the loop body.
-    let list: Vec<Value> = match collection_val {
-        Value::List(items) => items,
-        Value::Map(map) => {
-            // I03: map iteration — each entry becomes a mini-map with "key" and "value".
-            map.into_iter()
-                .map(|(k, v)| {
-                    let mut entry = slideforge_types::OrderedMap::new();
-                    entry.insert(Arc::from("key"), Value::Str(k));
-                    entry.insert(Arc::from("value"), v);
-                    Value::Map(entry)
-                })
-                .collect()
-        },
-        other => {
-            sink.push_with_severity(
-                EvalError::NotIterable {
-                    value_type: Arc::from(other.type_name()),
-                    span: SourceSpan::default(),
-                },
-                ParseSeverity::Error,
-            );
-            return vec![];
-        },
-    };
-
-    let mut slides: Vec<Slide> = Vec::new();
-
-    for item in list {
-        // Check max_total_slides cap before generating more slides.
-        if let Some(max) = config.max_total_slides
-            && slides.len() >= max
-        {
-            sink.push_with_severity(
-                EvalError::TooManySlides {
-                    count: slides.len() + 1,
-                    max,
-                    span: SourceSpan::default(),
-                },
-                ParseSeverity::Error,
-            );
-            break;
-        }
-
-        // Push an inner scope with the loop binding variable.
-        let mut bindings: IndexMap<Arc<str>, Value> = IndexMap::new();
-        bindings.insert(Arc::from(var_name), item);
-        env.push_scope(bindings);
-
-        // Evaluate the body items in the inner scope.
-        let body_slides = eval_block_items(env, body, set_rule_defaults, config, sink);
-        slides.extend(body_slides);
-
-        // Restore outer scope.
-        env.pop_scope();
-    }
-
-    // Emit a large-deck warning if the generated count exceeds the threshold.
-    // I04: Use LargeDeckWarning (not TooManySlides) for the lint warning.
-    //
-    // Strictly greater (>) because this is a soft warning — a deck AT the
-    // threshold is within the expected range and must not trigger a warning.
-    // The hard cap (TooManySlides) uses >= because the cap is a hard limit that
-    // must not be exceeded.
-    if slides.len() > config.large_deck_warn_threshold {
-        sink.push_with_severity(
-            EvalError::LargeDeckWarning {
-                count: slides.len(),
-                threshold: config.large_deck_warn_threshold,
-                span: SourceSpan::default(),
-            },
-            ParseSeverity::Warning,
-        );
-    }
-
-    slides
+    // Delegate to the section-tracking inner function with a throwaway membership vec.
+    // eval_for_block is called from eval_block_items (which already has its own
+    // membership vec), but this public entry point is used by external callers.
+    let mut membership = Vec::new();
+    let mut section_group_counter: u32 = 0;
+    eval_for_block_with_sections(
+        env,
+        var_name,
+        collection_expr,
+        body,
+        set_rule_defaults,
+        config,
+        sink,
+        None,
+        &mut membership,
+        &mut section_group_counter,
+    )
 }
 
 // ─── eval_slide_node ─────────────────────────────────────────────────────────
@@ -391,6 +325,83 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
+    let mut membership: Vec<Option<(u32, Arc<str>)>> = Vec::new();
+    // The counter is local to this throwaway call — eval_block_items is used by
+    // external callers (e.g. eval_if_chain for non-section contexts).  Each
+    // independent call site gets its own counter starting at 0.
+    let mut section_group_counter: u32 = 0;
+    eval_block_items_with_sections(
+        env,
+        items,
+        set_rule_defaults,
+        config,
+        sink,
+        None,
+        &mut membership,
+        &mut section_group_counter,
+    )
+}
+
+/// Evaluate a slice of [`BlockItem`]s with section-membership tracking.
+///
+/// This is the **single-pass authoritative** implementation that both evaluates
+/// slides and records per-slide section membership.  The public
+/// [`eval_block_items`] wrapper calls this with `section_tag = None` and a
+/// throwaway `membership` vec.
+///
+/// `section_tag` is `Some((instance_id, name))` when this call is recursing into
+/// a `section "Name":` body — all slides produced in that subtree are tagged
+/// with that section's `(instance_id, name)`.  The `instance_id` is a
+/// monotonically-increasing counter that is incremented once per
+/// `BlockItem::SectionGroup` encountered anywhere in the deck (see
+/// `section_group_counter` parameter below).  Ungrouped slides receive `None`.
+///
+/// Two adjacent `section "Background":` blocks receive distinct `instance_id`s
+/// (e.g. `(0, "Background")` and `(1, "Background")`), so
+/// [`crate::section_groups::build_slide_sections_from_membership`] emits two
+/// separate [`slideforge_types::SlideSectionEntry`] values for them — fixing
+/// F-P10-HIGH-1 (BC-4.01.003 EC-011).
+///
+/// `membership` is extended with exactly one entry per slide appended to the
+/// returned `Vec<Slide>`, in the same order.
+///
+/// `section_group_counter` is a mutable counter shared across ALL recursive
+/// calls in the same deck evaluation.  It is incremented by 1 each time a
+/// `BlockItem::SectionGroup` is entered.  Callers at deck level pass
+/// `&mut 0u32`; recursive calls from within section bodies, `@for` loops,
+/// and `@if` branches all pass the SAME counter through so the counter is
+/// global across the entire deck expansion.
+///
+/// ## CRIT-A fix (STORY-082 pass-2)
+///
+/// The superseded AST-walker approach (removed in pass-4) walked the raw
+/// `DeckNode` independently and could not model `@for`/`@if` expansion.
+/// This function fixes that by tracking section membership during the SAME
+/// expansion pass that builds `Deck.slides`, guaranteeing that slide IDs
+/// assigned by `slideforge-pptx::slide_ids` (256 + flat index) exactly match
+/// the IDs recorded in each `SlideSectionEntry`.
+///
+/// `section_tag` is taken by value (`Option<(u32, Arc<str>)>`) because every
+/// call site needs to clone it for the multiple recursive sub-calls.  Taking by
+/// value makes the semantics explicit: the caller transfers ownership, and this
+/// function clones from its owned copy.
+// section_tag is cloned at every call site that recurses — owned is more natural
+// here than a reference since all child calls need their own owned value.
+// section_group_counter is shared across ALL recursive calls in one deck
+// evaluation so each SectionGroup block gets a unique instance_id
+// (F-P10-HIGH-1 fix, STORY-082 pass-5).
+#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
+    env: &mut Env,
+    items: &[BlockItem],
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
+    config: &EvalConfig,
+    sink: &mut DiagnosticSink,
+    section_tag: Option<(u32, Arc<str>)>,
+    membership: &mut Vec<Option<(u32, Arc<str>)>>,
+    section_group_counter: &mut u32,
+) -> Vec<Slide> {
     let mut slides: Vec<Slide> = Vec::new();
 
     for item in items {
@@ -406,6 +417,7 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                     // downstream validation diagnostics carry file:line:col.
                     slide.source_span = slide_span;
                     slides.push(slide);
+                    membership.push(section_tag.clone());
                 }
                 // I05: Process element-scope inline items (@for/@if) inside
                 // the slide body. @for generates additional slides; @if is
@@ -414,7 +426,7 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                     match inline_item {
                         BlockItem::For(spanned_for) => {
                             let for_node = spanned_for.value();
-                            let generated = eval_for_block(
+                            let generated = eval_for_block_with_sections(
                                 env,
                                 for_node.binding.value(),
                                 for_node.collection.value(),
@@ -422,22 +434,30 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                                 set_rule_defaults,
                                 config,
                                 sink,
+                                section_tag.clone(),
+                                membership,
+                                section_group_counter,
                             );
                             slides.extend(generated);
                         },
                         BlockItem::If(spanned_if) => {
                             // Delegate to @if evaluator (STORY-013).
                             let if_node = spanned_if.value();
-                            let generated = crate::if_eval::eval_if_chain(
+                            let generated = crate::if_eval::eval_if_chain_with_sections(
                                 env,
                                 if_node,
                                 set_rule_defaults,
                                 config,
                                 sink,
+                                section_tag.clone(),
+                                membership,
+                                section_group_counter,
                             );
                             slides.extend(generated);
                         },
-                        BlockItem::Slide(_) | BlockItem::Section(_) => {
+                        BlockItem::Slide(_)
+                        | BlockItem::Section(_)
+                        | BlockItem::SectionGroup(_) => {
                             // Nested slides inside a slide body are not valid;
                             // silently ignored (parser guards against this).
                         },
@@ -446,7 +466,7 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
             },
             BlockItem::For(spanned_for) => {
                 let for_node = spanned_for.value();
-                let generated = eval_for_block(
+                let generated = eval_for_block_with_sections(
                     env,
                     for_node.binding.value(),
                     for_node.collection.value(),
@@ -454,6 +474,9 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                     set_rule_defaults,
                     config,
                     sink,
+                    section_tag.clone(),
+                    membership,
+                    section_group_counter,
                 );
                 slides.extend(generated);
             },
@@ -462,14 +485,168 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
                 // DI-004 type checking (BC-1.02.003) is handled inside eval_if_chain
                 // via eval_bool_condition — non-Bool conditions produce E-EVL-003.
                 let if_node = spanned_if.value();
-                let generated =
-                    crate::if_eval::eval_if_chain(env, if_node, set_rule_defaults, config, sink);
+                let generated = crate::if_eval::eval_if_chain_with_sections(
+                    env,
+                    if_node,
+                    set_rule_defaults,
+                    config,
+                    sink,
+                    section_tag.clone(),
+                    membership,
+                    section_group_counter,
+                );
                 slides.extend(generated);
             },
             BlockItem::Section(_spanned_section) => {
-                // Section blocks generate no slides at the eval level.
+                // Section blocks (bare-ident form, STORY-078) generate no slides
+                // at the eval level — they carry register content for DOCX/PDF.
+            },
+            BlockItem::SectionGroup(spanned_group) => {
+                // SectionGroup ("Name": form) — CRIT-4 fix.
+                // The grouping is METADATA for the PPTX exporter (p14:sectionLst).
+                // The slides themselves MUST still flow into Deck.slides in
+                // declaration order — grouping must not cause silent data loss.
+                //
+                // CRIT-A fix (STORY-082 pass-2):
+                // Recurse with `section_tag = Some((instance_id, group_name))` so
+                // that ALL slides produced by this section's body — including those
+                // from nested @for/@if expansions — are tagged with this section's
+                // (instance_id, name).
+                //
+                // F-P10-HIGH-1 fix (STORY-082 pass-5):
+                // Claim the next instance_id from the shared counter BEFORE recursing.
+                // Each SectionGroup block gets a unique instance_id, so adjacent
+                // blocks with the same name are never merged in
+                // build_slide_sections_from_membership.
+                let group = spanned_group.value();
+                let group_name = Arc::clone(group.name.value());
+                let instance_id = *section_group_counter;
+                *section_group_counter = section_group_counter
+                    .checked_add(1)
+                    .expect("section_group_counter overflow — impossible: a deck cannot have > 4 billion section groups");
+                let group_slides = eval_block_items_with_sections(
+                    env,
+                    &group.slides,
+                    set_rule_defaults,
+                    config,
+                    sink,
+                    Some((instance_id, group_name)),
+                    membership,
+                    section_group_counter,
+                );
+                slides.extend(group_slides);
             },
         }
+    }
+
+    slides
+}
+
+/// Evaluate one `@for` block with section-membership tracking.
+///
+/// Same logic as [`eval_for_block`]; the difference is that each slide produced
+/// is tagged with `section_tag` in `membership`.  Called by
+/// [`eval_block_items_with_sections`] when the `@for` block is inside a
+/// `section "Name":` body (or at deck level when `section_tag = None`).
+///
+/// # CRIT-A fix (STORY-082 pass-2)
+///
+/// When a `@for x in [1,2]:` block appears BEFORE a `section "Name":`, the
+/// two expanded slides are counted (tagged `None`) before the section's slide
+/// is counted (tagged `Some(...)`.  The PPTX exporter assigns IDs as
+/// `256 + flat_index`, so the section slide gets ID 258, matching the tag.
+// 10 arguments are justified: this mirrors eval_for_block's 7 parameters plus
+// the 3 section-tracking parameters (section_tag + membership + counter) that
+// are needed for single-pass section membership tracking.  The counter is
+// threaded through so that SectionGroup blocks inside @for loops get globally
+// unique instance_ids (F-P10-HIGH-1 fix, STORY-082 pass-5).
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn eval_for_block_with_sections<S: std::hash::BuildHasher>(
+    env: &mut Env,
+    var_name: &str,
+    collection_expr: &Expr,
+    body: &[BlockItem],
+    set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
+    config: &EvalConfig,
+    sink: &mut DiagnosticSink,
+    section_tag: Option<(u32, Arc<str>)>,
+    membership: &mut Vec<Option<(u32, Arc<str>)>>,
+    section_group_counter: &mut u32,
+) -> Vec<Slide> {
+    // Evaluate the collection expression.
+    let Some(collection_val) = eval_expr(env, collection_expr, sink) else {
+        return vec![];
+    };
+
+    let list: Vec<Value> = match collection_val {
+        Value::List(items) => items,
+        Value::Map(map) => map
+            .into_iter()
+            .map(|(k, v)| {
+                let mut entry = slideforge_types::OrderedMap::new();
+                entry.insert(Arc::from("key"), Value::Str(k));
+                entry.insert(Arc::from("value"), v);
+                Value::Map(entry)
+            })
+            .collect(),
+        other => {
+            sink.push_with_severity(
+                EvalError::NotIterable {
+                    value_type: Arc::from(other.type_name()),
+                    span: SourceSpan::default(),
+                },
+                ParseSeverity::Error,
+            );
+            return vec![];
+        },
+    };
+
+    let mut slides: Vec<Slide> = Vec::new();
+
+    for item in list {
+        if let Some(max) = config.max_total_slides
+            && slides.len() >= max
+        {
+            sink.push_with_severity(
+                EvalError::TooManySlides {
+                    count: slides.len() + 1,
+                    max,
+                    span: SourceSpan::default(),
+                },
+                ParseSeverity::Error,
+            );
+            break;
+        }
+
+        let mut bindings: IndexMap<Arc<str>, Value> = IndexMap::new();
+        bindings.insert(Arc::from(var_name), item);
+        env.push_scope(bindings);
+
+        let body_slides = eval_block_items_with_sections(
+            env,
+            body,
+            set_rule_defaults,
+            config,
+            sink,
+            section_tag.clone(),
+            membership,
+            section_group_counter,
+        );
+        slides.extend(body_slides);
+
+        env.pop_scope();
+    }
+
+    if slides.len() > config.large_deck_warn_threshold {
+        sink.push_with_severity(
+            EvalError::LargeDeckWarning {
+                count: slides.len(),
+                threshold: config.large_deck_warn_threshold,
+                span: SourceSpan::default(),
+            },
+            ParseSeverity::Warning,
+        );
     }
 
     slides

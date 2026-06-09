@@ -575,6 +575,11 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         slides: laid_out_slides,
         sections,
         warnings: deck_warnings,
+        // STORY-082 CRIT-2: slide_sections was populated by the evaluator
+        // (slideforge-eval::section_groups::build_slide_sections_from_membership)
+        // and stored on Deck::slide_sections. Pass it through to LaidOutDeck here
+        // so that the PPTX exporter can read it without re-examining the Deck or DeckNode.
+        slide_sections: deck.slide_sections.clone(),
     })
 }
 

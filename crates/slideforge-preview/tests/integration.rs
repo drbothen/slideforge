@@ -39,6 +39,7 @@ fn minimal_laid_out_deck() -> slideforge_layout::LaidOutDeck {
         slides: vec![],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -65,6 +66,7 @@ fn deck_with_one_slide() -> slideforge_layout::LaidOutDeck {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -944,6 +946,7 @@ async fn test_sec_004_ws_connection_cap_rejects_beyond_limit() {
         slides: vec![],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_fut = async move {

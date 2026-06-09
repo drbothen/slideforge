@@ -140,6 +140,7 @@ fn make_deck(n: usize) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -207,6 +208,7 @@ fn make_laid_out_deck(n: usize) -> LaidOutDeck {
             .collect(),
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

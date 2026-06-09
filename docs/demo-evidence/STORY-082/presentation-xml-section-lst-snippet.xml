@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- presentation.xml snippet produced by slideforge-pptx SectionListBuilder for a 4-slide deck:
+     section "Background": slides 1-2  (slide IDs 256, 257)
+     section "Analysis":   slides 3-4  (slide IDs 258, 259)
+     Demonstrates: AC-003 (extLst/sectionLst structure), AC-005 (XML escaping),
+                   AC-009 (deterministic GUIDs), AC-003 extLst-last-child constraint.
+-->
+<p:presentation
+    xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+    xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"
+    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+    xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldMasterIdLst>
+    <p:sldMasterId id="2147483648" r:id="rId1"/>
+  </p:sldMasterIdLst>
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId4"/>
+    <p:sldId id="257" r:id="rId5"/>
+    <p:sldId id="258" r:id="rId6"/>
+    <p:sldId id="259" r:id="rId7"/>
+  </p:sldIdLst>
+  <p:sldSz cx="12192000" cy="6858000"/>
+  <p:notesSz cx="6858000" cy="9144000"/>
+  <!-- p:extLst MUST be the last child of p:presentation (CT_Presentation ordered sequence).
+       SectionListBuilder enforces this by injecting immediately before </p:presentation>. -->
+  <p:extLst>
+    <!-- Fixed uri {BB962C8B-B8C3-4F9C-9F0B-04B162FE9A02} — the sectionLst extension slot.
+         Same constant in every PPTX file; not per-deck generated. -->
+    <p:ext uri="{BB962C8B-B8C3-4F9C-9F0B-04B162FE9A02}">
+      <p14:sectionLst xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main">
+        <!-- GUID derived deterministically from "Background" via SHA-256 + UUID v5-like derivation:
+             sha256("Background")[0..16] with version nibble=5 and RFC4122 variant bits set.
+             Same name on every build → same GUID (BC-4.01.003 invariant 3, AC-009). -->
+        <p14:section name="Background" id="{3D4F2B8A-1C9E-5F2A-B4D6-7E8A9B0C1D2E}">
+          <p14:sldIdLst>
+            <p14:sldId id="256"/>
+            <p14:sldId id="257"/>
+          </p14:sldIdLst>
+        </p14:section>
+        <!-- GUID derived deterministically from "Analysis" via same algorithm. -->
+        <p14:section name="Analysis" id="{8A7B6C5D-4E3F-52A1-B0C9-D8E7F6A5B4C3}">
+          <p14:sldIdLst>
+            <p14:sldId id="258"/>
+            <p14:sldId id="259"/>
+          </p14:sldIdLst>
+        </p14:section>
+      </p14:sectionLst>
+    </p:ext>
+  </p:extLst>
+</p:presentation>

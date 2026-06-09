@@ -787,6 +787,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
         }
     }
 
@@ -797,6 +798,7 @@ mod tests {
             metadata: make_metadata(),
             registers: OrderedMap::new(),
             section_blocks: blocks,
+            slide_sections: vec![],
         }
     }
 
@@ -817,6 +819,7 @@ mod tests {
             },
             registers: OrderedMap::new(),
             section_blocks: blocks,
+            slide_sections: vec![],
         }
     }
 

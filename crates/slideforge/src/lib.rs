@@ -2239,6 +2239,7 @@ mod tests {
                 vars: OrderedMap::new(),
                 registers: OrderedMap::new(),
                 section_blocks: vec![],
+                slide_sections: vec![],
                 metadata: DeckMetadata {
                     title: None,
                     slideforge_version: Arc::from("1"),
@@ -2446,6 +2447,7 @@ mod tests {
             vars: OrderedMap::new(),
             registers: OrderedMap::new(),
             section_blocks: vec![],
+            slide_sections: vec![],
             metadata: DeckMetadata {
                 title: None,
                 slideforge_version: Arc::from("0.1.0"),
@@ -2482,6 +2484,7 @@ mod tests {
             page_size: slideforge_layout::PageSize::default(),
             sections: vec![],
             warnings: vec![],
+            slide_sections: vec![],
         }
     }
 

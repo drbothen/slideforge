@@ -76,6 +76,7 @@ fn make_deck_one_slide(slide: Slide) -> Deck {
         metadata: make_metadata(),
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 

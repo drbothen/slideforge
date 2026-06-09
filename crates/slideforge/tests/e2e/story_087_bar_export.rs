@@ -109,6 +109,7 @@ fn minimal_deck() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -156,6 +157,7 @@ fn progress_bar_laid_out_deck() -> LaidOutDeck {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -457,6 +459,7 @@ fn test_BC_1_17_002_html_bar_render_layout_ir_proxy() {
         },
         registers: TypesOrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     };
 
     let brand = make_brand_for_layout();

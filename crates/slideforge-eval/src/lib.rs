@@ -49,6 +49,7 @@ pub mod for_eval;
 pub mod if_eval;
 pub mod include_cycle;
 pub mod register_routing;
+pub mod section_groups;
 
 #[cfg(test)]
 pub(crate) mod tests;

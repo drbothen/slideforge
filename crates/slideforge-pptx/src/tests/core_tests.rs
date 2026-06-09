@@ -88,6 +88,7 @@ fn make_deck(n: usize) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -184,6 +185,7 @@ fn make_laid_out_deck(n: usize) -> LaidOutDeck {
             .collect(),
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -1875,6 +1877,7 @@ fn test_sec100_progress_bar_label_with_control_char_stripped_from_slide_xml() {
         slides: vec![slide],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     let deck = make_deck(1);

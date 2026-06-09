@@ -277,6 +277,7 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
         }],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     };
 
     let deck = Deck {
@@ -291,6 +292,7 @@ fn test_bc_4_03_002_ac009_font_subset_smaller_than_full_font() {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     };
 
     let brand = Brand {

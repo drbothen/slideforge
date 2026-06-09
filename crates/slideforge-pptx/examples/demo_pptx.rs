@@ -86,6 +86,7 @@ fn make_deck(slide_count: usize) -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -190,6 +191,7 @@ fn make_deck_laid_out() -> LaidOutDeck {
         ],
         sections: vec![],
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 

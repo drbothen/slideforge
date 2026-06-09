@@ -432,6 +432,80 @@ pub enum SyntaxError {
         at: SourceSpan,
     },
 
+    /// A `section "":` block used an empty quoted name.
+    ///
+    /// Code: `E-PAR-023`
+    ///
+    /// Emitted when a `section "Name":` slide-grouping block has an empty
+    /// quoted name (e.g. `section "":"`). The empty-named block is discarded;
+    /// no `SectionGroupNode` is produced for it (BC-4.01.003 invariant 5).
+    ///
+    /// This error is **fatal** — the build halts with exit 1 (strict mode default).
+    ///
+    /// **Severity:** Fatal parse error.
+    #[error("Empty section group name at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("E-PAR-023"),
+        help(
+            "A section grouping name must be a non-empty quoted string. \
+             Change `section \"\":` to `section \"Background\":` or any other non-empty name."
+        )
+    )]
+    EmptySectionGroupName {
+        /// Source file path.
+        file: String,
+        /// One-based line number.
+        line: u32,
+        /// One-based column number.
+        col: u32,
+        /// Human-readable description.
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the empty string token `""`.
+        #[label("empty section name here")]
+        at: SourceSpan,
+    },
+
+    /// Two `section "Name":` blocks use the same quoted name in one deck.
+    ///
+    /// Code: `W-PAR-002`
+    ///
+    /// Emitted when a duplicate section group name is detected.  Both sections
+    /// are emitted (neither is discarded); the GUID derived for both will be
+    /// identical (BC-4.01.003 invariant 3). This is a **warning** — the build
+    /// exits with code 0 and produces output (the PPTX will contain both
+    /// sections; `PowerPoint` will accept but may merge them visually).
+    ///
+    /// **Severity:** Non-fatal warning.
+    #[error("Duplicate section group name '{name}' at {file}:{line}:{col}: {message}")]
+    #[diagnostic(
+        code("W-PAR-002"),
+        help(
+            "Both sections with the same name are emitted, but their GUIDs will be identical. \
+             Consider using distinct names to avoid PPTX rendering issues in PowerPoint."
+        )
+    )]
+    DuplicateSectionGroupName {
+        /// Source file path.
+        file: String,
+        /// One-based line number of the SECOND (duplicate) occurrence.
+        line: u32,
+        /// One-based column number of the SECOND (duplicate) occurrence.
+        col: u32,
+        /// The duplicated name.
+        name: String,
+        /// Human-readable description.
+        message: String,
+        /// Source code context for miette rendering.
+        #[source_code]
+        src: NamedSource<String>,
+        /// Span pointing at the duplicate section name token.
+        #[label("duplicate section name here")]
+        at: SourceSpan,
+    },
+
     /// A version declaration error.
     ///
     /// Code: `E-PAR-010`
@@ -734,6 +808,61 @@ impl SyntaxError {
         }
     }
 
+    /// Construct an `EmptySectionGroupName` error (E-PAR-023).
+    ///
+    /// `byte_offset` is the byte position of the empty string token `""`.
+    /// `token_len` is the byte length of the token (typically 2 for `""`).
+    #[must_use]
+    pub fn empty_section_group_name(
+        file: String,
+        line: u32,
+        col: u32,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        token_len: usize,
+    ) -> Self {
+        let span_len = token_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::EmptySectionGroupName {
+            file,
+            line,
+            col,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
+    /// Construct a `DuplicateSectionGroupName` warning (W-PAR-002).
+    ///
+    /// `name` is the duplicated section group name.
+    /// `byte_offset` is the byte position of the duplicate name token.
+    /// `token_len` is the byte length of the name token.
+    #[must_use]
+    pub fn duplicate_section_group_name(
+        file: String,
+        line: u32,
+        col: u32,
+        name: String,
+        message: String,
+        source_text: String,
+        byte_offset: usize,
+        token_len: usize,
+    ) -> Self {
+        let span_len = token_len.max(1);
+        let src = NamedSource::new(file.as_str(), source_text);
+        Self::DuplicateSectionGroupName {
+            file,
+            line,
+            col,
+            name,
+            message,
+            src,
+            at: SourceSpan::from((byte_offset, span_len)),
+        }
+    }
+
     /// Construct a `VersionError` (E-PAR-010).
     #[must_use]
     pub fn version_error(
@@ -777,9 +906,13 @@ impl SyntaxError {
     #[must_use]
     pub fn severity(&self) -> ParseSeverity {
         match self {
+            // Non-fatal advisory diagnostics (exit 0, warnings only):
+            // - VersionError(is_fatal=false): missing slideforge_version advisory.
+            // - DuplicateSectionGroupName (W-PAR-002): duplicate section group.
             Self::VersionError {
                 is_fatal: false, ..
-            } => ParseSeverity::Warning,
+            }
+            | Self::DuplicateSectionGroupName { .. } => ParseSeverity::Warning,
             _ => ParseSeverity::Fatal,
         }
     }
@@ -832,6 +965,12 @@ impl SyntaxError {
             }
             | Self::DisallowedLinkUrlScheme {
                 file, line, col, ..
+            }
+            | Self::EmptySectionGroupName {
+                file, line, col, ..
+            }
+            | Self::DuplicateSectionGroupName {
+                file, line, col, ..
             } => (file.as_str(), *line, *col),
             Self::UnexpectedEof { file, .. } | Self::VersionError { file, .. } => {
                 (file.as_str(), 0, 0)
@@ -858,6 +997,8 @@ impl SyntaxError {
             Self::EmptyInlineMarkupSpan { .. } => 8,
             Self::InlineNestingDepthExceeded { .. } => 9,
             Self::DisallowedLinkUrlScheme { .. } => 10,
+            Self::EmptySectionGroupName { .. } => 11,
+            Self::DuplicateSectionGroupName { .. } => 12,
         }
     }
 }

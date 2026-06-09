@@ -89,6 +89,7 @@ fn minimal_deck() -> Deck {
         },
         registers: OrderedMap::new(),
         section_blocks: vec![],
+        slide_sections: vec![],
     }
 }
 
@@ -186,6 +187,7 @@ fn make_laid_out_deck(slides: Vec<LaidOutSlide>, sections: Vec<GeneratedSection>
         slides,
         sections,
         warnings: vec![],
+        slide_sections: vec![],
     }
 }
 
