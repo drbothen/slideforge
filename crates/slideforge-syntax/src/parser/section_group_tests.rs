@@ -29,8 +29,13 @@
 #![allow(clippy::manual_assert)]
 #![allow(clippy::missing_docs_in_private_items)]
 
+use crate::lexer::lex;
+use crate::parser::deck::deck_parser;
 use crate::span::SourceMap;
+use crate::token::Token;
 use crate::{BlockItem, parse};
+use chumsky::input::Input as _;
+use chumsky::{Parser, prelude::SimpleSpan};
 
 // ─── AC-001: section "Name": parses with correct SectionGroupNode ─────────────
 
@@ -178,6 +183,26 @@ section "":
 /// AC-010 — `section "":` produces no `SectionGroupNode` in the AST for the rejected block.
 ///
 /// Traces to BC-4.01.003 postcondition 7 + invariant 5.
+///
+/// # Load-bearing design
+///
+/// E-PAR-023 is always fatal (`parse()` returns `Err`), so inspecting the `parse()`
+/// result directly would never yield an `Ok` to unwrap — the assertion about the
+/// recovered AST would be permanently unreachable (paper-fix / TD-VSDD-059).
+///
+/// Instead this test exercises the sentinel-discard logic (`deck.rs:615-652`) by
+/// calling `deck_parser` directly on the raw token stream.  `deck_parser` is the
+/// combinator that chumsky drives *inside* `parse()`, and it is exactly where the
+/// sentinel is discarded.  The `into_output_errors()` call returns the partially-
+/// recovered `DeckNode` alongside the chumsky `Rich` errors, letting us assert BOTH:
+///   1. The chumsky error list contains E-PAR-023 (the rule fired).
+///   2. No `BlockItem::SectionGroup` with an empty name survived in the recovered
+///      AST after the sentinel-discard branch ran (BC-4.01.003 PC-7 / inv-5).
+///
+/// Regression proof: if a future change removed the `if name.is_empty() { continue; }`
+/// guard from `deck.rs`, assertion 2 would fire because the empty-named node would
+/// survive.  If a future change removed the E-PAR-023 emitter from
+/// `section_group.rs`, assertion 1 would fire.
 #[test]
 fn test_BC_4_01_003_ac010_empty_section_name_no_section_group_node() {
     let src = r#"slideforge_version "1"
@@ -188,26 +213,55 @@ section "":
     let mut source_map = SourceMap::default();
     let file_id = source_map.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
 
-    let deck_items = match parse(src, file_id, &source_map) {
-        Ok(result) => result.deck.items,
-        Err(_) => {
-            // Fatal parse error is acceptable (E-PAR-023 is fatal per spec).
-            return;
-        },
-    };
-
-    let empty_group = deck_items.iter().find(|item| {
-        if let BlockItem::SectionGroup(s) = item {
-            s.value().name.value().is_empty()
-        } else {
-            false
-        }
-    });
-
-    assert!(
-        empty_group.is_none(),
-        "SectionGroupNode with empty name must NOT appear in AST (BC-4.01.003 PC7)"
+    // ── Assertion 1 (via parse()): E-PAR-023 is fatal — parse() returns Err. ──────
+    // This proves the error-taxonomy rule: no output is produced for an empty-named
+    // section.  If parse() ever returned Ok, this assertion would fire.
+    let parse_errors = parse(src, file_id, &source_map).expect_err(
+        "parse() MUST return Err for section \"\": — E-PAR-023 is always fatal \
+         (BC-4.01.003 PC-7; error-taxonomy.md §24)",
     );
+    let has_e_par_023 = parse_errors
+        .iter()
+        .any(|e| format!("{e}").contains("E-PAR-023"));
+    assert!(
+        has_e_par_023,
+        "parse error for empty section name must include E-PAR-023; got: {parse_errors:?}"
+    );
+
+    // ── Assertion 2 (via deck_parser): sentinel-discard — no empty-named node survives. ──
+    // Call the chumsky combinator directly (the same parser that parse() drives
+    // internally) to obtain the partially-recovered DeckNode alongside the raw errors.
+    // The sentinel-discard branch in deck.rs:626-628 runs inside deck_parser, so
+    // even if chumsky's error-recovery emits a temporary empty-named SectionGroupNode
+    // as a sentinel, it is stripped before the DeckNode is returned.
+    let (tokens, _lex_errs) = lex(src, std::sync::Arc::from("test.sf"));
+    let spanned: Vec<(Token, SimpleSpan)> = tokens
+        .into_iter()
+        .map(|(t, s)| (t, SimpleSpan::from(s)))
+        .collect();
+    let eoi = SimpleSpan::from(src.len()..src.len());
+    let input = spanned
+        .as_slice()
+        .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+
+    let (deck_opt, _raw_errors) = deck_parser(file_id).parse(input).into_output_errors();
+
+    if let Some(recovered_deck) = deck_opt {
+        let empty_group = recovered_deck.items.iter().find(|item| {
+            if let BlockItem::SectionGroup(s) = item {
+                s.value().name.value().is_empty()
+            } else {
+                false
+            }
+        });
+        assert!(
+            empty_group.is_none(),
+            "sentinel-discard (deck.rs:626-628) must remove the empty-named \
+             SectionGroupNode from the recovered AST (BC-4.01.003 PC-7 / inv-5)"
+        );
+    }
+    // deck_opt == None means chumsky produced no output at all; the invariant is
+    // trivially satisfied (no AST → no empty-named node).
 }
 
 // ─── AC-011: duplicate section names → W-PAR-002 ─────────────────────────────
@@ -350,26 +404,41 @@ section "Background":
     );
 }
 
-/// CRIT-3 supplement — a section with 0 slides parses with empty `slides` vec.
+/// CRIT-3 supplement — `section "Empty":\n` with no indented body fails to parse.
+///
+/// # Load-bearing design
+///
+/// The grammar for a section group is:
+/// ```text
+/// section_group ::= "section" STRING ":" NEWLINE INDENT slide_block* DEDENT
+/// ```
+/// `INDENT` is a mandatory token.  A bare `section "Empty":\n` (no subsequent
+/// indented block) produces no `Indent` token, so the combinator fails.  This
+/// means `parse()` MUST return `Err` for this input.
+///
+/// The old `if let Ok(...) { ... }` form was vacuous: the `Ok` arm was never
+/// taken so the assertion inside it was never executed (TD-VSDD-059 / OBS-P14-1).
+///
+/// The fix asserts the parse FAILS (unconditional) — a regression where the
+/// grammar silently accepted an empty section body would be caught here.
+/// The CRIT-3 *affirmative* assertion (non-empty body → populated `slides` vec)
+/// is already covered by `test_BC_4_01_003_crit3_section_group_slides_parsed`.
 #[test]
 fn test_BC_4_01_003_crit3_empty_section_body() {
-    // An empty section body is unusual but the grammar should permit it.
-    // The eval pass will simply produce no SlideSectionEntry for it (per spec).
+    // `section "Empty":\n` has no subsequent INDENT token — the grammar requires
+    // `INDENT slide_block* DEDENT`, so this MUST fail to parse.
     let src = "slideforge_version \"1\"\nsection \"Empty\":\n";
     let mut source_map = SourceMap::default();
     let file_id = source_map.add_file(std::sync::Arc::from("test.sf"), std::sync::Arc::from(src));
-    // Empty section bodies may or may not parse successfully depending on grammar strictness.
-    // The key invariant: if parse succeeds, the slides vec is empty.
-    if let Ok(parse_result) = parse(src, file_id, &source_map) {
-        for item in &parse_result.deck.items {
-            if let BlockItem::SectionGroup(spanned) = item {
-                assert!(
-                    spanned.value().slides.is_empty(),
-                    "SectionGroupNode for empty body must have 0 slides"
-                );
-            }
-        }
-    }
-    // If parse fails with an error, that's acceptable — empty section bodies may
-    // require at least one child. The CRIT-3 fix is demonstrated by the 3-slide test.
+
+    let result = parse(src, file_id, &source_map);
+
+    // Unconditional assertion: empty section body must NOT parse successfully.
+    // If the grammar were relaxed to allow INDENT-less bodies this test would
+    // catch the regression immediately.
+    assert!(
+        result.is_err(),
+        "section \"Empty\": with no indented body must produce a parse error \
+         (grammar requires INDENT … DEDENT); got Ok: {result:?}"
+    );
 }
