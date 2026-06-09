@@ -961,6 +961,22 @@ fn eval_set_rule_value(
             }
         },
         SetRuleValue::Error => None,
+        // STORY-088 AC-012: evaluate each FieldValue item through
+        // eval_field_value_to_value and collect to Value::List(vals).
+        // Items that fail to evaluate (FieldValue::Error sentinels from
+        // the parser's E-PAR-024 recovery path) are silently dropped —
+        // the parser already pushed a diagnostic for them.
+        // BC-1.15.001 error accumulation: the rest of the list is
+        // still evaluated even when an item fails.
+        SetRuleValue::List(items) => {
+            let mut vals: Vec<Value> = Vec::with_capacity(items.len());
+            for item in items {
+                if let Some(v) = eval_field_value_to_value(item, env, sink) {
+                    vals.push(v);
+                }
+            }
+            Some(Value::List(vals))
+        },
     }
 }
 
@@ -2999,5 +3015,198 @@ mod tests {
             "Gap-1 None-path variant 2: metadata.title must be None when the title-type \
              slide exists but has no 'title' field (title_str() returns None)"
         );
+    }
+
+    // ─── STORY-088 AC-012: eval_set_rule_value for SetRuleValue::List ───────────
+
+    /// AC-012 eval — `SetRuleValue::List([FieldValue::Template("A"), ...])` evaluates
+    /// to `Value::List([Value::Str("A"), ...])`.
+    ///
+    /// This is the direct unit test for the `eval_set_rule_value` `SetRuleValue::List`
+    /// arm (SID-1: load-bearing unit test for the new eval branch).
+    #[test]
+    fn test_bc_1_01_002_ac012_eval_set_rule_value_list_produces_value_list() {
+        use slideforge_syntax::{FieldValue, SetRuleValue};
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        let set_rule_value = SetRuleValue::List(vec![
+            FieldValue::Template(vec![TemplateChunk::Literal("Step 1".to_string())]),
+            FieldValue::Template(vec![TemplateChunk::Literal("Step 2".to_string())]),
+            FieldValue::Template(vec![TemplateChunk::Literal("Step 3".to_string())]),
+        ]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "AC-012 eval: no diagnostics expected for valid list; got: {:?}",
+            sink.errors()
+        );
+        let value = result
+            .expect("AC-012 eval: SetRuleValue::List must evaluate to Some(Value::List); got None");
+        let Value::List(vals) = value else {
+            panic!("AC-012 eval: result must be Value::List; got: {value:?}");
+        };
+        assert_eq!(
+            vals.len(),
+            3,
+            "AC-012 eval: Value::List must have 3 items; got: {vals:?}"
+        );
+        assert_eq!(
+            vals[0],
+            Value::Str(Arc::from("Step 1")),
+            "AC-012 eval: item[0] must be Value::Str(\"Step 1\")"
+        );
+        assert_eq!(
+            vals[1],
+            Value::Str(Arc::from("Step 2")),
+            "AC-012 eval: item[1] must be Value::Str(\"Step 2\")"
+        );
+        assert_eq!(
+            vals[2],
+            Value::Str(Arc::from("Step 3")),
+            "AC-012 eval: item[2] must be Value::Str(\"Step 3\")"
+        );
+    }
+
+    /// AC-012 eval (empty list) — `SetRuleValue::List([])` evaluates to `Value::List([])`.
+    #[test]
+    fn test_bc_1_01_002_ac012_eval_set_rule_value_empty_list_produces_empty_value_list() {
+        use slideforge_syntax::SetRuleValue;
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        let result = eval_set_rule_value(&SetRuleValue::List(vec![]), &env, &mut sink);
+
+        assert!(
+            sink.is_empty(),
+            "AC-012 eval empty: no diagnostics expected"
+        );
+        let value = result.expect("AC-012 eval empty: SetRuleValue::List([]) must return Some");
+        let Value::List(vals) = value else {
+            panic!("AC-012 eval empty: result must be Value::List; got: {value:?}");
+        };
+        assert!(
+            vals.is_empty(),
+            "AC-012 eval empty: Value::List must be empty; got {vals:?}"
+        );
+    }
+
+    /// AC-012 eval (error-sentinel items dropped) — `SetRuleValue::List` items
+    /// that are `FieldValue::Error` (parser recovery sentinels) are silently dropped.
+    ///
+    /// BC-1.15.001: error accumulation — the rest of the list is still evaluated.
+    #[test]
+    fn test_bc_1_01_002_ac012_eval_set_rule_value_list_error_items_dropped() {
+        use slideforge_syntax::{FieldValue, SetRuleValue};
+
+        let env = Env::new(IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+
+        // Mix of valid Template items and an Error sentinel.
+        let set_rule_value = SetRuleValue::List(vec![
+            FieldValue::Template(vec![TemplateChunk::Literal("Good".to_string())]),
+            FieldValue::Error, // parser-recovery sentinel — must be silently dropped
+            FieldValue::Template(vec![TemplateChunk::Literal("Also good".to_string())]),
+        ]);
+
+        let result = eval_set_rule_value(&set_rule_value, &env, &mut sink);
+
+        // Error sentinel produces None from eval_field_value_to_value; it is
+        // silently dropped. The other two items must still produce values.
+        let value = result.expect(
+            "AC-012 eval error-drop: list with error sentinel must return Some(Value::List)",
+        );
+        let Value::List(vals) = value else {
+            panic!("AC-012 eval error-drop: result must be Value::List; got: {value:?}");
+        };
+        assert_eq!(
+            vals.len(),
+            2,
+            "AC-012 eval error-drop: Error sentinel dropped → 2 remaining items; got {vals:?}"
+        );
+        assert_eq!(vals[0], Value::Str(Arc::from("Good")));
+        assert_eq!(vals[1], Value::Str(Arc::from("Also good")));
+    }
+
+    /// AC-012 eval (set-rule default merge path) — `SetRuleValue::List` set-rule
+    /// default flows through the deck-level set_rule_defaults merge as `Value::List`
+    /// and is injected into the slide's fields as `FieldValue::Literal(Value::List(...))`.
+    ///
+    /// This verifies that the set-rule default-merge mechanism correctly stores
+    /// `Value::List` into the slide IR fields (same pattern as the existing
+    /// `test_set_rule_applied_as_default` for string-valued set-rules).
+    #[test]
+    fn test_bc_1_01_002_ac012_eval_set_rule_list_default_flows_as_value_list() {
+        use slideforge_syntax::{FieldValue, SetRule, SetRuleValue, Spanned};
+
+        let bullets_set_rule = SetRule {
+            slide_type: Spanned::new("content".to_string(), dummy_span()),
+            field: Spanned::new("bullets".to_string(), dummy_span()),
+            value: Spanned::new(
+                SetRuleValue::List(vec![
+                    FieldValue::Template(vec![TemplateChunk::Literal("Default A".to_string())]),
+                    FieldValue::Template(vec![TemplateChunk::Literal("Default B".to_string())]),
+                ]),
+                dummy_span(),
+            ),
+        };
+        // Build a content slide with no bullets field (should receive the default).
+        let slide_item = BlockItem::Slide(Spanned::new(
+            SlideNode {
+                kind: Spanned::new("content".to_string(), dummy_span()),
+                tags: vec![],
+                fields: vec![],
+                inline_items: vec![],
+            },
+            dummy_span(),
+        ));
+        let deck_node = DeckNode {
+            items: vec![slide_item],
+            set_rules: vec![bullets_set_rule],
+            ..DeckNode::default()
+        };
+
+        let config = default_config();
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&deck_node, &config, &mut sink);
+        let deck = deck.expect("AC-012 set-rule merge: eval must return Some");
+        assert!(
+            sink.is_empty(),
+            "AC-012 set-rule merge: no errors expected; got: {:?}",
+            sink.errors()
+        );
+        assert_eq!(
+            deck.slides.len(),
+            1,
+            "AC-012 set-rule merge: deck must have 1 slide"
+        );
+        // The bullets field must be present in the slide (injected by set-rule default).
+        let bullets_field = deck.slides[0].fields.get("bullets");
+        assert!(
+            bullets_field.is_some(),
+            "AC-012 set-rule merge: bullets field must be injected by set-rule default; \
+             got fields: {:?}",
+            deck.slides[0].fields.keys().collect::<Vec<_>>()
+        );
+        // The value must be FieldValue::Literal(Value::List([...])) with 2 items.
+        match bullets_field.expect("checked above") {
+            slideforge_types::FieldValue::Literal(Value::List(vals)) => {
+                assert_eq!(
+                    vals.len(),
+                    2,
+                    "AC-012 set-rule merge: injected bullets must be Value::List with 2 items; \
+                     got: {vals:?}"
+                );
+                assert_eq!(vals[0], Value::Str(Arc::from("Default A")));
+                assert_eq!(vals[1], Value::Str(Arc::from("Default B")));
+            },
+            other => panic!(
+                "AC-012 set-rule merge: bullets field must be Literal(Value::List); got: {other:?}"
+            ),
+        }
     }
 }

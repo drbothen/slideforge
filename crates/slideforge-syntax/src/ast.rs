@@ -249,6 +249,21 @@ pub enum SetRuleValue {
     Bool(bool),
     /// An unquoted bare identifier.
     Ident(String),
+    /// A list-literal value: `["A", "B", "C"]`.
+    ///
+    /// Produced when a `[...]` list-literal appears as the right-hand side of a
+    /// `set <slide_type>: <field> [...]` rule. Items are [`FieldValue`] so that
+    /// the evaluator can map each to a `Value` (from `slideforge-types`) via the
+    /// standard `eval_field_value_to_value` dispatch.
+    ///
+    /// # STORY-088 AC-012
+    ///
+    /// `set content: bullets ["A", "B"]` → `SetRuleValue::List(vec![FieldValue::Template(...), ...])`.
+    /// The evaluator maps this to `Value::List(vec![Value::Str("A"), Value::Str("B")])`,
+    /// which flows through `thread_fields_to_blocks` (BC-1.16.001 PC-7) to
+    /// `ContentBlock::Bullets` when the `bullets` field is resolved via the
+    /// set-rule default-merge mechanism.
+    List(Vec<FieldValue>),
     /// Sentinel produced by error recovery.
     Error,
 }

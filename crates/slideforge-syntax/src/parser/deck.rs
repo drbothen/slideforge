@@ -171,7 +171,7 @@ where
 }
 
 /// Parser for a `set` rule value: string literal (with template interpolation),
-/// integer, float, bool, or identifier.
+/// integer, float, bool, identifier, or list literal.
 ///
 /// Identical in surface syntax to `value_parser()` but produces [`SetRuleValue`]
 /// so that `set` rules carry a distinct type from field values.
@@ -180,6 +180,13 @@ where
 /// `SetRuleValue::Template([TemplateChunk::Expr(Expr::FieldAccess { base:
 /// Ident("brand"), field: "footer" })])`. The expression parser handles this
 /// naturally via field-access syntax — no special `BrandRef` token is needed.
+///
+/// # STORY-088 AC-012
+///
+/// List literals `[item, item, ...]` produce [`SetRuleValue::List`]. Only string
+/// items are valid inside a set-rule list literal; non-string items emit E-PAR-024
+/// (same rules as `value_parser()`) and are substituted with [`FieldValue::Error`]
+/// sentinels (BC-1.15.001 error accumulation). Nested lists are rejected.
 fn set_rule_value_parser<'src, I>()
 -> impl Parser<'src, I, (SetRuleValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
@@ -206,7 +213,64 @@ where
         Token::Ident(s) = e => (SetRuleValue::Ident(s.to_string()), e.span()),
     };
 
-    template_val.or(other_val)
+    // List literal for set-rule position: `["A", "B", ...]` → SetRuleValue::List.
+    //
+    // LESSON-19: reuse the same E-PAR-024 validation and flat-only list semantics
+    // as value_parser()'s list_item validator.  The item type is FieldValue (not
+    // SetRuleValue) so that the evaluator can dispatch each item through the
+    // standard `eval_field_value_to_value` path rather than duplicating the
+    // string-evaluation logic.
+    //
+    // Any non-Template item emits E-PAR-024 and is substituted with FieldValue::Error.
+    // Nested lists ([["A"]]) are structurally rejected by the grammar: the list_item
+    // combinator only recognises template_value() + non-string primitive tokens.
+    // AC-012 / STORY-088.
+    let list_item_for_set = template_value()
+        .validate(
+            move |(chunks, errs): (
+                Vec<TemplateChunk>,
+                Vec<crate::parser::template::TemplateError>,
+            ),
+                  info,
+                  emitter| {
+                for err in errs {
+                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+                }
+                (FieldValue::Template(chunks), info.span())
+            },
+        )
+        .or(
+            // Non-string primitive items: emit E-PAR-024 and recover with Error sentinel.
+            select! {
+                Token::IntLit(_) = e => (FieldValue::Error, e.span()),
+                Token::FloatLit(_) = e => (FieldValue::Error, e.span()),
+                Token::BoolLit(_) = e => (FieldValue::Error, e.span()),
+                Token::Ident(_) = e => (FieldValue::Error, e.span()),
+            }
+            .validate(move |(_, item_span): (FieldValue, TSpan), _info, emitter| {
+                emitter.emit(Rich::custom(
+                    item_span,
+                    "E-PAR-024: non-string list item. \
+                     List items must be quoted string literals. \
+                     Wrap the value in quotes to use it as a string."
+                        .to_string(),
+                ));
+                (FieldValue::Error, item_span)
+            }),
+        );
+
+    let list_val_for_set = list_item_for_set
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map_with(move |items, e| {
+            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+            (SetRuleValue::List(items_fv), e.span())
+        });
+
+    // Priority: list_val first so `[...]` is not misinterpreted as an ident.
+    list_val_for_set.or(template_val).or(other_val)
 }
 
 // ─── Keyword matchers ─────────────────────────────────────────────────────────
@@ -2177,6 +2241,180 @@ mod tests {
             has_decimal,
             "MED-P3-002 (deck): E-PAR-024 message for bullets [1.5] must contain \
              'decimal number'; got errors: {errors:?}"
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // STORY-088 AC-012: set-rule list-literal default
+    // Traces to BC-1.01.002 — set_rule_value_parser() is a value-position
+    // parser surface for the field-value grammar.
+    // RED GATE: set_rule_value_parser() has no list arm → these tests FAIL.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Helper: raw-parse and return (`deck_opt`, `parse_errors` count) for set-rule test.
+    fn parse_set_rule_list(src: &str) -> (Option<DeckNode>, Vec<String>) {
+        let file: Arc<str> = Arc::from("test.sf");
+        let (tokens, _lex_errs) = lex(src, file.clone());
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+        let reasons: Vec<String> = parse_errs
+            .iter()
+            .map(|e| format!("{:?}", e.reason()))
+            .collect();
+        (deck_opt, reasons)
+    }
+
+    /// BC-1.01.002 AC-012 (positive) — `set content: bullets ["Step 1", "Step 2"]`
+    /// parses without error and produces a set rule whose value is a list type.
+    ///
+    /// RED GATE: `set_rule_value_parser()` has no list-literal arm → the `[` token
+    /// is unexpected → parse error → no set-rule value produced.
+    #[test]
+    fn test_bc_1_01_002_ac012_set_rule_list_literal_parses_to_list_value() {
+        use crate::ast::SetRuleValue;
+        let src = concat!(
+            "set content: bullets [\"Step 1\", \"Step 2\", \"Step 3\"]\n",
+            "slide content:\n",
+            "  title \"Test\"\n",
+        );
+        let (deck, errors) = parse_set_rule_list(src);
+        assert!(
+            errors.is_empty(),
+            "AC-012: set content: bullets [...] must parse without error; \
+             got errors: {errors:?}\n\
+             RED GATE: set_rule_value_parser() has no list arm — add SetRuleValue::List \
+             and a list-literal arm."
+        );
+        let deck = deck.expect("AC-012: deck must parse");
+        assert_eq!(deck.set_rules.len(), 1, "AC-012: deck must have 1 set rule");
+        let sr = &deck.set_rules[0];
+        assert_eq!(
+            sr.slide_type.value(),
+            "content",
+            "AC-012: slide_type must be 'content'"
+        );
+        assert_eq!(
+            sr.field.value(),
+            "bullets",
+            "AC-012: field must be 'bullets'"
+        );
+        // The value must be SetRuleValue::List with 3 items.
+        // RED GATE: without the list arm this will be SetRuleValue::Error.
+        let SetRuleValue::List(items) = sr.value.value() else {
+            panic!(
+                "AC-012 RED GATE: set-rule value must be SetRuleValue::List; got: {:?}. \
+                 Add SetRuleValue::List variant and set_rule_value_parser() list arm.",
+                sr.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            3,
+            "AC-012: SetRuleValue::List must have 3 items; got: {items:?}"
+        );
+        for (i, item) in items.iter().enumerate() {
+            assert!(
+                matches!(item, FieldValue::Template(_)),
+                "AC-012: item[{i}] must be FieldValue::Template; got: {item:?}"
+            );
+        }
+    }
+
+    /// BC-1.01.002 AC-012 (empty list) — `set content: bullets []` parses to an
+    /// empty list value with 0 errors.
+    ///
+    /// RED GATE: no list arm in `set_rule_value_parser()`.
+    #[test]
+    fn test_bc_1_01_002_ac012_set_rule_empty_list_literal_is_valid() {
+        use crate::ast::SetRuleValue;
+        let src = concat!(
+            "set content: bullets []\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (deck, errors) = parse_set_rule_list(src);
+        assert!(
+            errors.is_empty(),
+            "AC-012 empty: set content: bullets [] must parse without error; got: {errors:?}"
+        );
+        let deck = deck.expect("AC-012 empty: deck must parse");
+        let sr = &deck.set_rules[0];
+        let SetRuleValue::List(items) = sr.value.value() else {
+            panic!(
+                "AC-012 empty RED GATE: empty [] must produce SetRuleValue::List([]); got: {:?}",
+                sr.value.value()
+            );
+        };
+        assert!(
+            items.is_empty(),
+            "AC-012 empty: list must be empty; got {items:?}"
+        );
+    }
+
+    /// BC-1.01.002 AC-012 (error case) — `set content: bullets [42, true]` produces
+    /// E-PAR-024 (non-string list element). Error accumulation applies.
+    ///
+    /// RED GATE: no list arm → the error is a different token-unexpected error.
+    /// After implementation: specific E-PAR-024 errors are present.
+    #[test]
+    fn test_bc_1_01_002_ac012_set_rule_non_string_list_items_produce_e_par_024() {
+        let src = concat!(
+            "set content: bullets [42, true]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (_deck, errors) = parse_set_rule_list(src);
+        // Must produce at least one parse error (E-PAR-024 or token-unexpected).
+        assert!(
+            !errors.is_empty(),
+            "AC-012 error: set content: bullets [42, true] must produce ≥1 parse error; got 0"
+        );
+        // After implementation: E-PAR-024 must be present.
+        let has_e_par_024 = errors.iter().any(|msg| msg.contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "AC-012 error RED GATE: errors must include E-PAR-024 for non-string items; \
+             got: {errors:?}"
+        );
+    }
+
+    /// BC-1.01.002 AC-012 (trailing comma) — `set content: bullets ["A", "B",]`
+    /// trailing comma is accepted (`allow_trailing`).
+    ///
+    /// RED GATE: no list arm → different error.
+    #[test]
+    fn test_bc_1_01_002_ac012_set_rule_list_trailing_comma_accepted() {
+        use crate::ast::SetRuleValue;
+        let src = concat!(
+            "set content: bullets [\"A\", \"B\",]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (deck, errors) = parse_set_rule_list(src);
+        assert!(
+            errors.is_empty(),
+            "AC-012 trailing comma: trailing comma must be accepted; got errors: {errors:?}"
+        );
+        let deck = deck.expect("AC-012 trailing comma: deck must parse");
+        let SetRuleValue::List(items) = deck.set_rules[0].value.value() else {
+            panic!(
+                "AC-012 trailing comma RED GATE: must be SetRuleValue::List; got: {:?}",
+                deck.set_rules[0].value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "AC-012 trailing comma: trailing comma must not add extra item; got {items:?}"
         );
     }
 }

@@ -99,6 +99,16 @@ where
 // ─── Value parser (for vars: inside a variant) ───────────────────────────────
 
 /// Parse a variant `vars:` entry value.
+///
+/// Accepts string templates, integers, floats, booleans, bare identifiers,
+/// and list literals `["A", "B", ...]`.
+///
+/// # STORY-088 AC-013
+///
+/// List literals produce [`FieldValue::List`]. Only quoted string items are
+/// valid; non-string items emit E-PAR-024 (BC-1.15.001 error accumulation).
+/// Nested lists are structurally rejected by the grammar (same as
+/// `value_parser()` in `deck.rs`).
 fn variant_value<'src, I>()
 -> impl Parser<'src, I, (FieldValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
@@ -123,7 +133,60 @@ where
         Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
         Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
     };
-    template_val.or(other_val)
+
+    // List literal for variant vars: position: `["A", "B", ...]` → FieldValue::List.
+    //
+    // LESSON-19: same E-PAR-024 validation and flat-only list semantics as
+    // value_parser()'s list_item validator in deck.rs.
+    // Non-Template items emit E-PAR-024 and are substituted with FieldValue::Error.
+    // Nested lists ([["A"]]) are structurally rejected by the grammar.
+    // AC-013 / STORY-088.
+    let list_item_for_variant = template_value()
+        .validate(
+            move |(chunks, errs): (
+                Vec<TemplateChunk>,
+                Vec<crate::parser::template::TemplateError>,
+            ),
+                  info,
+                  emitter| {
+                for err in errs {
+                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+                }
+                (FieldValue::Template(chunks), info.span())
+            },
+        )
+        .or(
+            // Non-string primitive items: emit E-PAR-024 and recover with Error sentinel.
+            select! {
+                Token::IntLit(_) = e => (FieldValue::Error, e.span()),
+                Token::FloatLit(_) = e => (FieldValue::Error, e.span()),
+                Token::BoolLit(_) = e => (FieldValue::Error, e.span()),
+                Token::Ident(_) = e => (FieldValue::Error, e.span()),
+            }
+            .validate(move |(_, item_span): (FieldValue, TSpan), _info, emitter| {
+                emitter.emit(Rich::custom(
+                    item_span,
+                    "E-PAR-024: non-string list item. \
+                     List items must be quoted string literals. \
+                     Wrap the value in quotes to use it as a string."
+                        .to_string(),
+                ));
+                (FieldValue::Error, item_span)
+            }),
+        );
+
+    let list_val_for_variant = list_item_for_variant
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .map_with(move |items, e| {
+            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+            (FieldValue::List(items_fv), e.span())
+        });
+
+    // Priority: list_val first so `[...]` is not misinterpreted as an ident.
+    list_val_for_variant.or(template_val).or(other_val)
 }
 
 // ─── Intermediate types ───────────────────────────────────────────────────────
@@ -677,5 +740,211 @@ mod tests {
             let _ = has_empty_variants_err; // informational; not asserted
         }
         // Ok result is also acceptable if parser successfully recovers.
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // STORY-088 AC-013: variant vars list-literal override
+    // Traces to BC-1.01.002 — variant_value() is a value-position parser
+    // surface for the field-value grammar (variants.rs).
+    // RED GATE: variant_value() has no list arm → these tests FAIL.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// BC-1.01.002 AC-013 (positive) — `variant short: vars: items: ["Quick win", "Low effort"]`
+    /// parses to `FieldValue::List` with 2 items and 0 errors.
+    ///
+    /// RED GATE: `variant_value()` has no `[...]` arm → parse error; the vars entry
+    /// fails → no `FieldValue::List` produced.
+    #[test]
+    fn test_bc_1_01_002_ac013_variant_vars_list_literal_parses_to_fieldvalue_list() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [\"Quick win\", \"Low effort\"]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_ok(),
+            "AC-013: variant with list-literal vars entry must parse without error; \
+             got: {:?}\n\
+             RED GATE: variant_value() has no list arm — add list-literal arm.",
+            result.err()
+        );
+        let deck = result.expect("AC-013: deck must parse");
+        let vb = deck
+            .variants
+            .as_ref()
+            .expect("AC-013: deck must have variants block");
+        assert_eq!(vb.variants.len(), 1, "AC-013: must have 1 variant");
+        let variant = &vb.variants[0];
+        assert_eq!(
+            variant.name.value(),
+            "short",
+            "AC-013: variant name must be 'short'"
+        );
+        assert_eq!(
+            variant.vars.len(),
+            1,
+            "AC-013: variant must have 1 vars entry"
+        );
+
+        let (_name, value_spanned) = &variant.vars[0];
+        let FieldValue::List(items) = value_spanned.value() else {
+            panic!(
+                "AC-013 RED GATE: variant vars list value must be FieldValue::List; got: {:?}. \
+                 variant_value() has no [...] arm yet.",
+                value_spanned.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "AC-013: FieldValue::List must have 2 items; got: {items:?}"
+        );
+        for (i, item) in items.iter().enumerate() {
+            assert!(
+                matches!(item, FieldValue::Template(_)),
+                "AC-013: item[{i}] must be FieldValue::Template; got: {item:?}"
+            );
+        }
+    }
+
+    /// BC-1.01.002 AC-013 (empty list) — `vars: items: []` in a variant parses
+    /// to `FieldValue::List(vec![])` with 0 errors.
+    ///
+    /// RED GATE: no list arm in `variant_value()`.
+    #[test]
+    fn test_bc_1_01_002_ac013_variant_vars_empty_list_literal_is_valid() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: []\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_ok(),
+            "AC-013 empty: variant vars empty list must parse without error; got: {:?}",
+            result.err()
+        );
+        let deck = result.expect("AC-013 empty: deck must parse");
+        let variant = &deck.variants.as_ref().unwrap().variants[0];
+        let (_name, value_spanned) = &variant.vars[0];
+        let FieldValue::List(items) = value_spanned.value() else {
+            panic!(
+                "AC-013 empty RED GATE: empty [] must produce FieldValue::List([]); got: {:?}",
+                value_spanned.value()
+            );
+        };
+        assert!(
+            items.is_empty(),
+            "AC-013 empty: list must be empty; got {items:?}"
+        );
+    }
+
+    /// BC-1.01.002 AC-013 (trailing comma) — `vars: items: ["A", "B",]` trailing
+    /// comma is accepted.
+    ///
+    /// RED GATE: no list arm.
+    #[test]
+    fn test_bc_1_01_002_ac013_variant_vars_list_trailing_comma_accepted() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [\"A\", \"B\",]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_ok(),
+            "AC-013 trailing comma: trailing comma must be accepted; got: {:?}",
+            result.err()
+        );
+        let deck = result.expect("AC-013 trailing comma: deck must parse");
+        let variant = &deck.variants.as_ref().unwrap().variants[0];
+        let (_name, value_spanned) = &variant.vars[0];
+        let FieldValue::List(items) = value_spanned.value() else {
+            panic!(
+                "AC-013 trailing comma RED GATE: must be FieldValue::List; got: {:?}",
+                value_spanned.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "AC-013 trailing comma: trailing comma must not add extra item; got {items:?}"
+        );
+    }
+
+    /// BC-1.01.002 AC-013 (error case) — `vars: items: [42, true]` produces
+    /// E-PAR-024. Error accumulation applies (BC-1.15.001).
+    ///
+    /// The parse must NOT panic. Errors must include E-PAR-024 for non-string items.
+    ///
+    /// RED GATE: no list arm → different error type (unexpected token).
+    /// After implementation: E-PAR-024 emitted.
+    #[test]
+    fn test_bc_1_01_002_ac013_variant_vars_non_string_list_items_produce_e_par_024() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [42, true]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        // Must NOT panic.
+        let result = parse_deck(src);
+        // Must produce errors (E-PAR-024 or token-unexpected at minimum).
+        assert!(
+            result.is_err(),
+            "AC-013 error: variant vars [42, true] must produce parse errors; got Ok"
+        );
+        let errors = result.unwrap_err();
+        assert!(
+            !errors.is_empty(),
+            "AC-013 error: error list must not be empty"
+        );
+        // After implementation: must include E-PAR-024.
+        let has_e_par_024 = errors.iter().any(|e| e.to_string().contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "AC-013 error RED GATE: errors must include E-PAR-024 for non-string items; \
+             got: {errors:?}"
+        );
+    }
+
+    /// BC-1.01.002 AC-013 (nested list rejection) — `vars: items: [["A"]]`
+    /// (nested list) produces ≥1 parse error. Not silently accepted.
+    ///
+    /// Nested list literals are out of scope (STORY-088 spec).
+    #[test]
+    fn test_bc_1_01_002_ac013_variant_vars_nested_list_is_rejected() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [[\"A\"]]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        // Must NOT panic.
+        let result = parse_deck(src);
+        // Must produce errors — nested list is not silently accepted.
+        assert!(
+            result.is_err(),
+            "AC-013 nested: nested list [[\"A\"]] in variant vars must produce error; got Ok"
+        );
+        let errors = result.unwrap_err();
+        assert!(
+            !errors.is_empty(),
+            "AC-013 nested: error list must not be empty"
+        );
     }
 }
