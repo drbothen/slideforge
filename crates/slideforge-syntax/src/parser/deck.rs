@@ -36,6 +36,7 @@ use crate::{
 use super::{
     alias::{AliasRegistry, alias_decl},
     control_flow::block_item,
+    list_literal::list_literal_elements,
     section::section_block_parser,
     section_group::section_group_parser,
     template::template_value,
@@ -70,104 +71,57 @@ fn to_span(ss: SimpleSpan, file_id: u32) -> Span {
 /// all errors in the file are accumulated (BC-1.15.001 error-accumulation).
 ///
 /// On error, produces `FieldValue::Error` sentinel for recovery.
+///
+/// List validation is routed through [`list_literal_elements`] — the single
+/// shared combinator used by all four value-position parsers. This ensures
+/// identical E-PAR-024 emission (including `got <type>` and `got nested list`)
+/// regardless of which parser surface encounters the malformed input.
 fn value_parser<'src, I>()
 -> impl Parser<'src, I, (FieldValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
     I: ValueInput<'src, Token = Token, Span = TSpan>,
 {
-    recursive(move |value_parser_ref| {
-        // Template string: emit any E-PAR-012/E-PAR-013/E-PAR-014 errors via validate().
-        let template_val = template_value().validate(
-            move |(chunks, errs): (
-                Vec<TemplateChunk>,
-                Vec<crate::parser::template::TemplateError>,
-            ),
-                  info,
-                  emitter| {
-                for err in errs {
-                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
-                }
-                (FieldValue::Template(chunks), info.span())
-            },
-        );
+    // Template string: emit any E-PAR-012/E-PAR-013/E-PAR-014 errors via validate().
+    let template_val = template_value().validate(
+        move |(chunks, errs): (
+            Vec<TemplateChunk>,
+            Vec<crate::parser::template::TemplateError>,
+        ),
+              info,
+              emitter| {
+            for err in errs {
+                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
+            }
+            (FieldValue::Template(chunks), info.span())
+        },
+    );
 
-        // Non-string field values.
-        let other_val = select! {
-            Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
-            Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
-            Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
-            Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
-        };
+    // Non-string field values (scalars).
+    let other_val = select! {
+        Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
+        Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
+        Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
+        Token::Ident(s) = e => (FieldValue::Ident(s.to_string()), e.span()),
+    };
 
-        // List items: only template (string) items are valid for bullet-list fields.
-        // Non-string list items — integers, floats, booleans, and bare words — emit
-        // E-PAR-024 (non-string list item) and are substituted with FieldValue::Error
-        // sentinels so that the evaluator's --warn-only path never renders a coerced
-        // non-string value as a bullet (BC-1.15.001 error accumulation).
-        //
-        // AC-005 / EC-002 / EC-005: non-string items must produce a diagnostic with
-        // the actual type name, not a silent wrong value or a panic.
-        let list_item = value_parser_ref.validate(
-            move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
-                // Only template strings (quoted string literals) are valid list items.
-                // Nested lists are NOT in scope (STORY-088 spec, line ~185);
-                // silently accepting them would violate the no-silent-failure ban.
-                if let FieldValue::Template(_) = &item {
-                    (item, item_span)
-                } else {
-                    // Non-string item: map to a human-readable type name and emit
-                    // E-PAR-024 with the actual type substituted for <type>
-                    // (error-taxonomy v2.27 §E-PAR-024 binding format).
-                    let type_name = match &item {
-                        FieldValue::Num(_) => "integer",
-                        FieldValue::Float(_) => "decimal number",
-                        FieldValue::Bool(_) => "boolean",
-                        FieldValue::Ident(_) => "bare word",
-                        FieldValue::Shape(_) => "shape block",
-                        // Error sentinel from a nested recovery path — already reported.
-                        FieldValue::Error => "error sentinel",
-                        // Nested list literals are out of scope (STORY-088 spec);
-                        // reject them explicitly so no items are silently dropped.
-                        FieldValue::List(_) => "nested list",
-                        // Template is matched in the outer arm above.
-                        FieldValue::Template(_) => unreachable!(),
-                    };
-                    emitter.emit(Rich::custom(
-                        item_span,
-                        format!(
-                            "E-PAR-024: non-string list item. \
-                             List items must be quoted string literals; got {type_name}. \
-                             Wrap the value in quotes to use it as a string."
-                        ),
-                    ));
-                    // Substitute FieldValue::Error so the evaluator's --warn-only
-                    // path skips this item rather than coercing it to a wrong value.
-                    (FieldValue::Error, item_span)
-                }
-            },
-        );
+    // List literal: route through the shared combinator (parser/list_literal.rs).
+    //
+    // list_literal_elements() handles:
+    //   - Valid template-string items → FieldValue::Template
+    //   - Non-string primitives       → E-PAR-024 "got <type>" + FieldValue::Error
+    //   - Nested list `[...]` items   → E-PAR-024 "got nested list" + FieldValue::Error
+    //   - Trailing comma              → accepted (EC-003 compliance)
+    //   - Empty list `[]`             → FieldValue::List([]) with 0 errors (AC-002)
+    //
+    // AC-005 / EC-002 / EC-005: non-string items must produce a diagnostic with
+    // the actual type name, not a silent wrong value or a panic.
+    let list_val = list_literal_elements().map_with(move |items, e| {
+        let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+        (FieldValue::List(items_fv), e.span())
+    });
 
-        // List literal: `[` (list_item (`,` list_item)*)? `]`
-        //
-        // Following the chumsky 0.10 token-stream idiom from expr.rs lines 96-103:
-        // use just(Token::LBracket) / just(Token::Comma) / just(Token::RBracket) —
-        // NOT char-stream combinators like just('[').
-        //
-        // allow_trailing() so that `["A", "B",]` (trailing comma) is accepted.
-        // AC-002 (empty list): `[]` produces FieldValue::List(vec![]) without error.
-        let list_val = list_item
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
-            .collect::<Vec<_>>()
-            .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map_with(move |items, e| {
-                let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
-                (FieldValue::List(items_fv), e.span())
-            });
-
-        // Priority: list_val first so `[...]` is not misinterpreted as an ident.
-        list_val.or(template_val).or(other_val)
-    })
+    // Priority: list_val first so `[...]` is not misinterpreted as an ident.
+    list_val.or(template_val).or(other_val)
 }
 
 /// Parser for a `set` rule value: string literal (with template interpolation),
@@ -186,7 +140,11 @@ where
 /// List literals `[item, item, ...]` produce [`SetRuleValue::List`]. Only string
 /// items are valid inside a set-rule list literal; non-string items emit E-PAR-024
 /// (same rules as `value_parser()`) and are substituted with [`FieldValue::Error`]
-/// sentinels (BC-1.15.001 error accumulation). Nested lists are rejected.
+/// sentinels (BC-1.15.001 error accumulation). Nested lists produce E-PAR-024
+/// "got nested list" (F-088-P5-MED-001 fix).
+///
+/// List validation routes through [`list_literal_elements`] — the shared combinator
+/// that guarantees identical E-PAR-024 emission across all four value-position parsers.
 fn set_rule_value_parser<'src, I>()
 -> impl Parser<'src, I, (SetRuleValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
@@ -215,59 +173,17 @@ where
 
     // List literal for set-rule position: `["A", "B", ...]` → SetRuleValue::List.
     //
-    // LESSON-19: reuse the same E-PAR-024 validation and flat-only list semantics
-    // as value_parser()'s list_item validator.  The item type is FieldValue (not
-    // SetRuleValue) so that the evaluator can dispatch each item through the
-    // standard `eval_field_value_to_value` path rather than duplicating the
-    // string-evaluation logic.
+    // Routes through the shared list_literal_elements() combinator (parser/list_literal.rs)
+    // which handles: valid Template items, per-type E-PAR-024 for non-string primitives,
+    // E-PAR-024 "nested list" for [["A"]] attempts, and trailing-comma acceptance.
     //
-    // Any non-Template item emits E-PAR-024 and is substituted with FieldValue::Error.
-    // Nested lists ([["A"]]) are structurally rejected by the grammar: the list_item
-    // combinator only recognises template_value() + non-string primitive tokens.
-    // AC-012 / STORY-088.
-    let list_item_for_set = template_value()
-        .validate(
-            move |(chunks, errs): (
-                Vec<TemplateChunk>,
-                Vec<crate::parser::template::TemplateError>,
-            ),
-                  info,
-                  emitter| {
-                for err in errs {
-                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
-                }
-                (FieldValue::Template(chunks), info.span())
-            },
-        )
-        .or(
-            // Non-string primitive items: emit E-PAR-024 and recover with Error sentinel.
-            select! {
-                Token::IntLit(_) = e => (FieldValue::Error, e.span()),
-                Token::FloatLit(_) = e => (FieldValue::Error, e.span()),
-                Token::BoolLit(_) = e => (FieldValue::Error, e.span()),
-                Token::Ident(_) = e => (FieldValue::Error, e.span()),
-            }
-            .validate(move |(_, item_span): (FieldValue, TSpan), _info, emitter| {
-                emitter.emit(Rich::custom(
-                    item_span,
-                    "E-PAR-024: non-string list item. \
-                     List items must be quoted string literals. \
-                     Wrap the value in quotes to use it as a string."
-                        .to_string(),
-                ));
-                (FieldValue::Error, item_span)
-            }),
-        );
-
-    let list_val_for_set = list_item_for_set
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just(Token::LBracket), just(Token::RBracket))
-        .map_with(move |items, e| {
-            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
-            (SetRuleValue::List(items_fv), e.span())
-        });
+    // Item type is FieldValue (not SetRuleValue) so that the evaluator dispatches each
+    // item through eval_field_value_to_value without duplicating string-evaluation logic.
+    // AC-012 / STORY-088 / F-088-P5-MED-001.
+    let list_val_for_set = list_literal_elements().map_with(move |items, e| {
+        let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+        (SetRuleValue::List(items_fv), e.span())
+    });
 
     // Priority: list_val first so `[...]` is not misinterpreted as an ident.
     list_val_for_set.or(template_val).or(other_val)
@@ -2384,6 +2300,166 @@ mod tests {
             has_e_par_024,
             "AC-012 error RED GATE: errors must include E-PAR-024 for non-string items; \
              got: {errors:?}"
+        );
+    }
+
+    // ── MED-001 (Pass-5): per-type <type> substitution in E-PAR-024 — SET-RULE path ──
+    //
+    // F-088-P5-MED-001: set_rule_value_parser() emits a generic message
+    // ("List items must be quoted string literals.") without the per-type <type>
+    // substitution ("got integer"/"got boolean"/"got bare word") that is required
+    // by error-taxonomy v2.28 §E-PAR-024 binding format.
+    //
+    // These RED GATE tests assert that the CANONICAL message (including "got <type>")
+    // is present. Before the shared-combinator refactor they FAIL because the
+    // set-rule path uses the generic message.
+
+    /// MED-001 (a, set-rule) — `set content: bullets [42]` → E-PAR-024 message
+    /// contains "got integer" AND "integer" (`set_rule_value_parser` path).
+    ///
+    /// RED GATE: `set_rule_value_parser()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_set_rule_integer_item_has_got_type_in_message() {
+        let src = concat!(
+            "set content: bullets [42]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (_deck, errors) = parse_set_rule_list(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-001 (set-rule int): [42] must produce ≥1 parse error; got 0"
+        );
+        let has_got_integer = errors.iter().any(|msg| msg.contains("integer"));
+        assert!(
+            has_got_integer,
+            "P5-MED-001 (set-rule int): E-PAR-024 for set-rule [42] must contain 'integer' \
+             per error-taxonomy v2.28; \
+             got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (b, set-rule) — `set content: bullets [true]` → E-PAR-024 message
+    /// contains "boolean" (`set_rule_value_parser` path).
+    ///
+    /// RED GATE: `set_rule_value_parser()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_set_rule_boolean_item_has_got_type_in_message() {
+        let src = concat!(
+            "set content: bullets [true]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (_deck, errors) = parse_set_rule_list(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-001 (set-rule bool): [true] must produce ≥1 parse error; got 0"
+        );
+        let has_boolean = errors.iter().any(|msg| msg.contains("boolean"));
+        assert!(
+            has_boolean,
+            "P5-MED-001 (set-rule bool): E-PAR-024 for set-rule [true] must contain 'boolean' \
+             per error-taxonomy v2.28; \
+             got errors: {errors:?}"
+        );
+    }
+
+    /// MED-001 (c, set-rule) — `set content: bullets [someident]` → E-PAR-024 message
+    /// contains "bare word" (`set_rule_value_parser` path).
+    ///
+    /// RED GATE: `set_rule_value_parser()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_set_rule_bare_word_item_has_got_type_in_message() {
+        let src = concat!(
+            "set content: bullets [someident]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (_deck, errors) = parse_set_rule_list(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-001 (set-rule ident): [someident] must produce ≥1 parse error; got 0"
+        );
+        let has_bare_word = errors.iter().any(|msg| msg.contains("bare word"));
+        assert!(
+            has_bare_word,
+            "P5-MED-001 (set-rule ident): E-PAR-024 for set-rule [someident] must contain \
+             'bare word' per error-taxonomy v2.28; \
+             got errors: {errors:?}"
+        );
+    }
+
+    // ── Consistency matrix: same malformed element → same E-PAR-024 core (all 4 positions) ──
+    //
+    // The regression guard against future drift: the SAME malformed list element
+    // in ANY of the 4 value-position parsers must produce the SAME E-PAR-024
+    // message fragment ("List items must be quoted string literals; got integer").
+    // This test matrix fires if any single parser deviates from the canonical form.
+
+    /// Consistency matrix — `[42]` in all 4 value-position parsers all produce
+    /// a message containing "integer" (canonical per-type substitution).
+    ///
+    /// Positions: (1) `field_line_cf`/slide-body, (2) `vars_block`/deck-level `value_parser`,
+    /// (3) `set_rule_value_parser`, (4) `variant_value`.
+    ///
+    /// RED GATE for positions 3 and 4: they currently use the generic message.
+    #[test]
+    fn test_bc_1_01_002_consistency_matrix_integer_item_all_4_positions_same_message_fragment() {
+        // Position 1: slide-body (control_flow::field_line_cf).
+        let src_body = concat!("slide content:\n", "  bullets [42]\n");
+        let errors_body = parse_get_errors(src_body);
+        let has_integer_body = errors_body.iter().any(|msg| msg.contains("integer"));
+
+        // Position 2: vars_block (deck.rs::value_parser via vars_block_parser).
+        let src_vars = concat!(
+            "vars:\n",
+            "  items: [42]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let errors_vars = parse_get_errors(src_vars);
+        let has_integer_vars = errors_vars.iter().any(|msg| msg.contains("integer"));
+
+        // Position 3: set_rule_value_parser.
+        let src_set = concat!(
+            "set content: bullets [42]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let (_deck_set, errors_set) = parse_set_rule_list(src_set);
+        let has_integer_set = errors_set.iter().any(|msg| msg.contains("integer"));
+
+        // Position 4: variant_value (tested via parse_deck in variants module).
+        // We use parse_get_errors (deck-level) which routes through deck_parser and then
+        // through variants_block → variant_value.
+        let src_variant = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [42]\n",
+            "slide content:\n",
+            "  title \"T\"\n",
+        );
+        let errors_variant = parse_get_errors(src_variant);
+        let has_integer_variant = errors_variant.iter().any(|msg| msg.contains("integer"));
+
+        assert!(
+            has_integer_body,
+            "consistency: position 1 (slide-body) [42] must contain 'integer'; got: {errors_body:?}"
+        );
+        assert!(
+            has_integer_vars,
+            "consistency: position 2 (vars_block) [42] must contain 'integer'; got: {errors_vars:?}"
+        );
+        assert!(
+            has_integer_set,
+            "consistency: position 3 (set-rule) [42] must contain 'integer'; \
+             RED GATE — set_rule_value_parser uses generic message; got: {errors_set:?}"
+        );
+        assert!(
+            has_integer_variant,
+            "consistency: position 4 (variant) [42] must contain 'integer'; \
+             RED GATE — variant_value uses generic message; got: {errors_variant:?}"
         );
     }
 

@@ -43,7 +43,7 @@ use crate::{
     token::Token,
 };
 
-use super::template::template_value;
+use super::{list_literal::list_literal_elements, template::template_value};
 
 // ─── Type aliases ─────────────────────────────────────────────────────────────
 
@@ -106,9 +106,12 @@ where
 /// # STORY-088 AC-013
 ///
 /// List literals produce [`FieldValue::List`]. Only quoted string items are
-/// valid; non-string items emit E-PAR-024 (BC-1.15.001 error accumulation).
-/// Nested lists are structurally rejected by the grammar (same as
-/// `value_parser()` in `deck.rs`).
+/// valid; non-string items emit E-PAR-024 with `got <type>` (BC-1.15.001 error
+/// accumulation). Nested lists produce E-PAR-024 "got nested list"
+/// (F-088-P5-MED-001 fix).
+///
+/// List validation routes through [`list_literal_elements`] — the shared combinator
+/// that guarantees identical E-PAR-024 emission across all four value-position parsers.
 fn variant_value<'src, I>()
 -> impl Parser<'src, I, (FieldValue, TSpan), extra::Err<Rich<'src, Token, TSpan>>> + Clone
 where
@@ -136,54 +139,14 @@ where
 
     // List literal for variant vars: position: `["A", "B", ...]` → FieldValue::List.
     //
-    // LESSON-19: same E-PAR-024 validation and flat-only list semantics as
-    // value_parser()'s list_item validator in deck.rs.
-    // Non-Template items emit E-PAR-024 and are substituted with FieldValue::Error.
-    // Nested lists ([["A"]]) are structurally rejected by the grammar.
-    // AC-013 / STORY-088.
-    let list_item_for_variant = template_value()
-        .validate(
-            move |(chunks, errs): (
-                Vec<TemplateChunk>,
-                Vec<crate::parser::template::TemplateError>,
-            ),
-                  info,
-                  emitter| {
-                for err in errs {
-                    emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
-                }
-                (FieldValue::Template(chunks), info.span())
-            },
-        )
-        .or(
-            // Non-string primitive items: emit E-PAR-024 and recover with Error sentinel.
-            select! {
-                Token::IntLit(_) = e => (FieldValue::Error, e.span()),
-                Token::FloatLit(_) = e => (FieldValue::Error, e.span()),
-                Token::BoolLit(_) = e => (FieldValue::Error, e.span()),
-                Token::Ident(_) = e => (FieldValue::Error, e.span()),
-            }
-            .validate(move |(_, item_span): (FieldValue, TSpan), _info, emitter| {
-                emitter.emit(Rich::custom(
-                    item_span,
-                    "E-PAR-024: non-string list item. \
-                     List items must be quoted string literals. \
-                     Wrap the value in quotes to use it as a string."
-                        .to_string(),
-                ));
-                (FieldValue::Error, item_span)
-            }),
-        );
-
-    let list_val_for_variant = list_item_for_variant
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just(Token::LBracket), just(Token::RBracket))
-        .map_with(move |items, e| {
-            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
-            (FieldValue::List(items_fv), e.span())
-        });
+    // Routes through the shared list_literal_elements() combinator (parser/list_literal.rs)
+    // which handles: valid Template items, per-type E-PAR-024 for non-string primitives,
+    // E-PAR-024 "nested list" for [["A"]] attempts, and trailing-comma acceptance.
+    // AC-013 / STORY-088 / F-088-P5-MED-001.
+    let list_val_for_variant = list_literal_elements().map_with(move |items, e| {
+        let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+        (FieldValue::List(items_fv), e.span())
+    });
 
     // Priority: list_val first so `[...]` is not misinterpreted as an ident.
     list_val_for_variant.or(template_val).or(other_val)
@@ -916,6 +879,100 @@ mod tests {
         assert!(
             has_e_par_024,
             "AC-013 error RED GATE: errors must include E-PAR-024 for non-string items; \
+             got: {errors:?}"
+        );
+    }
+
+    // ── F-088-P5-MED-001: per-type <type> substitution — VARIANT path ──────────
+    //
+    // F-088-P5-MED-001: variant_value() emits a generic message
+    // ("List items must be quoted string literals.") without "got <type>".
+    // RED GATE tests assert canonical "got <type>" message per error-taxonomy v2.28.
+
+    /// P5-MED-001 (a, variant) — variant vars `[42]` → error contains "integer".
+    ///
+    /// RED GATE: `variant_value()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_variant_integer_item_has_got_type_in_message() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [42]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "P5-MED-001 (variant int): [42] must produce parse errors; got Ok"
+        );
+        let errors = result.unwrap_err();
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-001 (variant int): error list must not be empty"
+        );
+        let has_integer = errors.iter().any(|e| e.to_string().contains("integer"));
+        assert!(
+            has_integer,
+            "P5-MED-001 (variant int) RED GATE: E-PAR-024 for variant [42] must contain \
+             'integer' per error-taxonomy v2.28; \
+             got: {errors:?}"
+        );
+    }
+
+    /// P5-MED-001 (b, variant) — variant vars `[true]` → error contains "boolean".
+    ///
+    /// RED GATE: `variant_value()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_variant_boolean_item_has_got_type_in_message() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [true]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "P5-MED-001 (variant bool): [true] must produce parse errors; got Ok"
+        );
+        let errors = result.unwrap_err();
+        let has_boolean = errors.iter().any(|e| e.to_string().contains("boolean"));
+        assert!(
+            has_boolean,
+            "P5-MED-001 (variant bool) RED GATE: E-PAR-024 for variant [true] must contain \
+             'boolean' per error-taxonomy v2.28; \
+             got: {errors:?}"
+        );
+    }
+
+    /// P5-MED-001 (c, variant) — variant vars `[someident]` → error contains "bare word".
+    ///
+    /// RED GATE: `variant_value()` uses generic message without "got <type>".
+    #[test]
+    fn test_bc_1_01_002_p5_med001_variant_bare_word_item_has_got_type_in_message() {
+        let src = concat!(
+            "variants:\n",
+            "  short:\n",
+            "    vars:\n",
+            "      items: [someident]\n",
+            "slide title:\n",
+            "  title \"Test\"\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "P5-MED-001 (variant ident): [someident] must produce parse errors; got Ok"
+        );
+        let errors = result.unwrap_err();
+        let has_bare_word = errors.iter().any(|e| e.to_string().contains("bare word"));
+        assert!(
+            has_bare_word,
+            "P5-MED-001 (variant ident) RED GATE: E-PAR-024 for variant [someident] must \
+             contain 'bare word' per error-taxonomy v2.28; \
              got: {errors:?}"
         );
     }

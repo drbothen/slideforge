@@ -33,7 +33,10 @@ use crate::{
     token::Token,
 };
 
-use super::{expr::expr, shape::shape_block, template::template_value};
+use super::{
+    expr::expr, list_literal::list_literal_elements_cf, shape::shape_block,
+    template::template_value,
+};
 
 // ─── Type alias ───────────────────────────────────────────────────────────────
 
@@ -122,81 +125,25 @@ where
         Token::Ident(s) = e if s.as_ref() != "in" => (FieldValue::Ident(s.to_string()), e.span()),
     };
 
-    // List items: only template (string) items are valid for bullet-list fields.
-    // Non-string list items emit E-PAR-024 and continue (BC-1.15.001 error accumulation).
-    let list_item_tval = template_value().validate(
-        move |(chunks, errs): (
-            Vec<TemplateChunk>,
-            Vec<crate::parser::template::TemplateError>,
-        ),
-              info,
-              emitter| {
-            for err in errs {
-                emitter.emit(Rich::custom(info.span(), err.into_routing_message()));
-            }
-            (FieldValue::Template(chunks), info.span())
-        },
-    );
-    let list_item_other = select! {
-        Token::IntLit(n) = e => (FieldValue::Num(n), e.span()),
-        Token::FloatLit(f) = e => (FieldValue::Float(f), e.span()),
-        Token::BoolLit(b) = e => (FieldValue::Bool(b), e.span()),
-        Token::Ident(s) = e if s.as_ref() != "in" => (FieldValue::Ident(s.to_string()), e.span()),
-    };
-    let list_item = list_item_tval.or(list_item_other).validate(
-        move |(item, item_span): (FieldValue, TSpan), _info, emitter| {
-            // Only template strings (quoted string literals) are valid list items.
-            // Nested lists are NOT in scope (STORY-088 spec, line ~185);
-            // silently accepting them would violate the no-silent-failure ban.
-            if let FieldValue::Template(_) = &item {
-                (item, item_span)
-            } else {
-                // Non-string item: map to a human-readable type name and emit
-                // E-PAR-024 with the actual type substituted for <type>
-                // (error-taxonomy v2.27 §E-PAR-024 binding format).
-                let type_name = match &item {
-                    FieldValue::Num(_) => "integer",
-                    FieldValue::Float(_) => "decimal number",
-                    FieldValue::Bool(_) => "boolean",
-                    FieldValue::Ident(_) => "bare word",
-                    FieldValue::Shape(_) => "shape block",
-                    // Error sentinel from a nested recovery path — already reported.
-                    FieldValue::Error => "error sentinel",
-                    // Nested list literals are out of scope (STORY-088 spec);
-                    // reject them explicitly so no items are silently dropped.
-                    FieldValue::List(_) => "nested list",
-                    // Template is matched in the outer arm above.
-                    FieldValue::Template(_) => unreachable!(),
-                };
-                emitter.emit(Rich::custom(
-                    item_span,
-                    format!(
-                        "E-PAR-024: non-string list item. \
-                         List items must be quoted string literals; got {type_name}. \
-                         Wrap the value in quotes to use it as a string."
-                    ),
-                ));
-                // Substitute FieldValue::Error so the evaluator's --warn-only
-                // path skips this item rather than coercing it to a wrong value.
-                (FieldValue::Error, item_span)
-            }
-        },
-    );
-
-    // List literal: `[` (list_item (`,` list_item)*)? `]`
+    // List literal: route through the shared list_literal_elements_cf() combinator.
     //
-    // Token-stream idiom (chumsky 0.10): just(Token::LBracket) / just(Token::Comma)
-    // / just(Token::RBracket) — NOT char-stream combinators.
-    // allow_trailing() so `["A", "B",]` (trailing comma) is accepted.
-    let list_val = list_item
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
-        .collect::<Vec<_>>()
-        .delimited_by(just(Token::LBracket), just(Token::RBracket))
-        .map_with(move |items, e| {
-            let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
-            (FieldValue::List(items_fv), e.span())
-        });
+    // list_literal_elements_cf() handles:
+    //   - Valid template-string items    → FieldValue::Template
+    //   - Non-string primitives          → E-PAR-024 "got <type>" + FieldValue::Error
+    //   - Nested list `[...]` items      → E-PAR-024 "got nested list" + FieldValue::Error
+    //   - Trailing comma                 → accepted (EC-003)
+    //   - Empty list `[]`                → FieldValue::List([]) with 0 errors
+    //
+    // The `_cf` variant excludes the `"in"` identifier from bare-word items so
+    // that `@for x in coll:` structural keywords are never consumed as list items.
+    //
+    // This replaces the previous local list_item_tval/list_item_other/list_item trio
+    // and the dead FieldValue::List(_) => "nested list" arm (F-088-P5-MED-002 fix).
+    // BC-1.15.001 error accumulation is preserved: parsing continues after each error.
+    let list_val = list_literal_elements_cf().map_with(move |items, e| {
+        let items_fv: Vec<FieldValue> = items.into_iter().map(|(fv, _span)| fv).collect();
+        (FieldValue::List(items_fv), e.span())
+    });
 
     // Priority: list_val first, then template string, then other scalars.
     let value_p = list_val.or(template_val).or(other_val);
@@ -1601,6 +1548,63 @@ mod tests {
             has_lbracket_rejection,
             "MED-P3-001 (cf): error for bullets [[\"A\"]] must reference the rejected \
              nested bracket token or E-PAR-024; got errors: {errors:?}"
+        );
+    }
+
+    // ── F-088-P5-MED-002: nested list in SLIDE BODY must emit E-PAR-024 "nested list" ──
+    //
+    // F-088-P5-MED-002: `bullets [["A"]]` in slide-body (control_flow path) currently
+    // emits a cryptic `ExpectedFound` (LBracket unexpected) rather than E-PAR-024
+    // with "got nested list". The shared-combinator refactor must use a `recursive`
+    // list_item parser that recognises `[` as a nested-list attempt and emits the
+    // canonical E-PAR-024 message.
+    //
+    // RED GATE: current control_flow path uses `list_item_tval.or(list_item_other)` without
+    // a recursive arm — so `[` is never consumed as a list item and ExpectedFound fires first.
+    // After the refactor: the shared recursive combinator catches `[` → emits E-PAR-024
+    // "nested list" → the error contains "nested list" AND "E-PAR-024".
+
+    /// F-088-P5-MED-002 (a) — `bullets [["A"]]` in slide body → error contains
+    /// "nested list" (not just `LBracket` `ExpectedFound`).
+    ///
+    /// RED GATE: `control_flow` path emits `ExpectedFound` (`LBracket`) instead of
+    /// E-PAR-024 "nested list". After shared-combinator refactor: "nested list" present.
+    #[test]
+    fn test_bc_1_01_002_p5_med002_cf_nested_list_emits_e_par_024_nested_list_message() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-002: bullets [[\"A\"]] must produce ≥1 parse error; got 0"
+        );
+        let has_nested_list_msg = errors.iter().any(|msg| msg.contains("nested list"));
+        assert!(
+            has_nested_list_msg,
+            "P5-MED-002 RED GATE: error for bullets [[\"A\"]] must contain 'nested list' \
+             per error-taxonomy v2.28 §E-PAR-024; \
+             currently emits ExpectedFound(LBracket) instead; \
+             got errors: {errors:?}"
+        );
+    }
+
+    /// F-088-P5-MED-002 (b) — `bullets [["A"]]` in slide body → error contains
+    /// "E-PAR-024" code (not just a structural token error).
+    ///
+    /// RED GATE: `control_flow` `ExpectedFound` lacks the E-PAR-024 code.
+    #[test]
+    fn test_bc_1_01_002_p5_med002_cf_nested_list_emits_e_par_024_code() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]]\n");
+        let errors = parse_get_errors_cf(src);
+        assert!(
+            !errors.is_empty(),
+            "P5-MED-002 (b): bullets [[\"A\"]] must produce ≥1 parse error; got 0"
+        );
+        let has_e_par_024 = errors.iter().any(|msg| msg.contains("E-PAR-024"));
+        assert!(
+            has_e_par_024,
+            "P5-MED-002 (b) RED GATE: error for bullets [[\"A\"]] must contain 'E-PAR-024'; \
+             currently emits a structural ExpectedFound without the error code; \
+             got errors: {errors:?}"
         );
     }
 
