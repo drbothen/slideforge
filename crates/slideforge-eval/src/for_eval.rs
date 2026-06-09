@@ -107,6 +107,7 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
     // eval_for_block is called from eval_block_items (which already has its own
     // membership vec), but this public entry point is used by external callers.
     let mut membership = Vec::new();
+    let mut section_group_counter: u32 = 0;
     eval_for_block_with_sections(
         env,
         var_name,
@@ -117,6 +118,7 @@ pub fn eval_for_block<S: std::hash::BuildHasher>(
         sink,
         None,
         &mut membership,
+        &mut section_group_counter,
     )
 }
 
@@ -323,7 +325,11 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
 ) -> Vec<Slide> {
-    let mut membership: Vec<Option<Arc<str>>> = Vec::new();
+    let mut membership: Vec<Option<(u32, Arc<str>)>> = Vec::new();
+    // The counter is local to this throwaway call — eval_block_items is used by
+    // external callers (e.g. eval_if_chain for non-section contexts).  Each
+    // independent call site gets its own counter starting at 0.
+    let mut section_group_counter: u32 = 0;
     eval_block_items_with_sections(
         env,
         items,
@@ -332,6 +338,7 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
         sink,
         None,
         &mut membership,
+        &mut section_group_counter,
     )
 }
 
@@ -342,13 +349,28 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
 /// [`eval_block_items`] wrapper calls this with `section_tag = None` and a
 /// throwaway `membership` vec.
 ///
-/// `section_tag` is `Some(name)` when this call is recursing into a
-/// `section "Name":` body — all slides produced in that subtree are tagged
-/// with that section name.  Ungrouped slides (and slides inside `@for`/`@if`
-/// that appear OUTSIDE any section body) receive `None`.
+/// `section_tag` is `Some((instance_id, name))` when this call is recursing into
+/// a `section "Name":` body — all slides produced in that subtree are tagged
+/// with that section's `(instance_id, name)`.  The `instance_id` is a
+/// monotonically-increasing counter that is incremented once per
+/// `BlockItem::SectionGroup` encountered anywhere in the deck (see
+/// `section_group_counter` parameter below).  Ungrouped slides receive `None`.
+///
+/// Two adjacent `section "Background":` blocks receive distinct `instance_id`s
+/// (e.g. `(0, "Background")` and `(1, "Background")`), so
+/// [`crate::section_groups::build_slide_sections_from_membership`] emits two
+/// separate [`slideforge_types::SlideSectionEntry`] values for them — fixing
+/// F-P10-HIGH-1 (BC-4.01.003 EC-011).
 ///
 /// `membership` is extended with exactly one entry per slide appended to the
 /// returned `Vec<Slide>`, in the same order.
+///
+/// `section_group_counter` is a mutable counter shared across ALL recursive
+/// calls in the same deck evaluation.  It is incremented by 1 each time a
+/// `BlockItem::SectionGroup` is entered.  Callers at deck level pass
+/// `&mut 0u32`; recursive calls from within section bodies, `@for` loops,
+/// and `@if` branches all pass the SAME counter through so the counter is
+/// global across the entire deck expansion.
 ///
 /// ## CRIT-A fix (STORY-082 pass-2)
 ///
@@ -359,21 +381,26 @@ pub fn eval_block_items<S: std::hash::BuildHasher>(
 /// assigned by `slideforge-pptx::slide_ids` (256 + flat index) exactly match
 /// the IDs recorded in each `SlideSectionEntry`.
 ///
-/// `section_tag` is taken by value (`Option<Arc<str>>`) because every call site
-/// needs to clone it for the multiple recursive sub-calls.  Taking by value makes
-/// the semantics explicit: the caller transfers ownership, and this function
-/// clones from its owned copy.
+/// `section_tag` is taken by value (`Option<(u32, Arc<str>)>`) because every
+/// call site needs to clone it for the multiple recursive sub-calls.  Taking by
+/// value makes the semantics explicit: the caller transfers ownership, and this
+/// function clones from its owned copy.
 // section_tag is cloned at every call site that recurses — owned is more natural
-// here than a reference since all child calls need their own owned Option<Arc<str>>.
+// here than a reference since all child calls need their own owned value.
+// section_group_counter is shared across ALL recursive calls in one deck
+// evaluation so each SectionGroup block gets a unique instance_id
+// (F-P10-HIGH-1 fix, STORY-082 pass-5).
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
     env: &mut Env,
     items: &[BlockItem],
     set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
-    section_tag: Option<Arc<str>>,
-    membership: &mut Vec<Option<Arc<str>>>,
+    section_tag: Option<(u32, Arc<str>)>,
+    membership: &mut Vec<Option<(u32, Arc<str>)>>,
+    section_group_counter: &mut u32,
 ) -> Vec<Slide> {
     let mut slides: Vec<Slide> = Vec::new();
 
@@ -409,6 +436,7 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                                 sink,
                                 section_tag.clone(),
                                 membership,
+                                section_group_counter,
                             );
                             slides.extend(generated);
                         },
@@ -423,6 +451,7 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                                 sink,
                                 section_tag.clone(),
                                 membership,
+                                section_group_counter,
                             );
                             slides.extend(generated);
                         },
@@ -447,6 +476,7 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                     sink,
                     section_tag.clone(),
                     membership,
+                    section_group_counter,
                 );
                 slides.extend(generated);
             },
@@ -463,6 +493,7 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                     sink,
                     section_tag.clone(),
                     membership,
+                    section_group_counter,
                 );
                 slides.extend(generated);
             },
@@ -477,21 +508,31 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                 // declaration order — grouping must not cause silent data loss.
                 //
                 // CRIT-A fix (STORY-082 pass-2):
-                // Recurse with `section_tag = Some(group_name)` so that ALL slides
-                // produced by this section's body — including those from nested
-                // @for/@if expansions — are tagged with this section's name.
-                // This is the SINGLE SOURCE OF TRUTH for section membership;
-                // the superseded AST-walker approach has been removed (pass-4).
+                // Recurse with `section_tag = Some((instance_id, group_name))` so
+                // that ALL slides produced by this section's body — including those
+                // from nested @for/@if expansions — are tagged with this section's
+                // (instance_id, name).
+                //
+                // F-P10-HIGH-1 fix (STORY-082 pass-5):
+                // Claim the next instance_id from the shared counter BEFORE recursing.
+                // Each SectionGroup block gets a unique instance_id, so adjacent
+                // blocks with the same name are never merged in
+                // build_slide_sections_from_membership.
                 let group = spanned_group.value();
                 let group_name = Arc::clone(group.name.value());
+                let instance_id = *section_group_counter;
+                *section_group_counter = section_group_counter
+                    .checked_add(1)
+                    .expect("section_group_counter overflow — impossible: a deck cannot have > 4 billion section groups");
                 let group_slides = eval_block_items_with_sections(
                     env,
                     &group.slides,
                     set_rule_defaults,
                     config,
                     sink,
-                    Some(group_name),
+                    Some((instance_id, group_name)),
                     membership,
+                    section_group_counter,
                 );
                 slides.extend(group_slides);
             },
@@ -512,13 +553,13 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
 ///
 /// When a `@for x in [1,2]:` block appears BEFORE a `section "Name":`, the
 /// two expanded slides are counted (tagged `None`) before the section's slide
-/// is counted (tagged `Some("Name")`).  The PPTX exporter assigns IDs as
+/// is counted (tagged `Some(...)`.  The PPTX exporter assigns IDs as
 /// `256 + flat_index`, so the section slide gets ID 258, matching the tag.
-// 9 arguments are justified: this mirrors eval_for_block's 7 parameters plus
-// the 2 section-tracking parameters (section_tag + membership) that are needed
-// for single-pass section membership tracking (CRIT-A fix, STORY-082 pass-2).
-// There is no natural grouping that wouldn't obscure the function's intent.
-// section_tag is owned because each recursive call needs its own owned copy.
+// 10 arguments are justified: this mirrors eval_for_block's 7 parameters plus
+// the 3 section-tracking parameters (section_tag + membership + counter) that
+// are needed for single-pass section membership tracking.  The counter is
+// threaded through so that SectionGroup blocks inside @for loops get globally
+// unique instance_ids (F-P10-HIGH-1 fix, STORY-082 pass-5).
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn eval_for_block_with_sections<S: std::hash::BuildHasher>(
@@ -529,8 +570,9 @@ pub(crate) fn eval_for_block_with_sections<S: std::hash::BuildHasher>(
     set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
-    section_tag: Option<Arc<str>>,
-    membership: &mut Vec<Option<Arc<str>>>,
+    section_tag: Option<(u32, Arc<str>)>,
+    membership: &mut Vec<Option<(u32, Arc<str>)>>,
+    section_group_counter: &mut u32,
 ) -> Vec<Slide> {
     // Evaluate the collection expression.
     let Some(collection_val) = eval_expr(env, collection_expr, sink) else {
@@ -589,6 +631,7 @@ pub(crate) fn eval_for_block_with_sections<S: std::hash::BuildHasher>(
             sink,
             section_tag.clone(),
             membership,
+            section_group_counter,
         );
         slides.extend(body_slides);
 

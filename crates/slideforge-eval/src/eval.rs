@@ -376,9 +376,14 @@ pub fn eval_deck_with_variant(
     // ── Step 4: Evaluate all top-level block items ──
     // CRIT-A fix (STORY-082 pass-2): use the section-tracking variant so that
     // slide membership is derived from the SAME expansion pass that builds
-    // Deck.slides.  `membership_tags[i]` is Some(section_name) for slides
-    // inside a `section "Name":` body, None for ungrouped slides.
-    let mut membership_tags: Vec<Option<std::sync::Arc<str>>> = Vec::new();
+    // Deck.slides.  `membership_tags[i]` is Some((instance_id, section_name))
+    // for slides inside a `section "Name":` body, None for ungrouped slides.
+    // The instance_id disambiguates adjacent same-named blocks (F-P10-HIGH-1 fix).
+    let mut membership_tags: Vec<Option<(u32, std::sync::Arc<str>)>> = Vec::new();
+    // Deck-wide counter: incremented once per SectionGroup block entered, giving
+    // each block a unique instance_id so adjacent same-named blocks are not merged
+    // in build_slide_sections_from_membership (F-P10-HIGH-1 fix, STORY-082 pass-5).
+    let mut section_group_counter: u32 = 0;
     let mut slides = crate::for_eval::eval_block_items_with_sections(
         &mut env,
         &deck_node.items,
@@ -387,6 +392,7 @@ pub fn eval_deck_with_variant(
         sink,
         None,
         &mut membership_tags,
+        &mut section_group_counter,
     );
 
     // ── Step 4c: Evaluate section blocks (STORY-077) ──

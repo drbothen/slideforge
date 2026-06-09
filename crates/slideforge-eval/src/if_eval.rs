@@ -181,16 +181,24 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
 /// the taken branch produces receives the section tag.  This ensures that
 /// `@if`-conditional slides inside a section are correctly grouped — even when
 /// the `@if` condition depends on variables set by a preceding `@for` loop.
+///
+/// ## F-P10-HIGH-1 fix (STORY-082 pass-5)
+///
+/// `section_group_counter` is threaded through to
+/// `eval_block_items_with_sections` calls so that any `SectionGroup` blocks
+/// inside an `@if` body get globally-unique `instance_id`s.
 // section_tag is owned because each branch call needs its own owned copy.
 #[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
     env: &mut Env,
     if_node: &IfNode,
     set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     config: &EvalConfig,
     sink: &mut DiagnosticSink,
-    section_tag: Option<Arc<str>>,
-    membership: &mut Vec<Option<Arc<str>>>,
+    section_tag: Option<(u32, Arc<str>)>,
+    membership: &mut Vec<Option<(u32, Arc<str>)>>,
+    section_group_counter: &mut u32,
 ) -> Vec<Slide> {
     let if_span = span_to_source_span(if_node.condition.span());
     match eval_bool_condition(env, if_node.condition.value(), if_span, sink) {
@@ -203,6 +211,7 @@ pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
             sink,
             section_tag,
             membership,
+            section_group_counter,
         ),
         Some(false) => {
             for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
@@ -218,6 +227,7 @@ pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
                             sink,
                             section_tag,
                             membership,
+                            section_group_counter,
                         );
                     },
                     Some(false) => {},
@@ -232,6 +242,7 @@ pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
                     sink,
                     section_tag,
                     membership,
+                    section_group_counter,
                 )
             } else {
                 vec![]

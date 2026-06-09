@@ -87,18 +87,28 @@ pub fn slide_id_for_index(index: usize) -> u32 {
 /// `membership` has exactly one entry per slide in `Deck.slides`, in the same
 /// order.  An entry is:
 /// - `None` — the slide is ungrouped (not inside any `section "Name":` body).
-/// - `Some(name)` — the slide belongs to the section named `name`.
+/// - `Some((instance_id, name))` — the slide belongs to the section named
+///   `name` that was the `instance_id`-th `section "Name":` block encountered
+///   during evaluation (zero-based, incremented once per `SectionGroup` block
+///   entered in `eval_block_items_with_sections`).
 ///
-/// For each run of consecutive `Some(name)` entries the function emits one
-/// [`SlideSectionEntry`] with `slide_ids` equal to `[256 + index, ...]` for
-/// the corresponding flat indices.  Non-consecutive entries with the same name
-/// (interleaved by ungrouped slides) produce SEPARATE `SlideSectionEntry`
-/// values — each contiguous block is its own entry, preserving deck order.
+/// Slides with the same `(instance_id, name)` are part of the SAME DSL block
+/// and are coalesced into one [`SlideSectionEntry`].  Slides from a DIFFERENT
+/// `SectionGroup` block — even if it shares the same name — have a distinct
+/// `instance_id` and therefore produce a SEPARATE entry.
+///
+/// This correctly handles the adjacent-duplicate case (BC-4.01.003 EC-011 /
+/// F-P10-HIGH-1): two `section "Background":` blocks back-to-back get distinct
+/// `instance_id`s and are never merged, while slides within a single block
+/// are still grouped together.
+///
+/// Non-consecutive blocks (interleaved by ungrouped slides) continue to produce
+/// separate entries because the `instance_id` differs between the two blocks.
 ///
 /// # CRIT-A correctness (STORY-082 pass-2)
 ///
-/// Unlike the superseded `extract_slide_sections` (which re-walked the raw AST and
-/// could not account for `@for`/`@if` expansion), this function operates on
+/// Unlike the superseded `extract_slide_sections` (which re-walked the raw AST
+/// and could not account for `@for`/`@if` expansion), this function operates on
 /// the ALREADY-EXPANDED membership tags.  The flat index `i` in `membership`
 /// corresponds exactly to `Deck.slides[i]` and the PPTX slide ID assigned by
 /// `slideforge-pptx::slide_ids::SlideIdAssigner` as `256 + i`.  There is no
@@ -110,31 +120,53 @@ pub fn slide_id_for_index(index: usize) -> u32 {
 /// complete with respect to the named section slides.  This function never
 /// assigns a slide to two sections simultaneously (a slide index has at most
 /// one section tag) and never skips slides that have a tag.
+///
+/// # Panics
+///
+/// The internal `.expect()` call in the `same_block` branch is
+/// documented-infallible: `same_block` is `true` only when `last_key` is
+/// `Some(...)` which means the previous iteration already pushed at least one
+/// entry into `result`.  The invariant cannot be violated within a single-pass
+/// scan of the membership slice.
 #[must_use]
 pub fn build_slide_sections_from_membership(
-    membership: &[Option<Arc<str>>],
+    membership: &[Option<(u32, Arc<str>)>],
 ) -> Vec<SlideSectionEntry> {
     let mut result: Vec<SlideSectionEntry> = Vec::new();
+    // Track the (instance_id, name) of the last entry we were extending.
+    // We use this instead of comparing `last.name` so that two adjacent blocks
+    // with the same name (different instance_ids) are never merged.
+    let mut last_key: Option<(u32, Arc<str>)> = None;
 
     for (flat_index, tag) in membership.iter().enumerate() {
-        let Some(name) = tag else {
+        let Some((instance_id, name)) = tag else {
             // Ungrouped slide — not in any section.
+            // Seal the current run so a same-named block after an ungrouped slide
+            // always starts a new entry.
+            last_key = None;
             continue;
         };
         let slide_id = slide_id_for_index(flat_index);
 
-        // Try to extend the most-recently-started entry for this name.
-        // If the last entry has the same name, append to it (consecutive slides
-        // in the same section form a single entry).  Otherwise, start a new entry.
-        if let Some(last) = result.last_mut()
-            && last.name.as_ref() == name.as_ref()
-        {
-            last.slide_ids.push(slide_id);
+        // Extend the current entry only when both the instance_id AND the name
+        // match the previous tag — i.e. we are still inside the same DSL block.
+        let same_block = last_key
+            .as_ref()
+            .is_some_and(|(prev_id, prev_name)| *prev_id == *instance_id && prev_name == name);
+
+        if same_block {
+            // Safety: `same_block` is true only when `result` is non-empty.
+            result
+                .last_mut()
+                .expect("result is non-empty when same_block is true")
+                .slide_ids
+                .push(slide_id);
         } else {
             result.push(SlideSectionEntry {
                 name: Arc::clone(name),
                 slide_ids: vec![slide_id],
             });
+            last_key = Some((*instance_id, Arc::clone(name)));
         }
     }
 
@@ -360,6 +392,142 @@ slide bullets:
             has_e_par_023,
             "parse error for section \"\": must include E-PAR-023; got: {parse_err:?}"
         );
+    }
+
+    /// F-P10-HIGH-1 / BC-4.01.003 EC-011 — two ADJACENT `section "Background":`
+    /// blocks must produce TWO separate `SlideSectionEntry` values, not one.
+    ///
+    /// This is a RED GATE test for the Pass-10 HIGH-1 defect: the consecutive-run
+    /// coalescing in `build_slide_sections_from_membership` collapsed adjacent
+    /// same-name blocks into a single entry, violating BC-4.01.003 EC-011 which
+    /// requires "Both sections are emitted to the IR … No section is dropped."
+    ///
+    /// The test drives the REAL eval pipeline (`eval_deck`) — not hand-built
+    /// entries — so any regression in the eval → membership → sections path is
+    /// caught here.
+    ///
+    /// Expected (after fix): `deck.slide_sections.len() == 2`, both named
+    /// "Background", with slide IDs [256] and [257] respectively.
+    #[test]
+    fn test_f_p10_high1_adjacent_same_name_sections_produce_two_entries() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        // Two ADJACENT section "Background": blocks — each with exactly one slide.
+        // The bug: only ONE SlideSectionEntry is produced (the second block is
+        // merged into the first).
+        let src = r#"slideforge_version "1"
+section "Background":
+  slide title:
+    title "First Background"
+section "Background":
+  slide content:
+    title "Second Background"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(
+            std::sync::Arc::from("adjacent_dup.sf"),
+            std::sync::Arc::from(src),
+        );
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect(
+            "parse must succeed — adjacent duplicates are a W-PAR-002 warning, not a fatal error",
+        );
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed for adjacent-duplicate sections");
+        assert!(
+            !sink.has_fatal(),
+            "adjacent-duplicate sections must not produce fatal errors"
+        );
+
+        // Both slides must appear in the flat slide list.
+        assert_eq!(
+            deck.slides.len(),
+            2,
+            "F-P10-HIGH-1: deck must contain 2 slides (one per section block); got {}",
+            deck.slides.len()
+        );
+
+        // KEY ASSERTION (load-bearing): two DISTINCT section entries must be emitted.
+        assert_eq!(
+            deck.slide_sections.len(),
+            2,
+            "F-P10-HIGH-1 (BC-4.01.003 EC-011): two adjacent `section \"Background\":` blocks \
+             must produce 2 SlideSectionEntry values, not {}; no section may be dropped",
+            deck.slide_sections.len()
+        );
+
+        // Both entries must be named "Background".
+        assert_eq!(deck.slide_sections[0].name.as_ref(), "Background");
+        assert_eq!(deck.slide_sections[1].name.as_ref(), "Background");
+
+        // Each entry covers exactly one slide, with the correct PPTX IDs.
+        assert_eq!(
+            deck.slide_sections[0].slide_ids,
+            vec![256],
+            "F-P10-HIGH-1: first Background section must cover slide 256; got {:?}",
+            deck.slide_sections[0].slide_ids
+        );
+        assert_eq!(
+            deck.slide_sections[1].slide_ids,
+            vec![257],
+            "F-P10-HIGH-1: second Background section must cover slide 257; got {:?}",
+            deck.slide_sections[1].slide_ids
+        );
+    }
+
+    /// F-P10-HIGH-1 regression guard: non-consecutive duplicate sections
+    /// (separated by an ungrouped slide) must still produce two separate entries.
+    ///
+    /// This path was already correct before the fix (the `None` tag breaks the
+    /// consecutive run). This test ensures the fix does not regress it.
+    #[test]
+    fn test_f_p10_high1_non_consecutive_same_name_still_two_entries() {
+        use crate::config::EvalConfig;
+        use crate::eval::eval_deck;
+        use slideforge_syntax::DiagnosticSink;
+        use slideforge_syntax::span::SourceMap;
+
+        // Two "Background" sections SEPARATED by an ungrouped slide.
+        let src = r#"slideforge_version "1"
+section "Background":
+  slide title:
+    title "First Background"
+slide bullets:
+  title "Ungrouped"
+section "Background":
+  slide content:
+    title "Second Background"
+"#;
+        let mut sm = SourceMap::default();
+        let file_id = sm.add_file(
+            std::sync::Arc::from("non_consec_dup.sf"),
+            std::sync::Arc::from(src),
+        );
+        let parse_result = slideforge_syntax::parse(src, file_id, &sm).expect("parse must succeed");
+
+        let mut sink = DiagnosticSink::new();
+        let deck = eval_deck(&parse_result.deck, &EvalConfig::default(), &mut sink)
+            .expect("eval must succeed");
+        assert!(
+            !sink.has_fatal(),
+            "non-consecutive duplicate sections must not be fatal"
+        );
+
+        assert_eq!(deck.slides.len(), 3, "3 slides total (1 + 1 + 1)");
+        assert_eq!(
+            deck.slide_sections.len(),
+            2,
+            "non-consecutive duplicates must produce 2 entries; got {}",
+            deck.slide_sections.len()
+        );
+        assert_eq!(deck.slide_sections[0].name.as_ref(), "Background");
+        assert_eq!(deck.slide_sections[1].name.as_ref(), "Background");
+        assert_eq!(deck.slide_sections[0].slide_ids, vec![256]);
+        assert_eq!(deck.slide_sections[1].slide_ids, vec![258]);
     }
 
     /// AC-010 / BC-4.01.003 PC-7 — `parse_checked()` with `section "":` returns
