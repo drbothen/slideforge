@@ -61,15 +61,15 @@
 use krilla::Document;
 use krilla::color::rgb;
 use krilla::configure::{Configuration, Validator};
-use krilla::geom::{PathBuilder, Point, Rect};
+use krilla::geom::{PathBuilder, Point, Rect, Transform};
 use krilla::metadata::Metadata;
 use krilla::num::NormalizedF32;
 use krilla::page::PageSettings;
-use krilla::paint::{Fill, FillRule};
+use krilla::paint::{Fill, FillRule, LinearGradient, SpreadMethod, Stop};
 use krilla::tagging::{ArtifactType, ContentTag};
 use krilla::text::TextDirection;
 use slideforge_layout::LaidOutDeck;
-use slideforge_layout::types::{BoundingBox, FrameContent, Rgb};
+use slideforge_layout::types::{BoundingBox, FillSpec, FrameContent, Rgb};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck};
 
@@ -758,12 +758,23 @@ fn draw_frame(
             )?;
         },
         // Chart: no SVG payload at frame level — drawn via ChartRenderer pass.
-        // Image, Shape, Empty: no drawing in this story.
+        // Image, Empty: no drawing in this story.
         // STORY-039: Chart now carries `alt` field; drawing stub unchanged.
-        FrameContent::Chart { .. }
-        | FrameContent::Image { .. }
-        | FrameContent::Shape(_)
-        | FrameContent::Empty => {},
+        FrameContent::Chart { .. } | FrameContent::Image { .. } | FrameContent::Empty => {},
+
+        // Shape — STORY-072: emit gradient-filled rect for FillSpec::Gradient.
+        // FillSpec::SolidColor and FillSpec::None are not yet drawn (stubbed).
+        FrameContent::Shape(shape_frame) => {
+            match &shape_frame.fill {
+                FillSpec::Gradient { from, to } => {
+                    draw_gradient_rect(surface, bbox, *from, *to);
+                },
+                FillSpec::SolidColor(_) | FillSpec::None => {
+                    // Solid / transparent shapes: no drawing yet (future story).
+                    tracing::debug!("Shape with SolidColor/None fill: no PDF drawing emitted");
+                },
+            }
+        },
 
         // ColorBar — PDF filled rectangle (BC-1.17.002 PC-9).
         //
@@ -1482,6 +1493,115 @@ impl Exporter for PdfExporter {
                 message: e.to_string(),
             })
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-072: FillSpec::Gradient — PDF krilla gradient emission stub
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Draw a linear gradient-filled rectangle onto a krilla `Surface` for a
+/// `FillSpec::Gradient { from, to }` shape.
+///
+/// ## Contract (STORY-072 AC-004)
+///
+/// Calls (in order):
+/// 1. `surface.set_fill(Some(Fill { paint: LinearGradient { ... }.into(), ... }))`
+/// 2. `surface.draw_path(rect_path)` to stroke/fill the rectangle.
+///
+/// The gradient is top-to-bottom (v1.0 fixed direction):
+/// - `x1 = bbox.x_pt, y1 = bbox.y_pt` (top-left)
+/// - `x2 = bbox.x_pt, y2 = (bbox.y + bbox.height)_pt` (bottom-left)
+/// - `spread_method = SpreadMethod::Pad`
+/// - Two `Stop` entries: offset=0 for `from`, offset=1 for `to`
+///
+/// Uses `krilla = "=0.6.0"` API. `pdf-writer` MUST NOT be a direct dep of
+/// `slideforge-pdf` (per export-architecture v1.2 RISK-1).
+///
+/// ## Coordinate system
+///
+/// krilla `Surface` uses top-left, Y-down. EMU values are converted to points
+/// via `coords::emu_to_pt` before passing to krilla.
+///
+/// ## No-op on degenerate bounding box
+///
+/// When `bbox.width` or `bbox.height` is non-positive, no path is emitted.
+pub fn draw_gradient_rect(
+    surface: &mut krilla::surface::Surface<'_>,
+    bbox: &slideforge_layout::BoundingBox,
+    from: slideforge_types::Rgb,
+    to: slideforge_types::Rgb,
+) {
+    let x_pt = emu_to_pt(bbox.x);
+    let y_pt = emu_to_pt(bbox.y);
+    let w_pt = emu_to_pt(bbox.width);
+    let h_pt = emu_to_pt(bbox.height);
+
+    // Guard: degenerate dimensions produce no path.
+    let Some(rect) = Rect::from_xywh(x_pt, y_pt, w_pt, h_pt) else {
+        tracing::debug!(
+            x_pt,
+            y_pt,
+            w_pt,
+            h_pt,
+            "draw_gradient_rect: Rect::from_xywh returned None (degenerate dimensions); skipping"
+        );
+        return;
+    };
+
+    let mut pb = PathBuilder::new();
+    pb.push_rect(rect);
+    let Some(path) = pb.finish() else {
+        tracing::debug!("draw_gradient_rect: PathBuilder::finish() returned None; skipping");
+        return;
+    };
+
+    // Build the two color stops: offset=0 (from color, top) and offset=1 (to color, bottom).
+    // NormalizedF32::ZERO and ONE are always valid.
+    let stop_from = Stop {
+        offset: NormalizedF32::ZERO,
+        color: rgb::Color::new(from.r, from.g, from.b).into(),
+        opacity: NormalizedF32::ONE,
+    };
+    let stop_to = Stop {
+        offset: NormalizedF32::ONE,
+        color: rgb::Color::new(to.r, to.g, to.b).into(),
+        opacity: NormalizedF32::ONE,
+    };
+
+    // Top-to-bottom linear gradient:
+    // (x1, y1) = top-left of bbox; (x2, y2) = bottom-left of bbox.
+    let gradient = LinearGradient {
+        x1: x_pt,
+        y1: y_pt,
+        x2: x_pt,
+        y2: y_pt + h_pt,
+        transform: Transform::identity(),
+        spread_method: SpreadMethod::Pad,
+        stops: vec![stop_from, stop_to],
+        anti_alias: false,
+    };
+
+    surface.set_fill(Some(Fill {
+        paint: gradient.into(),
+        opacity: NormalizedF32::ONE,
+        rule: FillRule::NonZero,
+    }));
+    surface.set_stroke(None);
+    surface.draw_path(&path);
+
+    tracing::debug!(
+        x_pt,
+        y_pt,
+        w_pt,
+        h_pt,
+        from_r = from.r,
+        from_g = from.g,
+        from_b = from.b,
+        to_r = to.r,
+        to_g = to.g,
+        to_b = to.b,
+        "draw_gradient_rect: linear gradient rectangle drawn"
+    );
 }
 
 #[cfg(test)]
@@ -2988,6 +3108,278 @@ mod tests {
         assert!(
             validate_title_for_xmp("Title\nwith\nnewlines").is_ok(),
             "validate_title_for_xmp must accept U+000A (LF)"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-072 — PDF gradient tests (Red Gate)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// | Test | AC | Clause |
+// |---|---|---|
+// | test_BC_3_04_001_ac004_pdf_full_export_gradient_shape_no_error | AC-004 | postcondition 5 |
+// | test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output | AC-004 | draw path load-bearing (HIGH-001) |
+// | test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes | AC-004 | non-zero output |
+// | test_BC_3_04_001_ec005_pdf_same_from_to_gradient_valid | EC-005 | STORY-072 EC-005 |
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case
+)]
+mod story_072_tests {
+    use std::sync::Arc;
+
+    use slideforge_layout::types::{
+        BoundingBox, FillSpec, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        ShapeFrame, ShapeType,
+    };
+    use slideforge_types::{AltText, Brand, BrandFonts, BrandPalette, Deck, Emu, Rgb, SourceSpan};
+
+    use super::PdfExporter;
+    use slideforge_plugin_api::{ExportOptions, Exporter};
+
+    // ─── Fixture builders ────────────────────────────────────────────────────
+
+    fn make_brand() -> Brand {
+        use slideforge_types::span::SourceSpan;
+        Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri Light"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+                font_size_emu: 457_200,
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        }
+    }
+
+    fn make_deck_one_slide() -> Deck {
+        use slideforge_types::deck::DeckMetadata;
+        use slideforge_types::ordered_map::OrderedMap;
+        use slideforge_types::slide::Slide;
+
+        Deck {
+            slides: vec![Slide {
+                slide_type: Arc::from("title"),
+                fields: OrderedMap::new(),
+                blocks: vec![],
+                register: None,
+                tags: vec![],
+                source_span: SourceSpan::default(),
+                overlay: None,
+                register_content: vec![],
+            }],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(Arc::from("Gradient Test")),
+                slideforge_version: Arc::from("0.1.0"),
+                lang: Some(Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+        }
+    }
+
+    fn gradient_bbox() -> BoundingBox {
+        BoundingBox {
+            x: Emu(914_400),
+            y: Emu(914_400),
+            width: Emu(914_400),
+            height: Emu(914_400),
+        }
+    }
+
+    fn make_gradient_deck(from: Rgb, to: Rgb, alt: AltText) -> LaidOutDeck {
+        LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("title"),
+                frames: vec![Frame {
+                    bbox: gradient_bbox(),
+                    content: FrameContent::Shape(ShapeFrame {
+                        shape_type: ShapeType::Rect,
+                        fill: FillSpec::Gradient { from, to },
+                        text: None,
+                        alt,
+                    }),
+                    text_flow: None,
+                    region_role: None,
+                }],
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        }
+    }
+
+    // ─── Tests ───────────────────────────────────────────────────────────────
+
+    /// AC-004 (STORY-072) — `PdfExporter::export` with a `FillSpec::Gradient` shape
+    /// must not return an error (no panic, no Err).
+    ///
+    /// `draw_gradient_rect` is fully implemented and wired into the export loop.
+    /// This test verifies the no-error postcondition — the gradient path must
+    /// succeed without panicking or returning `Err`.
+    #[test]
+    fn test_BC_3_04_001_ac004_pdf_full_export_gradient_shape_no_error() {
+        let laid_out = make_gradient_deck(
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Provided(Arc::from("Gradient background")),
+        );
+        let deck = make_deck_one_slide();
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let exporter = PdfExporter::new();
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "PdfExporter::export must not fail for a deck with FillSpec::Gradient shape; \
+             err: {:?}",
+            result.err()
+        );
+    }
+
+    /// AC-004 (STORY-072) — `draw_gradient_rect` is called during PDF export and produces
+    /// different bytes than an identical export WITHOUT the gradient shape.
+    ///
+    /// ## Closing HIGH-001 (adversary Pass-1 / TD-VSDD-059)
+    ///
+    /// The previous test was a no-op fn-pointer type-check.  `draw_gradient_rect` is
+    /// real production code (exporter.rs:~1528) invoked at the shape dispatch site
+    /// (exporter.rs:~770).  This test exercises that live path:
+    ///
+    /// 1. Exports a deck containing one `FillSpec::Gradient` shape → gradient PDF bytes.
+    /// 2. Exports an identical deck with **zero frames** (no shape) → baseline PDF bytes.
+    /// 3. Asserts the bytes DIFFER — proving `draw_gradient_rect` executed and mutated
+    ///    the PDF content stream.
+    ///
+    /// A regression that disconnects `draw_gradient_rect` from the export pipeline
+    /// (e.g., silently skipping the Shape arm) would make both exports identical,
+    /// causing this test to fail.
+    #[test]
+    fn test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output() {
+        let deck = make_deck_one_slide();
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+
+        // Export WITH gradient shape.
+        let gradient_laid_out = make_gradient_deck(
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Provided(Arc::from("Red-to-blue gradient")),
+        );
+        let gradient_bytes = PdfExporter::new()
+            .export(&deck, &gradient_laid_out, &brand, &opts)
+            .expect("export with gradient shape must succeed");
+
+        // Export WITHOUT any shape (empty slide, no frames).
+        let empty_laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("title"),
+                frames: vec![], // No shape frame — baseline for comparison.
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+        };
+        let empty_bytes = PdfExporter::new()
+            .export(&deck, &empty_laid_out, &brand, &opts)
+            .expect("export with empty slide must succeed");
+
+        // Both must be valid PDFs.
+        assert!(
+            gradient_bytes.starts_with(b"%PDF"),
+            "gradient export must produce a valid PDF; got: {:?}",
+            &gradient_bytes[..gradient_bytes.len().min(8)]
+        );
+        assert!(
+            empty_bytes.starts_with(b"%PDF"),
+            "empty export must produce a valid PDF; got: {:?}",
+            &empty_bytes[..empty_bytes.len().min(8)]
+        );
+
+        // THE LOAD-BEARING ASSERTION (TD-VSDD-059): the gradient draw path must mutate
+        // the PDF content stream.  If draw_gradient_rect is silently disconnected from
+        // the export pipeline, both exports produce identical bytes and this fails.
+        assert_ne!(
+            gradient_bytes, empty_bytes,
+            "PDF export with gradient shape must produce DIFFERENT bytes than an export with \
+             no shape frames — draw_gradient_rect must have executed and changed the PDF \
+             content stream. If this fails, the gradient draw path is disconnected."
+        );
+    }
+
+    /// AC-004 (STORY-072) — PDF export with gradient shape produces non-zero bytes.
+    ///
+    /// This is a baseline sanity check: gradient export must produce a valid PDF
+    /// with at least `%PDF` magic bytes and non-zero length.
+    ///
+    /// The load-bearing gradient-path assertion is in
+    /// `test_BC_3_04_001_ac004_pdf_draw_gradient_rect_executes_and_changes_output`
+    /// (HIGH-001 closure).
+    #[test]
+    fn test_BC_3_04_001_ac004_pdf_gradient_shape_produces_nonzero_bytes() {
+        let laid_out = make_gradient_deck(
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Provided(Arc::from("Gradient background")),
+        );
+        let deck = make_deck_one_slide();
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let exporter = PdfExporter::new();
+        let bytes = exporter
+            .export(&deck, &laid_out, &brand, &opts)
+            .expect("export must succeed");
+        assert!(!bytes.is_empty(), "PDF export must produce non-zero bytes");
+        // PDF magic bytes check.
+        assert!(
+            bytes.starts_with(b"%PDF"),
+            "export output must begin with PDF magic bytes; got: {:?}",
+            &bytes[..bytes.len().min(8)]
+        );
+    }
+
+    /// EC-005 (STORY-072) — Same `from` and `to` gradient color (flat gradient) is
+    /// valid; PDF export must not fail.
+    ///
+    /// RED GATE: passes today (Shape skipped). After implementation with
+    /// `draw_gradient_rect` wired in, the gradient path must handle same-color safely.
+    #[test]
+    fn test_BC_3_04_001_ec005_pdf_same_from_to_gradient_valid() {
+        let same = Rgb { r: 255, g: 0, b: 0 };
+        let laid_out =
+            make_gradient_deck(same, same, AltText::Provided(Arc::from("Flat gradient")));
+        let deck = make_deck_one_slide();
+        let brand = make_brand();
+        let opts = ExportOptions::default();
+        let exporter = PdfExporter::new();
+        let result = exporter.export(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "PDF export with same from==to gradient must not fail; err: {:?}",
+            result.err()
         );
     }
 }

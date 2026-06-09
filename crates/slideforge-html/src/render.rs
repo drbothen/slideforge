@@ -451,6 +451,81 @@ pub fn render_text_frame(
     }
 }
 
+/// Emit an SVG fragment for a `FrameContent::Shape` frame.
+///
+/// Handles both gradient (`FillSpec::Gradient`) and non-gradient fills. Extracted
+/// to keep [`render_graphics_layer`] within the `clippy::too_many_lines` limit.
+///
+/// ## AC-004 (STORY-072)
+///
+/// `FillSpec::Gradient` → SVG-native `<defs><linearGradient id="sf-grad-{slide_id}-{grad_idx}">...
+/// </linearGradient></defs>` followed by `<rect fill="url(#sf-grad-...)"/>`.
+/// CSS `background` is NOT used — it has no effect on SVG geometry elements.
+/// The gradient flows top-to-bottom (`x1="0" y1="0" x2="0" y2="1"`) matching
+/// PPTX ang=5400000 and the `to bottom` direction used by `css_linear_gradient_background`.
+///
+/// `FillSpec::SolidColor` → SVG `fill="#RRGGBB"` attribute.
+/// `FillSpec::None` → SVG `fill="none"` attribute.
+///
+/// Called by [`render_graphics_layer`] for `FrameContent::Shape` frames.
+/// `grad_idx` is incremented each time a gradient def is emitted so multiple
+/// gradient shapes on the same slide receive distinct `<linearGradient>` ids.
+fn render_shape_svg(
+    out: &mut String,
+    frame_idx: &mut u32,
+    grad_idx: &mut u32,
+    slide_id: &str,
+    alt: &AltText,
+    fill: &slideforge_layout::FillSpec,
+    bbox: (i64, i64, i64, i64), // (x, y, w, h) in EMU
+) {
+    use std::fmt::Write as _;
+    let (x, y, w, h) = bbox;
+
+    // For gradient fills, emit a <defs> block BEFORE the <g> so the
+    // gradient def is available when the <rect> references it.
+    // SVG spec allows <defs> anywhere within an <svg> element.
+    let fill_attr = match fill {
+        slideforge_layout::FillSpec::Gradient { from, to } => {
+            let gid = format!("sf-grad-{slide_id}-{grad_idx}");
+            *grad_idx += 1;
+            let escaped_gid = html_escape::encode_double_quoted_attribute(&gid);
+            let _ = write!(
+                out,
+                "<defs><linearGradient id=\"{escaped_gid}\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\">\
+<stop offset=\"0\" stop-color=\"#{:02X}{:02X}{:02X}\"/>\
+<stop offset=\"1\" stop-color=\"#{:02X}{:02X}{:02X}\"/>\
+</linearGradient></defs>",
+                from.r, from.g, from.b, to.r, to.g, to.b
+            );
+            format!("fill=\"url(#{escaped_gid})\"")
+        },
+        slideforge_layout::FillSpec::SolidColor(rgb) => {
+            format!("fill=\"#{:02X}{:02X}{:02X}\"", rgb.r, rgb.g, rgb.b)
+        },
+        slideforge_layout::FillSpec::None => "fill=\"none\"".to_owned(),
+    };
+    match alt {
+        AltText::Provided(text) => {
+            let idx = frame_idx.to_string();
+            *frame_idx += 1;
+            let label_id = format!("sf-{slide_id}-{idx}");
+            let eid = html_escape::encode_double_quoted_attribute(&label_id);
+            let ealt = html_escape::encode_text(text);
+            let _ = write!(
+                out,
+                r#"<g role="img" aria-labelledby="{eid}"><title id="{eid}">{ealt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" {fill_attr}/></g>"#
+            );
+        },
+        AltText::Decorative | AltText::Unspecified => {
+            let _ = write!(
+                out,
+                r#"<g aria-hidden="true"><rect x="{x}" y="{y}" width="{w}" height="{h}" {fill_attr}/></g>"#
+            );
+        },
+    }
+}
+
 /// Render the SVG graphics layer for a slide.
 ///
 /// Produces a single `<svg role="presentation" ...>` element containing wrapped
@@ -492,6 +567,10 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
     // MED-B3: frame_idx is 0-based; incremented BEFORE use for each graphical frame.
     // This gives ids: sf-{slide_id}-0, sf-{slide_id}-1, ... (no doubling of slide_id).
     let mut frame_idx: u32 = 0;
+    // grad_idx is a per-slide counter for linearGradient def ids (AC-004 STORY-072).
+    // Incremented each time a gradient shape is emitted so multiple gradient shapes
+    // on one slide get distinct ids: sf-grad-{slide_id}-0, sf-grad-{slide_id}-1, ...
+    let mut grad_idx: u32 = 0;
 
     for frame in frames {
         // MED-B5 / Pass-10: skip frames with zero OR NEGATIVE bbox dimensions.
@@ -610,26 +689,15 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 }
             },
             FrameContent::Shape(shape_frame) => {
-                let alt = &shape_frame.alt;
-                match alt {
-                    AltText::Provided(text) => {
-                        let frame_id_str = frame_idx.to_string();
-                        frame_idx += 1;
-                        let label_id = format!("sf-{slide_id}-{frame_id_str}");
-                        let escaped_id = html_escape::encode_double_quoted_attribute(&label_id);
-                        let escaped_alt = html_escape::encode_text(text);
-                        let _ = write!(
-                            graphical_content,
-                            r#"<g role="img" aria-labelledby="{escaped_id}"><title id="{escaped_id}">{escaped_alt}</title><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
-                        );
-                    },
-                    AltText::Decorative | AltText::Unspecified => {
-                        let _ = write!(
-                            graphical_content,
-                            r#"<g aria-hidden="true"><rect x="{x}" y="{y}" width="{w}" height="{h}" fill="none"/></g>"#
-                        );
-                    },
-                }
+                render_shape_svg(
+                    &mut graphical_content,
+                    &mut frame_idx,
+                    &mut grad_idx,
+                    slide_id,
+                    &shape_frame.alt,
+                    &shape_frame.fill,
+                    (x, y, w, h),
+                );
             },
             FrameContent::ColorBar {
                 filled_width_emu,
@@ -1769,6 +1837,54 @@ pub fn render_svg_chart(svg_str: &str, alt_text: &str) -> String {
             svg_str.to_owned()
         },
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-072: FillSpec::Gradient — CSS linear-gradient helper (utility / test surface)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Produce the CSS `background` property value string for a linear gradient.
+///
+/// ## Note (STORY-072 adv-P2 HIGH-001)
+///
+/// This function is NOT called by `render_shape_svg`. SVG `<rect>` elements
+/// are SVG geometry nodes — CSS `background` has no effect on them. Gradient
+/// fills on shapes are rendered via SVG-native `<linearGradient>` defs +
+/// `fill="url(#...)"` (see `render_shape_svg`).
+///
+/// This function is retained as a public utility for callers that render
+/// gradients onto CSS box-model elements (e.g. HTML `<div>` overlays in
+/// non-SVG rendering paths) and as a stable test surface for the CSS
+/// gradient format contract.
+///
+/// ## Contract
+///
+/// Returns a CSS string of the form:
+/// `linear-gradient(to bottom, #RRGGBB, #RRGGBB)`
+///
+/// - Direction is fixed as `to bottom` (top-to-bottom, v1.0).
+/// - Both hex values are uppercase 6-digit (`#RRGGBB`).
+///
+/// ## Examples
+///
+/// ```
+/// use slideforge_html::render::css_linear_gradient_background;
+/// use slideforge_types::Rgb;
+/// let css = css_linear_gradient_background(
+///     Rgb { r: 255, g: 0, b: 0 },
+///     Rgb { r: 0, g: 0, b: 255 },
+/// );
+/// assert_eq!(css, "linear-gradient(to bottom, #FF0000, #0000FF)");
+/// ```
+#[must_use]
+pub fn css_linear_gradient_background(
+    from: slideforge_types::Rgb,
+    to: slideforge_types::Rgb,
+) -> String {
+    format!(
+        "linear-gradient(to bottom, #{:02X}{:02X}{:02X}, #{:02X}{:02X}{:02X})",
+        from.r, from.g, from.b, to.r, to.g, to.b
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4431,6 +4547,274 @@ mod tests {
             h1_text.trim(),
             paragraph_text,
             "F-P9-001: <h1> text must equal first text block's text; got: {h1_text:?}"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-072 — FillSpec::Gradient HTML tests (Red Gate)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These tests cover AC-004 (HTML CSS linear-gradient) for STORY-072.
+//
+// | Test | AC | Clause |
+// |---|---|---|
+// | test_BC_3_04_001_ac004_html_css_linear_gradient_background_format | AC-004 | postcondition 5 |
+// | test_BC_3_04_001_ac004_html_css_linear_gradient_direction_to_bottom | AC-004 | postcondition 5 |
+// | test_BC_3_04_001_ac004_html_css_gradient_stop_colors_uppercase_hex | AC-004 | postcondition 5 |
+// | test_BC_3_04_001_ec005_html_same_from_to_css_gradient_valid | EC-005 | STORY-072 EC-005 |
+// | test_BC_3_04_001_ac004_html_gradient_shape_frame_emits_linear_gradient_style | AC-004/OBS-002 | SVG linearGradient paint (adv-P2 HIGH-001) |
+// | test_BC_3_04_001_ac004_html_gradient_shape_alt_accessible_name | AC-004 + AC-005 | invariant 1 |
+// | test_BC_3_04_001_ac005_html_gradient_decorative_shape_aria_hidden | AC-005 | BC-3.04.001 invariant 1 |
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    non_snake_case
+)]
+mod story_072_tests {
+    use std::sync::Arc;
+
+    use slideforge_layout::{
+        BoundingBox, FillSpec, Frame, FrameContent, PageSize, ShapeFrame, ShapeType,
+    };
+    use slideforge_types::{AltText, Emu, Rgb};
+
+    use super::{css_linear_gradient_background, render_graphics_layer};
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    fn gradient_bbox() -> BoundingBox {
+        BoundingBox {
+            x: Emu(914_400),
+            y: Emu(914_400),
+            width: Emu(914_400),
+            height: Emu(914_400),
+        }
+    }
+
+    fn default_page() -> PageSize {
+        PageSize {
+            width: Emu(9_144_000),
+            height: Emu(6_858_000),
+        }
+    }
+
+    fn gradient_shape_frame(from: Rgb, to: Rgb, alt: AltText) -> Frame {
+        Frame {
+            bbox: gradient_bbox(),
+            content: FrameContent::Shape(ShapeFrame {
+                shape_type: ShapeType::Rect,
+                fill: FillSpec::Gradient { from, to },
+                text: None,
+                alt,
+            }),
+            text_flow: None,
+            region_role: None,
+        }
+    }
+
+    // ─── CSS stub tests (Red Gate via todo!()) ────────────────────────────────
+
+    /// AC-004 (STORY-072) — `css_linear_gradient_background` returns the correct
+    /// CSS format: `linear-gradient(to bottom, #FF0000, #0000FF)`.
+    ///
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_css_linear_gradient_background_format() {
+        let result =
+            css_linear_gradient_background(Rgb { r: 255, g: 0, b: 0 }, Rgb { r: 0, g: 0, b: 255 });
+        assert_eq!(
+            result, "linear-gradient(to bottom, #FF0000, #0000FF)",
+            "css_linear_gradient_background must return correct CSS format"
+        );
+    }
+
+    /// AC-004 (STORY-072) — `css_linear_gradient_background` always uses
+    /// `to bottom` direction (v1.0 fixed top-to-bottom).
+    ///
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_css_linear_gradient_direction_to_bottom() {
+        let result =
+            css_linear_gradient_background(Rgb { r: 0, g: 255, b: 0 }, Rgb { r: 0, g: 0, b: 255 });
+        assert!(
+            result.contains("to bottom"),
+            "css_linear_gradient_background must use 'to bottom' direction; got: {result}"
+        );
+    }
+
+    /// AC-004 (STORY-072) — `css_linear_gradient_background` uses uppercase hex.
+    ///
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_css_gradient_stop_colors_uppercase_hex() {
+        let result = css_linear_gradient_background(
+            Rgb {
+                r: 255,
+                g: 111,
+                b: 0,
+            }, // #FF6F00
+            Rgb {
+                r: 0,
+                g: 55,
+                b: 102,
+            }, // #003766
+        );
+        // Both colors must appear as uppercase hex in the output.
+        assert!(
+            result.contains("FF6F00"),
+            "from color must be uppercase hex 'FF6F00'; got: {result}"
+        );
+        assert!(
+            result.contains("003766"),
+            "to color must be uppercase hex '003766'; got: {result}"
+        );
+    }
+
+    /// EC-005 (STORY-072) — `css_linear_gradient_background` with same from=to
+    /// colors produces a valid CSS gradient string (no error, no panic).
+    ///
+    /// Fails on the `todo!()` stub (panic = test failure). Passes once implemented.
+    #[test]
+    fn test_BC_3_04_001_ec005_html_same_from_to_css_gradient_valid() {
+        let same = Rgb { r: 255, g: 0, b: 0 };
+        let result = css_linear_gradient_background(same, same);
+        // Same color appears twice in the gradient.
+        assert!(
+            result.contains("FF0000"),
+            "same from==to gradient must still appear in output; got: {result}"
+        );
+    }
+
+    // ─── render_graphics_layer integration tests (Red Gate via assertion) ────
+
+    /// AC-004 (STORY-072) / OBS-002 — `render_graphics_layer` with a gradient `ShapeFrame`
+    /// paints the shape via SVG-native `<linearGradient>` + `fill="url(#sf-grad-..."`.
+    ///
+    /// Load-bearing paint assertion (adv-P2 HIGH-001): asserts BOTH:
+    /// 1. A `<linearGradient` element exists in the output (the def is present), AND
+    /// 2. The `<rect>` references it with `fill="url(#sf-grad` (the paint is wired up).
+    ///
+    /// A regression to the old CSS-background form (which used `style="background: ..."`
+    /// on the SVG `<rect>` and painted NOTHING in browsers) will fail this test because
+    /// neither `<linearGradient` nor `fill="url(#sf-grad` would be present.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_gradient_shape_frame_emits_linear_gradient_style() {
+        let from = Rgb { r: 255, g: 0, b: 0 };
+        let to = Rgb { r: 0, g: 0, b: 255 };
+        let frames = vec![gradient_shape_frame(
+            from,
+            to,
+            AltText::Provided(Arc::from("Red-to-blue gradient")),
+        )];
+        let html = render_graphics_layer(&frames, "test-slide", &default_page());
+
+        // OBS-002 load-bearing: assert SVG-native gradient def is emitted.
+        assert!(
+            html.contains("<linearGradient"),
+            "HTML graphics layer must contain '<linearGradient' element for FillSpec::Gradient; \
+             CSS background on <rect> painted nothing (HIGH-001). \
+             Got HTML snippet: {}",
+            &html[..html.len().min(800)]
+        );
+        // OBS-002 load-bearing: assert the <rect> actually references the gradient def.
+        assert!(
+            html.contains("fill=\"url(#sf-grad"),
+            "HTML graphics layer <rect> must reference the gradient def via fill=\"url(#sf-grad...\"; \
+             gradient def without a reference paints nothing (HIGH-001). \
+             Got HTML snippet: {}",
+            &html[..html.len().min(800)]
+        );
+    }
+
+    /// AC-004 (STORY-072) — `render_graphics_layer` gradient `style` contains both
+    /// `from` and `to` hex colors.
+    ///
+    /// RED GATE: assertion fails because no gradient CSS is currently emitted.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_gradient_shape_from_to_colors_in_style() {
+        let from = Rgb {
+            r: 255,
+            g: 111,
+            b: 0,
+        }; // #FF6F00
+        let to = Rgb {
+            r: 0,
+            g: 55,
+            b: 102,
+        }; // #003766
+        let frames = vec![gradient_shape_frame(
+            from,
+            to,
+            AltText::Provided(Arc::from("Orange to dark blue")),
+        )];
+        let html = render_graphics_layer(&frames, "test-slide", &default_page());
+
+        assert!(
+            html.contains("FF6F00"),
+            "HTML gradient must include from color 'FF6F00'; got: {}",
+            &html[..html.len().min(600)]
+        );
+        assert!(
+            html.contains("003766"),
+            "HTML gradient must include to color '003766'; got: {}",
+            &html[..html.len().min(600)]
+        );
+    }
+
+    /// AC-004 + AC-005 (STORY-072) — Gradient shape with `AltText::Provided` emits
+    /// `role="img"` and accessible `<title>` in the HTML output.
+    ///
+    /// RED GATE: the Shape arm currently emits `role="img"` for provided alt text,
+    /// so this test PASSES today. It becomes load-bearing to ensure the gradient
+    /// implementation doesn't regress the existing accessibility pattern.
+    ///
+    /// This is NOT a Red Gate test — it exercises behavior that already works.
+    /// Included for completeness and regression protection.
+    #[test]
+    fn test_BC_3_04_001_ac004_html_gradient_shape_alt_accessible_name() {
+        let alt_text = "Red to blue gradient background";
+        let frames = vec![gradient_shape_frame(
+            Rgb { r: 255, g: 0, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Provided(Arc::from(alt_text)),
+        )];
+        let html = render_graphics_layer(&frames, "test-slide", &default_page());
+
+        // The alt text must appear in a <title> element (existing pattern).
+        assert!(
+            html.contains(alt_text),
+            "HTML gradient shape must contain accessible alt text '{alt_text}'; got: {}",
+            &html[..html.len().min(600)]
+        );
+        assert!(
+            html.contains("role=\"img\""),
+            "HTML gradient shape with provided alt must have role=\"img\"; got: {}",
+            &html[..html.len().min(600)]
+        );
+    }
+
+    /// AC-005 (STORY-072) — Decorative gradient shape emits `aria-hidden="true"`.
+    ///
+    /// RED GATE: `AltText::Decorative` already emits `aria-hidden="true"` in the
+    /// current Shape arm. This test is GREEN today (existing behavior). Load-bearing
+    /// to guard against gradient implementation regressions.
+    #[test]
+    fn test_BC_3_04_001_ac005_html_gradient_decorative_shape_aria_hidden() {
+        let frames = vec![gradient_shape_frame(
+            Rgb { r: 0, g: 255, b: 0 },
+            Rgb { r: 0, g: 0, b: 255 },
+            AltText::Decorative,
+        )];
+        let html = render_graphics_layer(&frames, "test-slide", &default_page());
+
+        assert!(
+            html.contains("aria-hidden=\"true\""),
+            "Decorative gradient shape must emit aria-hidden=\"true\"; got: {}",
+            &html[..html.len().min(600)]
         );
     }
 }

@@ -26,7 +26,8 @@ use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
     Body, BodyChoice, Bold, Document, Hyperlink, HyperlinkChoice, Italic, Paragraph,
     ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice, RunFonts,
-    RunProperties, Strike, Text, VerticalPositionValues, VerticalTextAlignment,
+    RunProperties, Shading, ShadingPatternValues, Strike, Text, VerticalPositionValues,
+    VerticalTextAlignment,
 };
 use ooxmlsdk::sdk::SdkType;
 use slideforge_layout::LaidOutDeck;
@@ -224,6 +225,18 @@ impl DocumentBodySerializer {
                         "Normal",
                         &percent_text,
                     ))));
+                }
+            }
+
+            // ── Shape (FrameContent::Shape → DOCX solid fallback) ───────────────
+            // AC-004 (STORY-072): Gradient shapes use solid fallback (see helper).
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::Shape(sf) = &frame.content
+                    && let slideforge_layout::types::FillSpec::Gradient { from, .. } = &sf.fill
+                {
+                    body_paragraphs.push(BodyChoice::WP(Box::new(
+                        make_gradient_solid_fallback_paragraph(*from),
+                    )));
                 }
             }
 
@@ -571,6 +584,42 @@ fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
 /// Build an empty paragraph (no runs, no style).
 fn make_empty_paragraph() -> Paragraph {
     Paragraph::default()
+}
+
+/// Build a shaded Normal paragraph for the DOCX gradient solid fallback (STORY-072 AC-004).
+///
+/// DOCX does not support shape gradient fills natively. Each gradient shape is
+/// downgraded to a solid `<w:shd w:val="clear" w:fill="RRGGBB"/>` paragraph
+/// using the `from` color. A [`tracing::warn!`] is also emitted.
+fn make_gradient_solid_fallback_paragraph(from: slideforge_layout::types::Rgb) -> Paragraph {
+    tracing::warn!(
+        "DOCX gradient fill downgraded to solid \
+         (DOCX does not support shape gradient fills)"
+    );
+    let hex_fill = format!("{:02X}{:02X}{:02X}", from.r, from.g, from.b);
+    let shading = Shading {
+        val: ShadingPatternValues::Clear,
+        color: None,
+        theme_color: None,
+        theme_tint: None,
+        theme_shade: None,
+        fill: Some(hex_fill),
+        theme_fill: None,
+        theme_fill_tint: None,
+        theme_fill_shade: None,
+    };
+    let ppr = ParagraphProperties {
+        paragraph_style_id: Some(ParagraphStyleId {
+            val: "Normal".into(),
+        }),
+        shading: Some(shading),
+        ..ParagraphProperties::default()
+    };
+    Paragraph {
+        paragraph_properties: Some(Box::new(ppr)),
+        paragraph_choice: vec![],
+        ..Paragraph::default()
+    }
 }
 
 /// Build a plain-text run with no run properties.

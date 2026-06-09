@@ -28,3 +28,6 @@ slideforge-layout = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 slideforge-eval = { workspace = true, features = ["test-utils"] }
+# tracing-test: load-bearing warn-capture test for DOCX gradient downgrade warning
+# (MED-003 adversary Pass-1 closure — LESSON-14 warning strings must be load-bearing).
+tracing-test = { workspace = true }
