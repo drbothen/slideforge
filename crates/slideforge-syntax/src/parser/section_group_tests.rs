@@ -246,22 +246,25 @@ section "":
 
     let (deck_opt, _raw_errors) = deck_parser(file_id).parse(input).into_output_errors();
 
-    if let Some(recovered_deck) = deck_opt {
-        let empty_group = recovered_deck.items.iter().find(|item| {
-            if let BlockItem::SectionGroup(s) = item {
-                s.value().name.value().is_empty()
-            } else {
-                false
-            }
-        });
-        assert!(
-            empty_group.is_none(),
-            "sentinel-discard (deck.rs:626-628) must remove the empty-named \
-             SectionGroupNode from the recovered AST (BC-4.01.003 PC-7 / inv-5)"
-        );
-    }
-    // deck_opt == None means chumsky produced no output at all; the invariant is
-    // trivially satisfied (no AST → no empty-named node).
+    assert!(
+        deck_opt.is_some(),
+        "deck_parser must produce a recovered DeckNode for `section \"\":` (sentinel emitted \
+         then discarded at deck.rs:628); None here would silently skip the sentinel-discard \
+         assertion (LESSON-14 / TD-VSDD-059)"
+    );
+    let recovered_deck = deck_opt.expect("checked is_some above");
+    let empty_group = recovered_deck.items.iter().find(|item| {
+        if let BlockItem::SectionGroup(s) = item {
+            s.value().name.value().is_empty()
+        } else {
+            false
+        }
+    });
+    assert!(
+        empty_group.is_none(),
+        "sentinel-discard (deck.rs:626-628) must remove the empty-named \
+         SectionGroupNode from the recovered AST (BC-4.01.003 PC-7 / inv-5)"
+    );
 }
 
 // ─── AC-011: duplicate section names → W-PAR-002 ─────────────────────────────
