@@ -29,7 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — Pass 2 DONE NOT CLEAN; implementer fix burst COMPLETE HEAD 885d83027295946f97bcca71f1ece620fc6dd533; all 5 Pass-2 findings CLOSED; NEXT: adversary Pass 3). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — Pass 3 DONE NOT CLEAN 2 CRIT+1 HIGH+1 OBS; C1-NEW/C2-NEW font-face dead-wiring; H1-NEW misleading docstrings; OBS-1 exit-gate gap; ADR-023 Accepted 2026-06-09; NEXT: implementer fix burst per ADR-023). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
@@ -57,18 +57,15 @@ workspace_test_failures: 0
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `885d83027295946f97bcca71f1ece620fc6dd533` (was c11d6468)
-- **Adversary streak:** **0/3** — Pass 2 findings ALL CLOSED (implementer fix burst COMPLETE). NEXT: adversary Pass 3 (fresh 3-clean streak starts here).
-- **Pass 2 findings (CLOSED):**
-  - C1[CRIT] PDF body/bullet dead-wiring → fixed: `extract_all_inline_text` routed through live draw path; dead `extract_inline_text` removed.
-  - C2[HIGH] Vacuous PDF tests → fixed: `build()`-driven PDF assertions with `ActualText` proof added.
-  - C3[HIGH] `FrameContent::Subtitle(Arc<str>)` flattened inlines → fixed: new `FrameContent::SubtitleInlines(Vec<InlineNode>)` variant wired through layout + all 4 exporters (PPTX/DOCX/HTML/PDF).
-  - HTML/PDF rich title AC-006(3) → fixed: via existing `title_inlines` shadow-field pattern (matching sound DOCX path; `FrameContent::Title` NOT widened — see arch note below).
-  - I1[MED] PPTX `InlineNode::Math(_)` silent drop → fixed: `tracing::warn!` EC-008 pattern added.
-- **ARCH NOTE for Pass 3 to adjudicate:** `FrameContent::Title` was NOT widened to `Vec<InlineNode>` (cascade ~118 sites); HTML/PDF rich title uses `title_inlines` shadow field. Creates asymmetry: `SubtitleInlines` variant exists but no `TitleInlines` variant. Flagged as potential Pass-3 observation.
-- **KNOWN LIMITATION (consistent, not a regression):** PDF subtitle/title inline text content preserved; per-span font switching NOT implemented (consistent with PDF body inline limitation; candidate follow-up).
-- **LESSON-21 exit gate:** ALL GREEN — fmt clean; clippy pedantic+unwrap_used clean; nextest 3754 pass 0 fail; shared-process `cargo test` pass; `rustdoc -D warnings` clean.
-- **NEXT ACTION:** Adversary Pass 3 (fresh-context). 3-CLEAN streak starts at 0. Findings in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`.
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `885d83027295946f97bcca71f1ece620fc6dd533` (Pass-3 reviewed this HEAD; new fix burst pending)
+- **Adversary streak:** **0/3** — Pass 3 DONE NOT CLEAN. ADR-023 Accepted 2026-06-09. Story spec v1.2.
+- **Pass 3 findings (OPEN — 4 total):**
+  - C1-NEW[CRIT] PDF inline font-face rendering dead-wired; `extract_all_inline_text` discards every `KrillaTextSpan` field except `.text`; `FontFaceKind`+`y_offset_units` have zero production readers. Fix per ADR-023: `ResolvedFontSet` + fontdb =0.23.0; consume `.face`/`.y_offset_units`; draw super/sub via `Surface::draw_glyphs`. Flatten sites: exporter.rs:1212,1222,1341,1355,772,760-764,331-341/749.
+  - C2-NEW[CRIT] PDF tests vacuous for AC-004 font-face claim; `build()`-driven test asserts only text + `/ActualText`, not glyph face. Fix: build()-driven assertion distinguishing bold-span font resource from plain-span in PDF content stream.
+  - H1-NEW[HIGH] Misleading docstrings assert font-switching that does not occur (story_081_inline_markup_e2e.rs:206-208; slide_pdf.rs:25-27). Fix alongside C1-NEW.
+  - OBS-1[process-gap] Exit-gate anti-pattern recurred 3rd time; route to FU-EXIT-GATE-DISTINGUISHING-OUTPUT (see OPEN FOLLOW-UPS).
+- **Pass 3 adjudication:** Title shadow-field vs SubtitleInlines variant = ACCEPTABLE (not a defect). PPTX/DOCX/HTML/eval subtitle threading: SOUND.
+- **NEXT ACTION:** Implementer fix burst per ADR-023: implement `ResolvedFontSet` (fontdb =0.23.0 direct pin); `resolve_font_set()`; consume `KrillaTextSpan .face/.y_offset_units` in PDF production draw path (body/bullets/subtitle/title); draw super/sub via `Surface::draw_glyphs`; replace `extract_all_inline_text` flattening at all flatten sites; add `build()`-driven font-distinctness test (C2-NEW, fixture-font deterministic); correct misleading docstrings (H1-NEW). Then LESSON-21 exit gate → adversary Pass 3 re-run (fresh 3-clean streak).
 
 ---
 
@@ -100,6 +97,7 @@ workspace_test_failures: 0
 **OPEN FOLLOW-UPS:**
 - **FU-CI-ARM64-TEST-FAILURE** (HIGH — investigate on next PR): A nextest test fails on `test (linux-arm64)` only (other 3 platforms + local 3916-test suite PASS). Exact test unknown — arm64 runner finalization hang prevented log retrieval on PR #78. On the NEXT PR, capture the failed test name immediately. Likely a pre-existing perf/timing flake (test_cold_budget_under_200ms / http_4xx retry) on the slow emulated arm64 runner. Deferred via admin-override merge on STORY-088 per human direction.
 - **FU-088-BC10102-ANCHOR** (spec-steward; non-blocking): pre-existing BC-1.01.002 H1 title/anchor mismatch.
+- **FU-EXIT-GATE-DISTINGUISHING-OUTPUT** (process-improvement; source OBS-1 Pass-3 adversary STORY-081): Exporter-wiring proof anti-pattern recurred 3rd time (text-drop → face-drop). Exit-gate rule must verify non-test caller consumes a dispatch fn's DISTINGUISHING output (e.g., `.face`/`.y_offset_units`), not merely that a non-test caller exists. Target: lessons-codification / Standing Process Rules. Tracked for next session-wrap or lessons update.
 
 ---
 
@@ -107,8 +105,8 @@ workspace_test_failures: 0
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `885d8302`. STORY-072/074/079/080/047/082/088 cleaned up post-merge. Open PRs: 0.
-- Workspace: 3754 pass / 0 fail (STORY-081 worktree; LESSON-21 exit gate ALL GREEN; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `885d8302`. Adversary Pass 3 DONE NOT CLEAN. ADR-023 Accepted. Implementer fix burst pending. STORY-072/074/079/080/047/082/088 cleaned up post-merge. Open PRs: 0.
+- Workspace: 3754 pass / 0 fail (STORY-081 worktree at HEAD 885d8302; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -121,7 +119,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — implementer fix burst COMPLETE (HEAD 885d8302; all 5 Pass-2 findings CLOSED; LESSON-21 exit gate ALL GREEN). NEXT: adversary Pass 3 (fresh-context; 3-CLEAN streak starts at 0). Pass 2 findings archived: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`. Arch note for Pass 3: `FrameContent::Title` asymmetry (SubtitleInlines variant exists, no TitleInlines; title uses shadow field). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — Pass 3 DONE NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS; HEAD still 885d8302). ADR-023 Accepted 2026-06-09. NEXT: implementer fix burst per ADR-023 (ResolvedFontSet + fontdb =0.23.0; consume .face/.y_offset_units; build()-driven font-distinctness test; correct misleading docstrings). After fix burst + LESSON-21 exit gate → adversary Pass 3 re-run (fresh 3-clean streak from 0). Pass 3 findings in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Arch asymmetry adjudicated: ACCEPTABLE. Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -154,7 +152,7 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 implementer fix burst COMPLETE — all 5 Pass-2 findings CLOSED — LESSON-21 ALL GREEN. 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 3 DONE NOT CLEAN — ADR-023 Accepted — implementer fix burst pending. 1 worktree active. 12 stories remain.**
 
 | Field | Value |
 |-------|-------|
@@ -162,11 +160,12 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
 | **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `885d8302`. Cleaned up: STORY-088 (+ previously 072/074/079/080/047/082). |
-| **STORY-081 state** | HEAD `885d8302` (was c11d6468); adversary 0/3; Pass 2 findings ALL CLOSED (implementer fix burst COMPLETE); LESSON-21 ALL GREEN (fmt/clippy/nextest 3754/cargo-test/rustdoc clean); NEXT: adversary Pass 3 (fresh 3-CLEAN streak starts at 0) |
-| **STORY-081 arch note** | `FrameContent::Title` NOT widened (cascades ~118 sites); HTML/PDF rich title uses `title_inlines` shadow field. `SubtitleInlines` variant exists; no `TitleInlines` variant. Pass 3 to adjudicate asymmetry. PDF per-span font switching not implemented for subtitle/title (consistent; candidate follow-up). |
-| **Workspace tests** | 3754 pass / 0 fail (STORY-081 worktree LESSON-21 gate; cold_budget PERMANENTLY FIXED; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
+| **STORY-081 state** | HEAD `885d8302`; adversary 0/3; Pass 3 DONE NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS); ADR-023 Accepted 2026-06-09; story spec v1.2 (commit f55cb58d); NEXT: implementer fix burst per ADR-023 |
+| **STORY-081 Pass 3 findings** | C1-NEW[CRIT] font-face dead-wired (`extract_all_inline_text` discards FontFaceKind+y_offset_units; zero production readers; flatten sites exporter.rs:1212,1222,1341,1355,772,760-764,331-341/749); C2-NEW[CRIT] PDF tests vacuous (assert text+/ActualText, not glyph face); H1-NEW[HIGH] misleading docstrings; OBS-1[process-gap] exit-gate gap → FU-EXIT-GATE-DISTINGUISHING-OUTPUT |
+| **STORY-081 arch adjudication** | Title shadow-field vs SubtitleInlines variant = ACCEPTABLE. PPTX/DOCX/HTML/eval: SOUND. |
+| **Workspace tests** | 3754 pass / 0 fail (STORY-081 worktree at HEAD 885d8302; cold_budget PERMANENTLY FIXED; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 implementer fix burst DONE. All 5 Pass-2 findings CLOSED (C1 PDF dead-wiring+dead fn removed, C2 build()-driven PDF assertions+ActualText, C3 SubtitleInlines variant+all-4-exporter wiring, HTML/PDF rich title via title_inlines shadow-field, I1 tracing::warn EC-008). LESSON-21 exit gate ALL GREEN. NEXT: dispatch adversary Pass 3 (fresh-context; 3-CLEAN streak starts at 0). Arch note in IN-FLIGHT section for Pass 3. Pass 2 findings: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 Pass 3 done (NOT CLEAN). ADR-023 approved 2026-06-09 (fontdb =0.23.0 + ResolvedFontSet, confined to slideforge-pdf). NEXT: dispatch implementer fix burst — implement ResolvedFontSet; consume KrillaTextSpan .face/.y_offset_units in PDF draw path (body/bullets/subtitle/title); draw super/sub via Surface::draw_glyphs; replace extract_all_inline_text at all flatten sites; add build()-driven font-distinctness test (C2-NEW, fixture-font); correct misleading docstrings (H1-NEW). LESSON-21 exit gate then adversary Pass 3 re-run (fresh 3-clean streak from 0). Pass 3 findings: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -217,6 +216,8 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | ADR-023-APPROVED | Human approved ADR-023 (PDF styled font-face resolution via fontdb metadata-aware ResolvedFontSet, Option C, fontdb =0.23.0 promoted from transitive to direct pin, confined to slideforge-pdf, no BC change). Story spec corrected to v1.2 (commit f55cb58d). |
+| 2026-06-09 | STORY-081-PASS3 | Pass 3 NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS). C1-NEW: font-face dead-wiring deeper layer — `extract_all_inline_text` discards FontFaceKind+y_offset_units, zero production readers. C2-NEW: PDF tests vacuous for AC-004 font-face claim. H1-NEW: misleading docstrings. OBS-1: exit-gate gap (non-test caller must consume distinguishing output, not just exist). Architectural asymmetry (SubtitleInlines vs title shadow-field) adjudicated ACCEPTABLE. Streak 0/3. |
 | 2026-06-09 | STORY-081-FIX-BURST | STORY-081 implementer fix burst COMPLETE. HEAD 885d83027295946f97bcca71f1ece620fc6dd533 (was c11d6468). All 5 Pass-2 findings CLOSED: C1 PDF body/bullet dead-wiring (extract_all_inline_text routed through live draw path; dead extract_inline_text removed); C2 build()-driven PDF assertion with ActualText proof; C3 FrameContent::SubtitleInlines(Vec<InlineNode>) new variant wired through layout + all 4 exporters; HTML/PDF rich title AC-006(3) via existing title_inlines shadow-field (matching sound DOCX path; FrameContent::Title NOT widened ~118 sites); I1 PPTX InlineNode::Math tracing::warn! EC-008 pattern. LESSON-21 exit gate ALL GREEN (fmt/clippy pedantic+unwrap_used/nextest 3754 pass 0 fail/cargo test shared-process/rustdoc -D warnings). Adversary streak: 0/3 (fix burst does not advance). NEXT: adversary Pass 3 (fresh-context). Arch asymmetry (SubtitleInlines variant exists, no TitleInlines; title uses shadow field) flagged for Pass-3 adjudication. PDF per-span font switching for subtitle/title not implemented (consistent with PDF body inline limitation; candidate follow-up). |
 | 2026-06-09 | STORY-081-AC006-3-DECISION | Human adjudicated AC-006(3): fix HTML/PDF rich title in same burst as C3 (widen FrameContent Title/Subtitle inline seam once). NOT deferred. Per adversary recommendation + production-grade default. |
 | 2026-06-09 | CI-ARM64-TIMEOUT-FIX | PR #79 merged → develop. ci.yml test-matrix timeout 30→75 min + cache-on-failure:true (Swatinem/rust-cache). Roots out the linux-arm64 cold-build-timeout loop (cancelled jobs never saved cache → perpetual cold builds after foundational-crate changes). ci-workflow-analyzer caught initial no-op (save-always invalid for rust-cache) → corrected to cache-on-failure. |

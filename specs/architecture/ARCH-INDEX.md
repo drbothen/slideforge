@@ -122,6 +122,7 @@ axum process but this is a local development feature, not a deployed service.
 | ADR-020 | FieldDef type-annotation extension — FieldType enum + expected_type field for schema-driven field-value validation | Accepted (2026-06-07) |
 | ADR-021 | Async runtime adoption — tokio for preview server, watch-mode HTTP, interactive keypress, and OTLP export | Accepted (2026-06-07) |
 | ADR-022 | Workspace dependency centralization and major-version adoption with merged-crate migration plan | Accepted (2026-06-07) |
+| ADR-023 | PDF styled font-face resolution via fontdb metadata-aware lookup | Accepted |
 
 ---
 
