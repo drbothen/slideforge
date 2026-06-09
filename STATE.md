@@ -29,7 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — pass 2 pending after full re-impl; HEAD c11d6468). CI infra fix PR#79 merged (linux-arm64 timeout 30→75 + cache-on-failure)."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — Pass 2 DONE NOT CLEAN; NEXT: implementer fix burst then Pass 3; HEAD c11d6468). CI infra fix PR#79 merged (linux-arm64 timeout 30→75 + cache-on-failure)."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
@@ -58,10 +58,11 @@ workspace_test_failures: 0
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
 - **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `c11d6468`
-- **Adversary streak:** **0/3**
-- **History:** Pass-1 found 4 CRIT dead-wiring (dead PDF path, body/subtitle markup dropped at threading seam, PPTX Body flattens, no e2e test) → FULL re-implementation: eval threads FieldValue::Inlines; PPTX inline runs + Code/Super/Sub/Highlight; DOCX highlight + rich title; PDF ActualText via slide_to_krilla_runs; keystone e2e test (build() → b="1"/`<w:b/>`/`<strong>`/PDF ActualText, no literal `**`). 1190 tests pass.
-- **NEXT ACTION:** Run adversary **Pass 2** (re-review the full rebuild).
-- **OPEN RISK for adversary:** HTML/PDF *title*-inline rendering was DEFERRED as a follow-on (DOCX rich title done; AC-006(3) requires all 3 — HTML + PDF title inline). Adversary must judge if partial AC-006(3) is acceptable or needs a fix before convergence.
+- **Adversary streak:** **0/3** — Pass 2 DONE, NOT CLEAN (1 CRIT + 2 HIGH + 2 MED). Findings persisted: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`.
+- **Pass 2 findings (summary):** C1[CRIT] `slide_to_krilla_runs` zero production callers — PDF body/bullet inline markup dead-wired (live draw path uses `extract_inline_text` `_ => {}` which silently drops Code/Strike/Highlight/Super/Sub/Link/Math). C2[HIGH] PDF tests vacuous for production path (unit-tests only isolation; no build()-driven assertion). C3[HIGH] Subtitle inline markup dropped at layout seam for ALL exporters (`FrameContent::Subtitle(Arc<str>)` at types.rs:410 flattens inlines). I1[MED] PPTX `InlineNode::Math(_) => vec![]` silent drop, no tracing::warn!. I2[MED] HTML/PDF title inline deferred (same FrameContent::Title seam as C3).
+- **OPEN DECISION — AC-006(3):** Adversary recommends fixing HTML/PDF rich title IN SAME BURST as C3 (C3 already requires widening the FrameContent seam; marginal cost near zero). PRODUCTION-GRADE DEFAULT: fix in scope. If human elects to defer, must provide: explicit direction + concrete future dependency + specific story anchor (CLAUDE.md rule 3). **Human must adjudicate before implementer fix burst is scoped.**
+- **What is sound (do not regress):** PPTX/DOCX/HTML body inline paths are live and correctly wired.
+- **NEXT ACTION:** Human AC-006(3) decision → implementer fix burst (C1+C2+C3+I1, HTML/PDF title per decision) → full LESSON-21 exit gate → adversary Pass 3.
 
 ---
 
@@ -114,7 +115,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 (Pass 2 after full re-impl). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — (A) human AC-006(3) decision (adversary recommends fix HTML/PDF title in same burst as C3; if deferral, requires human-directed tech-debt anchor per CLAUDE.md rule 3), then (B) implementer fix burst (C1+C2+C3+I1 + title per decision), then (C) adversary Pass 3. Findings in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`. Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -153,12 +154,12 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 |-------|-------|
 | **Date** | 2026-06-09 |
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79 |
+| **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
 | **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081`. Cleaned up: STORY-088 (+ previously 072/074/079/080/047/082). |
-| **STORY-081 state** | HEAD `c11d6468`; adversary 0/3 (full re-impl after Pass-1 4-CRIT); NEXT: Pass 2 |
+| **STORY-081 state** | HEAD `c11d6468`; adversary 0/3; Pass 2 DONE NOT CLEAN (1 CRIT+2 HIGH+2 MED); NEXT: AC-006(3) human decision → implementer fix burst → Pass 3 |
 | **Workspace tests** | ~3916+ pass / ~20 skip (cold_budget PERMANENTLY FIXED; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Check STORY-081 worktree HEAD vs table above. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting active: dispatch adversary/review passes ONE AT A TIME. Apply LESSON-21 exit gate to every story. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | Check STORY-081 worktree HEAD vs table above. STORY-081 Pass 2 DONE — NOT CLEAN. Step 1: human AC-006(3) decision (adversary recommends fixing HTML/PDF title in same burst as C3; if defer, human must anchor to specific story per CLAUDE.md rule 3). Step 2: implementer fix burst (C1+C2+C3+I1 + HTML/PDF title per AC-006(3) decision) — findings in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-2.md`. Step 3: full LESSON-21 exit gate. Step 4: adversary Pass 3. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. Apply LESSON-21 exit gate to every story. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
