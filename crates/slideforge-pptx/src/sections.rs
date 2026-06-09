@@ -64,6 +64,7 @@ use sha2::{Digest, Sha256};
 use slideforge_layout::SlideSectionEntry;
 
 use crate::error::PptxError;
+use crate::xml_escape::strip_xml10_invalid_chars;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -228,10 +229,17 @@ impl SectionListBuilder {
         for section in sections {
             let guid = derive_section_guid(&section.name);
 
+            // Sanitize the section name: strip XML-1.0-invalid control characters
+            // (U+0001–U+0008, U+000B, U+000C, U+000E–U+001F) before writing to the
+            // name attribute.  quick-xml's push_attribute entity-escapes & < > " '
+            // but does NOT strip XML-1.0-invalid bytes; a raw control char produces
+            // malformed XML that PowerPoint 365 cannot open (SEC-100 / CWE-116).
+            let safe_name = strip_xml10_invalid_chars(&section.name);
+
             // <p14:section name="..." id="{...}">
             {
                 let mut sec_start = BytesStart::new("p14:section");
-                sec_start.push_attribute(("name", section.name.as_ref()));
+                sec_start.push_attribute(("name", safe_name.as_str()));
                 sec_start.push_attribute(("id", guid.as_str()));
                 writer.write_event(Event::Start(sec_start)).map_err(|e| {
                     PptxError::OoxmlElement {

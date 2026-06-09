@@ -1342,3 +1342,92 @@ fn test_BC_4_01_003_format_guid_produces_correct_format() {
     assert_eq!(parts[3].len(), 4);
     assert_eq!(parts[4].len(), 12);
 }
+
+// ─── SEC-100 / CWE-116: XML-1.0 control-character sanitization in section names ─
+
+/// SEC-100/CWE-116 — section names containing XML-1.0-invalid control chars are
+/// sanitized before writing to the `name` attribute of `<p14:section>`.
+///
+/// `quick-xml`'s `push_attribute` only entity-escapes `& < > " '`.  It does NOT
+/// strip XML-1.0-invalid bytes (U+0001–U+0008, U+000B, U+000C, U+000E–U+001F).
+/// A raw control character in the `name` attribute renders the resulting
+/// `presentation.xml` malformed — PowerPoint 365 cannot open such files (file
+/// corruption / CWE-116).
+///
+/// This test is the load-bearing RED-gate that proves the defect before the fix
+/// and proves the fix after.  It:
+///
+/// 1. Constructs a `SlideSectionEntry` whose name contains U+0001 (SOH) and
+///    U+000B (VT) — two distinct classes of XML-1.0-invalid chars.
+/// 2. Calls `SectionListBuilder::build_ext_lst` (the direct XML-write path).
+/// 3. Asserts the emitted bytes contain NEITHER U+0001 NOR U+000B.
+/// 4. Asserts the resulting bytes re-parse cleanly via `quick_xml::Reader`
+///    (no malformed-XML error).
+/// 5. Asserts the sanitized name (control chars stripped) still appears in the
+///    attribute value.
+///
+/// Traces to BC-4.01.003 EC-004 / SEC-100 / CWE-116.
+/// F-P12-HIGH-1 (adversary pass 12, HIGH severity, security/correctness).
+#[test]
+fn test_sec100_cwe116_section_name_control_chars_stripped_from_p14_section_attr() {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    // Section name with U+0001 (SOH) and U+000B (VT) — both XML-1.0-invalid.
+    let name_with_controls = "Back\u{0001}ground\u{000B}Section";
+    let expected_sanitized = "BackgroundSection";
+
+    let sections = vec![SlideSectionEntry {
+        name: Arc::from(name_with_controls),
+        slide_ids: vec![256],
+    }];
+
+    let bytes = SectionListBuilder::build_ext_lst(&sections).expect("build_ext_lst must succeed");
+
+    // Assert 1: U+0001 must NOT appear in the emitted bytes.
+    assert!(
+        !bytes.contains(&0x01u8),
+        "SEC-100/CWE-116: U+0001 (SOH) must be stripped from the p14:section name \
+         attribute — raw control char renders presentation.xml malformed; \
+         found 0x01 byte in emitted XML"
+    );
+
+    // Assert 2: U+000B must NOT appear in the emitted bytes.
+    assert!(
+        !bytes.contains(&0x0Bu8),
+        "SEC-100/CWE-116: U+000B (VT) must be stripped from the p14:section name \
+         attribute — raw control char renders presentation.xml malformed; \
+         found 0x0B byte in emitted XML"
+    );
+
+    // Assert 3: The sanitized name (without control chars) must appear in the output.
+    let xml_str = String::from_utf8(bytes.clone()).expect("emitted XML must be valid UTF-8");
+    assert!(
+        xml_str.contains(expected_sanitized),
+        "SEC-100/CWE-116: sanitized name '{expected_sanitized}' must appear in \
+         p14:section name attribute; got:\n{xml_str}"
+    );
+
+    // Assert 4: The full ext_lst block must re-parse as well-formed XML via
+    // quick_xml::Reader — no malformed-XML error.
+    // Wrap in a root element because quick_xml expects a single root.
+    let wrapped = format!("<root>{}</root>", xml_str);
+    let mut reader = Reader::from_str(&wrapped);
+    reader.config_mut().check_end_names = true;
+    let mut event_count = 0usize;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(_) => event_count += 1,
+            Err(e) => panic!(
+                "SEC-100/CWE-116: quick_xml::Reader reported malformed XML after \
+                 build_ext_lst — raw control chars in name attribute cause XML \
+                 well-formedness violation: {e}\nXML was:\n{xml_str}"
+            ),
+        }
+    }
+    assert!(
+        event_count > 0,
+        "quick_xml::Reader must emit at least one event for a non-empty XML block"
+    );
+}
