@@ -30,7 +30,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — ADR-023 fix burst DONE HEAD 626ae472; C1-NEW[ResolvedFontSet+resolve_font_set()+fontdb=0.23.0+KrillaTextSpan.face/.y_offset_units consumed]/C2-NEW[build()-driven font-distinctness test Tuffy.ttf fixture]/H1-NEW[docstrings corrected] CLOSED; fontdb =0.23.0 direct pin; cargo deny PASS; 3755 pass 0 fail; NEXT: adversary Pass 4 — fresh 3-clean streak attempt; WATCH: upem=1000 hardcode for TT fonts; cold_budget flake recurrence). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (adversary 0/3 — Pass 4 NOT CLEAN HEAD 626ae472; C1-NEW+C2-NEW CONFIRMED load-bearing; NEW: ADV-P04-CRIT-001 multi-span overprinting regression + ADV-P04-HIGH-001 super/sub docstring divergence+size-reduction gap; architect ruling 2026-06-09: baseline-shift blessed, ADR-023 amended, story v1.3 commit 52a841e8; NEXT: implementer fix burst then Pass 5). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
@@ -58,20 +58,17 @@ workspace_test_failures: 0
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `626ae472b4a6f9f0f44096fbc032e35d675b59dd` (ADR-023 fix burst DONE)
-- **Adversary streak:** **0/3** — ADR-023 fix burst complete. Pass 3 findings CLOSED. NEXT: adversary Pass 4 (fresh-context, new 3-clean streak attempt).
-- **Pass 3 findings (ALL CLOSED):**
-  - C1-NEW[CRIT] CLOSED — `ResolvedFontSet` + `resolve_font_set()` implemented via fontdb =0.23.0 OS/2-metadata query in `slideforge-pdf/src/font.rs`; `font_for_span()` dispatch + `draw_inline_spans_at_y()` consume `KrillaTextSpan .face + .y_offset_units` in body/bullets/subtitle/title production paths; super/sub via per-glyph y_offset.
-  - C2-NEW[CRIT] CLOSED — `build()`-driven `test_BC_3_02_002_ac004_pdf_bold_span_uses_distinct_font_resource` injects fixture fonts (LatinModernMath-Regular + Tuffy); asserts both distinct font resources embedded. Fixture `crates/slideforge-pdf/tests/fixtures/Tuffy.ttf` added.
-  - H1-NEW[HIGH] CLOSED — docstrings corrected; all "future enhancement"/"for now" MVP comments removed.
-  - OBS-1[process-gap] ROUTED → FU-EXIT-GATE-DISTINGUISHING-OUTPUT (see OPEN FOLLOW-UPS).
-- **fontdb pin:** =0.23.0 promoted transitive→direct pin in `slideforge-pdf/Cargo.toml`; cargo deny PASS (advisories/bans/licenses/sources ok); no new crates added.
-- **Non-silent fallback:** `tracing::warn!` emitted in `resolve_font_set` when styled face unavailable; falls back to regular face.
-- **LESSON-21 exit gate:** ALL GREEN — fmt; clippy pedantic+unwrap_used; nextest 3755 pass; shared-process cargo test 0 fail; rustdoc -D warnings; cargo deny.
-- **WATCH ITEMS for adversary Pass 4:**
-  1. `units_per_em=1000` hardcoded for super/sub offset normalization (krilla 0.6.0 does not expose `units_per_em`). Correct for CFF/OTF; TrueType commonly uses 2048 upem — potential offset-halving on TT fonts.
-  2. `slideforge-diagrams` cold_budget test: `cold_budget` PERMANENTLY FIXED by STORY-080 PR#73; any genuine recurrence is a regression, not a flake.
-- **NEXT ACTION:** Adversary Pass 4 — fresh-context re-review at HEAD `626ae472`. Beginning fresh 3-clean streak (0/3).
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `626ae472b4a6f9f0f44096fbc032e35d675b59dd`
+- **Adversary streak:** **0/3** — Pass 4 NOT CLEAN (1 CRIT + 1 HIGH + 1 OBS). See pass report `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-4.md`.
+- **Pass 4 findings (ALL OPEN):**
+  - ADV-P04-CRIT-001[CRIT] OPEN — `draw_inline_spans_at_y` (exporter.rs:1224) resets to `bbox.x` for every span with no horizontal cursor advance; multi-span lines overprint. Forbidden "for now" comment at 1172-1175. Fix: maintain cursor advancing by each span's measured width + add multi-span-same-line positional regression test.
+  - ADV-P04-HIGH-001[HIGH] OPEN — `slide_pdf.rs:69-70/78-83/154-155` docstrings describe `draw_glyphs`/`KrillaGlyph.y_offset` mechanism that is not implemented. ALSO: super/sub size reduction absent (code does not apply `SUPER_SUB_SCALE`). Architect ruling: baseline-shift draw_text mechanism BLESSED (draw_glyphs unusable — naive_shape pub(crate)); ADR-023 amended; story v1.3 (52a841e8). Fix: correct docstrings + implement SUPER_SUB_SCALE=0.583 + SUPER_RISE_FRACTION=0.333 + SUB_DROP_FRACTION=0.333.
+  - OBS-P04-001[process-gap] — PDF inline exit-gate proven only for "text/face reaches PDF," never "laid out correctly." Extends FU-EXIT-GATE-DISTINGUISHING-OUTPUT with multi-span-same-line positional assertion requirement.
+- **Pass 3 findings (ALL CLOSED):** C1-NEW[CRIT] + C2-NEW[CRIT] CONFIRMED load-bearing by Pass 4. H1-NEW[HIGH] PARTIALLY_RESOLVED (e2e docstring fixed; slide_pdf.rs internals still wrong — see ADV-P04-HIGH-001).
+- **Architect ruling 2026-06-09:** draw_glyphs unusable in krilla 0.6.0 (naive_shape pub(crate)); original y_offset=units_per_em/3 dimensionally wrong. Blessed mechanism: two `draw_text` calls with `font_size * SUPER_SUB_SCALE` and `±(font_size * SUPER_RISE_FRACTION/SUB_DROP_FRACTION)` baseline shift in point-space. ADR-023 amended. Story spec v1.3 (commit 52a841e8).
+- **fontdb pin:** =0.23.0 direct pin retained; cargo deny PASS.
+- **LESSON-21 exit gate (Pass-3 basis):** ALL GREEN — 3755 pass / 0 fail.
+- **NEXT ACTION:** Implementer fix burst — CRIT-001 (horizontal cursor advance + multi-span positional regression test + remove "for now" comment) + HIGH-001 (SUPER_SUB_SCALE/SUPER_RISE_FRACTION/SUB_DROP_FRACTION constants + size-reduction impl + correct slide_pdf.rs:69-70/78-83/154-155 docstrings). Then LESSON-21 exit gate → adversary Pass 5 (fresh 3-clean streak).
 
 ---
 
@@ -103,7 +100,7 @@ workspace_test_failures: 0
 **OPEN FOLLOW-UPS:**
 - **FU-CI-ARM64-TEST-FAILURE** (HIGH — investigate on next PR): A nextest test fails on `test (linux-arm64)` only (other 3 platforms + local 3916-test suite PASS). Exact test unknown — arm64 runner finalization hang prevented log retrieval on PR #78. On the NEXT PR, capture the failed test name immediately. Likely a pre-existing perf/timing flake (test_cold_budget_under_200ms / http_4xx retry) on the slow emulated arm64 runner. Deferred via admin-override merge on STORY-088 per human direction.
 - **FU-088-BC10102-ANCHOR** (spec-steward; non-blocking): pre-existing BC-1.01.002 H1 title/anchor mismatch.
-- **FU-EXIT-GATE-DISTINGUISHING-OUTPUT** (process-improvement; source OBS-1 Pass-3 adversary STORY-081): Exporter-wiring proof anti-pattern recurred 3rd time (text-drop → face-drop). Exit-gate rule must verify non-test caller consumes a dispatch fn's DISTINGUISHING output (e.g., `.face`/`.y_offset_units`), not merely that a non-test caller exists. Target: lessons-codification / Standing Process Rules. Tracked for next session-wrap or lessons update.
+- **FU-EXIT-GATE-DISTINGUISHING-OUTPUT** (process-improvement; source OBS-1 Pass-3 + OBS-P04-001 Pass-4 adversary STORY-081): Anti-pattern recurred 4th time (text-drop → face-drop → position-collapse). Exit-gate rule must verify (1) non-test caller consumes a dispatch fn's DISTINGUISHING output (e.g., `.face`/`.y_offset_units`), AND (2) multi-span-same-line positional assertion (two spans on one line → strictly increasing draw-origin X). Target: lessons-codification / Standing Process Rules. Tracked for next session-wrap or lessons update.
 
 ---
 
@@ -111,7 +108,7 @@ workspace_test_failures: 0
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. ADR-023 fix burst DONE. Pass 3 all findings CLOSED. Adversary Pass 4 NEXT (fresh 3-clean streak). Open PRs: 0.
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. Pass 4 NOT CLEAN (1 CRIT + 1 HIGH + 1 OBS). Implementer fix burst NEXT. Open PRs: 0.
 - Workspace: 3755 pass / 0 fail (STORY-081 worktree at HEAD 626ae472; LESSON-21 exit gate ALL GREEN; cargo deny PASS; cold_budget PERMANENTLY FIXED by STORY-080 PR#73; linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
@@ -125,7 +122,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — ADR-023 fix burst DONE (HEAD `626ae472`; Pass 3 all findings CLOSED; 3755 pass; cargo deny PASS). NEXT: adversary Pass 4 — fresh-context re-review at HEAD `626ae472`, beginning fresh 3-clean streak (0/3). TWO WATCH ITEMS for Pass 4: (1) `units_per_em=1000` hardcoded — correct for CFF/OTF, may halve offset on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080; any recurrence is a regression. Pass 3 findings archived in `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — Pass 4 NOT CLEAN (HEAD `626ae472`; 1 CRIT + 1 HIGH + 1 OBS). Implementer fix burst: (1) CRIT-001 horizontal cursor advance in `draw_inline_spans_at_y` + multi-span positional regression test + remove "for now" comment; (2) HIGH-001 SUPER_SUB_SCALE=0.583 + SUPER_RISE_FRACTION=0.333 + SUB_DROP_FRACTION=0.333 module constants + size-reduction impl + correct `slide_pdf.rs:69-70/78-83/154-155` docstrings. Architect ruling: draw_text mechanism BLESSED; ADR-023 amended; story v1.3 (52a841e8). Then LESSON-21 exit gate → adversary Pass 5. Pass 4 report: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-4.md`. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -158,20 +155,20 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 ADR-023 fix burst DONE — Pass 4 NEXT (fresh 3-clean streak). 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 4 NOT CLEAN — implementer fix burst NEXT. 1 worktree active. 12 stories remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-09 |
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. Cleaned up: STORY-088 (+ previously 072/074/079/080/047/082). |
-| **STORY-081 state** | HEAD `626ae472`; adversary 0/3; ADR-023 fix burst DONE; Pass 3 all findings CLOSED (C1-NEW/C2-NEW/H1-NEW CLOSED; OBS-1 routed to FU); fontdb =0.23.0 direct pin; cargo deny PASS; 3755 pass 0 fail; story spec v1.2 (commit f55cb58d) |
-| **STORY-081 fix burst summary** | ResolvedFontSet + resolve_font_set() via fontdb =0.23.0 OS/2-metadata query; font_for_span() + draw_inline_spans_at_y() consume KrillaTextSpan .face/.y_offset_units; super/sub via per-glyph y_offset; build()-driven font-distinctness test (Tuffy.ttf fixture); docstrings corrected |
-| **STORY-081 Pass 4 watch items** | (1) units_per_em=1000 hardcoded — correct CFF/OTF, may halve super/sub offset on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080 — any recurrence = regression |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `626ae472`. |
+| **STORY-081 state** | HEAD `626ae472`; adversary 0/3; Pass 4 NOT CLEAN (1 CRIT + 1 HIGH + 1 OBS); C1-NEW+C2-NEW CONFIRMED load-bearing; ADR-023 amended; story spec v1.3 (commit 52a841e8) |
+| **Pass 4 open findings** | ADV-P04-CRIT-001: multi-span overprinting in `draw_inline_spans_at_y` (no horizontal cursor advance + forbidden "for now" comment). ADV-P04-HIGH-001: `slide_pdf.rs` docstrings wrong + super/sub size reduction (SUPER_SUB_SCALE=0.583) absent. OBS-P04-001: positional assertion gap in exit gate. |
+| **Architect ruling 2026-06-09** | draw_glyphs unusable in krilla 0.6.0; original y_offset=units_per_em/3 wrong. Blessed: `draw_text` with `font_size * 0.583` + `±(font_size * 0.333)` baseline shift. ADR-023 amended; story v1.3. |
 | **Workspace tests** | 3755 pass / 0 fail (STORY-081 worktree at HEAD 626ae472; LESSON-21 ALL GREEN; cargo deny PASS; linux-arm64 CI: 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 ADR-023 fix burst DONE (HEAD 626ae472; 3755 pass; cargo deny PASS; LESSON-21 ALL GREEN). NEXT: dispatch adversary Pass 4 — fresh-context re-review at HEAD 626ae472, starting fresh 3-clean streak (0/3). TWO watch items for adversary: (1) units_per_em=1000 hardcode for TT-font super/sub offset; (2) cold_budget — must be PERMANENTLY FIXED, flag any recurrence as regression. Pass 3 findings: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-3.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name immediately (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 Pass 4 NOT CLEAN (HEAD 626ae472). NEXT: implementer fix burst — (1) CRIT-001: horizontal cursor advance in `draw_inline_spans_at_y`; add multi-span-same-line positional regression test (span-2 origin-X > span-1 origin-X); remove "for now" comment exporter.rs:1172-1175. (2) HIGH-001: add module constants SUPER_SUB_SCALE=0.583/SUPER_RISE_FRACTION=0.333/SUB_DROP_FRACTION=0.333; implement size reduction in super/sub draw path; correct `slide_pdf.rs:69-70/78-83/154-155` docstrings to describe draw_text mechanism. Then LESSON-21 exit gate → adversary Pass 5 (fresh 3-clean streak). Architect ruling: baseline-shift draw_text BLESSED; ADR-023 amended. Pass 4 report: `cycles/STORY-081/adversarial-reviews/adversary-STORY-081-pass-4.md`. Per-story: LOCAL adversary 3-CLEAN (SEQUENTIAL) → demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. On next PR: CAPTURE linux-arm64 nextest failure test name (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -222,6 +219,8 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-081-PASS4 | Pass 4 NOT CLEAN; C1-NEW + C2-NEW CONFIRMED load-bearing (not paper-fixes). New findings: ADV-P04-CRIT-001 — `draw_inline_spans_at_y` resets to bbox.x per span with no horizontal cursor advance; multi-span lines overprint (regression from C1-NEW fix); "for now" forbidden-rationalization comment at exporter.rs:1172-1175. ADV-P04-HIGH-001 — `slide_pdf.rs:69-70/78-83/154-155` docstrings still describe draw_glyphs mechanism; super/sub size reduction (SUPER_SUB_SCALE) absent from implementation. OBS-P04-001 — PDF exit-gate meta-pattern (pass-2 text-drop → pass-3 face-drop → pass-4 position-collapse); extends FU-EXIT-GATE-DISTINGUISHING-OUTPUT with positional assertion requirement. Streak 0/3. |
+| 2026-06-09 | STORY-081-ADR023-AMEND | Architect ruling — krilla 0.6.0 draw_glyphs unusable (naive_shape pub(crate); no public shaping API); original ADR y_offset=units_per_em/3 dimensionally wrong (normalized field; upem/3≈682 for 2048-upem TrueType = nonsensical). Blessed mechanism: two `surface.draw_text()` calls with `font_size * SUPER_SUB_SCALE` (0.583) and `±(font_size * SUPER_RISE_FRACTION/SUB_DROP_FRACTION)` (0.333) baseline shift in point-space at PARENT font size. No HarfBuzz/skrifa required. Observable contract unchanged (raised+smaller super, lowered+smaller sub). ADR-023 dispatch table amended; size-reduction is now an explicit requirement. Story spec corrected to v1.3 (commit 52a841e8). BC unchanged. |
 | 2026-06-09 | STORY-081-ADR023-FIXBURST | STORY-081 ADR-023 implementer fix burst COMPLETE. HEAD 626ae472b4a6f9f0f44096fbc032e35d675b59dd (was 885d8302). Pass-3 findings ALL CLOSED: C1-NEW — ResolvedFontSet + resolve_font_set() via fontdb =0.23.0 OS/2-metadata query in slideforge-pdf/src/font.rs; font_for_span() dispatch + draw_inline_spans_at_y() consume KrillaTextSpan .face + .y_offset_units in body/bullets/subtitle/title production paths; super/sub via per-glyph y_offset. C2-NEW — build()-driven test_BC_3_02_002_ac004_pdf_bold_span_uses_distinct_font_resource injects LatinModernMath-Regular + Tuffy fixture fonts, asserts both distinct embedded font resources; fixture crates/slideforge-pdf/tests/fixtures/Tuffy.ttf added. H1-NEW — docstrings corrected; all "future enhancement"/"for now" MVP comments removed. fontdb =0.23.0 promoted transitive→direct pin; cargo deny PASS. Non-silent fallback: tracing::warn! in resolve_font_set when styled face unavailable. LESSON-21 exit gate ALL GREEN (fmt/clippy pedantic+unwrap_used/nextest 3755/shared-process cargo test/rustdoc -D warnings/cargo deny). TWO watch items for Pass 4: (1) units_per_em=1000 hardcoded — potential offset-halving on TrueType 2048-upem fonts; (2) cold_budget PERMANENTLY FIXED by STORY-080 — any recurrence = regression. Adversary streak 0/3; NEXT: adversary Pass 4 fresh-context re-review. |
 | 2026-06-09 | ADR-023-APPROVED | Human approved ADR-023 (PDF styled font-face resolution via fontdb metadata-aware ResolvedFontSet, Option C, fontdb =0.23.0 promoted from transitive to direct pin, confined to slideforge-pdf, no BC change). Story spec corrected to v1.2 (commit f55cb58d). |
 | 2026-06-09 | STORY-081-PASS3 | Pass 3 NOT CLEAN (2 CRIT + 1 HIGH + 1 OBS). C1-NEW: font-face dead-wiring deeper layer — `extract_all_inline_text` discards FontFaceKind+y_offset_units, zero production readers. C2-NEW: PDF tests vacuous for AC-004 font-face claim. H1-NEW: misleading docstrings. OBS-1: exit-gate gap (non-test caller must consume distinguishing output, not just exist). Architectural asymmetry (SubtitleInlines vs title shadow-field) adjudicated ACCEPTABLE. Streak 0/3. |
