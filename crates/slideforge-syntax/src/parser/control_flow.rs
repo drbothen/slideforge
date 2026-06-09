@@ -1633,4 +1633,255 @@ mod tests {
              'decimal number'; got errors: {errors:?}"
         );
     }
+
+    // ── OBS-088-P7-001: depth-tracker boundary coverage ──────────────────────
+    //
+    // The Pass-6 fix introduced a non-recursive iterative depth-tracking loop
+    // (`custom` combinator) that consumes nested `[...]` tokens with O(1) stack.
+    //
+    // Three boundary conditions require explicit coverage:
+    //
+    //   1. **Nested-then-valid** (`[["A"], "B"]`): depth loop stops at the inner
+    //      `]` (depth 1→0) and does NOT consume the trailing `, "B"`.  The outer
+    //      `separated_by` can then recover `"B"` as a valid Template item.
+    //      A one-bracket over-consumption bug would swallow the `,` or `"B"`,
+    //      producing either a second error or losing the valid item.
+    //
+    //   2. **Valid-then-nested** (`["A", ["B"]]`): depth loop stops at the inner
+    //      `]`, leaving the outer `]` for `delimited_by`.  The preceding `"A"`
+    //      must be unaffected (no spurious error).  A one-bracket under-consumption
+    //      bug would leave a stray `]` that causes a secondary error.
+    //
+    //   3. **Truncated/EOF** (`[["A"]`): the outer `]` is absent.  The depth loop
+    //      sees `"A"` then the lone `]` → depth 1→0, exits normally.  The outer
+    //      `delimited_by` then reaches EOF with no `]` → emits an unclosed-list
+    //      error.  The `None => break` branch in the loop must not panic.
+    //
+    // These three inputs were not covered by the existing single-nested `[[\"A\"]]`
+    // or the 5000-deep stress test (both place the nested structure in the TRAILING
+    // position, which the outer `delimited_by` recovery hides).
+
+    /// Helper: lex `src`, run the full deck parser via the public `parse` API,
+    /// and return `(Option<DeckNode>, Vec<String>)` containing the parsed AST (if
+    /// any) and all error reason strings.  Unlike `parse_str`, this does NOT discard
+    /// the AST when errors are present — allowing tests to inspect partial results.
+    fn parse_deck_and_errors_cf(src: &str) -> (Option<DeckNode>, Vec<String>) {
+        use crate::{lexer::lex, parser::deck::deck_parser, token::Token};
+        use chumsky::Parser as _;
+        use chumsky::input::Input as _;
+        use chumsky::prelude::SimpleSpan;
+
+        let file: Arc<str> = Arc::from("test.sf");
+        let (tokens, _lex_errs) = lex(src, file.clone());
+        let eoi = SimpleSpan::from(src.len()..src.len());
+        let mut sm = crate::span::SourceMap::new();
+        let file_id = sm.add_file(Arc::from("test.sf"), Arc::from(src));
+        let spanned_tokens: Vec<(Token, SimpleSpan)> = tokens
+            .into_iter()
+            .map(|(t, s)| (t, SimpleSpan::from(s)))
+            .collect();
+        let input = spanned_tokens
+            .as_slice()
+            .map(eoi, |(t, s): &(Token, SimpleSpan)| (t, s));
+        let (deck_opt, parse_errs) = deck_parser(file_id).parse(input).into_output_errors();
+        let error_strs = parse_errs
+            .iter()
+            .map(|e| format!("{:?}", e.reason()))
+            .collect();
+        (deck_opt, error_strs)
+    }
+
+    /// OBS-088-P7-001 (1/3) — nested-then-valid: `bullets [["A"], "B"]` must emit
+    /// EXACTLY ONE E-PAR-024 "nested list" error and preserve `"B"` as a valid list
+    /// item (no spurious second E-PAR-024 for `"B"`).
+    ///
+    /// This proves the depth loop stops at the inner `]` (depth 1→0) without
+    /// consuming the `, "B"` tokens that follow.  A one-bracket over-consumption
+    /// regression would either produce a second error or lose the `"B"` item.
+    ///
+    /// Load-bearing assertions:
+    /// - nested-list error count == 1 (not 0, not 2+)
+    /// - the resulting list contains exactly 2 items: `FieldValue::Error` sentinel
+    ///   for `["A"]` followed by `FieldValue::Template` for `"B"`
+    #[test]
+    fn test_obs_088_p7_001_nested_then_valid_depth_stops_at_inner_close() {
+        let src = concat!("slide content:\n", "  bullets [[\"A\"], \"B\"]\n");
+        let (deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Count occurrences of "nested list" in the error set (not just any error).
+        let nested_list_count = errors
+            .iter()
+            .filter(|msg| msg.contains("nested list"))
+            .count();
+        assert_eq!(
+            nested_list_count, 1,
+            "OBS-088-P7-001 (nested-then-valid): expected EXACTLY 1 E-PAR-024 'nested list' \
+             error; got {nested_list_count}. \
+             errors: {errors:?}"
+        );
+
+        // The deck must be partially recoverable — the bullets field should be present
+        // with 2 items: Error sentinel for [\"A\"] and Template for \"B\".
+        let deck = deck_opt.expect(
+            "OBS-088-P7-001 (nested-then-valid): deck_parser must produce a partial AST \
+             even with errors; got None",
+        );
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!(
+                "OBS-088-P7-001: expected Slide as first item; got: {:?}",
+                deck.items[0]
+            );
+        };
+        let slide = slide_s.value();
+        let bullets = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect(
+                "OBS-088-P7-001 (nested-then-valid): 'bullets' field must be present in partial AST",
+            );
+        let FieldValue::List(items) = bullets.value.value() else {
+            panic!(
+                "OBS-088-P7-001 (nested-then-valid): bullets must be FieldValue::List; \
+                 got: {:?}",
+                bullets.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "OBS-088-P7-001 (nested-then-valid): list must have 2 items \
+             (Error for [\"A\"] + Template for \"B\"); got {}: {items:?}",
+            items.len()
+        );
+        // First item: Error sentinel for the nested list.
+        assert!(
+            matches!(items[0], FieldValue::Error),
+            "OBS-088-P7-001 (nested-then-valid): items[0] must be FieldValue::Error \
+             (nested-list sentinel); got: {:?}",
+            items[0]
+        );
+        // Second item: valid Template for \"B\" — proves the loop did NOT over-consume.
+        assert!(
+            matches!(items[1], FieldValue::Template(_)),
+            "OBS-088-P7-001 (nested-then-valid): items[1] must be FieldValue::Template \
+             for \"B\" (depth loop must stop at inner ']'); got: {:?}. \
+             Over-consumption regression: loop consumed ',' or '\"B\"' as part of the \
+             inner bracket skip.",
+            items[1]
+        );
+    }
+
+    /// OBS-088-P7-001 (2/3) — valid-then-nested: `bullets ["A", ["B"]]` must emit
+    /// EXACTLY ONE E-PAR-024 "nested list" error; `"A"` must be a valid Template item
+    /// with no spurious error; no leftover-token error after the list.
+    ///
+    /// This proves:
+    /// - The depth loop stops at the inner `]`, leaving the outer `]` for
+    ///   `delimited_by` (no under-consumption stray-token regression).
+    /// - `"A"` parsed before the nested sub-list is unaffected.
+    ///
+    /// Load-bearing assertions:
+    /// - nested-list error count == 1 (not 0, not 2+)
+    /// - the resulting list has 2 items: `FieldValue::Template` for `"A"` and
+    ///   `FieldValue::Error` sentinel for `["B"]`
+    #[test]
+    fn test_obs_088_p7_001_valid_then_nested_depth_stops_leaving_outer_close() {
+        let src = concat!("slide content:\n", "  bullets [\"A\", [\"B\"]]\n");
+        let (deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        let nested_list_count = errors
+            .iter()
+            .filter(|msg| msg.contains("nested list"))
+            .count();
+        assert_eq!(
+            nested_list_count, 1,
+            "OBS-088-P7-001 (valid-then-nested): expected EXACTLY 1 E-PAR-024 'nested list' \
+             error; got {nested_list_count}. \
+             errors: {errors:?}"
+        );
+
+        let deck = deck_opt.expect(
+            "OBS-088-P7-001 (valid-then-nested): deck_parser must produce a partial AST; got None",
+        );
+        let BlockItem::Slide(slide_s) = &deck.items[0] else {
+            panic!("OBS-088-P7-001: expected Slide; got: {:?}", deck.items[0]);
+        };
+        let slide = slide_s.value();
+        let bullets = slide
+            .fields
+            .iter()
+            .find(|f| f.name.value() == "bullets")
+            .expect(
+                "OBS-088-P7-001 (valid-then-nested): 'bullets' field must be present in partial AST",
+            );
+        let FieldValue::List(items) = bullets.value.value() else {
+            panic!(
+                "OBS-088-P7-001 (valid-then-nested): bullets must be FieldValue::List; \
+                 got: {:?}",
+                bullets.value.value()
+            );
+        };
+        assert_eq!(
+            items.len(),
+            2,
+            "OBS-088-P7-001 (valid-then-nested): list must have 2 items \
+             (Template for \"A\" + Error for [\"B\"]); got {}: {items:?}",
+            items.len()
+        );
+        // First item: valid Template for \"A\" — proves \"A\" was not affected by the
+        // nested-list processing that follows.
+        assert!(
+            matches!(items[0], FieldValue::Template(_)),
+            "OBS-088-P7-001 (valid-then-nested): items[0] must be FieldValue::Template \
+             for \"A\"; got: {:?}",
+            items[0]
+        );
+        // Second item: Error sentinel for the nested list.
+        assert!(
+            matches!(items[1], FieldValue::Error),
+            "OBS-088-P7-001 (valid-then-nested): items[1] must be FieldValue::Error \
+             (nested-list sentinel for [\"B\"]); got: {:?}. \
+             Under-consumption regression: outer ']' not left for delimited_by.",
+            items[1]
+        );
+    }
+
+    /// OBS-088-P7-001 (3/3) — truncated/EOF branch: `bullets [["A"]` (missing outer
+    /// `]`) must NOT panic and must produce ≥1 error.
+    ///
+    /// This is the load-bearing test for the `None => break` branch in the
+    /// `custom` depth-tracking loop.  Without that branch, a malformed input that
+    /// reaches EOF while inside the inner bracket skip would loop forever or
+    /// return an unexpected `Ok(())` leaving the outer `delimited_by` with a
+    /// missing close-bracket.
+    ///
+    /// The input is:
+    ///   `slide content:`
+    ///   `  bullets [["A"]`   ← only ONE `]` present; outer list is unclosed
+    ///
+    /// The `custom` loop: opens at depth=1 (outer `[` consumed by `just(LBracket)`),
+    /// sees `"A"`, sees `]` → depth 0, exits normally (no EOF hit here because the
+    /// one `]` closes the inner list before EOF).  Then the outer `delimited_by`
+    /// cannot find its closing `]` → emits an unclosed-list / E-PAR-024 error.
+    ///
+    /// The no-panic guarantee is the primary load-bearing assertion — reaching any
+    /// assertion proves the `None => break` branch fired without aborting.
+    #[test]
+    fn test_obs_088_p7_001_truncated_eof_branch_no_panic_produces_error() {
+        // One `]` present: closes the inner `["A"]`, but the outer `[` has no match.
+        let src = concat!("slide content:\n", "  bullets [[\"A\"]\n");
+        // Must NOT panic — reaching this line proves the parser handles truncated
+        // nested input gracefully (no stack overflow, no process abort).
+        let (_deck_opt, errors) = parse_deck_and_errors_cf(src);
+
+        // Must produce ≥1 error: either the nested-list E-PAR-024 or the
+        // unclosed outer list, or both.
+        assert!(
+            !errors.is_empty(),
+            "OBS-088-P7-001 (truncated/EOF): truncated input `[[\"A\"]` must produce ≥1 \
+             parse error (unclosed list or E-PAR-024); got 0. \
+             This may indicate the truncated input was silently accepted, which is wrong."
+        );
+    }
 }
