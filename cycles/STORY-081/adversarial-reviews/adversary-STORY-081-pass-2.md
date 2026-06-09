@@ -187,8 +187,7 @@ C3. If the human elects to defer, it MUST be:
 - Anchored to a specific future story ID
 - Recorded in tech-debt-register.md with all three CLAUDE.md rule-3 conditions met
 
-**This is an OPEN DECISION that requires human input before the implementer fix burst
-can be scoped.**
+**RESOLVED 2026-06-09 (human): fix HTML/PDF rich title in same burst as C3 — not deferred.**
 
 ---
 
