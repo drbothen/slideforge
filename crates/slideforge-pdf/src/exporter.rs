@@ -3157,6 +3157,7 @@ mod story_072_tests {
                 heading: Arc::from("Calibri Light"),
                 body: Arc::from("Calibri"),
                 mono: Arc::from("Courier New"),
+                font_size_emu: 457_200,
             },
             layouts: vec![],
             span: SourceSpan::default(),

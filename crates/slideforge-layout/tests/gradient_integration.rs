@@ -33,10 +33,14 @@
 
 use std::sync::Arc;
 
-use slideforge_layout::{
-    FillSpec, FrameContent, PageSize,
-    shapes::{DEFAULT_EM_IN_EMU, layout_shapes},
-};
+use slideforge_layout::{FillSpec, FrameContent, PageSize, shapes::layout_shapes};
+
+/// Default em-to-EMU value (`457_200`) — mirrors `BrandFonts::default().font_size_emu`.
+///
+/// `DEFAULT_EM_IN_EMU` is no longer pub in `slideforge-layout::shapes` (STORY-074 AC-002 /
+/// adversary P1 MED-001). Integration tests use this literal instead. It is the same value
+/// as the historical constant and equals `BrandFonts::default().font_size_emu` (AC-003).
+const DEFAULT_EM_IN_EMU: i64 = 457_200;
 use slideforge_types::{AltText, Rgb, ShapePosition, ShapeSpec, ShapeUnit, SourceSpan};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
