@@ -9,8 +9,8 @@ points: 8
 priority: P1
 tdd_mode: strict
 status: draft
-spec_version: "1.2"
-last_updated: "2026-06-06"
+spec_version: "1.3"
+last_updated: "2026-06-09"
 target_module: slideforge-syntax, slideforge-eval
 subsystems: [SS-01, SS-02]
 behavioral_contracts: [BC-1.01.002]
@@ -271,6 +271,59 @@ STORY-086 AC-007 parser-gap note.
 (traces to BC-1.01.002 — parse entry point; secondary trace: BC-1.16.001 postcondition 7 —
 Value::List → ContentBlock::Bullets → layout frames → PPTX text runs)
 
+### AC-012 — Set-rule list-literal default: `set <type>: <field> ["A","B"]` parses to FieldValue::List
+
+**Positive case:**
+```
+set content: bullets ["Step 1", "Step 2", "Step 3"]
+```
+The `set_rule_value_parser()` in `crates/slideforge-syntax/src/parser/deck.rs` accepts
+`["Step 1", "Step 2", "Step 3"]` as the default value for the `bullets` field on slide
+type `content`, parsing it to `FieldValue::List(vec![FieldValue::Template(...), ...])`.
+The default flows through the existing set-rule default-merge mechanism (unchanged) and
+is overridable by a per-slide `bullets:` value. When no per-slide value is present,
+`eval` resolves the list to `Value::List(vec![Value::Str("Step 1"), ...])` and
+`thread_fields_to_blocks` routes it to `ContentBlock::Bullets` (BC-1.16.001 PC-7).
+
+**Error case:**
+```
+set content: bullets [42, true]
+```
+Non-string list elements produce `E-PAR-024` (invalid list element type) with a source
+span pointing to the non-string token and a correction hint. Error accumulation applies
+(BC-1.15.001): the parser continues processing the rest of the file. No panic or silent
+wrong value is emitted.
+
+(traces to BC-1.01.002 — field-value parser: `set_rule_value_parser()` is a value-position
+parser surface for the field-value grammar; secondary trace: BC-1.16.001 postcondition 7 —
+the resolved `Value::List` feeds `ContentBlock::Bullets` through the same path as all other
+list-value positions)
+
+### AC-013 — Variant vars list-literal override: `vars: items: ["A","B"]` inside a variant block parses to FieldValue::List
+
+**Positive case:**
+```
+variant short:
+  vars:
+    items: ["Quick win", "Low effort"]
+```
+The `variant_value` parser in `crates/slideforge-syntax/src/parser/variants.rs` accepts
+`["Quick win", "Low effort"]` as the value for the `items` variable override, parsing it
+to `FieldValue::List(vec![FieldValue::Template(...), FieldValue::Template(...)])`. The list
+overrides the `items` variable via the existing variant-vars override path (unchanged).
+When `eval` resolves the variant, `items` evaluates to `Value::List(vec![Value::Str("Quick win"),
+Value::Str("Low effort")])`. If `bullets: items` is declared on the slide, `thread_fields_to_blocks`
+resolves the `FieldValue::Ident("items")` lookup to `Value::List` and routes to `ContentBlock::Bullets`
+(BC-1.16.001 PC-7).
+
+Same element rules as all other value-position parsers: quoted-string elements only; non-string
+elements → `E-PAR-024` with span+hint; nested lists rejected; trailing comma allowed; no implicit
+coercion.
+
+(traces to BC-1.01.002 — field-value parser: `variant_value` is a value-position parser surface
+for the field-value grammar; secondary trace: BC-1.16.001 postcondition 7 — `Value::List` from
+variant vars override feeds `ContentBlock::Bullets` through the existing ident-lookup path)
+
 ## Architecture Mapping
 
 | Component | Crate | File | Change Type | Pure/Effectful |
@@ -278,7 +331,9 @@ Value::List → ContentBlock::Bullets → layout frames → PPTX text runs)
 | `FieldValue::List` variant | `slideforge-syntax` | `src/ast.rs` | Add `List(Vec<FieldValue>)` variant to `FieldValue` enum | Pure (AST change) |
 | `value_parser()` extension (field literal) | `slideforge-syntax` | `src/parser/deck.rs` | Add `FieldValue::List` combinator arm using `just(Token::LBracket)` / `separated_by(just(Token::Comma))` / `just(Token::RBracket)` — idiom from `src/parser/expr.rs` lines 96–103. Covers `bullets: ["A","B","C"]` field-literal form. | Pure |
 | vars-block / `@var` value parser extension | `slideforge-syntax` | `src/parser/deck.rs` | Extend `set_rule_value_parser()` or the shared `value_parser()` (whichever handles `@var ident = <value>` RHS) with the same list-literal arm so `@var items = ["A","B","C"]` parses to `FieldValue::List`. If `value_parser()` is shared, this is the SAME arm — no duplicate implementation needed. Confirm by reading `deck.rs` before implementing. | Pure |
-| Parser error for non-string list items | `slideforge-syntax` | `src/parser/deck.rs` | Error recovery for non-string items → `E-PAR-NNN` diagnostic | Pure |
+| `set_rule_value_parser()` list-literal arm (AC-012) | `slideforge-syntax` | `src/parser/deck.rs` | Extend `set_rule_value_parser()` — the value-position parser for `set <slide_type>: <field> <value>` rules — to accept `[...]` list-literal tokens, producing `FieldValue::List`. Reuses the same `Token::LBracket / Comma / RBracket` combinator. If `set_rule_value_parser()` already delegates to `value_parser()`, this is a no-op after the shared arm is added; otherwise add a dedicated list-literal arm here. Confirm by reading `deck.rs` before implementing. | Pure |
+| `variant_value` list-literal arm (AC-013) | `slideforge-syntax` | `src/parser/variants.rs` | Extend `variant_value` — the value-position parser for variant `vars:` entries (e.g. `items: ["A","B"]` inside a `variant` block) — to accept `[...]` list-literal tokens, producing `FieldValue::List`. Same element rules and `E-PAR-024` error path as all other value-position parsers. | Pure |
+| Parser error for non-string list items | `slideforge-syntax` | `src/parser/deck.rs` | Error recovery for non-string items → `E-PAR-024` diagnostic with span+hint | Pure |
 | `FieldValue::List` eval handling | `slideforge-eval` | `src/` (eval dispatch) | Map `FieldValue::List(items)` → evaluate each item → `Value::List(vals)`. Also ensures `FieldValue::Ident` lookup resolves to `Value::List` for the `@var` form (already works if the eval environment stores `Value::List`). | Pure |
 
 **Forbidden Dependencies:**
@@ -295,22 +350,23 @@ Value::List → ContentBlock::Bullets → layout frames → PPTX text runs)
 
 | Context Source | Estimated Tokens |
 |---------------|-----------------|
-| This story spec (v1.2, expanded) | ~3,500 |
+| This story spec (v1.3, Pass-4 scope expansion) | ~4,500 |
 | BC-1.01.002 (field-value grammar section) | ~1,500 |
 | BC-1.16.001 PC-7 (bullets from Value::List) | ~500 |
 | BC-1.15.001 (error accumulation) | ~500 |
 | `crates/slideforge-syntax/src/ast.rs` (FieldValue enum) | ~1,000 |
-| `crates/slideforge-syntax/src/parser/deck.rs` (value_parser + vars-block parser) | ~4,000 |
+| `crates/slideforge-syntax/src/parser/deck.rs` (value_parser + set_rule_value_parser) | ~4,000 |
+| `crates/slideforge-syntax/src/parser/variants.rs` (variant_value — new, AC-013) | ~1,500 |
 | `crates/slideforge-syntax/src/parser/expr.rs` lines 96–103 (chumsky list idiom template) | ~300 |
 | `crates/slideforge-eval/src/` (FieldValue::List eval dispatch + FieldValue::Ident lookup path) | ~1,500 |
-| Unit test files (field-literal + @var forms, new) | ~2,500 |
+| Unit test files (field-literal + @var + set-rule + variant-vars forms, new) | ~3,500 |
 | E2E integration test update (AC-007 + @var regression AC-006) | ~1,500 |
 | Tool outputs (compiler, test results) | ~1,500 |
-| **TOTAL ESTIMATED** | **~18,300 tokens** |
+| **TOTAL ESTIMATED** | **~21,800 tokens** |
 
-18,300 tokens is ~9% of a 200k context window — well within the 20-30% per-story budget.
-Scope increased from original ~13,500 (direct-literal only) due to the addition of the
-`@var`/vars-block parsing path (pass-5 scope expansion).
+21,800 tokens is ~11% of a 200k context window — well within the 20-30% per-story budget.
+Scope increased from v1.2 (~18,300 tokens) by the addition of `variants.rs::variant_value`
+(AC-013) and expanded unit test coverage across all four value-position surfaces.
 
 ## Previous Story Intelligence
 
@@ -408,9 +464,16 @@ Files to MODIFY:
 crates/slideforge-syntax/src/ast.rs             [add FieldValue::List(Vec<FieldValue>) variant to FieldValue enum;
                                                   update all match arms on FieldValue to add the new variant]
 crates/slideforge-syntax/src/parser/deck.rs     [extend value_parser() with list-literal arm using Token::LBracket/Comma/RBracket;
-                                                  extend vars-block value parser (set_rule_value_parser() or shared value_parser())
-                                                  with the same list-literal arm so @var items = [...] parses to FieldValue::List;
-                                                  add error recovery for non-string list items → E-PAR diagnostic]
+                                                  extend set_rule_value_parser() with the same list-literal arm so
+                                                  `set <type>: <field> ["A","B"]` parses to FieldValue::List (AC-012);
+                                                  if set_rule_value_parser() delegates to value_parser(), the shared arm
+                                                  covers it automatically — confirm by reading deck.rs before implementing;
+                                                  also extend vars-block value parser (@var form) with list-literal arm;
+                                                  add error recovery for non-string list items → E-PAR-024 diagnostic]
+crates/slideforge-syntax/src/parser/variants.rs [extend variant_value parser — the value-position parser for variant
+                                                  vars: entries — to accept [...] list-literal tokens, producing
+                                                  FieldValue::List (AC-013); same Token::LBracket/Comma/RBracket idiom
+                                                  and E-PAR-024 error path as deck.rs]
 crates/slideforge-eval/src/                     [handle FieldValue::List(items) in eval dispatch → Value::List(vals);
                                                   grep for the FieldValue match/dispatch location and add the new arm;
                                                   confirm FieldValue::Ident lookup resolves @var-bound Value::List correctly
@@ -418,13 +481,18 @@ crates/slideforge-eval/src/                     [handle FieldValue::List(items) 
 ```
 NOTE: The file `crates/slideforge-syntax/src/deck.rs` does NOT exist at the top level —
 the real path is `crates/slideforge-syntax/src/parser/deck.rs`. Confirm before starting.
-Read `deck.rs` in full before implementing to determine whether `value_parser()` is shared
-between field-literal and vars-block contexts (one arm) or separate (two arms).
+Read `deck.rs` AND `variants.rs` in full before implementing to determine whether
+`set_rule_value_parser()` and `variant_value` share `value_parser()` (one arm covers all)
+or require independent list-literal arms.
 
 Files that RECEIVE new tests:
 ```
 crates/slideforge-syntax/src/parser/deck.rs    [cfg(test) block: add AC-001 through AC-006 unit tests,
-                                                  plus @var/vars-block list-form unit test]
+                                                  plus @var/vars-block list-form unit test,
+                                                  plus AC-012 unit tests for set_rule_value_parser() list-literal arm]
+crates/slideforge-syntax/src/parser/variants.rs [cfg(test) block: add AC-013 unit tests for variant_value list-literal arm,
+                                                  including positive case, E-PAR-024 error case for non-string elements,
+                                                  trailing-comma acceptance, and nested-list rejection]
 tests/integration/e2e_build_tests.rs           [un-ignore STORY-086 AC-007 #[ignore]'d fixture;
                                                   add AC-007 E2E test for direct list-literal bullets]
 ```
@@ -432,7 +500,7 @@ tests/integration/e2e_build_tests.rs           [un-ignore STORY-086 AC-007 #[ign
 Forbidden: Do NOT modify `slideforge-layout`, `slideforge-pptx`, `slideforge-docx`,
 `slideforge-pdf`, or `slideforge-html`. The only production code changes are in
 `crates/slideforge-syntax/src/ast.rs`, `crates/slideforge-syntax/src/parser/deck.rs`,
-and `crates/slideforge-eval/src/`.
+`crates/slideforge-syntax/src/parser/variants.rs`, and `crates/slideforge-eval/src/`.
 
 ## Tasks
 
@@ -441,7 +509,9 @@ and `crates/slideforge-eval/src/`.
   - [ ] T1.2: Write unit test for the `@var`/vars-block list assignment form (AC-006-ext: `@var items = ["A","B","C"]` parses to FieldValue::List in the vars-block context). Test must FAIL.
   - [ ] T1.3: Write regression test for the existing `@var` + `bullets: items` ident-reference path (original AC-006 regression guard). Must FAIL because the @var list form now requires parsing support.
   - [ ] T1.4: Update E2E integration test for AC-007 (direct `bullets: ["A","B","C"]` without @var) in `tests/integration/e2e_build_tests.rs`. Un-ignore the `#[ignore]`'d STORY-086 AC-007 fixture. Test must FAIL until implementation is complete.
-  - [ ] T1.5: Verify Red Gate density ≥0.5 before implementation starts.
+  - [ ] T1.6: Write unit tests for the set-rule list-literal arm (AC-012) in `crates/slideforge-syntax/src/parser/deck.rs` `#[cfg(test)] mod tests` block. Cover positive case (`set content: bullets ["A","B"]`), E-PAR-024 error case (`set content: bullets [42, true]`), trailing comma, and empty list. Tests must FAIL (no list-literal arm in `set_rule_value_parser()` yet).
+  - [ ] T1.7: Write unit tests for the variant vars list-literal arm (AC-013) in `crates/slideforge-syntax/src/parser/variants.rs` `#[cfg(test)] mod tests` block. Cover positive case (`variant short:` / `vars:` / `items: ["A","B"]`), E-PAR-024 error case for non-string elements, trailing comma, and nested-list rejection. Tests must FAIL (no list-literal arm in `variant_value` yet).
+  - [ ] T1.8: Verify Red Gate density ≥0.5 (total new failing tests / total new tests across all files) before implementation starts.
 
 - [ ] **T2 — Add FieldValue::List variant and implement value_parser() extension**
   - [ ] T2.1: In `crates/slideforge-syntax/src/ast.rs`, add `List(Vec<FieldValue>)` variant to the `FieldValue` enum. Ensure all existing `match` arms on `FieldValue` compile (add the new arm everywhere — `non_exhaustive_patterns` will catch missing arms).
@@ -462,9 +532,11 @@ and `crates/slideforge-eval/src/`.
   - [ ] T2.6: In `crates/slideforge-eval/src/`, locate the `FieldValue` match/dispatch (grep for `FieldValue::Template` or `FieldValue::Num`). Add arm: `FieldValue::List(items) => Value::List(items.into_iter().map(|item| eval_field_value(item, ctx)).collect())`.
   - [ ] T2.7: Verify `FieldValue::Ident` lookup in the eval environment: when `@var items` was parsed as `FieldValue::List`, it should be stored in the environment as `Value::List`. The `bullets: items` field is `FieldValue::Ident("items")`; the eval layer looks up `"items"` and finds `Value::List(...)` — no code change needed if the environment already stores `Value` (not `FieldValue`). Confirm by grepping for variable storage in the eval layer.
   - [ ] T2.8: Ensure the new arm integrates with indentation-sensitive field context (list starts on same line as `bullets:` or `@var`). Confirm with parse tests at T3.1.
+  - [ ] T2.9: Extend `set_rule_value_parser()` in `crates/slideforge-syntax/src/parser/deck.rs` with a list-literal arm (AC-012). If `set_rule_value_parser()` already delegates to `value_parser()`, verify that the shared arm added in T2.3 covers the set-rule position — no additional code needed; document the confirmation in the PR. If the parsers are independent, add a dedicated list-literal arm following the same `Token::LBracket / Comma / RBracket` pattern. Use `E-PAR-024` for non-string element errors.
+  - [ ] T2.10: Extend `variant_value` in `crates/slideforge-syntax/src/parser/variants.rs` with a list-literal arm (AC-013). Read `variants.rs` in full before implementing to understand the existing value-position parse context. Add the list-literal arm using the same `Token::LBracket / Comma / RBracket` combinator idiom as `deck.rs`. Non-string elements → `E-PAR-024` with span+hint; nested lists → `E-PAR-024`; trailing comma allowed; no implicit coercion.
 
 - [ ] **T3 — Green pass: all ACs passing**
-  - [ ] T3.1: Run `cargo nextest run -p slideforge-syntax --no-fail-fast` — all AC-001..AC-006 unit tests pass, including the `@var`/vars-block list form test.
+  - [ ] T3.1: Run `cargo nextest run -p slideforge-syntax --no-fail-fast` — all AC-001..AC-006 unit tests pass, including the `@var`/vars-block list form test; AC-012 set-rule tests pass; AC-013 variant-vars tests pass.
   - [ ] T3.2: Run `cargo nextest run -p slideforge-eval --no-fail-fast` — FieldValue::List eval produces Value::List; @var → FieldValue::Ident lookup resolves to Value::List.
   - [ ] T3.3: Run E2E integration test for AC-007 (direct list-literal bullets produce PPTX text runs with ≥3 `<a:r>` text runs).
   - [ ] T3.4: Run `just check` (full workspace pre-push gate: fmt + clippy pedantic + nextest + doctests).
@@ -494,3 +566,23 @@ STORY-006 (Parser Core: deck.rs field parser infrastructure)
 
 This story has no `blocks:` entries — it is a quality-of-life improvement that no
 other Wave 5 story depends on.
+
+## Revision History
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| v1.0 | 2026-06-06 | story-writer | Initial decomposition — direct `bullets: [...]` field-literal only (5 points) |
+| v1.1 | 2026-06-06 | story-writer | Path correction from D5 uncertainty resolution: `parser/deck.rs` (not `src/deck.rs`); `FieldValue::List` AST variant; chumsky token-stream idiom |
+| v1.2 | 2026-06-06 | story-writer | Pass-5 scope expansion (human-approved): added `@var items = [...]` / vars-block form; re-estimated 5 → 8 points; corrected D5 on `@var` parse failure |
+| v1.3 | 2026-06-09 | story-writer | Pass-4 scope expansion (human-approved): extend list-literal support to set-rule defaults (AC-012, `deck.rs::set_rule_value_parser`) and variant vars overrides (AC-013, `variants.rs::variant_value`) for FieldValue-position consistency; both reuse existing `Value::List` semantics + E-PAR-024 element rules; added T1.6, T1.7, T1.8, T2.9, T2.10; updated Architecture Mapping, File Structure, Token Budget |
+
+## Known Issues / Follow-up Notes
+
+**FU-088-BC10102-ANCHOR (non-blocking, tracked for spec-steward):**
+The adversary (Pass-4) flagged OBS-088-P4-003: BC-1.01.002's H1 title ("Reject Indentation
+Inconsistency...") does not match how STORY-088 and the error taxonomy's `E-PAR-024` anchor
+to it (field-value parsing / list-literal grammar, not indentation rejection). This mismatch
+is pre-existing and shared with the error taxonomy; it is NOT blocking this story's
+implementation or delivery. The BC anchor mismatch is tracked as `FU-088-BC10102-ANCHOR`
+for the spec-steward to correct in a future spec maintenance burst. No action required from
+the implementer for this story.

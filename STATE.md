@@ -29,7 +29,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "9 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76, STORY-082 PR#77). 13 stories remain. In-flight (2 active worktrees): STORY-088 (adversary 0/3 — pass 4 pending; HEAD 3b0c6295), STORY-081 (adversary 0/3 — pass 2 pending after full re-impl; HEAD c11d6468)."
+wave_5_status: "9 of 22 Wave-5 stories MERGED (STORY-089 PR#68, STORY-046 PR#70, STORY-055 PR#71, STORY-079 PR#72, STORY-080 PR#73, STORY-074 PR#74, STORY-047 PR#75, STORY-072 PR#76, STORY-082 PR#77). 13 stories remain. In-flight (2 active worktrees): STORY-088 (adversary 0/3 — pass 5 next; HEAD 72787dcb; scope expanded v1.2→v1.3 AC-012/013), STORY-081 (adversary 0/3 — pass 2 pending after full re-impl; HEAD c11d6468)."
 develop_sha: "c60cca36"
 develop_pr_count: 77
 error_taxonomy_version: "v2.28"
@@ -57,10 +57,12 @@ workspace_test_failures: 0
 **2 active worktrees. Both based on cbebfd57 and MUST rebase onto develop c60cca36 at PR step.**
 
 ### STORY-088 — Bullets List-Literal DSL (EPIC-02, BC-1.01.002)
-- **Worktree:** `.worktrees/STORY-088` | **Branch:** `feature/STORY-088` | **HEAD:** `3b0c6295`
-- **Adversary streak:** **0/3**
-- **History:** Pass-1 CRIT E-PAR-015 mis-anchor→E-PAR-024 (new code, taxonomy v2.27, dsl-spec v1.1). Pass-2 `<type>` interpolation + FieldValue::Error substitution. Pass-3 MED-P3-001 nested-list silent-drop→errors + MED-P3-002 Float test. HAS a genuine end-to-end test (real .sf → slideforge::build() → assert `<a:r>` + bullet text in slide XML). 792 tests pass.
-- **NEXT ACTION:** Run adversary **Pass 4** → need 3 consecutive strict-CLEAN for convergence.
+- **Worktree:** `.worktrees/STORY-088` | **Branch:** `feature/STORY-088` | **HEAD:** `72787dcb`
+- **Adversary streak:** **0/3** (reset by Pass-4 scope-expansion findings)
+- **Scope:** v1.3 — AC-012 (set-rule list-literal default) + AC-013 (variant vars list-literal override) added per human adjudication of Pass-4 MED intent-pending findings. SetRuleValue::List variant + variant_value list arm + eval; 13 new TDD tests; exit gate green (3740 pass). OBS-088-P4-002 stale #[ignore] doc-comment fixed.
+- **History:** Pass-1 CRIT E-PAR-015 mis-anchor→E-PAR-024 (new code, taxonomy v2.27, dsl-spec v1.1). Pass-2 `<type>` interpolation + FieldValue::Error substitution. Pass-3 MED-P3-001 nested-list silent-drop→errors + MED-P3-002 Float test. Pass-4 MED intent-pending (set-rule + variant-vars cryptic errors) → scope expanded AC-012/013. HAS a genuine end-to-end test (real .sf → slideforge::build() → assert `<a:r>` + bullet text in slide XML). 3740 tests pass.
+- **Follow-up:** FU-088-BC10102-ANCHOR (spec-steward; pre-existing BC-1.01.002 H1 title/anchor mismatch, non-blocking).
+- **NEXT ACTION:** Run adversary **Pass 5** against story v1.3 → need 3 consecutive strict-CLEAN for convergence.
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
 - **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `c11d6468`
@@ -114,7 +116,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `c60cca36`, 77 merged PRs). 9 of 22 don
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3850+ pass, 21 skip; cold_budget PERMANENTLY FIXED)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-088 (Pass 4), then STORY-081 (Pass 2 after full re-impl). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-088 (Pass 5 against story v1.3), then STORY-081 (Pass 2 after full re-impl). Per-story adversary passes are SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `c60cca36` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -155,7 +157,7 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 | **develop SHA** | `c60cca36` (77 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-082 PR#77 |
 | **Active worktrees** | 2 — STORY-081/088, each in `.worktrees/STORY-<NNN>` on `feature/STORY-<NNN>`. Cleaned up: STORY-082 (+ previously 072/074/079/080/047). |
-| **STORY-088 state** | HEAD `3b0c6295`; adversary 0/3 (3 passes done, last MED fixed); NEXT: Pass 4 |
+| **STORY-088 state** | HEAD `72787dcb`; adversary 0/3 (Pass-4 scope-expanded → AC-012/013 added, story v1.3); NEXT: Pass 5 |
 | **STORY-081 state** | HEAD `c11d6468`; adversary 0/3 (full re-impl after Pass-1 4-CRIT); NEXT: Pass 2 |
 | **Workspace tests** | ~3850+ pass / 21 skip (cold_budget PERMANENTLY FIXED) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
@@ -210,6 +212,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-088-SCOPE-EXPANSION | Adversary Pass-4 surfaced 2 MED intent-pending findings (list-literals produced cryptic errors in set-rule defaults + variant vars overrides). Human ADJUDICATED: extend full support. story v1.2→v1.3 (AC-012 set-rule list default, AC-013 variant vars list override; same Value::List semantics + E-PAR-024 element rules, no new merge semantics). Implemented at worktree HEAD 72787dcb (SetRuleValue::List variant, variant_value list arm, eval; 13 TDD tests; OBS-088-P4-002 stale #[ignore] doc-comment fixed; exit gate green 3740 pass). FU-088-BC10102-ANCHOR registered (pre-existing BC-1.01.002 title/anchor mismatch, spec-steward, non-blocking). STORY-088 streak reset 0/3; Pass 5 next against story v1.3. |
 | 2026-06-09 | STORY-082-MERGE | PR #77 squash-merged → develop `c60cca36` (77 merged PRs). PPTX slide-grouping sections (`<p14:sectionLst>`): full pipeline DSL→parser→eval(single-pass per-instance-id membership)→layout passthrough→`SectionListBuilder::inject`. SlideSectionEntry in slideforge-types (re-exported via layout). Deterministic RFC4122 v5 GUIDs. E-PAR-023 (empty name, fatal exit 1), W-PAR-002 (duplicate, warning exit 0, both emitted). CONVERGED 3/3 strict-CLEAN (passes 16-17-18) after 18-pass LOCAL cascade. Findings caught+fixed: adjacent-duplicate section merge (HIGH, per-instance-id fix), SEC-100/CWE-116 section-name sanitization (HIGH), vacuous AC-010 tests (TD-VSDD-059), E-PAR-023 exit 2→1 spec (BC v1.4, taxonomy v2.28), sha2 pin =0.11.0 spec. Security CLEAN (1 LOW pre-existing, 1 SUGGESTION); pr-reviewer APPROVE (2 non-blocking OBS); CI 25/25 green. Follow-ups: FU-082-SEC-S001-NUL-CALLSITE-TEST (NUL-byte call-site test via build_ext_lst). |
 | 2026-06-09 | STORY-082-OBS-P15-1 | Adversary Pass-15 OBS-P15-1 (LOW, spec-location anchor): STORY-082 spec showed `SlideSectionEntry` defined in `slideforge-layout`; actually defined in `slideforge-types/src/deck.rs`, re-exported via `slideforge-layout/src/lib.rs`. Corrected across 6 spec locations (Subsystem Anchor, Scope Overview §2, Tasks, File Structure table, Forbidden Dependencies, Test Strategy); story spec_version 1.2→1.3. Worktree code unchanged (separately, test fix F-P15-MED-1 landed at HEAD e40a410f). |
 | 2026-06-08 | STORY-082-F-P8-MED1 | Adversary Pass-8 F-P8-MED-1 (MEDIUM, spec-text defect — code correct): STORY-082 spec cited stale `sha2 =0.10.9` in 4 places vs canonical workspace pin `=0.11.0` (shared w/ slideforge-math). Fixed all 4 + reframed to `workspace = true`; full version-pin sweep (quick-xml/ooxmlsdk/chumsky/zip all match). story spec_version 1.1→1.2. Worktree code unchanged (67530b17). Streak reset 0/3 by Pass 8; Pass 9 next against HEAD 67530b17. |
