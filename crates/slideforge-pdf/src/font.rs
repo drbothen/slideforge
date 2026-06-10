@@ -33,7 +33,7 @@ use crate::error::PdfExportError;
 
 // ─── Font-load instrumentation ────────────────────────────────────────────────
 
-/// Count of [`load_system_fonts_counted`] invocations in this process.
+/// Process-global count of [`load_system_fonts_counted`] invocations.
 ///
 /// This counter is incremented **structurally** — only via
 /// [`load_system_fonts_counted`], the sole wrapper that calls
@@ -41,12 +41,23 @@ use crate::error::PdfExportError;
 /// `db.load_system_fonts()` directly anywhere else in this crate is
 /// prohibited; always use [`load_system_fonts_counted`] instead.
 ///
-/// Used by tests to assert the single-load invariant (OBS-P09-001 /
-/// OBS-P10-001 fix). Not conditionally compiled — zero overhead in release
-/// builds (one `fetch_add(Relaxed)` per export call).
+/// Used by observability metrics. Not conditionally compiled — zero overhead
+/// in release builds (one `fetch_add(Relaxed)` per export call).
+#[allow(dead_code)]
 static LOAD_SYSTEM_FONTS_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-/// Load system fonts into `db` and increment the instrumentation counter.
+// Per-thread count of `load_system_fonts_counted` invocations.
+// Each thread starts at 0. Unlike `LOAD_SYSTEM_FONTS_COUNT`, this counter is
+// isolated per test thread, making it safe to use in parallel unit tests.
+// Used by `test_obs_p09_001` to assert the single-load invariant without
+// interference from other tests running concurrently on different threads.
+#[cfg(test)]
+thread_local! {
+    static LOAD_SYSTEM_FONTS_THREAD_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// Load system fonts into `db` and increment both instrumentation counters.
 ///
 /// This is the **only** function in this crate that calls
 /// `fontdb::Database::load_system_fonts()`. All call sites must use this
@@ -54,21 +65,24 @@ static LOAD_SYSTEM_FONTS_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// invariant is structural, not a documentation promise.
 ///
 /// ADV-P11-LOW-001 structural fix: wrapping the call here makes the
-/// `LOAD_SYSTEM_FONTS_COUNT` docstring's invariant true by construction.
+/// counter invariants true by construction.
 fn load_system_fonts_counted(db: &mut fontdb::Database) {
     db.load_system_fonts();
     LOAD_SYSTEM_FONTS_COUNT.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    LOAD_SYSTEM_FONTS_THREAD_COUNT.with(|c| c.set(c.get() + 1));
 }
 
-/// Return the number of times [`load_system_fonts_counted`] has
-/// been invoked in this process.
+/// Return the number of times [`load_system_fonts_counted`] has been invoked
+/// on the **current thread** since the thread started.
 ///
-/// Exposed `pub(crate)` so that unit tests can assert the single-load
-/// invariant without touching `fontdb` directly.
+/// Thread-isolated: parallel tests on other threads do not affect this count.
+/// Use this in unit tests instead of the process-global counter to avoid
+/// false positives from concurrent test execution (OBS-P09-001 fix).
 #[cfg(test)]
 #[must_use]
-pub(crate) fn load_system_fonts_call_count() -> usize {
-    LOAD_SYSTEM_FONTS_COUNT.load(Ordering::Relaxed)
+pub(crate) fn load_system_fonts_thread_call_count() -> usize {
+    LOAD_SYSTEM_FONTS_THREAD_COUNT.with(std::cell::Cell::get)
 }
 
 // `ttf-parser` is used by `measure_text_width_pt` to compute per-glyph
@@ -1069,14 +1083,15 @@ mod tests {
     /// `resolve_font_set` for styled faces — each calling `load_system_fonts()`.
     /// That doubled the cold-path I/O cost (~50–300ms wasted per export call).
     ///
-    /// This test asserts the single-load invariant directly via the
-    /// `LOAD_SYSTEM_FONTS_COUNT` counter: one `resolve_font_set` call must
-    /// produce exactly one `load_system_fonts` invocation.
+    /// This test asserts the single-load invariant via the per-thread counter:
+    /// one `resolve_font_set` call must produce exactly one `load_system_fonts`
+    /// invocation on the calling thread.
     ///
-    /// Note: because `LOAD_SYSTEM_FONTS_COUNT` is a process-global counter,
-    /// this test reads the count BEFORE and AFTER the call, then asserts the
-    /// delta is exactly 1.  This makes the test robust against other tests
-    /// in the same binary that may have already incremented the counter.
+    /// Note: uses [`load_system_fonts_thread_call_count`] (thread-local) rather
+    /// than the process-global counter so parallel tests on other threads do not
+    /// pollute the delta measurement.  The delta approach tolerates this test
+    /// running on a thread that has already made prior `resolve_font_set` calls
+    /// (e.g. in the same binary's setup code).
     #[test]
     fn test_obs_p09_001_resolve_font_set_loads_system_fonts_exactly_once() {
         use slideforge_types::BrandFonts;
@@ -1088,9 +1103,9 @@ mod tests {
             mono: Arc::from("Courier"),
             font_size_emu: 457_200,
         };
-        let count_before = load_system_fonts_call_count();
+        let count_before = load_system_fonts_thread_call_count();
         let _font_set = resolve_font_set(&brand, None);
-        let count_after = load_system_fonts_call_count();
+        let count_after = load_system_fonts_thread_call_count();
         let delta = count_after - count_before;
         assert_eq!(
             delta, 1,
