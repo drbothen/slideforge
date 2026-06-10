@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4"
+version: "1.5"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -15,6 +15,10 @@ capability: CAP-021
 lifecycle_status: active
 introduced: v1.0.0
 modified:
+  - version: "1.5"
+    date: 2026-06-09
+    author: product-owner
+    reason: "STORY-081 / ADR-024 inline-run generator unification: Update Postcondition 5, EC-004, Description, and canonical test vectors to reflect the new unified engine. The dispatch mechanism is now render_inline_nodes_to_runs(nodes, hlink_resolver) + serialize_ooxml_run (both in slideforge-plugin-api/src/inline_formats/ooxml_runs.rs), replacing the per-node render_with_context loop and dispatch_inline_nodes_to_ooxml. The dog-fooding contract is MORE strongly satisfied: both the body path (via ooxml_run_to_ooxmlsdk) and the notes path (via serialize_ooxml_run) share one engine in slideforge-plugin-api — no bespoke per-consumer generator exists. Added ADR-024 cross-reference."
   - version: "1.4"
     date: 2026-06-05
     author: product-owner
@@ -48,11 +52,16 @@ the trait API is enhanced — the bypass is not the solution.
 
 This guarantee explicitly includes the OOXML/PPTX inline serialization path.
 `slideforge-pptx` (the PPTX exporter) MUST NOT perform inline node serialization
-(`InlineNode` → OOXML `<a:r>` run markup) through internal structs or functions within
-`slideforge-pptx`. All inline serialization — including the OOXML path — MUST be
-dispatched through the registered `InlineFormat` plugin trait. Where `slideforge-pptx`
-currently performs this serialization internally, it MUST be refactored to call the
-registered `InlineFormat` implementation for the OOXML output format.
+(`InlineNode` → OOXML `<a:r>` run markup) through internal structs or functions
+private to `slideforge-pptx`. All inline serialization — including the OOXML path —
+MUST flow through the unified engine `render_inline_nodes_to_runs` + `serialize_ooxml_run`
+located in `slideforge-plugin-api/src/inline_formats/ooxml_runs.rs` (per ADR-024).
+Both the slide-body path (which converts the resulting `Vec<OoxmlRun>` to typed
+ooxmlsdk `Run` objects via `ooxml_run_to_ooxmlsdk`) and the PPTX notes path (which
+serializes via `serialize_ooxml_run` directly) consume the same engine. There is no
+separate bespoke run generator for either consumer. This satisfies the dog-fooding
+guarantee more strongly than the previous per-node `render_with_context` dispatch:
+the engine itself lives in `slideforge-plugin-api`, outside of `slideforge-pptx`.
 
 ## Preconditions
 
@@ -62,34 +71,43 @@ registered `InlineFormat` implementation for the OOXML output format.
 ## Postconditions
 
 1. All cross-component interactions (including inline serialization) occur via the declared
-   trait APIs. No bundled plugin, including the PPTX exporter, serializes `InlineNode` values
-   through internal functions — all such calls are dispatched through the registered
-   `InlineFormat` plugin trait.
+   trait APIs and shared engine functions in `slideforge-plugin-api`. No bundled plugin,
+   including the PPTX exporter, serializes `InlineNode` values through internal functions
+   private to `slideforge-pptx`. All `<a:r>` run markup flows through
+   `render_inline_nodes_to_runs` → `serialize_ooxml_run` (notes path) or
+   `render_inline_nodes_to_runs` → `ooxml_run_to_ooxmlsdk` (body path), both engine
+   functions residing in `slideforge-plugin-api`.
 2. No `pub(crate)` or `pub(super)` functions in other crates are called by plugin code.
 3. The plugin compiles and passes tests using only the declared trait interfaces.
 4. The plugin's trait implementation is architecturally identical to what a third-party plugin
    would write.
-5. **Relationship registration is exporter-owned; run construction is trait-owned — no
+5. **Relationship registration is exporter-owned; run construction is engine-owned — no
    carve-out exception.**
    The PPTX exporter (`slideforge-pptx`) is responsible for two distinct operations on
    hyperlink `Link` nodes:
    - **Relationship registration (exporter-owned):** The exporter registers the link URL
      in the slide's `.rels` package part to obtain an `rId`. This is a PPTX packaging
      concern — the exporter owns the package state and is the correct site for this call.
-     This step does NOT produce any `<a:r>` XML and is NOT subject to trait dispatch.
-   - **Run construction (trait-owned):** ALL `<a:r>` OOXML run markup construction —
-     including the `<a:rPr>` element and `<a:t>` text for Link nodes — MUST be produced
-     by calling `InlineFormat::render_with_context(node, InlineOutputFormat::Ooxml, &ctx)`
-     (where `ctx: InlineRenderContext` carries the `hyperlink_rid` obtained from the
-     registration step). Under ADR-017 Option A, `render_with_context` is the new
-     dispatch method added to the `InlineFormat` trait with a defaulted body; existing
-     implementations are not broken. No production code path in `slideforge-pptx`
-     constructs `<a:r>` / `<a:rPr>` markup outside of this single trait dispatch call
-     site.
-   The invariant holds: the dog-fooding guarantee is intact. The split is
-   registration (packaging concern, exporter-owned) vs. construction (rendering concern,
-   trait-owned). The AC-005 grep-zero vector (`a:r` / `a:rPr` / `serialize_inline`
-   outside the dispatch site) continues to hold — there is exactly one dispatch site.
+     This step does NOT produce any `<a:r>` XML and is NOT subject to the unified engine.
+   - **Run construction (engine-owned, per ADR-024):** ALL `<a:r>` OOXML run markup
+     construction — including the `<a:rPr>` element and `<a:t>` text for Link nodes —
+     MUST be produced by calling `render_inline_nodes_to_runs(nodes, hlink_resolver)`
+     (defined in `slideforge-plugin-api/src/inline_formats/ooxml_runs.rs`), where
+     `hlink_resolver` is a closure supplied by the consumer that maps a URL to its
+     pre-registered `rId`. The body path converts the resulting `Vec<OoxmlRun>` to typed
+     ooxmlsdk `Run` objects via `ooxml_run_to_ooxmlsdk`; the notes path serializes via
+     `serialize_ooxml_run`. No production code path in `slideforge-pptx` constructs
+     `<a:r>` / `<a:rPr>` markup outside of these two conversion functions (which
+     themselves derive from `OoxmlRun` produced by the shared engine).
+     Note: `render_with_context` (ADR-017 Option A) remains in the `InlineFormat` trait
+     for forward compatibility, but it is NOT the dispatch mechanism for PPTX run
+     construction after ADR-024. Neither the body path nor the notes path calls
+     `render_with_context` for OOXML inline-run generation.
+   The invariant holds: the dog-fooding guarantee is intact and strengthened. The split
+   is registration (packaging concern, exporter-owned) vs. construction (rendering
+   concern, engine-owned in `slideforge-plugin-api`). The AC-005 grep-zero vector
+   (`a:r` / `a:rPr` / `serialize_inline` outside the two conversion functions) continues
+   to hold — there is no bespoke per-consumer run generator.
 
 ## Invariants
 
@@ -104,7 +122,7 @@ registered `InlineFormat` implementation for the OOXML output format.
 | EC-001 | PPTX exporter needs a Brand field not in the Brand trait | The Brand trait/struct is extended with that field. Not: PPTX exporter reads from an internal BrandImpl struct. |
 | EC-002 | ChartRenderer plugin needs layout information not in ChartSpec | ChartSpec is extended. Not: plugin reaches into LaidOutDeck internals. |
 | EC-003 | A new bundled plugin is added that works for all tests but bypasses the API | CI lint or review catches the violation. This is a DI-008 violation = bug. |
-| EC-004 | `slideforge-pptx` contains a private `serialize_inline_node()` function that generates `<a:r>` OOXML without going through the `InlineFormat` trait | This is an explicit contract violation of this BC. The function MUST be removed and replaced with a call to the registered `InlineFormat` implementation via `render_with_context(node, InlineOutputFormat::Ooxml, &ctx)`. For Link nodes, `ctx` carries the `hyperlink_rid` obtained from the prior `.rels` registration step (which is exporter-owned and not subject to replacement). CI adversarial review MUST flag any remaining `<a:r>` construction outside the single dispatch site as a blocker. The existing internal inline serialization in `slideforge-pptx` at the time of STORY-085 is a known gap; STORY-085 closes it. |
+| EC-004 | `slideforge-pptx` contains any internal function that generates `<a:r>` OOXML outside the unified engine (e.g., a private `serialize_inline_node()`, a bespoke per-node loop calling `render_with_context`, or `dispatch_inline_nodes_to_ooxml`) | This is an explicit contract violation of this BC. The function MUST be removed. The compliant mechanism (per ADR-024, closed by STORY-081) is: call `render_inline_nodes_to_runs(nodes, hlink_resolver)` from `slideforge-plugin-api/src/inline_formats/ooxml_runs.rs`, then convert the resulting `Vec<OoxmlRun>` via `ooxml_run_to_ooxmlsdk` (body path) or `serialize_ooxml_run` (notes path). For Link nodes, the `hlink_resolver` closure supplies the pre-registered `hyperlink_rid` from the `.rels` registration step (which remains exporter-owned and is not part of the engine). CI adversarial review MUST flag any remaining `<a:r>` construction outside the two conversion functions as a blocker. STORY-081 closes this gap. |
 
 ## Canonical Test Vectors
 
@@ -112,8 +130,8 @@ registered `InlineFormat` implementation for the OOXML output format.
 |-------|----------------|----------|
 | All 10 bundled plugin implementations compile using public trait APIs only | Compilation succeeds; 0 clippy warnings about visibility violations | happy-path |
 | Hypothetical test: plugin calls `slideforge_pptx::internal::LayoutHelper::compute()` (private) | Compilation error: private function; CI blocks merge | error |
-| `slideforge-pptx` is compiled in isolation without access to `slideforge-pptx` internals, and an `InlineNode::Bold("hello")` is rendered via the `InlineFormat` trait (OOXML format) | Returns `Ok("<a:r><a:rPr b=\"1\"/><a:t>hello</a:t></a:r>")` or equivalent valid OOXML run markup; no call to any internal `slideforge-pptx` serialization function | happy-path (OOXML dog-fooding) |
-| `grep -r "a:r\|a:rPr\|serialize_inline" crates/slideforge-pptx/src/` excluding the exporter's dispatch call site | Zero matches outside of the single dispatch call and its immediate OOXML assembly wrapper in the `InlineFormat` trait impl | architectural-invariant |
+| `render_inline_nodes_to_runs([InlineNode::Bold([InlineNode::Plain("hello")])], &|_| None)` called from `slideforge-plugin-api` | Returns `Ok(vec![OoxmlRun { text: "hello", bold: true, .. }])`; `serialize_ooxml_run` produces `<a:r><a:rPr b="1"/><a:t>hello</a:t></a:r>`; no internal `slideforge-pptx` function is involved | happy-path (OOXML dog-fooding) |
+| `grep -r "a:r\|a:rPr\|serialize_inline" crates/slideforge-pptx/src/` excluding the two conversion functions (`ooxml_run_to_ooxmlsdk` in `slide_serializer.rs` and `serialize_ooxml_run` calls in `notes_slide.rs`) | Zero matches outside of those two conversion functions — no bespoke per-consumer run generator remains | architectural-invariant (AC-005) |
 
 ## Verification Properties
 
@@ -141,6 +159,7 @@ registered `InlineFormat` implementation for the OOXML output format.
 ## Architecture Anchors
 
 - `architecture/plugin-architecture.md` — dog-fooding guarantee specification
+- `architecture/adr/ADR-024-pptx-inline-run-generator-unification.md` — unified engine design: `render_inline_nodes_to_runs` + `OoxmlRun` + `serialize_ooxml_run` in `slideforge-plugin-api`; supersedes the `render_with_context` per-node dispatch loop for PPTX run construction
 
 ## Story Anchor
 
