@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.1"
+version: "1.4.2"
 status: active
 producer: product-owner
-timestamp: 2026-05-29T00:00:00
+timestamp: 2026-06-10T00:00:00
 phase: 1a
 inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
@@ -25,6 +25,7 @@ modified:
   - "v1.3.6 — STORY-085 adversary F-004 [HIGH]: tighten HTML postcondition to require HTML-escaping of ALL interpolated values — attribute values (href/url/Xref id) AND text content (Math latex source) — not just Plain text. Added EC-009. Escaping rule: &, <, >, \" must be escaped in all HTML output positions (both attribute and content contexts)."
   - "v1.4.0 — STORY-081 re-anchor (human ruling 2026-06-09): BC-3.05.001 is now the primary anchor for slide-level inline markup rendering. Added: (1) explicit slide-level field scope list (title/subtitle/body/bullets/caption/description) with AC-006 dual-title shadow invariant; (2) per-exporter rendering matrix (5 surfaces: PPTX body, PPTX notes, DOCX, HTML, PDF) with unified-engine detail per ADR-024 — body via ooxml_run_to_ooxmlsdk, notes via serialize_ooxml_run, both call render_inline_nodes_to_runs; (3) corrected PPTX Highlight postcondition from attribute form to child-element form (<a:highlight><a:srgbClr val=\"FFFF00\"/></a:highlight>) per ADV-P11-HIGH-001 fix; (4) corrected hyperlink reference-set invariant (replacing false count-equality claim) per ADR-024 INV-4; (5) rId namespace isolation (slide vs notes rels parts); (6) nested/wrapped link behavior (F-040-P3-001); (7) safe-URL-scheme and empty-display-text guards; (8) Math PPTX behavior (tracing::warn + degraded plain run); (9) EC-007 interpolation-stays-Plain; (10) ADR-024, ADR-017, BC-5.02.002 cross-references. STORY-081 added to Stories traceability."
   - "v1.4.1 — F-P17-002 Math/HTML deferral codification: PC-4 Math clause corrected from aspirational 'Math → MathML <math>' to actual v1.0 behavior: Math → <code class=\"math\">{HTML-escaped LaTeX source}</code> as a degraded accessible-text fallback. Full MathML rendering explicitly deferred to STORY-045 (cited). EC-010 and canonical test vector updated to reference <code class=\"math\"> element (not <math>) as the v1.0 HTML output. No other PC-4 form changed — Footnote → <span role=\"note\"> confirmed correct (F-P17-002 Footnote half resolved by implementation in feature/STORY-081 at e5b1e92e)."
+  - "v1.4.2 — F-P24-MED-001 full-form accuracy reconciliation (2026-06-10): corrected all per-variant per-surface postconditions to match actual v1.0 implementation confirmed by code audit. (1) PC-1 Footnote: was aspirational 'presenter note annotation registered; superscript reference number emitted'; corrected to actual: inner body content rendered inline, numbered-marker mechanism DEFERRED to STORY-085 F-010. (2) PC-1 Xref: was aspirational 'internal hyperlink to slide index or heading via rId'; corrected to actual: plain text run rendered identically to Plain (ooxml_runs.rs:340-345, same match arm). (3) PC-2 Footnote and Xref: corrected to match actual (same engine as PC-1). (4) PC-3 Math: was aspirational '<m:oMath> block'; corrected to actual: plain text run of latex source (document_body.rs:564). (5) PC-3 Footnote: was aspirational '<w:footnote>/<w:endnote>'; corrected to actual: collect_plain_text(children) as plain run (document_body.rs:568). (6) PC-3 Xref: was aspirational 'internal hyperlink to heading or figure'; corrected to actual: plain text run of target string (document_body.rs:571). (7) PC-5 Math: was aspirational 'vector path rendering per BC-1.10.003'; corrected to actual: SKIPPED — no spans produced (slide_pdf.rs:294-296). (8) PC-5 Footnote: was aspirational 'footnote reference number / page reference in tagged PDF'; corrected to actual: inner body content rendered inline as regular text spans with inherited font face (slide_pdf.rs:282-287). (9) PC-5 Xref: was aspirational 'page reference in tagged PDF'; corrected to actual: plain text span rendered identically to Plain (slide_pdf.rs:238-244, same match arm). (10) OBS-P24-004 fix: InlineDepthExceeded struct shape corrected from 2-field { source_slide_index, depth: 65 } to 3-field { source_slide_index, depth, max } per production error.rs:226-233; error code corrected from missing to E-LAY-005 (error.rs doc comment line 218)."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -129,9 +130,15 @@ Native OOXML mapping per variant:
 - Math → `tracing::warn!` emitted; a plain-text `OoxmlRun` with the LaTeX source as
   text is produced (degraded run). Math block rendering is delegated to BC-1.10.003;
   `InlineNode::Math` in a slide body field is a degraded path in v1.0.
-- Footnote → presenter note annotation registered; superscript reference number emitted
-  on the slide body run.
-- Xref → internal hyperlink to slide index or heading via rId.
+- Footnote → inner body content rendered inline as a plain run (children are recursed
+  with unchanged `RunProps`). NO presenter-note annotation is registered and NO
+  superscript reference number is emitted on the slide run. Numbered-marker mechanism
+  **DEFERRED to STORY-085 F-010**. (`tracing::debug!("Footnote marker numbering deferred")`
+  is emitted; see `ooxml_runs.rs:430-442`.)
+- Xref → plain text run rendered identically to `Plain` (the production code matches
+  `InlineNode::Plain(text) | InlineNode::Xref(text)` in a single arm at
+  `ooxml_runs.rs:340-345`). No internal hyperlink or rId is registered in v1.0.
+  Cross-reference resolution to slide headings is **DEFERRED to STORY-085**.
 
 ### PC-2: PPTX Notes
 
@@ -149,21 +156,37 @@ final conversion step). This was hardened across the 16-pass STORY-081 adversari
 - Formatting INSIDE a hyperlink's display text is preserved: `[click **here**](url)` in
   notes OOXML renders the "here" run with `<a:rPr b="1"><a:hlinkClick r:id="rId3"/></a:rPr>`
   (Fix for F-P16-M1 — the pre-ADR-024 notes path silently dropped bold in this case).
+- **Footnote** (notes surface): same as PC-1 — inner body content rendered inline as a
+  plain run; no presenter-note annotation; no superscript reference number. Both body
+  and notes share the same engine (`render_inline_nodes_to_runs`), so the STORY-085
+  F-010 deferral applies equally to both surfaces.
+- **Xref** (notes surface): same as PC-1 — plain text run identical to `Plain`; no rId
+  registered in v1.0.
 
 ### PC-3: DOCX
 
 - Plain → `<w:r>` with `<w:t>` (no run properties)
 - Bold → `<w:b/>` in `<w:rPr>`
 - Italic → `<w:i/>` in `<w:rPr>`
-- Code → `<w:rStyle w:val="CodeSpan"/>` in `<w:rPr>`
+- Code → `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }` in `<w:rPr>`
+  (monospace font applied via `RunFonts`; no `<w:rStyle>` element — see
+  `document_body.rs:449-461`)
 - Superscript → `<w:vertAlign w:val="superscript"/>` in `<w:rPr>`
 - Subscript → `<w:vertAlign w:val="subscript"/>` in `<w:rPr>`
-- Strikethrough → `<w:strike/>` in `<w:rPr>`
-- Highlight → `<w:highlight w:val="yellow"/>` in `<w:rPr>` (ooxmlsdk typed builder)
-- Link → `<w:hyperlink r:id="...">` wrapping the display-text runs
-- Math → OMML `<m:oMath>` block (per BC-1.10.003)
-- Footnote → `<w:footnote>` or `<w:endnote>` reference
-- Xref → internal hyperlink to heading or figure
+- Strikethrough → `<w:strike/>` in `<w:rPr>` (ooxmlsdk `Strike::default()`)
+- Highlight → `<w:highlight w:val="yellow"/>` in `<w:rPr>` (ooxmlsdk typed builder,
+  `HighlightColorValues::Yellow`)
+- Link → `<w:hyperlink r:id="...">` wrapping the display-text runs (runs receive the
+  `"Hyperlink"` character style; formatting inside link display text is preserved)
+- Math → plain text run of the LaTeX source string with no run properties (degraded
+  fallback; `document_body.rs:564-566`). Full OMML `<m:oMath>` rendering is
+  **DEFERRED to STORY-045**.
+- Footnote → `collect_plain_text(children)` emitted as a plain `<w:r>` with no run
+  properties (degraded fallback; `document_body.rs:567-569`). Structured
+  `<w:footnote>`/`<w:endnote>` rendering is **DEFERRED to STORY-085 F-010**.
+- Xref → plain text run of the target identifier string with no run properties (degraded
+  fallback; `document_body.rs:570-573`). Internal hyperlink to heading is
+  **DEFERRED to STORY-085**.
 
 ### PC-4: HTML
 
@@ -200,30 +223,45 @@ regular face (never silent wrong-face).
 
 - Bold → `ResolvedFontSet.bold` face (distinct `Font` instance; no `set_bold()` API in krilla 0.6.0)
 - Italic → `ResolvedFontSet.italic` face
-- Code → `ResolvedFontSet.mono` face
-- Superscript → `ResolvedFontSet.regular` face at `font_size * 0.583` with
-  `baseline_y - (font_size * 0.333)` (raised, smaller)
-- Subscript → `ResolvedFontSet.regular` face at `font_size * 0.583` with
-  `baseline_y + (font_size * 0.333)` (lowered, smaller)
-- Strikethrough → text rendered; strike-line drawn as a separate path (krilla 0.6.0
-  has no native strike text decoration; a line segment at the correct vertical offset
-  is drawn over the run). This is CONSISTENT with nested strikethrough (same top-level
-  and nested behavior).
-- Highlight → text rendered; highlight background drawn as a filled rectangle behind
-  the run. HTML `<mark>` equivalent. No native krilla highlight annotation in 0.6.0.
+- Code → `ResolvedFontSet.mono` face (`FontFaceKind::Mono`; `slide_pdf.rs:245-250`)
+- Superscript → `ResolvedFontSet.regular` face at `font_size * SUPER_SUB_SCALE` (0.583)
+  with `baseline_y - (font_size * SUPER_RISE_FRACTION)` (0.333) raised in Y-down space
+  (`SUPER_OFFSET_UNITS` signal = +333 in `KrillaTextSpan.y_offset_units`;
+  `exporter.rs` `SUPER_SUB_SCALE`/`SUPER_RISE_FRACTION` constants)
+- Subscript → `ResolvedFontSet.regular` face at `font_size * SUPER_SUB_SCALE` (0.583)
+  with `baseline_y + (font_size * SUB_DROP_FRACTION)` (0.333) lowered in Y-down space
+  (`SUB_OFFSET_UNITS` signal = −333)
+- Strikethrough → inner body content rendered inline as regular text spans with the
+  inherited font face (`slide_pdf.rs:282-287`). In v1.0, no strike-line path is drawn
+  over the run. Native strike decoration is **DEFERRED to STORY-085**. This is
+  CONSISTENT (same top-level and nested behavior — both produce plain spans).
+- Highlight → inner body content rendered inline as regular text spans with the
+  inherited font face (`slide_pdf.rs:282-287`). In v1.0, no filled-rectangle background
+  is drawn behind the run. Highlight background rendering is **DEFERRED to STORY-085**.
   This is CONSISTENT (same top-level and nested behavior).
-- Link → URL annotation via krilla link annotation API (rectangle over the text run).
-  In v1.0, no visual underline/color hint is added unless the brand theme provides one
-  (text-only annotation).
-- Plain → tagged text span (PDF/UA structure)
-- Math → vector path rendering per BC-1.10.003
-- Footnote, Xref → footnote reference number / page reference in tagged PDF
+- Link → display-text content is recursed and collected as regular text spans with the
+  inherited font face (`slide_pdf.rs:289-293`). In v1.0, no URL annotation / rectangle
+  overlay is added. PDF link annotation rendering is **DEFERRED to STORY-085**.
+- Plain → regular text span with inherited font face (PDF/UA structure tag applied by
+  `tag_engine`)
+- Math → **SKIPPED** — `InlineNode::Math(_) => {}` produces NO `KrillaTextSpan`
+  entries (`slide_pdf.rs:294-297`). Math content is absent from PDF output in v1.0.
+  Full math rendering via `BC-1.10.003` is **DEFERRED to STORY-009 / STORY-045**.
+- Footnote → inner body content rendered inline as regular text spans with the
+  inherited font face (handled in same arm as `Strikethrough`/`Highlight` at
+  `slide_pdf.rs:282-287`). No reference number is emitted and no footnote annotation
+  is registered. Structured footnote support is **DEFERRED to STORY-085 F-010**.
+- Xref → plain text span rendered identically to `Plain` (same match arm as `Plain`
+  at `slide_pdf.rs:238-244`). No page-reference annotation or cross-reference
+  resolution in v1.0. Full cross-reference support is **DEFERRED to STORY-085**.
 
-**PDF scope boundary:** Only Bold/Italic/Code font-switching and Super/Sub positioning
-are full PDF-native rendering obligations in v1.0. Strikethrough, Highlight, and Link
-are rendered with text plus a geometric annotation — no PDF structure tag equivalent;
-this is WITHIN scope and CONSISTENT (top-level == nested). These are not violations;
-they are the defined v1.0 PDF boundary per STORY-081 AC-004.
+**PDF v1.0 scope boundary (actual):** Bold/Italic/Code/Super/Sub are fully rendered
+with correct font face and baseline positioning. All other formatting variants
+(Strikethrough, Highlight, Link, Footnote, Xref, Math) produce plain text spans only
+in v1.0 — no geometric annotations, no URL overlays, no reference numbers, no math
+paths. This is the defined v1.0 PDF boundary per STORY-081 AC-004. These are not
+violations; full rendering for these variants is tracked in STORY-085 (Footnote, Xref,
+Strikethrough, Highlight, Link) and STORY-009/STORY-045 (Math).
 
 ## Slide-Level Field Scope
 
@@ -320,8 +358,11 @@ unified engine eliminates the bug class by construction.
 3. Inline formatting within a math block (`$...$`) uses `@{var}` interpolation only;
    `{{ }}` text interpolation is disabled inside math mode. (BC-1.02.004)
 4. Nesting depth is bounded at 64 levels. Inline trees deeper than 64 produce
-   `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`. This is a
-   hard error (not a warning) to prevent stack overflow on export.
+   `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65, max: 64 }`
+   (error code **E-LAY-005** per `slideforge-layout/src/error.rs` doc comment). This
+   is a 3-field struct — `source_slide_index`, `depth` (the actual depth detected,
+   ≥ 65), and `max` (the allowed maximum, 64). This is a hard error (not a warning)
+   to prevent stack overflow on export.
 5. `InlineNode::Xref` validation traverses ONLY top-level inline sequences; it does
    NOT recursively validate xrefs inside `MathNode` content. Math is a separate
    validation surface. (v1.0 scope boundary — see Math Xref Boundary section below.)
@@ -377,8 +418,10 @@ This boundary is explicit and intentional, not an oversight.
 Maximum nesting depth: **64 levels**.
 
 At depth 65+, `layout_shapes` (or the inline validation pass) returns
-`LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }` (or the actual
-exceeded depth). This is a hard error — output is NOT produced for the affected slide.
+`LayoutError::InlineDepthExceeded { source_slide_index, depth: 65, max: 64 }` (or
+the actual exceeded depth in the `depth` field; `max` is always 64). Error code:
+**E-LAY-005** (per `slideforge-layout/src/error.rs` §`InlineDepthExceeded` doc
+comment). This is a hard error — output is NOT produced for the affected slide.
 
 Rationale: unbounded recursion in inline tree traversal during export (PPTX XML
 generation, PDF span building, HTML generation) can exhaust the stack on real-world
@@ -394,9 +437,9 @@ must produce `LayoutError::InlineDepthExceeded`.
 | EC-001 | Nested bold inside italic (`Italic(vec![Bold(vec![Plain("text")])])`) | Both applied: PPTX body `<a:rPr b="1" i="1">`; PPTX notes same via unified engine; HTML `<em><strong>text</strong></em>` |
 | EC-002 | Xref to a slide title that doesn't exist | `LayoutWarning::XrefTargetNotFound { target, source_slide_index }` accumulated; not fatal |
 | EC-003 | Highlight in PPTX with no highlight color in brand | Default to yellow highlight (#FFFF00) via `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child element; lint warning: "highlight color not declared in brand; using yellow" |
-| EC-004 | Footnote in PPTX (no footnote feature in slides natively) | Footnote content moved to presenter notes with superscript reference number on slide |
+| EC-004 | Footnote in PPTX (no structured footnote feature in slides) | Inner body content rendered inline as a plain `OoxmlRun` (children recursed with unchanged `RunProps`). No presenter-note annotation registered; no superscript reference number emitted on the slide run. `tracing::debug!("Footnote marker numbering deferred")` emitted. Numbered-marker mechanism DEFERRED to STORY-085 F-010. |
 | EC-005 | Code inline in .pptx (no semantic code type in OOXML) | Monospace font run via `<a:latin typeface="Courier New"/>`; no semantic tagging (PPTX limitation documented in DSL reference) |
-| EC-006 | Inline nesting at depth 65 | `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65 }`; hard error |
+| EC-006 | Inline nesting at depth 65 | `LayoutError::InlineDepthExceeded { source_slide_index, depth: 65, max: 64 }` (E-LAY-005); hard error; 3-field struct |
 | EC-007 | `Xref("slide-title")` inside a `MathNode` | NOT validated by xref pass; math is a separate validation surface |
 | EC-008 | `"**bold using markdown"` (forbidden pattern) | No bold applied; literal `**bold using markdown` rendered as Plain text; lint warning |
 | EC-009 | `Link { text: vec![Plain("click")], url: "https://evil.com?a=1&b=<script>" }` rendered to HTML | `href` attribute value is HTML-attribute-escaped: `href="https://evil.com?a=1&amp;b=&lt;script&gt;"`. The unescaped raw URL is NEVER written directly into attribute position. Similarly, `Xref("my\"id")` produces `href="#my&quot;id"` — not `href="#my"id"`. |
@@ -419,7 +462,7 @@ must produce `LayoutError::InlineDepthExceeded`.
 | `Link { text: vec![Plain("click "), Bold([Plain("here")]), Plain(" now")], url: "https://example.com" }` in PPTX notes | 3 runs, each with `hyperlink_rid="rId3"`; "here" run has `b="1"` AND `hyperlink_rid`; 1 External rel registered | notes-formatting-in-link |
 | `"**bold using markdown"` (forbidden pattern) | No bold; literal text rendered; lint warning issued | edge-case |
 | `Superscript(vec![Plain("2")])` (inside "CO₂") | PPTX: `<a:rPr baseline="30000">`; HTML: `<sup>2</sup>` | happy-path |
-| 65-deep nested `Bold(vec![Bold(vec![...])])` | `LayoutError::InlineDepthExceeded { source_slide_index: 0, depth: 65 }` | depth-bound |
+| 65-deep nested `Bold(vec![Bold(vec![...])])` | `LayoutError::InlineDepthExceeded { source_slide_index: 0, depth: 65, max: 64 }` (E-LAY-005) | depth-bound |
 | `Xref("nonexistent-slide")` in top-level text | `LayoutWarning::XrefTargetNotFound { target: "nonexistent-slide", source_slide_index: 0 }` | warning |
 | All 12 variants present in one `Vec<InlineNode>` | All 12 variants survive layout pass unchanged; `FrameContent::TextRun` preserves all | exhaustive |
 | `Link { text: vec![Plain("x")], url: "https://a.com?q=1&lang=<en>" }` → HTML | `<a href="https://a.com?q=1&amp;lang=&lt;en&gt;">x</a>` — `&` and `<` escaped in attribute | escaping-attribute |
