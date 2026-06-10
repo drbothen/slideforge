@@ -23,7 +23,7 @@ depends_on:
   - STORY-046
 blocks: []
 estimated_days: 6
-spec_version: "1.4"
+spec_version: "1.5"
 # BC status: STORY-081 is anchored to BC-3.05.001 (All 12 Inline Format Types Render to Correct Output
 # per Format) — slide-level inline markup rendering across all output surfaces. Ready requires
 # BC-3.05.001 >= v1.4.0 (satisfied: PO amended BC-3.05.001 to v1.4.0 on 2026-06-09 adding slide-level
@@ -48,7 +48,7 @@ spec_version: "1.4"
   PPTX title fields are single-run — only bullet/body carries inline formatting (enforced
   by the layout engine; the PPTX exporter renders what layout provides).
 - SS-05 (DOCX Exporter) owns DOCX rendering: `<w:b/>` for Bold, `<w:i/>` for Italic,
-  `<w:rStyle w:val="CodeSpan"/>` for Code, `<w:hyperlink>` for Link, etc.
+  `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }` (via `<w:rFonts>`) for Code, `<w:hyperlink>` for Link, etc.
 - SS-06 (PDF Exporter) — krilla `=0.6.0` text runs (pinned in slideforge-pdf/Cargo.toml,
   NOT workspace); bold/italic/mono faces resolved via a `ResolvedFontSet` struct populated
   by `resolve_font_set(brand, override_path)` using `fontdb =0.23.0` (already in
@@ -134,8 +134,8 @@ output format violates the production-grade default). It MUST land before v1.0 s
    - PPTX: `<a:rPr b="1"/>` for `InlineNode::Bold` children; `<a:rPr i="1"/>` for Italic;
      monospace character spacing for Code; `<a:hlinkClick>` for Link; other variants
      produce plain runs with appropriate rendering where OOXML supports it.
-   - DOCX: `<w:b/>` for Bold; `<w:i/>` for Italic; `<w:rStyle w:val="CodeSpan"/>` for
-     Code; `<w:hyperlink r:id="...">` for Link; `<w:vertAlign w:val="superscript"/>` for
+   - DOCX: `<w:b/>` for Bold; `<w:i/>` for Italic; `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }` via `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` for
+     Code (no `<w:rStyle>` element — see `document_body.rs:449-461`); `<w:hyperlink r:id="...">` for Link; `<w:vertAlign w:val="superscript"/>` for
      Superscript; `<w:vertAlign w:val="subscript"/>` for Subscript; `<w:strike/>` for
      Strikethrough; `<w:highlight w:val="yellow"/>` for Highlight.
    - PDF (krilla `=0.6.0`, pinned in slideforge-pdf/Cargo.toml): bold/italic/mono faces
@@ -153,13 +153,19 @@ output format violates the production-grade default). It MUST land before v1.0 s
 Per DIR-077-002 §4, point 4: PPTX title placeholder fields (`<p:ph type="title"/>`)
 support a single paragraph with one or more runs, but **mixed inline formatting
 within a title** is not standard across PPTX renderers (PowerPoint, Keynote,
-Google Slides). The layout engine MUST detect when a `title` field was parsed with
+Google Slides). The eval stage MUST detect when a `title` field was parsed with
 inline markup and:
-- Emit a `LayoutWarning::InlineMarkupInTitle { slide_title, stripped_text }` warning
-- Produce a plain-text run for the PPTX title placeholder
-- For DOCX/PDF/HTML output, preserve the inline structure in the title
+- Emit `EvalError::InlineMarkupInTitle { slide_title, stripped_text, span }` (error
+  code E-EVL-015, `ParseSeverity::Error`) into the diagnostic sink. Note: the dead
+  `LayoutWarning::InlineMarkupInTitle` variant has been REMOVED from `slideforge-types`;
+  the live diagnostic is `EvalError::InlineMarkupInTitle` in `slideforge-eval/src/error.rs`.
+- Produce a plain-text `FieldValue::Str(stripped_text)` for the PPTX title placeholder
+- For DOCX/PDF/HTML output, preserve inline structure via the `title_inlines` shadow field
 
-The warning is non-fatal in `--warn-only` mode and fatal in strict mode (the default).
+In strict mode (`CompileOptions { strict: true }`, default): the Error-severity diagnostic
+fires the strict gate → build exits non-zero, no output produced. In `--warn-only` mode
+(`strict: false`): gate skipped → build succeeds; PPTX receives plain stripped title,
+non-PPTX exporters receive `title_inlines`.
 
 ## Behavioral Contracts
 
@@ -169,10 +175,13 @@ The warning is non-fatal in `--warn-only` mode and fatal in strict mode (the def
 
 Note: BC-3.05.001 v1.4.0 (PO amendment 2026-06-09) added explicit slide-level field scope
 (title/subtitle/body/bullets/caption/description), per-exporter postconditions (PC-1 through
-PC-5), Hyperlink Invariants HI-1..HI-5, and EC-011..EC-016. STORY-081 is the implementation
-of that scope. BC-3.02.002 carries a cross-ref to BC-3.05.001 for slide-level inline markup
-and is no longer an anchor for this story (BC-3.02.002 PC8 scope boundary EXCLUDES
-slide-level fields and its v1.5 deferral note was superseded by the re-anchor ruling).
+PC-5), Hyperlink Invariants HI-1..HI-5, and EC-011..EC-016. BC-3.05.001 is now at v1.4.3
+(2026-06-10), which additionally corrects: DOCX Code to RunFonts Courier New (not w:rStyle);
+EvalError::InlineMarkupInTitle (3-field, eval stage); DOCX unsafe-scheme fatal behavior;
+full-form accuracy per code audit. STORY-081 is the implementation of the full scope.
+BC-3.02.002 carries a cross-ref to BC-3.05.001 for slide-level inline markup and is no
+longer an anchor for this story (BC-3.02.002 PC8 scope boundary EXCLUDES slide-level
+fields and its v1.5 deferral note was superseded by the re-anchor ruling).
 
 ## Acceptance Criteria
 
@@ -212,17 +221,20 @@ structure. The test uses a real PPTX ZIP output (not a mock), verifying the OOXM
 is correct per the OOXML specification (element ordering is schema-significant per CLAUDE.md).
 
 ### AC-003: DOCX exporter renders all 8 inline markup forms structurally
-(traces to BC-3.05.001 PC-3 — DOCX: Bold→`<w:b/>`, Italic→`<w:i/>`, Code→`<w:rStyle w:val="CodeSpan"/>`, Highlight→`<w:highlight w:val="yellow"/>`, etc.)
+(traces to BC-3.05.001 PC-3 — DOCX: Bold→`<w:b/>`, Italic→`<w:i/>`, Code→`RunFonts{ascii:"Courier New",high_ansi:"Courier New"}` via `<w:rFonts>` (NO `<w:rStyle>`), Highlight→`<w:highlight w:val="yellow"/>`, etc.)
 
 A slide body containing all 8 inline markup forms (Bold, Italic, Code, Link, Superscript,
 Subscript, Strikethrough, Highlight) produces DOCX XML with the correct OOXML run
 properties for each form using ooxmlsdk `=0.6.1` typed builders for `w:rPr`:
-`w:b` (Bold), `w:i` (Italic), `w:rStyle w:val="CodeSpan"` (Code),
-`w:vertAlign w:val="superscript"` (Superscript), `w:vertAlign w:val="subscript"` (Subscript),
-`w:strike` (Strikethrough), `w:highlight w:val="yellow"` (Highlight).
+`w:b` (Bold), `w:i` (Italic), `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }`
+via `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` (Code — NO `<w:rStyle w:val="CodeSpan"/>`;
+see `document_body.rs:449-461`), `w:vertAlign w:val="superscript"` (Superscript),
+`w:vertAlign w:val="subscript"` (Subscript), `w:strike` (Strikethrough),
+`w:highlight w:val="yellow"` (Highlight).
 For `InlineNode::Highlight`: ooxmlsdk `=0.6.1` provides typed builders for `w:highlight`
-in WordprocessingML. Use the typed API, not raw XML. Snapshot test on the DOCX XML.
-`InlineNode::Plain` nodes produce plain `<w:r>` runs without formatting overrides.
+in WordprocessingML (`HighlightColorValues::Yellow`). Use the typed API, not raw XML.
+Snapshot test on the DOCX XML. `InlineNode::Plain` nodes produce plain `<w:r>` runs
+without formatting overrides.
 
 ### AC-004: PDF exporter renders Bold/Italic/Code via font switching (traces to BC-3.05.001 PC-5 — PDF: Bold→ResolvedFontSet.bold face, Italic→ResolvedFontSet.italic face, Super/Sub→font_size*0.583 + baseline shift)
 
@@ -277,16 +289,21 @@ Snapshot test on the rendered HTML. `axe-core` accessibility scan on the preview
 passes (inline semantic elements are WCAG AA neutral; `<a>` elements must have accessible
 names satisfied by their text content).
 
-### AC-006: PPTX title with inline markup triggers layout warning and strips to plain text
-(traces to BC-3.05.001 Slide-Level Title Constraint / EC-011 — LayoutWarning::InlineMarkupInTitle; PPTX plain-text title run; title_inlines shadow for DOCX/PDF/HTML; fatal in strict mode)
+### AC-006: PPTX title with inline markup triggers eval diagnostic and strips to plain text
+(traces to BC-3.05.001 Slide-Level Title Constraint / EC-011 — EvalError::InlineMarkupInTitle (E-EVL-015); PPTX plain-text title run; title_inlines shadow for DOCX/PDF/HTML; fatal in strict mode)
 
 A slide with `title: "**Bold Title**"` produces:
-1. A `LayoutWarning::InlineMarkupInTitle` warning in the diagnostic sink.
+1. `EvalError::InlineMarkupInTitle { slide_title: "**Bold Title**", stripped_text: "Bold Title", span }`
+   (error code E-EVL-015, `ParseSeverity::Error`) emitted into the diagnostic sink at eval stage.
+   Note: the dead `LayoutWarning::InlineMarkupInTitle` variant has been REMOVED from
+   `slideforge-types`; the live diagnostic is `EvalError::InlineMarkupInTitle` in
+   `slideforge-eval/src/error.rs:380`.
 2. PPTX `<p:ph type="title"/>` with a plain-text run `<a:t>Bold Title</a:t>` (no `<a:rPr b="1"/>`).
-3. DOCX, PDF, HTML output with the title rendered as bold (layout preserves inline structure
-   for non-PPTX outputs).
-In strict mode (default), this warning is promoted to a fatal error and the build fails.
-In `--warn-only` mode, it is a warning and output is produced.
+3. DOCX, PDF, HTML output with the title rendered as bold (eval stage produces `title_inlines`
+   shadow field carrying `Vec<InlineNode>` for non-PPTX exporters).
+In strict mode (`CompileOptions { strict: true }`, default): Error-severity gate fires →
+build exits non-zero, no output produced. In `--warn-only` mode (`strict: false`): gate
+skipped → build succeeds; PPTX receives plain stripped title, non-PPTX exporters use `title_inlines`.
 
 ## Architecture Mapping
 
@@ -310,7 +327,7 @@ Architecture section files:
 | Component | Estimated Tokens |
 |-----------|-----------------|
 | This story spec | ~4,500 |
-| BC-3.05.001 (v1.4.0) | ~2,200 |
+| BC-3.05.001 (v1.4.3) | ~2,200 |
 | DIR-077-002 (inline-markup directive, §3 mapping table) | ~2,000 |
 | STORY-077 context (chunks_to_inline_nodes function) | ~2,000 |
 | `slideforge-eval/src/eval.rs` (eval_slide_node context) | ~3,000 |
@@ -340,9 +357,11 @@ split is acceptable: sub-burst A (eval + layout), sub-burst B (PPTX + DOCX), sub
   Highlight), call `chunks_to_inline_nodes(chunks, env, sink)` (from STORY-077) and store
   `FieldValue::Inlines(nodes)` instead of flattening to `Value::Str`
 - [ ] For `title` fields containing inline markup: strip markup and store `FieldValue::Str`
-  for the PPTX path; emit `LayoutWarning::InlineMarkupInTitle` into the diagnostic sink;
-  for DOCX/PDF/HTML, preserve `FieldValue::Inlines` via a separate evaluated-title field
-  on the slide node
+  for the PPTX path; emit `EvalError::InlineMarkupInTitle { slide_title, stripped_text, span }`
+  (E-EVL-015, `ParseSeverity::Error`) into the diagnostic sink (NOT the dead
+  `LayoutWarning::InlineMarkupInTitle` — that variant was REMOVED from `slideforge-types`);
+  for DOCX/PDF/HTML, produce a `title_inlines: Vec<InlineNode>` shadow field on the evaluated
+  slide node
 - [ ] Write unit tests: each field type with inline markup → `FieldValue::Inlines`; title
   with markup → warning emitted + plain string; plain-text fields unaffected
 
@@ -482,7 +501,7 @@ If fontdb cannot find a styled face, it falls back to the regular face with `tra
 | `slideforge-types` (workspace) | workspace | `InlineNode`, `FieldValue::Inlines` — consumed by all layers |
 | `slideforge-eval` (workspace) | workspace | `chunks_to_inline_nodes` (reused from STORY-077) |
 | `slideforge-layout` (workspace) | workspace | `FrameContent::TextRun` type update |
-| `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:rPr` (b/i/strike/fill) and DOCX typed builders for `w:rPr` (w:b/w:i/w:rStyle/w:vertAlign/w:strike/w:highlight) — typed API, not raw XML |
+| `ooxmlsdk` | `=0.6.1` | PPTX typed builders for `a:rPr` (b/i/strike/fill) and DOCX typed builders for `w:rPr` (w:b/w:i/RunFonts for Code/w:vertAlign/w:strike/w:highlight) — typed API, not raw XML; Code uses `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }`, NOT `w:rStyle w:val="CodeSpan"` |
 | `krilla` | `=0.6.0` (pinned in `crates/slideforge-pdf/Cargo.toml`, NOT workspace — per export-architecture v1.2) | PDF: `Font` instances from `ResolvedFontSet`; `surface.draw_text()` with `font_size * 0.583` + `baseline_y ± (font_size * 0.333)` for super/subscript (draw_glyphs is public but requires GlyphId from a non-public shaping API) |
 | `fontdb` | `=0.23.0` (direct dep in `crates/slideforge-pdf/Cargo.toml`; already in Cargo.lock as transitive dep of `usvg =0.47.0` — no new supply-chain surface) | PDF: `fontdb::Database::load_system_fonts()` + metadata-aware (OS/2 table) style query used by `resolve_font_set()` to populate `ResolvedFontSet` (ADR-023) |
 
@@ -525,14 +544,14 @@ Build fails if any of the above constraints are violated.
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | `title: "**Bold Title**"` in strict mode | Fatal `LayoutWarning::InlineMarkupInTitle` (promoted to error); build fails. PPTX title would be single-run anyway; user must rewrite title without markup or use `--warn-only`. |
+| EC-001 | `title: "**Bold Title**"` in strict mode | `EvalError::InlineMarkupInTitle { slide_title: "**Bold Title**", stripped_text: "Bold Title", span }` (E-EVL-015, `ParseSeverity::Error`) emitted at eval stage; strict gate fires; build exits non-zero, no output. User must rewrite title without markup or use `--warn-only`. (Dead `LayoutWarning::InlineMarkupInTitle` was REMOVED from `slideforge-types`.) |
 | EC-002 | `title: "**Bold Title**"` in `--warn-only` mode | Warning emitted; PPTX output has plain-text title; DOCX/PDF/HTML output has bold title. |
 | EC-003 | Nested inline markup in bullet: `"**_bold italic_**"` | `InlineNode::Bold([InlineNode::Italic([InlineNode::Plain("bold italic")])])`. PPTX: `<a:rPr b="1" i="1"/>`. DOCX: `<w:b/><w:i/>`. All exporters handle nested runs correctly. |
 | EC-004 | `InlineNode::Link` in PPTX bullet | `<a:hlinkClick r:id="..."/>` in PPTX draw XML with the URL registered in `slide.xml.rels`. The layout engine registers the URL and produces the rId. |
-| EC-005 | `InlineNode::Math` in bullet | Math inline in a bullet renders via the `MathRenderer` plugin. The PPTX exporter embeds the math SVG as an image run (same path as standalone math). DOCX uses OMML. HTML uses MathML. |
+| EC-005 | `InlineNode::Math` in bullet | **v1.0 degraded behavior (all surfaces):** PPTX: `tracing::warn!` emitted; plain-text `OoxmlRun` with the LaTeX source as text produced (no SVG image run). DOCX: plain text run of the LaTeX source string with no run properties (`document_body.rs:564-566`). HTML: `<code class="math">{HTML-escaped LaTeX source}</code>` (v1.0 accessible-text fallback). PDF: **SKIPPED** — no `KrillaTextSpan` entries produced (`slide_pdf.rs:294-297`). Full math rendering (SVG/OMML/MathML/path) via BC-1.10.003 is DEFERRED to STORY-045. |
 | EC-006 | Plain-text bullet with no inline markup | `FieldValue::Str` (or `FieldValue::Inlines([InlineNode::Plain(...)])`) — both are valid. Exporters must handle both forms without error. Prefer `FieldValue::Str` for pure-text bullets to avoid unnecessary allocation. |
 | EC-007 | `{{ var }}` resolves to string containing `**bold**` | Resolved string is `InlineNode::Plain(Arc::from("**bold**"))` — NOT further parsed (DIR-077-002 §3 rule: inline markup is parsed from DSL source, not dynamically resolved values). |
-| EC-008 | `InlineNode::Highlight` in PPTX | DrawingML does not have a `<a:highlight>` element equivalent to WordprocessingML's `<w:highlight>`. The PPTX exporter renders Highlight via a solid-fill/highlight child on `<a:rPr>` using the ooxmlsdk `=0.6.1` typed fill builder (emit a yellow solid-color highlight fill on the run via typed builder). If the DrawingML schema genuinely lacks a direct highlight element, emit a plain run plus a `tracing::warn!` noting the degradation. Use the typed builder API — not raw XML — in all cases. |
+| EC-008 | `InlineNode::Highlight` in PPTX | DrawingML DOES have a `<a:highlight>` child element on `<a:rPr>`. The PPTX exporter renders Highlight as `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` as a CHILD ELEMENT of `<a:rPr>` (per BC-3.05.001 PC-1 / ADV-P11-HIGH-001 fix). The form `<a:rPr highlight="yellow">` is a schema violation and MUST NOT be used. Brand highlight color replaces `FFFF00` if declared; defaults to yellow (#FFFF00) if not (BC-3.05.001 EC-003). Use the ooxmlsdk `=0.6.1` typed builder API. |
 | EC-009 | `InlineNode::Strikethrough` in PPTX | `<a:rPr strike="sngStrike"/>` — single strikethrough. |
 | EC-010 | Empty `bullets: []` | No `FieldValue::Inlines` produced; bullet frame content is empty. No error. |
 
@@ -592,12 +611,15 @@ snapshot/visual regression gating).
   MANDATORY before v1.0 to close the inconsistency").
 - **STORY-077** — delivers the inline-markup parser (`TemplateChunk` extension +
   `chunks_to_inline_nodes`). This story depends on STORY-077 and reuses its infrastructure.
-- **BC-3.05.001 v1.4.0** (PO amendment 2026-06-09, per human re-anchor ruling) — primary
-  anchor for slide-level inline markup rendering. Covers: slide-level field scope
-  (title/subtitle/body/bullets/caption/description), per-exporter postconditions PC-1 through
-  PC-5, Hyperlink Invariants HI-1..HI-5, Invariants 9-10, EC-011..EC-016. BC-3.02.002 PC8
-  scope boundary EXCLUDES slide-level fields; BC-3.02.002 now carries a cross-ref to
-  BC-3.05.001 for slide-level scope.
+- **BC-3.05.001 v1.4.3** (current version as of 2026-06-10, re-anchored per human ruling
+  2026-06-09) — primary anchor for slide-level inline markup rendering. Covers: slide-level
+  field scope (title/subtitle/body/bullets/caption/description), per-exporter postconditions
+  PC-1 through PC-5, Hyperlink Invariants HI-1..HI-5, Invariants 9-10, EC-011..EC-016.
+  v1.4.3 in particular corrects: EvalError::InlineMarkupInTitle (3-field, E-EVL-015, eval
+  stage); DOCX Code as RunFonts Courier New (not w:rStyle CodeSpan); DOCX unsafe-scheme
+  fatal error (SEC-001/CWE-601); full-form accuracy of Footnote/Xref/Math/Strikethrough/
+  Highlight/Link per actual code. BC-3.02.002 PC8 scope boundary EXCLUDES slide-level
+  fields; BC-3.02.002 now carries a cross-ref to BC-3.05.001 for slide-level scope.
 - **ADR-013** — comemo Hash compatibility; `InlineNode` already derives `Hash + Eq + Clone`.
 - **ADR-023** (`.factory/specs/architecture/adr/ADR-023-pdf-styled-font-face-resolution.md`) —
   PDF styled font-face resolution via `fontdb` metadata-aware lookup. Adopted 2026-06-09.
@@ -619,3 +641,4 @@ snapshot/visual regression gating).
 | 1.2 | 2026-06-09 | story-writer | Mechanism correction per ADR-023 (approved 2026-06-09): replaced non-existent BrandFonts field references (fonts.bold_data, fonts.italic_data, fonts.mono_data) with the ADR-023 ResolvedFontSet / fontdb =0.23.0 metadata-aware resolution approach throughout — Subsystem Anchor SS-06, Summary PDF bullet, AC-004 mechanism text, Phase-5 Tasks, Previous Story Intelligence (STORY-043 lesson), Architecture Compliance Rule 1, Library table (added fontdb row), References (added ADR-023). Observable AC-004 contract UNCHANGED: bold renders in a distinct bold face, code in monospace, super/sub offset in output PDF. No BC change. |
 | 1.3 | 2026-06-09 | story-writer | ADR-023 amendment (2026-06-09 architect ruling): super/subscript mechanism changed from `Surface::draw_glyphs` + `KrillaGlyph.y_offset` (unimplementable — `naive_shape` is `pub(crate)` in krilla 0.6.0) to `surface.draw_text()` with `font_size * 0.583` (SUPER_SUB_SCALE) and `baseline_y ± (font_size * 0.333)` baseline shift. Updated: Subsystem Anchor SS-06, Summary PDF dispatch bullet, AC-004 mechanism bullet + added explicit PASS condition asserting reduced size (not just offset), Phase-5 Tasks draw_frame dispatch list (split into separate Superscript/Subscript bullets with module-level constants), Library table krilla row, Previous Story Intelligence STORY-043 lesson. Observable contract BC-3.02.002 PC8 UNCHANGED: super appears raised+smaller, sub lowered+smaller, bold/italic/mono use distinct faces. No BC change. |
 | 1.4 | 2026-06-09 | story-writer | BC re-anchor per human (senior architect) ruling 2026-06-09: replaced BC-3.02.002 with BC-3.05.001 throughout. Frontmatter `behavioral_contracts:` updated from [BC-3.02.002] to [BC-3.05.001]. Frontmatter readiness-gate comment updated to reflect BC-3.05.001 >= v1.4.0 (satisfied). Body "Behavioral Contracts" table replaced with BC-3.05.001 row covering all ACs and clause mapping. AC-001 traces-to updated to BC-3.05.001 precondition 5. AC-002 traces-to updated to BC-3.05.001 PC-1. AC-003 traces-to updated to BC-3.05.001 PC-3. AC-004 traces-to updated to BC-3.05.001 PC-5; PASS condition note re-pointed from "BC-3.02.002 PC8" to "BC-3.05.001 PC-5". AC-005 traces-to updated to BC-3.05.001 PC-4. AC-006 traces-to updated to BC-3.05.001 Slide-Level Title Constraint / EC-011. Token Budget table updated to reference BC-3.05.001 v1.4.0. References section: BC-3.02.002 v1.5 entry replaced with BC-3.05.001 v1.4.0 entry. All AC behaviors and implementation scope are UNCHANGED — only the BC traceability mapping changed. |
+| 1.5 | 2026-06-10 | story-writer | BC v1.4.3 reconciliation sweep (demo-surfaced drift fix): (1) **DOCX Code** corrected throughout — all occurrences of `<w:rStyle w:val="CodeSpan"/>` replaced with `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }` via `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` (NO `<w:rStyle>` element), matching `document_body.rs:449-461` and BC-3.05.001 v1.4.3 PC-3. Fixed in: SS-05 subsystem anchor, Summary DOCX bullet, AC-003 traces-to line, AC-003 body, Library table ooxmlsdk row. (2) **Title constraint diagnostic type** corrected in all locations — dead `LayoutWarning::InlineMarkupInTitle` (2-field, layout stage, removed from slideforge-types) replaced with live `EvalError::InlineMarkupInTitle { slide_title, stripped_text, span }` (3-field, E-EVL-015, eval stage) per BC-3.05.001 v1.4.3. Fixed in: Summary PPTX title constraint section, AC-006 traces-to, AC-006 body, Tasks Phase 1 bullet, EC-001. (3) **EC-008 PPTX Highlight** corrected — removed false claim "DrawingML does not have a `<a:highlight>` element"; corrected to actual child-element form `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` per BC-3.05.001 PC-1 / ADV-P11-HIGH-001. (4) **EC-005 Math in bullet** corrected from aspirational PPTX SVG / DOCX OMML / HTML MathML to actual v1.0 degraded behavior per BC-3.05.001 v1.4.2 reconciliation: PPTX → plain text + warn, DOCX → plain text run, HTML → `<code class="math">`, PDF → SKIPPED. (5) Token Budget BC version updated to v1.4.3. |
