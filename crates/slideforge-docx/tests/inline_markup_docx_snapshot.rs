@@ -244,15 +244,40 @@ fn test_BC_3_05_001_ac003_docx_italic_produces_w_i() {
     );
 }
 
-/// AC-003: `InlineNode::Code` → monospace font run in DOCX.
+/// AC-003: `InlineNode::Code` → `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` in DOCX.
+///
+/// The DOCX Code mechanism is `RunFonts { ascii: "Courier New", high_ansi: "Courier New" }`,
+/// emitting `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` in `<w:rPr>`.
+/// There is NO `<w:rStyle w:val="CodeSpan"/>` — that mechanism does not exist in the codebase.
+///
+/// This assertion is DISTINGUISHING: it will FAIL if Code rendering regresses to a different
+/// mechanism (e.g., rStyle, or a different font name). The OR alternatives are intentionally
+/// removed so that only the actual RunFonts path passes.
 #[test]
 fn test_BC_3_05_001_ac003_docx_code_produces_monospace() {
     let nodes = vec![InlineNode::Code(Arc::from("fn foo()"))];
     let xml = serialize_nodes_as_report_content(nodes);
 
+    // DISTINGUISHING: must use RunFonts mechanism with Courier New — not rStyle or another font.
     assert!(
-        xml.contains("Courier") || xml.contains("CodeSpan") || xml.contains("w:rFonts"),
-        "AC-003: Code must produce monospace font run; XML (excerpt): {}",
+        xml.contains(r#"w:ascii="Courier New""#),
+        "AC-003: Code must emit <w:rFonts w:ascii=\"Courier New\" .../>  \
+         via the RunFonts mechanism (not rStyle or another font). \
+         XML (excerpt): {}",
+        &xml[..xml.len().min(800)]
+    );
+    assert!(
+        xml.contains(r#"w:hAnsi="Courier New""#),
+        "AC-003: Code must emit <w:rFonts ... w:hAnsi=\"Courier New\"/> \
+         via the RunFonts mechanism. \
+         XML (excerpt): {}",
+        &xml[..xml.len().min(800)]
+    );
+    // Confirm the rFonts element itself is present (not just attribute fragments from elsewhere).
+    assert!(
+        xml.contains("w:rFonts"),
+        "AC-003: Code run properties must contain a <w:rFonts> element. \
+         XML (excerpt): {}",
         &xml[..xml.len().min(800)]
     );
 }

@@ -76,7 +76,7 @@
 **Demonstrated in recording:** `AC-003-005-docx-html-exporters` — Sections 1–3
 **Tests run:**
 
-- `test_BC_3_05_001_ac003_docx_slide_body_inline_markup_wired` (snapshot test) — slide body with all 8 forms → DOCX XML contains `<w:b/>` (Bold), `<w:i/>` (Italic), `<w:rStyle w:val="CodeSpan"/>` (Code), `<w:hyperlink>` (Link), `<w:vertAlign w:val="superscript"/>` (Superscript), `<w:vertAlign w:val="subscript"/>` (Subscript), `<w:strike/>` (Strikethrough), `<w:highlight w:val="yellow"/>` (Highlight)
+- `test_BC_3_05_001_ac003_docx_slide_body_inline_markup_wired` (snapshot test) — slide body with all 8 forms → DOCX XML contains `<w:b/>` (Bold), `<w:i/>` (Italic), `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` (Code — RunFonts mechanism, NOT `<w:rStyle w:val="CodeSpan"/>`), `<w:hyperlink>` (Link), `<w:vertAlign w:val="superscript"/>` (Superscript), `<w:vertAlign w:val="subscript"/>` (Subscript), `<w:strike/>` (Strikethrough), `<w:highlight w:val="yellow"/>` (Highlight)
 - `test_story_081_c4_docx_body_bold_produces_wb_run_property` (e2e) — full pipeline: `story-081-inline-markup.sf` → DOCX → `<w:b/>` present in output XML
 - `test_f_p13_e2e_docx_bold_link_has_wb_and_hyperlink` — combined `Bold([Link])` form → both `<w:b/>` and `<w:hyperlink>` present
 - `test_f_p13_e2e_docx_nested_bold_italic_has_wb_and_wi` — nested `Bold([Italic])` form → both `<w:b/>` and `<w:i/>` present
