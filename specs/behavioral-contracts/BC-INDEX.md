@@ -235,7 +235,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-3.05.001 | All 12 inline format types render to correct output per format (plain, bold, italic, code, link, math, footnote, xref, super, sub, strike, highlight) — slide-level fields + unified PPTX engine (ADR-024) | P1 | active | [BC-3.05.001.md](BC-3.05.001.md) | v1.4.2 |
+| BC-3.05.001 | All 12 inline format types render to correct output per format (plain, bold, italic, code, link, math, footnote, xref, super, sub, strike, highlight) — slide-level fields + unified PPTX engine (ADR-024) | P1 | active | [BC-3.05.001.md](BC-3.05.001.md) | v1.4.3 |
 
 ### 3.06 — Core Layout Transformation: Deck → LaidOutDeck (CAP-010)
 

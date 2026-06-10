@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.2"
+version: "1.4.3"
 status: active
 producer: product-owner
 timestamp: 2026-06-10T00:00:00
@@ -26,6 +26,7 @@ modified:
   - "v1.4.0 — STORY-081 re-anchor (human ruling 2026-06-09): BC-3.05.001 is now the primary anchor for slide-level inline markup rendering. Added: (1) explicit slide-level field scope list (title/subtitle/body/bullets/caption/description) with AC-006 dual-title shadow invariant; (2) per-exporter rendering matrix (5 surfaces: PPTX body, PPTX notes, DOCX, HTML, PDF) with unified-engine detail per ADR-024 — body via ooxml_run_to_ooxmlsdk, notes via serialize_ooxml_run, both call render_inline_nodes_to_runs; (3) corrected PPTX Highlight postcondition from attribute form to child-element form (<a:highlight><a:srgbClr val=\"FFFF00\"/></a:highlight>) per ADV-P11-HIGH-001 fix; (4) corrected hyperlink reference-set invariant (replacing false count-equality claim) per ADR-024 INV-4; (5) rId namespace isolation (slide vs notes rels parts); (6) nested/wrapped link behavior (F-040-P3-001); (7) safe-URL-scheme and empty-display-text guards; (8) Math PPTX behavior (tracing::warn + degraded plain run); (9) EC-007 interpolation-stays-Plain; (10) ADR-024, ADR-017, BC-5.02.002 cross-references. STORY-081 added to Stories traceability."
   - "v1.4.1 — F-P17-002 Math/HTML deferral codification: PC-4 Math clause corrected from aspirational 'Math → MathML <math>' to actual v1.0 behavior: Math → <code class=\"math\">{HTML-escaped LaTeX source}</code> as a degraded accessible-text fallback. Full MathML rendering explicitly deferred to STORY-045 (cited). EC-010 and canonical test vector updated to reference <code class=\"math\"> element (not <math>) as the v1.0 HTML output. No other PC-4 form changed — Footnote → <span role=\"note\"> confirmed correct (F-P17-002 Footnote half resolved by implementation in feature/STORY-081 at e5b1e92e)."
   - "v1.4.2 — F-P24-MED-001 full-form accuracy reconciliation (2026-06-10): corrected all per-variant per-surface postconditions to match actual v1.0 implementation confirmed by code audit. (1) PC-1 Footnote: was aspirational 'presenter note annotation registered; superscript reference number emitted'; corrected to actual: inner body content rendered inline, numbered-marker mechanism DEFERRED to STORY-085 F-010. (2) PC-1 Xref: was aspirational 'internal hyperlink to slide index or heading via rId'; corrected to actual: plain text run rendered identically to Plain (ooxml_runs.rs:340-345, same match arm). (3) PC-2 Footnote and Xref: corrected to match actual (same engine as PC-1). (4) PC-3 Math: was aspirational '<m:oMath> block'; corrected to actual: plain text run of latex source (document_body.rs:564). (5) PC-3 Footnote: was aspirational '<w:footnote>/<w:endnote>'; corrected to actual: collect_plain_text(children) as plain run (document_body.rs:568). (6) PC-3 Xref: was aspirational 'internal hyperlink to heading or figure'; corrected to actual: plain text run of target string (document_body.rs:571). (7) PC-5 Math: was aspirational 'vector path rendering per BC-1.10.003'; corrected to actual: SKIPPED — no spans produced (slide_pdf.rs:294-296). (8) PC-5 Footnote: was aspirational 'footnote reference number / page reference in tagged PDF'; corrected to actual: inner body content rendered inline as regular text spans with inherited font face (slide_pdf.rs:282-287). (9) PC-5 Xref: was aspirational 'page reference in tagged PDF'; corrected to actual: plain text span rendered identically to Plain (slide_pdf.rs:238-244, same match arm). (10) OBS-P24-004 fix: InlineDepthExceeded struct shape corrected from 2-field { source_slide_index, depth: 65 } to 3-field { source_slide_index, depth, max } per production error.rs:226-233; error code corrected from missing to E-LAY-005 (error.rs doc comment line 218)."
+  - "v1.4.3 — F-P25-MED-001 (LayoutWarning→EvalError type correction) + F-P25-LOW-001 (DOCX unsafe-scheme policy codified + FU-LINK-SCHEME-CONSISTENCY) (2026-06-10): (1) Slide-Level Title Constraint section, EC-011, and Canonical Test Vectors corrected from dead type LayoutWarning::InlineMarkupInTitle { slide_title, stripped_text } (2-field, layout stage) to live type EvalError::InlineMarkupInTitle { slide_title, stripped_text, span } (3-field, eval stage, E-EVL-015, ParseSeverity::Error). The LayoutWarning::InlineMarkupInTitle variant was REMOVED from slideforge-types; the live diagnostic is in slideforge-eval/src/error.rs:380. Strict-fatal / --warn-only semantics retained — they are now correctly implemented: strict mode (CompileOptions { strict: true }) → Error-severity gate triggers → build fails (non-zero exit, no output); --warn-only (strict: false) → gate skipped → build succeeds; PPTX plain title + title_inlines shadow for DOCX/PDF/HTML. (2) PC-3 DOCX Link row extended to codify unsafe-scheme behavior: InlineNode::Link with unsafe URL scheme → fatal ExportError::ValidationError (SEC-001 / CWE-601), build fails (document_body.rs:507-521). EC-013 extended with cross-surface inconsistency note: DOCX hard-errors while PPTX/HTML silently degrade — so an all-formats build with an unsafe-scheme link fails, driven by the DOCX exporter. New FU-LINK-SCHEME-CONSISTENCY open question registered for human/architect adjudication."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -177,7 +178,14 @@ final conversion step). This was hardened across the 16-pass STORY-081 adversari
 - Highlight → `<w:highlight w:val="yellow"/>` in `<w:rPr>` (ooxmlsdk typed builder,
   `HighlightColorValues::Yellow`)
 - Link → `<w:hyperlink r:id="...">` wrapping the display-text runs (runs receive the
-  `"Hyperlink"` character style; formatting inside link display text is preserved)
+  `"Hyperlink"` character style; formatting inside link display text is preserved).
+  **Unsafe URL scheme (e.g., `javascript:`, `data:`, or any scheme not in
+  `ALLOWED_LINK_SCHEMES`):** the DOCX exporter performs a defense-in-depth scheme
+  check at `document_body.rs:507-521` and returns a **fatal
+  `ExportError::ValidationError`** (error message cites `SEC-001 / CWE-601`).
+  The build exits non-zero; no DOCX output is produced for that build target.
+  Allowed schemes: `http`, `https`, `mailto`. This behavior is per-exporter
+  defense-in-depth — see EC-013 and the cross-surface inconsistency note below.
 - Math → plain text run of the LaTeX source string with no run properties (degraded
   fallback; `document_body.rs:564-566`). Full OMML `<m:oMath>` rendering is
   **DEFERRED to STORY-045**.
@@ -282,16 +290,20 @@ PPTX title placeholder fields (`<p:ph type="title"/>`) do not reliably support m
 inline formatting across all renderers (PowerPoint, Keynote, Google Slides). The layout
 engine enforces:
 
-1. If a `title` field is parsed with inline markup, the eval stage emits a
-   `LayoutWarning::InlineMarkupInTitle { slide_title, stripped_text }` warning.
+1. If a `title` field is parsed with inline markup, `eval_slide_node` in
+   `slideforge-eval` emits `EvalError::InlineMarkupInTitle { slide_title, stripped_text,
+   span }` (error code **E-EVL-015**, `ParseSeverity::Error`) into the diagnostic sink.
+   This is a 3-field struct. The dead `LayoutWarning::InlineMarkupInTitle` variant has
+   been REMOVED from `slideforge-types`; it never had a live callsite.
 2. PPTX output receives a plain-text title run (`<a:t>stripped_text</a:t>` — no
    `<a:rPr>` formatting on the title placeholder).
 3. For DOCX, PDF, and HTML output, a `title_inlines: Vec<InlineNode>` shadow field is
    produced by the eval stage and used by non-PPTX exporters to render the title with
    full inline structure.
-4. In **strict mode** (default), `LayoutWarning::InlineMarkupInTitle` is promoted to a
-   fatal error (build exits 1). In `--warn-only` mode, it is a warning and output is
-   produced with the PPTX-plain / non-PPTX-inline split.
+4. In **strict mode** (default, `CompileOptions { strict: true }`), the Error-severity
+   diagnostic fires the strict gate → build exits non-zero, no output is produced. In
+   **`--warn-only` mode** (`strict: false`), the strict gate is skipped → build succeeds;
+   PPTX receives the plain stripped title, non-PPTX exporters receive `title_inlines`.
 
 This is NOT a missing feature — it is the defined contract. Authors must either rewrite
 the title without markup, or accept the PPTX plain-text degradation under `--warn-only`.
@@ -444,12 +456,18 @@ must produce `LayoutError::InlineDepthExceeded`.
 | EC-008 | `"**bold using markdown"` (forbidden pattern) | No bold applied; literal `**bold using markdown` rendered as Plain text; lint warning |
 | EC-009 | `Link { text: vec![Plain("click")], url: "https://evil.com?a=1&b=<script>" }` rendered to HTML | `href` attribute value is HTML-attribute-escaped: `href="https://evil.com?a=1&amp;b=&lt;script&gt;"`. The unescaped raw URL is NEVER written directly into attribute position. Similarly, `Xref("my\"id")` produces `href="#my&quot;id"` — not `href="#my"id"`. |
 | EC-010 | `Math(MathNode { latex: "<b>not bold</b>" })` rendered to HTML | LaTeX source is HTML-content-escaped before being written as the text content of `<code class="math">`: `<code class="math">&lt;b&gt;not bold&lt;/b&gt;</code>`. An unescaped `<` would break the HTML parse tree. v1.0 renders `<code class="math">` (STORY-045 deferred MathML). |
-| EC-011 | `title: "**Bold Title**"` containing inline markup | Eval stage: `LayoutWarning::InlineMarkupInTitle` emitted; `FieldValue::Str("Bold Title")` for PPTX title placeholder; `title_inlines: vec![InlineNode::Bold([InlineNode::Plain("Bold Title")])]` shadow for DOCX/PDF/HTML. In strict mode: fatal error. In `--warn-only`: warning only. |
+| EC-011 | `title: "**Bold Title**"` containing inline markup | `eval_slide_node` emits `EvalError::InlineMarkupInTitle { slide_title: "**Bold Title**", stripped_text: "Bold Title", span }` (E-EVL-015, `ParseSeverity::Error`) into the diagnostic sink. PPTX receives `FieldValue::Str("Bold Title")` (plain stripped title); `title_inlines: vec![InlineNode::Bold([InlineNode::Plain("Bold Title")])]` shadow produced for DOCX/PDF/HTML. In strict mode (`strict: true`): Error-severity gate fires → build exits non-zero, no output. In `--warn-only` (`strict: false`): gate skipped → build succeeds; PPTX plain + non-PPTX inline split. |
 | EC-012 | `Link { text: vec![Plain("click "), Bold([Plain("here")]), Plain(" now")], url: "https://example.com" }` in PPTX notes | THREE runs produced (one per leaf), each with `hyperlink_rid = Some("rId3")`; the "here" run has `bold=true` AND `hyperlink_rid=Some("rId3")`; ONE External rel registered. Count-equality test (`ext_rel_count == hlinkclick_count`) would be `1 != 3` — use reference-set invariant HI-1 instead. |
-| EC-013 | `Link { url: "javascript:evil()", text: vec![Plain("x")] }` in PPTX | Unsafe URL scheme: no External relationship registered; no `<a:hlinkClick>` emitted; display text "x" rendered as plain run; `tracing::warn!` emitted. |
+| EC-013 | `Link { url: "javascript:evil()", text: vec![Plain("x")] }` — cross-surface unsafe-scheme handling | **Behavior differs per surface (cross-surface inconsistency — see FU-LINK-SCHEME-CONSISTENCY):** (a) PPTX: unsafe URL scheme → no External relationship registered; no `<a:hlinkClick>` emitted; display text "x" rendered as plain run; `tracing::warn!` emitted. Silent degrade — build succeeds. (b) DOCX: unsafe URL scheme → fatal `ExportError::ValidationError` (SEC-001 / CWE-601, `document_body.rs:507-521`); build exits non-zero; no DOCX output. Hard error. (c) HTML: unsafe URL scheme → `<span>` element (href dropped); `tracing::warn!` emitted. Silent degrade — build succeeds. **Consequence for multi-format builds:** an all-formats build (PPTX + DOCX + HTML) containing an unsafe-scheme Link FAILS, driven by the DOCX exporter's hard-error, even though PPTX and HTML would individually succeed. The decision to align or diverge these behaviors is tracked as FU-LINK-SCHEME-CONSISTENCY (see Open Questions). |
 | EC-014 | `Link { url: "https://example.com", text: vec![Link { url: "https://inner.com", text: vec![Plain("inner")] }] }` in PPTX | Outer URL registered once; inner URL NOT registered (F-040-P3-001 / HI-3). Inner display text runs inherit the outer rId. No orphan rel, no double-register. |
 | EC-015 | `{{ x }}` where `x = "**literal**"` in slide bullet | `InlineNode::Plain(Arc::from("**literal**"))` — NOT re-parsed as Bold. The resolved string is treated as plain text (Invariant 10 / DIR-077-002 §3). |
 | EC-016 | `InlineNode::Math` in PPTX slide body (inline math in a bullet) | `tracing::warn!` emitted; a plain-text OoxmlRun with the LaTeX source as text is produced (degraded path). Full math rendering via BC-1.10.003 is the correct path; this EC documents the defined degraded behavior for v1.0 InlineNode::Math in slide body context. |
+
+## Open Questions
+
+| ID | Question | Status |
+|----|----------|--------|
+| FU-LINK-SCHEME-CONSISTENCY | **Cross-surface unsafe-scheme policy alignment.** The DOCX exporter hard-errors on unsafe-scheme `InlineNode::Link` (fatal `ExportError::ValidationError`, SEC-001 / CWE-601), while PPTX silently degrades to a plain run + `tracing::warn!` and HTML silently degrades to a `<span>` + `tracing::warn!`. This means an all-formats build fails if any slide contains an unsafe-scheme Link (driven by DOCX), but per-format PPTX or HTML builds succeed. The design question — should all surfaces hard-error (defense-in-depth uniformity) or all silently degrade (author-friendliness) or keep the current split (DOCX security-strict, PPTX/HTML lenient) — is a security policy decision requiring human and/or architect adjudication. **Do NOT resolve this in a BC fix burst.** Escalate to the human/architect when the next relevant story or security review is scheduled. | open |
 
 ## Canonical Test Vectors
 
@@ -468,8 +486,8 @@ must produce `LayoutError::InlineDepthExceeded`.
 | `Link { text: vec![Plain("x")], url: "https://a.com?q=1&lang=<en>" }` → HTML | `<a href="https://a.com?q=1&amp;lang=&lt;en&gt;">x</a>` — `&` and `<` escaped in attribute | escaping-attribute |
 | `Math(MathNode { latex: "a < b & c > d" })` → HTML | v1.0: `<code class="math">a &lt; b &amp; c &gt; d</code>` — LaTeX source HTML-escaped as text content of `<code class="math">`. (Full MathML deferred to STORY-045.) | escaping-content |
 | `Xref("slide\"with-quote")` → HTML | `<a href="#slide&quot;with-quote">` — `"` escaped in attribute value | escaping-attribute |
-| slide with `title: "**Bold**"` → PPTX (strict mode) | `LayoutError` (promoted from `InlineMarkupInTitle` warning); build exits 1; no PPTX output | title-constraint-strict |
-| slide with `title: "**Bold**"` → DOCX (--warn-only) | `LayoutWarning::InlineMarkupInTitle` warning; DOCX title rendered as bold via `title_inlines` shadow field | title-constraint-warn-only |
+| slide with `title: "**Bold**"` → PPTX (strict mode) | `EvalError::InlineMarkupInTitle { slide_title: "**Bold**", stripped_text: "Bold", span }` (E-EVL-015) emitted at `ParseSeverity::Error`; strict gate fires; build exits non-zero; no output produced | title-constraint-strict |
+| slide with `title: "**Bold**"` → DOCX (--warn-only) | `EvalError::InlineMarkupInTitle` (E-EVL-015) emitted at `ParseSeverity::Error` but strict gate skipped (`strict: false`); build succeeds; DOCX title rendered as bold via `title_inlines` shadow field | title-constraint-warn-only |
 | `{{ x }}` where `x = "**markup**"` in bullet | `InlineNode::Plain(Arc::from("**markup**"))` — no re-parsing; literal asterisks in output | interpolation-stays-plain |
 
 ## Verification Properties
