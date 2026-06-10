@@ -872,3 +872,77 @@ fn test_fp25_high_001_warn_only_title_markup_succeeds() {
         slide_xml
     );
 }
+
+// ─── P31-MED-001: caption and description inline markup reaches exporters ─────
+
+/// STORY-081 P31-MED-001 — caption `**bold caption**` must produce PPTX `b="1"`
+/// run property. Pre-fix: `thread_fields_to_blocks` had no arm for `"caption"`,
+/// so `FieldValue::Inlines` was silently dropped — no `ContentBlock` emitted,
+/// no `<a:r>` in PPTX, no `b="1"`. Post-fix: arm added → inlines thread through.
+///
+/// Uses `story-081-caption-markup.sf` (image slide with `caption` as a defined
+/// known field, not `content` type where `caption` is not in `known_fields.rs`).
+#[test]
+fn test_p31_med_001_caption_bold_reaches_pptx_exporter() {
+    let brand = BrandTmpDir::new("s081_p31_caption_pptx");
+    let source = fixture_source("story-081-caption-markup.sf");
+    let opts = brand.build_options("pptx", false);
+
+    let output = slideforge::build(&source, &opts)
+        .expect("P31-MED-001: PPTX build of caption markup fixture must succeed");
+
+    // The fixture has 2 slides; slide 2 = "Caption Markup Slide" (1-indexed).
+    let mut archive = open_zip(&output.bytes, "p31-caption-pptx");
+    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide2.xml", "p31-caption-pptx");
+
+    // PPTX must carry b="1" for the bold span in the caption.
+    assert!(
+        slide_xml.contains("b=\"1\""),
+        "P31-MED-001: PPTX slide2.xml (caption slide) must contain b=\"1\" \
+         for **bold caption**. Got no b=\"1\" — caption FieldValue::Inlines \
+         was NOT threaded to the PPTX exporter.\n\
+         slide2.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+
+    // Must NOT contain literal ** characters.
+    assert!(
+        !slide_xml.contains("**"),
+        "P31-MED-001: PPTX slide2.xml (caption slide) must NOT contain '**' literals.\n\
+         slide2.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+}
+
+/// STORY-081 P31-MED-001 — caption `**bold caption**` must produce HTML `<strong>`
+/// element. Verifies the full pipeline: caption `FieldValue::Inlines` → layout
+/// `TextRun` frame → HTML exporter `<strong>` tag.
+#[test]
+fn test_p31_med_001_description_italic_reaches_html_exporter() {
+    let brand = BrandTmpDir::new("s081_p31_caption_html");
+    let source = fixture_source("story-081-caption-markup.sf");
+    let opts = brand.build_options("html", false);
+
+    let output = slideforge::build(&source, &opts)
+        .expect("P31-MED-001: HTML build of caption markup fixture must succeed");
+
+    let html = String::from_utf8_lossy(&output.bytes);
+
+    // HTML must contain <strong> for **bold caption** in the caption field.
+    assert!(
+        html.contains("<strong>"),
+        "P31-MED-001: HTML output must contain '<strong>' for **bold caption**. \
+         Got no <strong> — caption FieldValue::Inlines was NOT threaded to the \
+         HTML exporter.\n\
+         HTML (first 800 chars): {:.800}",
+        html
+    );
+
+    // Must NOT contain literal ** characters from the markup delimiters.
+    assert!(
+        !html.contains("**"),
+        "P31-MED-001: HTML output must NOT contain '**' literals in caption output.\n\
+         HTML (first 800 chars): {:.800}",
+        html
+    );
+}
