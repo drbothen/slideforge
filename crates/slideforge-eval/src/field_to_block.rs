@@ -168,7 +168,53 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             },
         }
 
-        // ── 4. Bullets ───────────────────────────────────────────────────────
+        // ── 4a. Caption ──────────────────────────────────────────────────────
+        // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
+        // STORY-081 P31-MED-001 fix: caption field was in INLINE_CONTENT_FIELDS so
+        // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
+        // had no match arm for it, silently dropping inline nodes before they reached exporters.
+        match slide.fields.get("caption") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+                slide.blocks.push(make_text_block_tagged_inlines(
+                    nodes.clone(),
+                    TextTag::Untagged,
+                ));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "caption")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Untagged));
+                }
+            },
+        }
+
+        // ── 4b. Description ──────────────────────────────────────────────────
+        // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
+        // STORY-081 P31-MED-001 fix: description field was in INLINE_CONTENT_FIELDS so
+        // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
+        // had no match arm for it, silently dropping inline nodes before they reached exporters.
+        match slide.fields.get("description") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+                slide.blocks.push(make_text_block_tagged_inlines(
+                    nodes.clone(),
+                    TextTag::Untagged,
+                ));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "description")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Untagged));
+                }
+            },
+        }
+
+        // ── 5. Bullets ───────────────────────────────────────────────────────
         match slide.fields.get("bullets") {
             Some(FieldValue::Literal(Value::List(items))) => {
                 let bullet_items: Vec<BulletItem> = items
@@ -852,5 +898,107 @@ mod tests {
             "item 2 must be Plain(\"plain item\"); got: {:?}",
             bullet_items[2].inlines[0]
         );
+    }
+
+    /// P31-MED-001: caption `FieldValue::Inlines` must reach `ContentBlock::Text` (Untagged).
+    /// Tests the new match arm added in STORY-081 fix-burst to prevent silent inline drop.
+    #[test]
+    fn test_p31_med_001_caption_inlines_produces_text_block() {
+        let mut slide = make_slide("content");
+        slide.fields.insert(
+            Arc::from("caption"),
+            FieldValue::Inlines(vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+                "bold caption",
+            ))])]),
+        );
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            1,
+            "caption FieldValue::Inlines must produce exactly 1 ContentBlock::Text"
+        );
+        let block = &deck.slides[0].blocks[0];
+        let ContentBlock::Text(text_block) = &block.content else {
+            panic!("expected ContentBlock::Text; got {:?}", block.content);
+        };
+        assert_eq!(
+            text_block.tag,
+            TextTag::Untagged,
+            "caption must use TextTag::Untagged"
+        );
+        assert!(
+            matches!(text_block.inlines[0], InlineNode::Bold(_)),
+            "first inline must be Bold; got {:?}",
+            text_block.inlines[0]
+        );
+    }
+
+    /// P31-MED-001: description `FieldValue::Inlines` must reach `ContentBlock::Text` (Untagged).
+    /// Tests the new match arm added in STORY-081 fix-burst to prevent silent inline drop.
+    #[test]
+    fn test_p31_med_001_description_inlines_produces_text_block() {
+        let mut slide = make_slide("content");
+        slide.fields.insert(
+            Arc::from("description"),
+            FieldValue::Inlines(vec![InlineNode::Italic(vec![InlineNode::Plain(
+                Arc::from("italic description"),
+            )])]),
+        );
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            1,
+            "description FieldValue::Inlines must produce exactly 1 ContentBlock::Text"
+        );
+        let block = &deck.slides[0].blocks[0];
+        let ContentBlock::Text(text_block) = &block.content else {
+            panic!("expected ContentBlock::Text; got {:?}", block.content);
+        };
+        assert_eq!(
+            text_block.tag,
+            TextTag::Untagged,
+            "description must use TextTag::Untagged"
+        );
+        assert!(
+            matches!(text_block.inlines[0], InlineNode::Italic(_)),
+            "first inline must be Italic; got {:?}",
+            text_block.inlines[0]
+        );
+    }
+
+    /// P31-MED-001: plain-string caption still reaches `ContentBlock::Text` (backwards compat).
+    #[test]
+    fn test_p31_med_001_caption_plain_str_produces_text_block() {
+        let mut slide = make_slide("content");
+        slide.fields.insert(
+            Arc::from("caption"),
+            FieldValue::Literal(Value::Str(Arc::from("plain caption text"))),
+        );
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(deck.slides[0].blocks.len(), 1);
+        assert!(matches!(
+            deck.slides[0].blocks[0].content,
+            ContentBlock::Text(_)
+        ));
+    }
+
+    /// P31-MED-001: plain-string description still reaches `ContentBlock::Text` (backwards compat).
+    #[test]
+    fn test_p31_med_001_description_plain_str_produces_text_block() {
+        let mut slide = make_slide("content");
+        slide.fields.insert(
+            Arc::from("description"),
+            FieldValue::Literal(Value::Str(Arc::from("plain description text"))),
+        );
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(deck.slides[0].blocks.len(), 1);
+        assert!(matches!(
+            deck.slides[0].blocks[0].content,
+            ContentBlock::Text(_)
+        ));
     }
 }
