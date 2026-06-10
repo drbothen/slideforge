@@ -255,11 +255,17 @@ pub fn render_inline_nodes_to_runs(
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 struct RunProps {
+    /// `b="1"` — accumulated from a `Bold` ancestor node.
     bold: bool,
+    /// `i="1"` — accumulated from an `Italic` ancestor node.
     italic: bool,
+    /// `baseline="{n}"` — +30 000 for Superscript, −25 000 for Subscript.
     baseline: Option<i32>,
+    /// `strike="sngStrike"` — accumulated from a `Strikethrough` ancestor.
     strike: bool,
+    /// `<a:highlight>` child element — accumulated from a `Highlight` ancestor.
     highlight: bool,
+    /// `<a:latin typeface="Courier New"/>` — set by `Code` leaf.
     code_font: bool,
     /// Set when inside a `Link`'s display-text recursion (INV-5: suppress
     /// nested resolver calls) or when inheriting an outer `Link`'s rId (INV-6).
@@ -267,6 +273,7 @@ struct RunProps {
 }
 
 impl RunProps {
+    /// Construct a `RunProps` with all formatting flags off and no hyperlink.
     fn new() -> Self {
         Self {
             bold: false,
@@ -279,6 +286,7 @@ impl RunProps {
         }
     }
 
+    /// Convert accumulated run properties and a text string into an [`OoxmlRun`].
     fn to_ooxml_run(&self, text: String) -> OoxmlRun {
         OoxmlRun {
             text,
@@ -320,6 +328,8 @@ fn render_nodes_recursive(
     Ok(())
 }
 
+/// Dispatch a single [`InlineNode`] to the appropriate run-building logic,
+/// updating `props` for formatting nodes and appending leaf runs to `runs`.
 fn render_node_recursive(
     node: &InlineNode,
     props: &RunProps,
