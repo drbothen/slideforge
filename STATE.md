@@ -30,11 +30,11 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (Pass 11 found+fixed HIGH(notes highlight attr→child) + MED(body per-form assertions) + LOW(font docstring); orchestrator validation caught+fixed EC-004 body-link hlinkClick (was unimplemented, masked by vacuous test); streak 0/3; new HEAD 5556aa75; NEXT adversary Pass 12 fresh). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (Pass 13 found+fixed 2 MED: F-P13-001 DOCX silently dropped formatting on hyperlinks; F-P13-002 missing combined-form assertions across PPTX/DOCX/HTML/PDF + e2e fixture extended; streak reset 0/3; new HEAD eec4be32; OPEN: Pass-14 must adjudicate PPTX nested-link hlinkClick parity — top-level-only scope vs defect; NEXT adversary Pass 14 fresh). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
-workspace_tests: "3770 pass / 20 skip / 0 fail (STORY-081 worktree HEAD 5556aa75; Pass-11 fix burst + orchestrator-caught EC-004 body-link hlinkClick implementation)"
+workspace_tests: "3782 pass / 20 skip / 0 fail (STORY-081 worktree HEAD eec4be32; Pass-13 fix burst: DOCX link-format-drop fixed + combined-form load-bearing assertions added across PPTX/DOCX/HTML/PDF + e2e fixture extended)"
 workspace_test_failures: 0
 ---
 
@@ -58,12 +58,12 @@ workspace_test_failures: 0
 Both branches are on origin (durable, machine-independent):
 
 - `origin/factory-artifacts` — all `.factory/` state, all 11 STORY-081 adversary pass reports + orchestrator-EC004 note, ADR-023. (Run `git -C .factory log -1` for current HEAD.)
-- `origin/feature/STORY-081` @ `5556aa75` — 16 STORY-081 implementation commits (5 from Pass-10+11 fix bursts: 0b2ce53e a:highlight, 49b1fc8e pdf font double-load, f7c26fba normalize deterministic, 34c128b2 notes highlight child + body assertions + font docstring, 5556aa75 EC-004 body Link hlinkClick); based on develop `cbebfd57`; MUST rebase onto develop `15838de1` at PR step.
+- `origin/feature/STORY-081` @ `eec4be32` — 17 STORY-081 implementation commits (6 from Pass-10+11+13 fix bursts: 0b2ce53e a:highlight, 49b1fc8e pdf font double-load, f7c26fba normalize deterministic, 34c128b2 notes highlight child + body assertions + font docstring, 5556aa75 EC-004 body Link hlinkClick, eec4be32 DOCX hyperlink-format fix + combined-form assertions + e2e extension); based on develop `cbebfd57`; MUST rebase onto develop `15838de1` at PR step.
 
 **Same-machine resume:** `.factory/` and `.worktrees/STORY-081/` worktrees already exist on disk.
 1. Run `vsdd-factory:factory-worktree-health`
-2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `5556aa75`
-3. Continue at NEXT ACTION: adversary Pass 12.
+2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `eec4be32`
+3. Continue at NEXT ACTION: adversary Pass 14 (fresh, adjudicate nested-link PPTX parity).
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
@@ -75,7 +75,7 @@ git rev-parse develop   # must equal origin/develop == 15838de1
 ```
 Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
-**Exact resume point:** Phase 3 / Wave 5 / STORY-081 adversary convergence at **streak 0/3** (Pass 11 RESET — HIGH notes highlight attr + orchestrator-caught EC-004 body-link unimplemented; all fixed). NEXT: adversary Pass 12 at HEAD `5556aa75` (sequential, LESSON-7; fresh context; no code change between passes) → Pass 13 → Pass 14 → 3/3 CONVERGED → demo-recorder per-AC → rebase onto develop `15838de1` → pr-manager 9-step. All pre-PR blockers RESOLVED.
+**Exact resume point:** Phase 3 / Wave 5 / STORY-081 adversary convergence at **streak 0/3** (Pass 13 RESET — 2 MED: DOCX hyperlink-format drop + missing combined-form assertions; all fixed at HEAD eec4be32). NEXT: adversary Pass 14 (fresh context, sequential LESSON-7) — MUST adjudicate PPTX nested-link hlinkClick parity (top-level-only scope vs cross-format defect) before advancing streak → 3/3 CONVERGED → demo-recorder per-AC → rebase onto develop `15838de1` → pr-manager 9-step. All pre-PR blockers RESOLVED.
 
 ---
 
@@ -84,17 +84,17 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `5556aa75` (Pass-11 fix burst + EC-004 body-link implementation — commits since c739d59c: 0b2ce53e (body a:highlight), 49b1fc8e (pdf font double-load), f7c26fba (normalize deterministic), 34c128b2 (notes a:highlight child + 3 body assertions + font docstring helper), 5556aa75 (EC-004 body Link hlinkClick implementation); tests 3770 pass)
-- **Adversary streak:** **0/3** — RESET by Pass 11 ADV-P11-HIGH-001 HIGH (notes path emitted invalid highlight="yellow" attribute; fixed + orchestrator-caught EC-004 body-link was unimplemented).
-- **Pass 11 findings (all REMEDIATED):**
-  - ADV-P11-HIGH-001[HIGH] — notes path `emit_run` emitted `highlight="yellow"` ATTRIBUTE on `<a:rPr>` (schema-invalid); REMEDIATED commit 34c128b2 (child element + Red-Gate test).
-  - ADV-P11-MED-001[MED] — body path missing distinguishing assertions for Code/Super/Sub/Link; REMEDIATED commits 34c128b2 + 5556aa75 (body assertions + EC-004 hlinkClick implementation).
-  - ADV-P11-LOW-001[LOW] — font.rs docstring overstated load invariant; REMEDIATED commit 34c128b2.
-  - OBS-P11-001[OBS] — dual OOXML run-generators (make_run typed vs DefaultInlineFormat raw-string); follow-up FU-PPTX-DUAL-RUN-GENERATOR registered.
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `eec4be32` (Pass-13 fix burst — commits since c739d59c: 0b2ce53e (body a:highlight), 49b1fc8e (pdf font double-load), f7c26fba (normalize deterministic), 34c128b2 (notes a:highlight child + 3 body assertions + font docstring helper), 5556aa75 (EC-004 body Link hlinkClick implementation), eec4be32 (DOCX hyperlink-format fix + combined-form assertions + e2e extension); tests 3782 pass)
+- **Adversary streak:** **0/3** — RESET by Pass 13 (F-P13-001 DOCX silently dropped inline formatting on hyperlinks; F-P13-002 missing combined-form assertions across all 4 exporters; both REMEDIATED at eec4be32). OPEN: Pass 14 must adjudicate PPTX nested-link hlinkClick parity (top-level-only scope vs cross-format defect).
+- **Pass 13 findings (all REMEDIATED):**
+  - F-P13-001[MED] — DOCX `apply_run_property` `other => other` arm silently dropped formatting on `WHyperlink`; REMEDIATED commit eec4be32 (WHyperlink arm iterates inner WR runs; apply_run_property FnOnce→Fn; Red-Gate tests for bold+italic wrapping link).
+  - F-P13-002[MED] — no distinguishing combined-form assertions on PPTX-body/DOCX/HTML/PDF; REMEDIATED commit eec4be32 (combined-form load-bearing assertions per exporter; e2e fixture extended with bold-link + nested bold-italic slides; 6 cross-exporter parity assertions).
+  - OBS-P13-001[OBS] — carries FU-PPTX-DUAL-RUN-GENERATOR (non-blocking).
+  - OBS-P13-002[OBS] — PDF Strikethrough/Highlight spec-compliant (not AC-004 required); non-blocking.
 - **Pre-PR blockers:** FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED. FU-CI-ARM64-TEST-FAILURE RESOLVED. Confirm arm64 CI green on STORY-081 PR.
 - **fontdb pin:** =0.23.0 direct pin retained; cargo deny PASS.
-- **Workspace tests at HEAD 5556aa75:** 3770 pass / 20 skip / 0 fail.
-- **NEXT ACTION:** Adversary Pass 12 (fresh context, HEAD 5556aa75, sequential LESSON-7). Need 3 consecutive strict-CLEAN to converge 3/3.
+- **Workspace tests at HEAD eec4be32:** 3782 pass / 20 skip / 0 fail.
+- **NEXT ACTION:** Adversary Pass 14 (fresh context, HEAD eec4be32, sequential LESSON-7) — MUST adjudicate PPTX nested-link hlinkClick parity question (see Pass-13 ORCHESTRATOR-FLAGGED). Need 3 consecutive strict-CLEAN to converge 3/3.
 
 ---
 
@@ -129,7 +129,8 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 - **FU-NOTES-HIGHLIGHT-ATTR** (RESOLVED — fixed IN STORY-081 commit 34c128b2; NOT deferred to STORY-040): notes-path `emit_run` now emits `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child element; `highlight="yellow"` attribute form eliminated; Red-Gate test confirms child present + attribute absent.
 - **FU-PPTX-DUAL-RUN-GENERATOR** [process-gap, follow-up story candidate, draft]: PPTX inline-markup has two independent OOXML run-generators (make_run typed ooxmlsdk vs DefaultInlineFormat raw-string). Already diverged on Highlight (ADV-P11-HIGH-001). Recommend unification (route notes through typed builder) OR cross-path equivalence test for all 8 InlineNode forms. Source OBS-P11-001. Target self-improvement epic.
 - **FU-088-BC10102-ANCHOR** (spec-steward; non-blocking): pre-existing BC-1.01.002 H1 title/anchor mismatch.
-- **FU-EXIT-GATE-DISTINGUISHING-OUTPUT** (process-improvement; source OBS-1 Pass-3 + OBS-P04-001 Pass-4 + OBS-P05-001 Pass-5 + ADV-P06-MED-001 Pass-6 + PROCESS-NOTE Pass-8 + ADV-P11-HIGH-001 Pass-11 + orchestrator EC-004 catch Pass-11 validation): Anti-pattern recurred 8th time. LESSON codification: "MED distinguishing-assertion findings must close with assertions that FAIL when the form's unique output is removed; presence-of-display-text is vacuous" (source orchestrator EC-004 catch). Exit-gate rule must verify (1) non-test caller consumes a dispatch fn's DISTINGUISHING output; (2) multi-span-same-line positional assertion; (3) when drawable font present but raw bytes absent, non-silent diagnostic; (4) BOTH measure path AND draw path select slots via THE SAME helper; (5) multi-exporter "rich rendering" closures MUST be verified PER EXPORTER. Target: lessons-codification / Standing Process Rules.
+- **FU-EXIT-GATE-DISTINGUISHING-OUTPUT** (process-improvement; source OBS-1 Pass-3 + OBS-P04-001 Pass-4 + OBS-P05-001 Pass-5 + ADV-P06-MED-001 Pass-6 + PROCESS-NOTE Pass-8 + ADV-P11-HIGH-001 Pass-11 + orchestrator EC-004 catch Pass-11 validation + F-P13-002 Pass-13): Anti-pattern recurred 9th time. LESSON codification: "MED distinguishing-assertion findings must close with assertions that FAIL when the form's unique output is removed; presence-of-display-text is vacuous; COMBINED-form cells (bold+italic, bold+link, nested) must have per-exporter assertions". Exit-gate rule must verify (1) non-test caller consumes a dispatch fn's DISTINGUISHING output; (2) multi-span-same-line positional assertion; (3) when drawable font present but raw bytes absent, non-silent diagnostic; (4) BOTH measure path AND draw path select slots via THE SAME helper; (5) multi-exporter "rich rendering" closures MUST be verified PER EXPORTER; (6) COMBINED-form compound nodes must have load-bearing assertions on EVERY exporter surface. Target: lessons-codification / Standing Process Rules.
+- **OPEN ADJUDICATION (Pass 14):** PPTX BODY path omits `<a:hlinkClick>` for NESTED (non-top-level) links (e.g. `Bold([Link])`) — `**[click](url)**` renders bold but NON-clickable in PPTX, while DOCX (post-F-P13-001) and HTML render it bold AND clickable. Implementer cites F-085-P6-001 "top-level-only" scope. Pass 14 adversary must adjudicate: spec-sanctioned limitation OR cross-format parity defect. Pending adversary ruling — NOT yet a registered follow-up.
 
 ---
 
@@ -137,8 +138,8 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5556aa75`. Pass 11 RESET (ADV-P11-HIGH-001 HIGH + orchestrator-caught EC-004 body-link unimplemented); streak 0/3. Adversary Pass 12 NEXT. Open PRs: 0.
-- Workspace: 3770 pass / 20 skip / 0 fail (STORY-081 worktree at HEAD 5556aa75; cargo deny PASS; cold_budget PERMANENTLY FIXED; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm on STORY-081 PR arm64 CI).
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `eec4be32`. Pass 13 RESET (F-P13-001 DOCX hyperlink-format drop + F-P13-002 missing combined-form assertions; all fixed); streak 0/3. Adversary Pass 14 NEXT (fresh, must adjudicate PPTX nested-link parity). Open PRs: 0.
+- Workspace: 3782 pass / 20 skip / 0 fail (STORY-081 worktree at HEAD eec4be32; cargo deny PASS; cold_budget PERMANENTLY FIXED; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm on STORY-081 PR arm64 CI).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -151,7 +152,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — Pass 11 RESET (ADV-P11-HIGH-001 HIGH + orchestrator EC-004 body-link unimplemented + vacuous test); HEAD `5556aa75`; streak **0/3**. All P11 findings REMEDIATED (commits 34c128b2 + 5556aa75). Pre-PR blockers RESOLVED. NEXT: adversary Pass 12 (fresh context, sequential LESSON-7; HEAD 5556aa75). Need 3 consecutive strict-CLEAN to converge 3/3. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — Pass 13 RESET (F-P13-001 DOCX hyperlink-format drop + F-P13-002 missing combined-form assertions); HEAD `eec4be32`; streak **0/3**. All P13 findings REMEDIATED (commit eec4be32). Pre-PR blockers RESOLVED. NEXT: adversary Pass 14 (fresh context, sequential LESSON-7; HEAD eec4be32) — MUST adjudicate PPTX nested-link hlinkClick parity question (top-level-only vs cross-format defect). Need 3 consecutive strict-CLEAN to converge 3/3. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -184,18 +185,18 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 11 RESET (notes highlight attr + EC-004 body-link unimplemented fixed) — streak 0/3. 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 13 RESET (DOCX hyperlink-format drop + missing combined-form assertions; both fixed) — streak 0/3. 1 worktree active. 12 stories remain.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-09 |
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5556aa75`. |
-| **STORY-081 state** | HEAD `5556aa75`; adversary **0/3** (RESET by Pass 11 — HIGH notes highlight attr, MED body per-form assertions, LOW font docstring; orchestrator caught EC-004 body-link hlinkClick was unimplemented + masked by vacuous test). Fix commits since c739d59c: 0b2ce53e (body a:highlight), 49b1fc8e (pdf font double-load), f7c26fba (normalize deterministic), 34c128b2 (notes highlight child + 3 body assertions + font docstring), 5556aa75 (EC-004 body Link hlinkClick). All pre-PR blockers RESOLVED. |
-| **Workspace tests** | 3770 pass / 20 skip / 0 fail (HEAD 5556aa75; cargo deny PASS; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 on STORY-081 PR) |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `eec4be32`. |
+| **STORY-081 state** | HEAD `eec4be32`; adversary **0/3** (RESET by Pass 13 — F-P13-001 DOCX silently dropped inline formatting on hyperlinks, F-P13-002 missing combined-form assertions across all 4 exporters). Fix commits since c739d59c: 0b2ce53e, 49b1fc8e, f7c26fba, 34c128b2, 5556aa75, eec4be32 (DOCX hyperlink-format fix + combined-form assertions + e2e extension). All pre-PR blockers RESOLVED. OPEN: Pass-14 must adjudicate PPTX nested-link hlinkClick parity. |
+| **Workspace tests** | 3782 pass / 20 skip / 0 fail (HEAD eec4be32; cargo deny PASS; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 on STORY-081 PR) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 Pass 11 RESET; streak 0/3; HEAD 5556aa75. NEXT: adversary Pass 12 (fresh context, sequential LESSON-7; HEAD 5556aa75 — no code change between passes). Need 3 consecutive strict-CLEAN for 3/3 convergence. Pre-PR blockers CLEARED. After 3/3: demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. Confirm arm64 CI green on STORY-081 PR (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 Pass 13 RESET; streak 0/3; HEAD eec4be32. NEXT: adversary Pass 14 (fresh context, sequential LESSON-7) — MUST adjudicate PPTX nested-link hlinkClick parity (top-level-only scope vs cross-format defect) before advancing streak. Need 3 consecutive strict-CLEAN for 3/3 convergence. Pre-PR blockers CLEARED. After 3/3: demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. Confirm arm64 CI green on STORY-081 PR (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -246,6 +247,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-081-PASS13 | Pass 13 NOT CLEAN — fresh re-derivation at HEAD 5556aa75, COMBINED/COMPOUND-form axis. F-P13-001[MED]: DOCX `apply_run_property` `other => other` arm silently passed `WHyperlink` unchanged — `<w:b/>` never applied for `Bold([Link])`; PPTX/HTML/PDF all preserved bold-on-link; DOCX lone divergent exporter. REMEDIATED commit eec4be32 (WHyperlink arm iterates inner WR runs; FnOnce→Fn; Red-Gate tests bold+italic wrapping link). F-P13-002[MED]: every combined cell (bold+italic, bold+link, nested) untested on 4 STORY-081 exporter surfaces — gate gap hid F-P13-001. REMEDIATED commit eec4be32 (combined-form load-bearing assertions per exporter; e2e fixture extended with slides 3+4, 6 cross-exporter parity assertions). ORCHESTRATOR-FLAGGED: PPTX BODY omits `<a:hlinkClick>` for nested links (`Bold([Link])`) — bold+NON-clickable vs DOCX/HTML bold+clickable. Pass 14 must adjudicate top-level-only scope vs cross-format defect. Streak RESET 0/3. New HEAD eec4be32; tests 3782 pass. NEXT: adversary Pass 14 fresh, with nested-link parity adjudication. |
 | 2026-06-09 | STORY-081-PASS11 | Pass 11 NOT CLEAN — fresh re-derivation at HEAD f7c26fba. ADV-P11-HIGH-001: notes `emit_run` emitted `highlight="yellow"` ATTRIBUTE on `<a:rPr>` (schema-invalid; TD-VSDD-060 sibling-sweep failure of Pass-10 body fix); REMEDIATED commit 34c128b2 (child element + Red-Gate test). ADV-P11-MED-001: body path missing distinguishing assertions for Code/Super/Sub/Link; REMEDIATED commits 34c128b2 + 5556aa75. ADV-P11-LOW-001: font.rs docstring overstated load invariant; REMEDIATED commit 34c128b2. ORCHESTRATOR VALIDATION CATCH: during post-fix MED-001 validation, body Link `make_run` had `let _ = url` (URL dropped), `add_external_hyperlink` notes-only; NO `<a:hlinkClick>` ever emitted for body links — EC-004 violation masked by vacuous `test_adv_p11_med_001_body_path_link_display_text_present` (green while feature absent; TD-VSDD-059). Implemented EC-004 body-link hlinkClick (commit 5556aa75): hlink_map pre-computed in `build_slide_parts`, safe-scheme guard, threaded to `make_run`; 3 load-bearing tests. FU-NOTES-HIGHLIGHT-ATTR RESOLVED (fixed IN STORY-081, not deferred). FU-PPTX-DUAL-RUN-GENERATOR registered. Streak RESET 0/3. New HEAD 5556aa75; tests 3770 pass. NEXT: adversary Pass 12 (fresh context). |
 | 2026-06-09 | STORY-081-PASS10 | Pass 10 NOT CLEAN — fresh PPTX Highlight seam examination found ADV-P10-HIGH-001 (HIGH): body `InlineNode::Highlight` emitted `<a:solidFill>` (glyph recolor → yellow text, illegible) instead of `<a:highlight>` child element (background highlight). False premise in 4 code comments (ooxmlsdk =0.6.1 does expose `a_highlight` on RunProperties). No prior pass exercised this seam; zero distinguishing tests. DOCX uses `<w:highlight>`, HTML uses `<mark>` — only PPTX diverged (TD-VSDD-060). Streak RESET 0/3. Fix burst: 0b2ce53e (a:highlight correct; load-bearing test asserts presence + solidFill absent), 49b1fc8e (pdf font double-load defect fixed; cold_budget deterministic), f7c26fba (normalize_under_budget deterministic). FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE + FU-CI-ARM64-TEST-FAILURE both RESOLVED. New HEAD f7c26fba; tests 3764 pass. NEXT: adversary Pass 11 (fresh context). |
 | 2026-06-09 | STORY-081-PASS9 | Pass 9 CLEAN (strict + PR-merge); streak 1/3. ADV-P08-HIGH-001 CONFIRMED closed (load-bearing): `draw_frame` now takes `title_inlines_override: Option<&[InlineNode]>`; `FrameContent::Title` arm renders richly via `slide_to_krilla_runs+draw_inline_spans(..,36.0)` when inlines present; all 4 call-sites thread `title_inlines_nodes.as_deref()`; load-bearing test `test_BC_3_02_002_adv_p08_high001_pdf_title_bold_uses_distinct_font_resource` asserts both Tuffy(bold)+LatinModernMath-Regular. Fresh re-derivation of every seam (eval/layout/PPTX/DOCX/HTML/PDF × body/title/subtitle/caption/description × all-8-forms+Math+nested) found NO new gap. Both body-span axis (P2-P6) and title-leg axis (P8) structurally eliminated + re-confirmed sound. OBS-P09-001 (cold_budget/double load_system_fonts) out-of-scope, non-blocking for streak but pre-PR blocker intact. 2 more consecutive strict-CLEAN passes required to converge 3/3. HEAD c739d59c; tests 3762 pass. |
