@@ -918,7 +918,7 @@ fn test_p31_med_001_caption_bold_reaches_pptx_exporter() {
 /// element. Verifies the full pipeline: caption `FieldValue::Inlines` → layout
 /// `TextRun` frame → HTML exporter `<strong>` tag.
 #[test]
-fn test_p31_med_001_description_italic_reaches_html_exporter() {
+fn test_p31_med_001_caption_bold_reaches_html_exporter() {
     let brand = BrandTmpDir::new("s081_p31_caption_html");
     let source = fixture_source("story-081-caption-markup.sf");
     let opts = brand.build_options("html", false);
