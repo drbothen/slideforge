@@ -447,7 +447,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.01.001 | STORY-003 | Full |
 | BC-3.01.002 | STORY-003 | Full |
 | BC-3.01.003 | STORY-003 | Full |
-| BC-3.02.002 | STORY-027, STORY-077 | Full (auto-generated sections: STORY-027; manually authored section IR extension + register routing: STORY-077) |
+| BC-3.02.002 | STORY-027, STORY-077 | Full (auto-generated sections: STORY-027; manually authored section IR extension + register routing: STORY-077) — STORY-081 re-anchored to BC-3.05.001 v1.4.0 (human ruling 2026-06-09; slide-level markup belongs to inline-formatting BC, not section-block BC) |
 | BC-3.02.001 | STORY-027 | Full |
 | BC-3.03.001 | STORY-016 | Full |
 | BC-3.03.002 | STORY-016 | Full |
@@ -455,7 +455,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.03.004 | STORY-016 | Full |
 | BC-3.04.001 | STORY-028 | Full |
 | BC-3.04.002 | STORY-009 | Full |
-| BC-3.05.001 | STORY-028 | Full |
+| BC-3.05.001 | STORY-028, STORY-081 | Full (original rich inline formatting: STORY-028; slide-level inline markup re-anchored from BC-3.02.002: STORY-081, per human ruling 2026-06-09; BC-3.05.001 amended to v1.4.0 with slide-level field scope + per-exporter matrix + HI-1..HI-5 hyperlink invariants) |
 | BC-4.01.001 | STORY-037 | Full |
 | BC-4.01.002 | STORY-052 | Full |
 | BC-4.01.003 | STORY-040 (Half A: speaker notes + master), STORY-082 (Half B: sectionLst) | Full — human-authorized scope split 2026-06-04 |

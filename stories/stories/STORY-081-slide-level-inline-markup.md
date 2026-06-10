@@ -11,7 +11,7 @@ tdd_mode: strict
 status: draft
 target_module: slideforge-eval, slideforge-layout, slideforge-pptx, slideforge-docx, slideforge-pdf, slideforge-html
 subsystems: [SS-01, SS-02, SS-03, SS-04, SS-05, SS-06, SS-07, SS-08]
-behavioral_contracts: [BC-3.02.002]
+behavioral_contracts: [BC-3.05.001]
 verification_properties: []
 nfr_refs: [NFR-021, NFR-022, NFR-023, NFR-024]
 depends_on:
@@ -23,10 +23,12 @@ depends_on:
   - STORY-046
 blocks: []
 estimated_days: 6
-spec_version: "1.3"
-# BC status: BC-3.02.002 postcondition 8 covers the observable-consequence clause (bold renders as bold
-# in ALL output formats). Product-owner is amending BC-3.02.002 to PC8 v1.5 wording per DIR-077-002 §9.1
-# (parallel burst). This story MUST NOT be marked ready until that amendment lands and BC version >= 1.5.
+spec_version: "1.4"
+# BC status: STORY-081 is anchored to BC-3.05.001 (All 12 Inline Format Types Render to Correct Output
+# per Format) — slide-level inline markup rendering across all output surfaces. Ready requires
+# BC-3.05.001 >= v1.4.0 (satisfied: PO amended BC-3.05.001 to v1.4.0 on 2026-06-09 adding slide-level
+# field scope, per-exporter PCs, Hyperlink Invariants, and EC-011..EC-016). The obsolete BC-3.02.002
+# v1.5 gate no longer applies; BC-3.02.002 carries a cross-ref to BC-3.05.001 for slide-level scope.
 ---
 
 # STORY-081: Slide-Level Inline Markup — eval + layout + all-exporter structural formatting
@@ -161,20 +163,21 @@ The warning is non-fatal in `--warn-only` mode and fatal in strict mode (the def
 
 ## Behavioral Contracts
 
-| BC | Title | Covered ACs |
-|----|-------|-------------|
-| BC-3.02.002 | Manually Authored Section Blocks appear in DOCX/PDF | AC-001 through AC-005 |
+| BC | Title | Covered ACs | BC Clauses |
+|----|-------|-------------|------------|
+| BC-3.05.001 | All 12 Inline Format Types Render to Correct Output per Format | AC-001 through AC-006 | PC-1 (PPTX body), PC-2 (PPTX notes), PC-3 (DOCX), PC-4 (HTML), PC-5 (PDF), Precondition 5 (eval), Slide-Level Title Constraint (AC-006), HI-1..HI-5 (Link/hyperlink ACs), Invariant 9 (unified engine), Invariant 10 / EC-015 (interpolation-stays-Plain), EC-011 (title constraint), EC-016 (InlineNode::Math degraded path) |
 
-Note: BC-3.02.002 postcondition 8 ("bold text within a section sub-block renders as bold
-in DOCX/PDF output — not as literal asterisks") is amended by the product-owner
-(DIR-077-002 §9.1) to explicitly cover slide-level fields too: "bold text in slide bullets
-and body renders as bold in ALL output formats (PPTX, DOCX, PDF, HTML) — not as literal
-asterisks." This story is the implementation of that amended clause for slide-level fields.
+Note: BC-3.05.001 v1.4.0 (PO amendment 2026-06-09) added explicit slide-level field scope
+(title/subtitle/body/bullets/caption/description), per-exporter postconditions (PC-1 through
+PC-5), Hyperlink Invariants HI-1..HI-5, and EC-011..EC-016. STORY-081 is the implementation
+of that scope. BC-3.02.002 carries a cross-ref to BC-3.05.001 for slide-level inline markup
+and is no longer an anchor for this story (BC-3.02.002 PC8 scope boundary EXCLUDES
+slide-level fields and its v1.5 deferral note was superseded by the re-anchor ruling).
 
 ## Acceptance Criteria
 
 ### AC-001: Eval stage converts slide bullet inline markup to FieldValue::Inlines
-(traces to BC-3.02.002 postcondition 8 — slide-level inline-structure preservation in evaluator)
+(traces to BC-3.05.001 precondition 5 — eval_slide_node produces FieldValue::Inlines for slide-level fields)
 
 **SCOPE BOUNDARY:** This AC covers slide field values only (bullets, body, caption,
 description, subtitle). Section sub-blocks are covered by STORY-077 AC-002.
@@ -194,7 +197,7 @@ A unit test drives the full `eval_slide_node` path (not a hand-built InlineNode 
 asserts the field value variant is `FieldValue::Inlines` containing the correct nodes.
 
 ### AC-002: PPTX exporter renders InlineNode::Bold as OOXML bold run
-(traces to BC-3.02.002 postcondition 8 — observable consequence: bold renders as bold in PPTX)
+(traces to BC-3.05.001 PC-1 — PPTX slide body: Bold → `<a:rPr b="1"/>` before `<a:t>`)
 
 A slide with a bullet containing `InlineNode::Bold([InlineNode::Plain(Arc::from("bold text"))])`
 produces PPTX XML with:
@@ -209,7 +212,7 @@ structure. The test uses a real PPTX ZIP output (not a mock), verifying the OOXM
 is correct per the OOXML specification (element ordering is schema-significant per CLAUDE.md).
 
 ### AC-003: DOCX exporter renders all 8 inline markup forms structurally
-(traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in DOCX runs)
+(traces to BC-3.05.001 PC-3 — DOCX: Bold→`<w:b/>`, Italic→`<w:i/>`, Code→`<w:rStyle w:val="CodeSpan"/>`, Highlight→`<w:highlight w:val="yellow"/>`, etc.)
 
 A slide body containing all 8 inline markup forms (Bold, Italic, Code, Link, Superscript,
 Subscript, Strikethrough, Highlight) produces DOCX XML with the correct OOXML run
@@ -221,7 +224,7 @@ For `InlineNode::Highlight`: ooxmlsdk `=0.6.1` provides typed builders for `w:hi
 in WordprocessingML. Use the typed API, not raw XML. Snapshot test on the DOCX XML.
 `InlineNode::Plain` nodes produce plain `<w:r>` runs without formatting overrides.
 
-### AC-004: PDF exporter renders Bold/Italic/Code via font switching (traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in PDF)
+### AC-004: PDF exporter renders Bold/Italic/Code via font switching (traces to BC-3.05.001 PC-5 — PDF: Bold→ResolvedFontSet.bold face, Italic→ResolvedFontSet.italic face, Super/Sub→font_size*0.583 + baseline shift)
 
 A slide body containing `InlineNode::Bold` and `InlineNode::Italic` nodes produces
 PDF output where the bold text is rendered with a distinct font face from the plain text.
@@ -251,19 +254,21 @@ fixture OTF byte buffers (`test-regular.otf`, `test-bold.otf` in
 both fixture PostScript font names appear in the uncompressed PDF bytes — confirming that
 two distinct font resources were embedded (C2-NEW distinctness assertion).
 
-**PASS condition for Superscript/Subscript (size + position, BC-3.02.002 PC8):**
+**PASS condition for Superscript/Subscript (size + position, BC-3.05.001 PC-5):**
 A unit test constructs a slide with a superscript span (parent `font_size = 12.0`) and
 asserts the draw_text call uses `font_size = 12.0 * 0.583 ≈ 6.996` (SMALLER than the
 parent — NOT the same size) and `baseline_y = parent_baseline - (12.0 * 0.333) ≈
 parent_baseline - 3.996` (RAISED above parent baseline). A matching test for subscript
 asserts `font_size ≈ 6.996` (smaller) and `baseline_y = parent_baseline + 3.996` (LOWERED).
-This directly validates BC-3.02.002 PC8: "super appears raised and smaller, sub appears
-lowered and smaller." Shipping super/sub at full parent font size would fail this PASS condition.
+This directly validates BC-3.05.001 PC-5: Superscript at `font_size * 0.583` with
+`baseline_y - (font_size * 0.333)` (raised, smaller); Subscript at `font_size * 0.583`
+with `baseline_y + (font_size * 0.333)` (lowered, smaller). Shipping super/sub at full
+parent font size would fail this PASS condition.
 
 A PDF snapshot fixture test asserts structural equivalence. (per export-architecture v1.2 + ADR-023)
 
 ### AC-005: HTML exporter renders all 8 inline markup forms as semantic HTML elements
-(traces to BC-3.02.002 postcondition 8 — observable consequence: inline markup in HTML/preview)
+(traces to BC-3.05.001 PC-4 — HTML: Bold→`<strong>`, Italic→`<em>`, Code→`<code>`, Link→`<a href>`, Super→`<sup>`, Sub→`<sub>`, Del→`<del>`, Highlight→`<mark>`; HTML escaping mandatory per PC-4 escaping rule)
 
 A slide body containing all 8 inline markup forms produces HTML with:
 `<strong>` (Bold), `<em>` (Italic), `<code>` (Code), `<a href="...">` (Link),
@@ -273,7 +278,7 @@ passes (inline semantic elements are WCAG AA neutral; `<a>` elements must have a
 names satisfied by their text content).
 
 ### AC-006: PPTX title with inline markup triggers layout warning and strips to plain text
-(traces to BC-3.02.002 postcondition 8 — PPTX single-run constraint enforced by layout engine)
+(traces to BC-3.05.001 Slide-Level Title Constraint / EC-011 — LayoutWarning::InlineMarkupInTitle; PPTX plain-text title run; title_inlines shadow for DOCX/PDF/HTML; fatal in strict mode)
 
 A slide with `title: "**Bold Title**"` produces:
 1. A `LayoutWarning::InlineMarkupInTitle` warning in the diagnostic sink.
@@ -305,7 +310,7 @@ Architecture section files:
 | Component | Estimated Tokens |
 |-----------|-----------------|
 | This story spec | ~4,500 |
-| BC-3.02.002 (v1.5, amended) | ~1,800 |
+| BC-3.05.001 (v1.4.0) | ~2,200 |
 | DIR-077-002 (inline-markup directive, §3 mapping table) | ~2,000 |
 | STORY-077 context (chunks_to_inline_nodes function) | ~2,000 |
 | `slideforge-eval/src/eval.rs` (eval_slide_node context) | ~3,000 |
@@ -587,8 +592,12 @@ snapshot/visual regression gating).
   MANDATORY before v1.0 to close the inconsistency").
 - **STORY-077** — delivers the inline-markup parser (`TemplateChunk` extension +
   `chunks_to_inline_nodes`). This story depends on STORY-077 and reuses its infrastructure.
-- **BC-3.02.002 v1.5** (PO amendment per DIR-077-002 §9.1, in-progress) — amended PC8
-  covers slide-level bold rendering in all output formats.
+- **BC-3.05.001 v1.4.0** (PO amendment 2026-06-09, per human re-anchor ruling) — primary
+  anchor for slide-level inline markup rendering. Covers: slide-level field scope
+  (title/subtitle/body/bullets/caption/description), per-exporter postconditions PC-1 through
+  PC-5, Hyperlink Invariants HI-1..HI-5, Invariants 9-10, EC-011..EC-016. BC-3.02.002 PC8
+  scope boundary EXCLUDES slide-level fields; BC-3.02.002 now carries a cross-ref to
+  BC-3.05.001 for slide-level scope.
 - **ADR-013** — comemo Hash compatibility; `InlineNode` already derives `Hash + Eq + Clone`.
 - **ADR-023** (`.factory/specs/architecture/adr/ADR-023-pdf-styled-font-face-resolution.md`) —
   PDF styled font-face resolution via `fontdb` metadata-aware lookup. Adopted 2026-06-09.
@@ -609,3 +618,4 @@ snapshot/visual regression gating).
 | 1.1 | 2026-06-07 | story-writer | Wave-5 remove-uncertainty propagation: fixed krilla mislabel — krilla=0.6.0 is pinned in slideforge-pdf/Cargo.toml (NOT workspace; per export-architecture v1.2); updated AC-004, Subsystem Anchor SS-06, Summary PDF description, and Phase-5 tasks to reflect correct krilla 0.6.0 API: bold/italic via separate Font::new(data,index) faces (no set_bold/set_italic toggle), super/subscript via KrillaGlyph.y_offset in Surface::draw_glyphs (no text-rise setter); updated AC-003 and Phase-4 DOCX tasks to use ooxmlsdk=0.6.1 typed builders for w:rPr; updated EC-008 PPTX highlight to typed-builder approach; removed axum Library table row (slideforge-html uses minijinja/usvg, not axum; axum belongs to STORY-047 only); cited export-architecture v1.2 throughout. |
 | 1.2 | 2026-06-09 | story-writer | Mechanism correction per ADR-023 (approved 2026-06-09): replaced non-existent BrandFonts field references (fonts.bold_data, fonts.italic_data, fonts.mono_data) with the ADR-023 ResolvedFontSet / fontdb =0.23.0 metadata-aware resolution approach throughout — Subsystem Anchor SS-06, Summary PDF bullet, AC-004 mechanism text, Phase-5 Tasks, Previous Story Intelligence (STORY-043 lesson), Architecture Compliance Rule 1, Library table (added fontdb row), References (added ADR-023). Observable AC-004 contract UNCHANGED: bold renders in a distinct bold face, code in monospace, super/sub offset in output PDF. No BC change. |
 | 1.3 | 2026-06-09 | story-writer | ADR-023 amendment (2026-06-09 architect ruling): super/subscript mechanism changed from `Surface::draw_glyphs` + `KrillaGlyph.y_offset` (unimplementable — `naive_shape` is `pub(crate)` in krilla 0.6.0) to `surface.draw_text()` with `font_size * 0.583` (SUPER_SUB_SCALE) and `baseline_y ± (font_size * 0.333)` baseline shift. Updated: Subsystem Anchor SS-06, Summary PDF dispatch bullet, AC-004 mechanism bullet + added explicit PASS condition asserting reduced size (not just offset), Phase-5 Tasks draw_frame dispatch list (split into separate Superscript/Subscript bullets with module-level constants), Library table krilla row, Previous Story Intelligence STORY-043 lesson. Observable contract BC-3.02.002 PC8 UNCHANGED: super appears raised+smaller, sub lowered+smaller, bold/italic/mono use distinct faces. No BC change. |
+| 1.4 | 2026-06-09 | story-writer | BC re-anchor per human (senior architect) ruling 2026-06-09: replaced BC-3.02.002 with BC-3.05.001 throughout. Frontmatter `behavioral_contracts:` updated from [BC-3.02.002] to [BC-3.05.001]. Frontmatter readiness-gate comment updated to reflect BC-3.05.001 >= v1.4.0 (satisfied). Body "Behavioral Contracts" table replaced with BC-3.05.001 row covering all ACs and clause mapping. AC-001 traces-to updated to BC-3.05.001 precondition 5. AC-002 traces-to updated to BC-3.05.001 PC-1. AC-003 traces-to updated to BC-3.05.001 PC-3. AC-004 traces-to updated to BC-3.05.001 PC-5; PASS condition note re-pointed from "BC-3.02.002 PC8" to "BC-3.05.001 PC-5". AC-005 traces-to updated to BC-3.05.001 PC-4. AC-006 traces-to updated to BC-3.05.001 Slide-Level Title Constraint / EC-011. Token Budget table updated to reference BC-3.05.001 v1.4.0. References section: BC-3.02.002 v1.5 entry replaced with BC-3.05.001 v1.4.0 entry. All AC behaviors and implementation scope are UNCHANGED — only the BC traceability mapping changed. |

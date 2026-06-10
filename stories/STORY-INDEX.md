@@ -162,7 +162,7 @@ stories_merged: 68
 | [STORY-074](stories/STORY-074-brand-em-sizing.md) | EPIC-07 | Brand-aware Em conversion (font_size_emu) | BC-3.04.001 | P2 | 3 | strict | merged |
 | [STORY-079](stories/STORY-079-diagrams-svg-dos-hardening.md) | EPIC-12 | slideforge-diagrams: SVG DoS hardening (byte-size cap + nesting-depth guard) | BC-1.12.003 | P2 | 3 | strict | merged |
 | [STORY-080](stories/STORY-080-deflake-cross-platform-tests.md) | EPIC-19 | Test reliability: de-flake http_4xx_not_retried + cold_budget | BC-1.03.002 | P2 | 3 | strict | merged |
-| [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.02.002 | P0 | 13 | strict | in-progress |
+| [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.05.001 | P0 | 13 | strict | in-progress |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | in-progress |
 | [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | in-progress |
 
@@ -338,7 +338,7 @@ _STORY-090 created 2026-06-08 per S-7.02 cycle-closing checklist (PROC-GAP-PIPEL
 | Metric | Count | Status |
 |--------|-------|--------|
 | Total BCs | 117 | — |
-| BCs covered by at least one story | 117 | PASS — 100% (BC-1.16.001 covered by STORY-086; BC-1.17.001 covered by STORY-087; BC-1.17.002 covered by STORY-087; BC-1.17.003 covered by STORY-087; BC-1.18.001 covered by STORY-089; BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
+| BCs covered by at least one story | 117 | PASS — 100% (BC-1.16.001 covered by STORY-086; BC-1.17.001 covered by STORY-087; BC-1.17.002 covered by STORY-087; BC-1.17.003 covered by STORY-087; BC-1.18.001 covered by STORY-089; BC-3.02.002 covered by STORY-027 + STORY-077 + STORY-078; BC-3.05.001 covered by STORY-028 + STORY-081; BC-1.14.003 covered by STORY-035 + STORY-077 + STORY-082; BC-1.12.003 covered by STORY-034 + STORY-079; BC-1.03.002 covered by STORY-019 + STORY-080; BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082) |
 | Orphan BCs (no story) | 0 | PASS |
 | Total VPs | 15 | — |
 | VPs covered | 15 | PASS — 100% |

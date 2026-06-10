@@ -30,7 +30,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (Pass 16 found M1/M2/L1 (notes drops link-text formatting + weak parity test); HUMAN AUTHORIZED root-cause fix → ADR-024 PPTX inline-run generator UNIFICATION implemented (HEAD e5b1e92e); FU-PPTX-DUAL-RUN-GENERATOR RESOLVED by ADR-024; BC-5.02.002→v1.5; streak 0/3; OPEN: BC-3.02.002 anchoring (slide-level markup anchored to section-block BC) pending human adjudication; NEXT adversary Pass 17 after anchor resolved). CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (BC ANCHOR RESOLVED (human ruling 2026-06-09): STORY-081 re-anchored BC-3.02.002 → BC-3.05.001 v1.4.0 (Rich Inline Formatting, CAP-024); BC-3.05.001 amended with slide-level field scope + PC-1..PC-5 per-exporter + HI-1..HI-5 hyperlink invariants + unified-engine Invariant 9. HEAD e5b1e92e; streak 0/3. NEXT: adversary Pass 17 fresh on unified engine against BC-3.05.001). CI infra fix PR#79 merged."
 develop_sha: "15838de1"
 develop_pr_count: 79
 error_taxonomy_version: "v2.28"
@@ -57,13 +57,13 @@ workspace_test_failures: 0
 
 Both branches are on origin (durable, machine-independent):
 
-- `origin/factory-artifacts` — all `.factory/` state, all 16 STORY-081 adversary pass reports + orchestrator-EC004 note, ADR-023, ADR-024, BC-5.02.002 v1.5. (Run `git -C .factory log -1` for current HEAD.)
+- `origin/factory-artifacts` — all `.factory/` state, all 16 STORY-081 adversary pass reports + orchestrator-EC004 note, ADR-023, ADR-024, BC-5.02.002 v1.5, BC-3.05.001 v1.4.0, BC-3.02.002 v1.5.1. (Run `git -C .factory log -1` for current HEAD.)
 - `origin/feature/STORY-081` @ `e5b1e92e` — 21 STORY-081 implementation commits (10 from Pass-10+11+13+14+15+16 fix bursts: 0b2ce53e a:highlight, 49b1fc8e pdf font double-load, f7c26fba normalize deterministic, 34c128b2 notes highlight child + body assertions + font docstring, 5556aa75 EC-004 body Link hlinkClick, eec4be32 DOCX hyperlink-format fix + combined-form assertions + e2e extension, d73bbc64 PPTX body+notes nested-link hlinkClick wrapper-descent, 5048a987 body link-in-link orphan-rel rid inherit-on-None + cross-path parity guard, c1401f33 ADR-024 inline-run generator unification, e5b1e92e dead-code cleanup); based on develop `cbebfd57`; MUST rebase onto develop `15838de1` at PR step.
 
 **Same-machine resume:** `.factory/` and `.worktrees/STORY-081/` worktrees already exist on disk.
 1. Run `vsdd-factory:factory-worktree-health`
 2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `e5b1e92e`
-3. Continue at NEXT ACTION: human adjudicates BC-3.02.002 anchoring, then adversary Pass 17 (fresh, HEAD e5b1e92e).
+3. Continue at NEXT ACTION: adversary Pass 17 (fresh, HEAD e5b1e92e, against BC-3.05.001 v1.4.0 — BC anchor RESOLVED per human ruling 2026-06-09).
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
@@ -75,7 +75,7 @@ git rev-parse develop   # must equal origin/develop == 15838de1
 ```
 Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
-**Exact resume point:** Phase 3 / Wave 5 / STORY-081 adversary convergence at **streak 0/3** (Pass 16 RESET — ADR-024 PPTX inline-run generator UNIFICATION complete at e5b1e92e; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC-5.02.002→v1.5; OPEN: BC-3.02.002 anchoring pending human adjudication). NEXT: human adjudicates BC-3.02.002 anchor → adversary Pass 17 (fresh context, sequential LESSON-7) → 3/3 CONVERGED → demo-recorder per-AC → rebase onto develop `15838de1` → pr-manager 9-step.
+**Exact resume point:** Phase 3 / Wave 5 / STORY-081 adversary convergence at **streak 0/3** (Pass 16 RESET — ADR-024 PPTX inline-run generator UNIFICATION complete at e5b1e92e; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC-5.02.002→v1.5; BC ANCHOR RESOLVED: BC-3.02.002 → BC-3.05.001 v1.4.0 per human ruling 2026-06-09). NEXT: adversary Pass 17 (fresh context, sequential LESSON-7, against BC-3.05.001) → 3/3 CONVERGED → demo-recorder per-AC → rebase onto develop `15838de1` → pr-manager 9-step.
 
 ---
 
@@ -83,11 +83,10 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
 **1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
 
-### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.02.002, 13 pts)
+### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.05.001, 13 pts)
 - **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `e5b1e92e` (ADR-024 dead-code cleanup — commits since c739d59c: 0b2ce53e (body a:highlight), 49b1fc8e (pdf font double-load), f7c26fba (normalize deterministic), 34c128b2 (notes a:highlight child + 3 body assertions + font docstring helper), 5556aa75 (EC-004 body Link hlinkClick implementation), eec4be32 (DOCX hyperlink-format fix + combined-form assertions + e2e extension), d73bbc64 (PPTX body+notes nested-link hlinkClick wrapper-descent), 5048a987 (body link-in-link orphan-rel rid inherit-on-None + cross-path body/notes parity guard), c1401f33 (ADR-024 unification), e5b1e92e (dead-code cleanup); 10 commits; tests 3820 pass)
 - **Adversary streak:** **0/3** — Pass 16 RESET (M1: notes drops link-text formatting inside link display text; M2: parity test weak; L1: intent resolved by human ruling). HUMAN AUTHORIZED ADR-024 root-cause fix (unify the two PPTX inline-run generators). FU-PPTX-DUAL-RUN-GENERATOR RESOLVED by ADR-024.
-
-**OPEN ITEM — BC-3.02.002 ANCHORING:** STORY-081 (slide-level inline markup, all formats) is anchored to BC-3.02.002 which governs SECTION BLOCKS in DOCX/PDF only (PC3: PPTX section blocks IGNORED; PC8 scope boundary excludes slide-level field values; v1.5 changelog defers slide-level inline markup to a follow-up story). STORY-081's frontmatter readiness gate ("PC8 v1.5 covers all formats") is NOT satisfied by the landed v1.5 (which deferred slide-level). Needs: PO to either amend BC-3.02.002 to genuinely cover slide-level inline-markup rendering across all output formats, OR author a NEW dedicated BC for slide-level inline markup + re-anchor STORY-081 (story-writer). **PENDING HUMAN ADJUDICATION.**
+- **BC ANCHOR RESOLVED (human ruling 2026-06-09):** re-anchored BC-3.02.002 → BC-3.05.001 v1.4.0 (Rich Inline Formatting, CAP-024). BC-3.05.001 amended with slide-level field scope (title/subtitle/body/bullets/caption/description) + PC-1..PC-5 per-exporter rendering matrix + HI-1..HI-5 hyperlink invariants + unified-engine Invariant 9. BC-3.02.002→v1.5.1 (cross-ref added; slide-level follow-up closed by STORY-081 via BC-3.05.001).
 
 - **Pass 16 findings (all REMEDIATED):**
   - M1[MED] — notes path silently dropped formatting inside link display text (`[click **here**](url)` → plain "click here" in notes OOXML; body+HTML preserved bold). HUMAN RULED DEFECT. REMEDIATED via ADR-024 unification at c1401f33.
@@ -96,10 +95,10 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
   - OBS-1[OBS] — FU-PPTX-DUAL-RUN-GENERATOR root cause of M1. RESOLVED by ADR-024 (single engine; unification complete).
   - OBS-2[OBS] — PDF link clickability within AC-004 scope; not a finding.
 - **ADR-024 implementation summary (HEAD e5b1e92e):** New unified engine `render_inline_nodes_to_runs(nodes, hlink_resolver)` + `OoxmlRun` + `serialize_ooxml_run` in `slideforge-plugin-api/src/inline_formats/ooxml_runs.rs`. Body path via `ooxml_run_to_ooxmlsdk`; notes path via `serialize_ooxml_run`. Old body generator cluster (~312 lines) DELETED. AC-005 grep-zero audit clean.
-- **Pre-PR blockers:** FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED. FU-CI-ARM64-TEST-FAILURE RESOLVED. Confirm arm64 CI green on STORY-081 PR. BC-3.02.002 anchoring pending human adjudication (above).
+- **Pre-PR blockers:** FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED. FU-CI-ARM64-TEST-FAILURE RESOLVED. Confirm arm64 CI green on STORY-081 PR. BC-3.02.002 anchoring RESOLVED (human ruling 2026-06-09 → BC-3.05.001 v1.4.0).
 - **fontdb pin:** =0.23.0 direct pin retained; cargo deny PASS.
 - **Workspace tests at HEAD e5b1e92e:** 3820 pass / 20 skip / 0 fail.
-- **NEXT ACTION:** BC-3.02.002 anchoring adjudication (human). After resolved: adversary Pass 17 fresh on the unified engine (sequential LESSON-7). Need 3 consecutive strict-CLEAN to converge 3/3.
+- **NEXT ACTION:** adversary Pass 17 fresh on the unified engine against BC-3.05.001 v1.4.0 (sequential LESSON-7). Need 3 consecutive strict-CLEAN to converge 3/3.
 
 ---
 
@@ -129,6 +128,7 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 - STORY-060/061 (FU-SEC-001-GIT2-OPENSSL must be resolved FIRST)
 
 **OPEN FOLLOW-UPS:**
+- **FU-VP-043-NOTES-PATH** (architect/formal-verifier, Phase-6, non-blocking): VP-043 ("all 12 inline variants produce distinct non-empty XML in PPTX") now implicitly spans body AND notes via the unified ADR-024 engine (BC-3.05.001 v1.4.0 amendment). Assess whether a separate notes-path proof/snapshot variant is needed; update VP-INDEX + verification-coverage-matrix under the vp_index source-of-truth policy. Source: PO BC-3.05.001 v1.4.0 amendment.
 - **FU-CI-ARM64-TEST-FAILURE** (RESOLVED — commits 49b1fc8e + f7c26fba): Root cause confirmed — two wall-clock timing gates (`cold_budget.rs` + `normalize_under_budget` warm-path test) were flaking on the slow emulated arm64 runner. Both converted to deterministic `font_db_load_count == 1` assertions; underlying double-load defect in `slideforge-pdf/src/font.rs` fixed. Confirm fully closed by verifying arm64 CI green on STORY-081 PR.
 - **FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE** (RESOLVED — commits 49b1fc8e + f7c26fba): `crates/slideforge-diagrams/tests/cold_budget.rs` flaky wall-clock gate eliminated. Root cause: real double `load_system_fonts` call per `resolve_font_set` in `slideforge-pdf/src/font.rs` (called in both `resolve_font_set` AND `resolve_regular_face`). Fixed to load once and share `&fontdb::Database`. Both timing gates converted to deterministic `font_db_load_count == 1`; perf budget remains gated by criterion benches.
 - **FU-NOTES-HIGHLIGHT-ATTR** (RESOLVED — fixed IN STORY-081 commit 34c128b2; NOT deferred to STORY-040): notes-path `emit_run` now emits `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child element; `highlight="yellow"` attribute form eliminated; Red-Gate test confirms child present + attribute absent.
@@ -142,7 +142,7 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `e5b1e92e`. Pass 16 RESET (M1: notes drops link-text formatting; ADR-024 unification IMPLEMENTED; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED); streak 0/3. OPEN: BC-3.02.002 anchoring pending human adjudication. Adversary Pass 17 NEXT (fresh, HEAD e5b1e92e, after anchor resolved). Open PRs: 0.
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `e5b1e92e`. Pass 16 RESET (M1: notes drops link-text formatting; ADR-024 unification IMPLEMENTED; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED); streak 0/3. BC ANCHOR RESOLVED (human ruling 2026-06-09): re-anchored BC-3.02.002 → BC-3.05.001 v1.4.0. Adversary Pass 17 NEXT (fresh, HEAD e5b1e92e, against BC-3.05.001). Open PRs: 0.
 - Workspace: 3820 pass / 20 skip / 0 fail (STORY-081 worktree at HEAD e5b1e92e; cargo deny PASS; cold_budget PERMANENTLY FIXED; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm on STORY-081 PR arm64 CI).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
@@ -156,7 +156,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — Pass 16 RESET (ADR-024 unification implemented; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED); HEAD `e5b1e92e`; streak **0/3**. OPEN: BC-3.02.002 anchoring issue pending human adjudication. NEXT: (a) human adjudicates BC-3.02.002 anchor, THEN (b) adversary Pass 17 (fresh context, sequential LESSON-7; HEAD e5b1e92e). Need 3 consecutive strict-CLEAN to converge 3/3. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
+6. **Continue in priority order:** STORY-081 — Pass 16 RESET (ADR-024 unification implemented; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED); HEAD `e5b1e92e`; streak **0/3**. BC ANCHOR RESOLVED (human ruling 2026-06-09): re-anchored BC-3.02.002 → BC-3.05.001 v1.4.0. NEXT: adversary Pass 17 (fresh context, sequential LESSON-7; HEAD e5b1e92e; against BC-3.05.001). Need 3 consecutive strict-CLEAN to converge 3/3. Per-story adversary passes SERIAL (LESSON-7 + rate-limit).
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -189,7 +189,7 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 16 RESET (ADR-024 PPTX inline-run generator UNIFICATION complete; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC-3.02.002 anchoring OPEN) — streak 0/3. 1 worktree active. 12 stories remain.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 Pass 16 RESET (ADR-024 PPTX inline-run generator UNIFICATION complete; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC ANCHOR RESOLVED: BC-3.02.002 → BC-3.05.001 v1.4.0) — streak 0/3. 1 worktree active. 12 stories remain. NEXT: adversary Pass 17 against BC-3.05.001.**
 
 | Field | Value |
 |-------|-------|
@@ -197,10 +197,10 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 | **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
 | **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
 | **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `e5b1e92e`. |
-| **STORY-081 state** | HEAD `e5b1e92e`; adversary **0/3** (RESET by Pass 16 — M1/M2/L1; HUMAN AUTHORIZED ADR-024 root-cause fix; unification implemented c1401f33 + e5b1e92e; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC-5.02.002→v1.5). Fix commits since c739d59c: 0b2ce53e, 49b1fc8e, f7c26fba, 34c128b2, 5556aa75, eec4be32, d73bbc64, 5048a987, c1401f33, e5b1e92e (10 commits). OPEN: BC-3.02.002 anchoring pending human adjudication. |
+| **STORY-081 state** | HEAD `e5b1e92e`; adversary **0/3** (RESET by Pass 16 — M1/M2/L1; HUMAN AUTHORIZED ADR-024 root-cause fix; unification implemented c1401f33 + e5b1e92e; FU-PPTX-DUAL-RUN-GENERATOR RESOLVED; BC-5.02.002→v1.5). Fix commits since c739d59c: 0b2ce53e, 49b1fc8e, f7c26fba, 34c128b2, 5556aa75, eec4be32, d73bbc64, 5048a987, c1401f33, e5b1e92e (10 commits). BC ANCHOR RESOLVED (human ruling 2026-06-09): BC-3.02.002 → BC-3.05.001 v1.4.0. |
 | **Workspace tests** | 3820 pass / 20 skip / 0 fail (HEAD e5b1e92e; cargo deny PASS; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 on STORY-081 PR) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 Pass 16 RESET; streak 0/3; HEAD e5b1e92e. ADR-024 unification complete. OPEN: BC-3.02.002 anchoring (slide-level markup anchored to section-block BC — needs human adjudication: PO amend BC-3.02.002 OR author new BC + re-anchor). After anchor resolved: adversary Pass 17 (fresh context, sequential LESSON-7). Need 3 consecutive strict-CLEAN for 3/3 convergence. After 3/3: demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. Confirm arm64 CI green on STORY-081 PR (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 Pass 16 RESET; streak 0/3; HEAD e5b1e92e. ADR-024 unification complete. BC ANCHOR RESOLVED (human ruling 2026-06-09): BC-3.02.002 → BC-3.05.001 v1.4.0 (slide-level field scope + PC-1..PC-5 per-exporter + HI-1..HI-5 hyperlink invariants + Invariant 9). NEXT: adversary Pass 17 (fresh context, sequential LESSON-7, against BC-3.05.001). Need 3 consecutive strict-CLEAN for 3/3 convergence. After 3/3: demo-recorder → rebase onto 15838de1 → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. Rate-limiting: ONE adversary/review pass at a time. Confirm arm64 CI green on STORY-081 PR (FU-CI-ARM64-TEST-FAILURE). HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -251,6 +251,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-09 | STORY-081-REANCHOR | Human ruled anchor BC-3.02.002 (section blocks, wrong) → BC-3.05.001 (inline formatting, correct). Rationale: BC-3.02.002 PC8 scope-boundary explicitly excludes slide-level field values and deferred slide-level inline markup to a follow-up story; BC-3.05.001 already governs "all 12 inline format types render per format" including slide text fields. BC-3.05.001 amended to v1.4.0: slide-level field scope (title/subtitle/body/bullets/caption/description) + AC-006 dual-title shadow invariant; per-exporter rendering matrix (5 surfaces: PPTX body, PPTX notes, DOCX, HTML, PDF) with unified-engine detail per ADR-024; corrected PPTX Highlight postcondition (child-element form); corrected hyperlink reference-set invariant; rId namespace isolation; nested/wrapped link behavior; safe-URL-scheme + empty-display-text guards; Math PPTX behavior; EC-007; ADR-024/017 + BC-5.02.002 cross-references; STORY-081 added to Stories traceability. BC-3.02.002 amended to v1.5.1: cross-ref to BC-3.05.001 added; slide-level follow-up now closed by STORY-081 via BC-3.05.001. STORY-081 spec frontmatter + all 6 AC traces re-pointed to BC-3.05.001 clauses; spec_version 1.3→1.4. STORY-INDEX + dependency-graph BC traceability updated. |
 | 2026-06-09 | STORY-081-PASS16 | Pass 16 NOT CLEAN — M1[MED]: PPTX notes path silently dropped formatting inside link display text (`[click **here**](url)` → plain in notes; body+HTML preserved bold); M2[MED]: cross-path parity test asserted only body/notes parity, not absolute rel/click contract; L1[LOW]: intent question resolved by human (DEFECT — preserve formatting). Human AUTHORIZED: (1) unify the two PPTX inline-run generators now in STORY-081 → ADR-024; (2) notes link-text formatting loss is a DEFECT (preserve). ADR-024 implemented (c1401f33 unification + e5b1e92e dead-code cleanup): new unified engine `render_inline_nodes_to_runs` + `OoxmlRun` + `serialize_ooxml_run` in `slideforge-plugin-api`; old body generator cluster deleted; AC-005 grep-zero clean; tests 3820 pass. FU-PPTX-DUAL-RUN-GENERATOR RESOLVED. BC-5.02.002→v1.5. Streak RESET 0/3. New HEAD e5b1e92e. Orchestrator surfaced separate BC-3.02.002 ANCHORING issue (STORY-081 slide-level inline markup anchored to section-block BC whose PC8 excludes slide-level; v1.5 deferred slide-level) — pending human adjudication before cascade resumes. |
 | 2026-06-09 | STORY-081-PASS15 | Pass 15 NOT CLEAN — F-P15-HIGH-001[HIGH]: body Link dispatcher arm built `RunContext{ hyperlink_rid: None }` for inner Link whose url was absent from the rel map, OVERWRITING the inherited outer rid (Some(rId_U1)) → inner display-text renders plain, no `<a:hlinkClick>` emitted → 1 rel / 0 clicks → ORPHAN External rel; `external_rel_count == hlinkclick_count` invariant violated. Notes path correct (flattens display text; can't diverge on this axis). Root: dual-generator design asymmetry (OBS-P15-001; third FU-PPTX-DUAL-RUN-GENERATOR finding). REMEDIATED commit 5048a987: `inherited_rid = rid.or_else(|| ctx.hyperlink_rid.clone()); RunContext{ hyperlink_rid: inherited_rid, .. }` — registered rid wins; outer rid inherited only when inner lookup None. Red-Gate: body link-in-link (1/1), body link-in-bold-link (1/1). Cross-path equivalence guard `test_obs_p15_001_body_notes_cross_path_rel_click_parity` (8-shape battery) added — makes future dual-generator divergence visible immediately. Streak RESET 0/3. New HEAD 5048a987; tests 3791 pass. NEXT: adversary Pass 16 fresh. |
 | 2026-06-09 | STORY-081-PASS14 | Pass 14 NOT CLEAN — ADV-P14-MED-001 ADJUDICATED cross-format parity DEFECT (not spec-sanctioned). PPTX body/notes silently dropped nested-link URL for `Bold([Link])` → bold but non-clickable; DOCX (post-F-P13-001) + HTML rendered bold+clickable. Grounds: EC-004/EC-003 no top-level carve-out; F-085-P6-001 was unexpired orphan-rel expedient never parity-ratified; orphan-rel invariant preservable via wrapper-descent collector; silent drop while Math path warns (internal inconsistency). REMEDIATED commit d73bbc64: body+notes collectors descend through Bold/Italic/Strike/Super/Sub/Highlight/Footnote wrappers; dispatcher threads hyperlink_rid; inner Link arm emits `<a:hlinkClick>`; external_rel_count==hlinkclick_count maintained. Red-Gate: body bold-link, body bold-italic-link, notes bold-link, nested unsafe-scheme, nested empty-text. e2e slide-3 updated. F-085-P6-001 docstring carve-out removed; SUPERSEDED for nested links. Streak RESET 0/3. New HEAD d73bbc64; tests 3787 pass. NEXT: adversary Pass 15 fresh. |

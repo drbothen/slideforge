@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.5"
+version: "1.5.1"
 status: draft
 producer: product-owner
 timestamp: 2026-05-24T00:00:00
@@ -19,6 +19,7 @@ modified:
   - "2026-06-01: v1.3 — Anchor/attribution correction (STORY-078 adversary pass 5 OBS-6): subsystem SS-TBD → SS-01 (DSL Parser, slideforge-syntax owns section block PARSING per ARCH-INDEX and STORY-078); Architecture Module line corrected to attribute parsing to slideforge-syntax (SS-01, STORY-078) and eval-stage TYPE validation/register routing to slideforge-eval (SS-02, STORY-077); added STORY-078 to Stories traceability. Behavioral semantics unchanged."
   - "2026-06-01: v1.4 — F-077-P2-001 [MEDIUM]: Expanded recognized-section-type enumeration from 5 to 7 canonical manual types — added executive_summary and risk_register (both defined in CANONICAL_MANUAL_SECTION_TYPES in slideforge-types, aliased by eval + layout; manual section blocks supersede auto-generated per BC-3.02.001 EC-002). Updated precondition 2, invariant 3, and EC-001 known-types message to list all 7 types and note the plugin extension point."
   - "2026-06-02: v1.5 — DIR-077-002 §9.1: Clarified PC8 to state the two-phase parse/eval representation (TemplateChunk inline-markup variants in slideforge-syntax → Vec<InlineNode> via chunks_to_inline_nodes in slideforge-eval → FieldValue::Inlines), enumerate all 11 supported inline markup forms per Q8 LOCKED decision, state the rendering guarantee through the InlineFormat plugin surface (surface #10), and note that slide-level inline markup conversion is deferred to a follow-up story. Behavioral semantics unchanged; clarification only."
+  - "2026-06-09: v1.5.1 — Cross-reference update: the 'follow-up story' deferred in PC8 scope boundary is now closed by STORY-081, anchored to BC-3.05.001 v1.4.0 (human re-anchor ruling 2026-06-09). The PC8 scope boundary note in this BC is superseded by BC-3.05.001 which is now the authoritative contract for slide-level inline markup rendering across all five output surfaces (PPTX body, PPTX notes, DOCX, HTML, PDF). Added BC-3.05.001 to Related BCs."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -173,6 +174,7 @@ sub-block content as `RegisteredContent`.
 - BC-3.02.001 — related to (auto-generated sections use the same SectionType trait rendering path)
 - BC-1.14.002 — related to (report register routing exclusion rules; applies when section `report:` sub-block is present)
 - BC-1.14.003 — authority for (detail register routing exclusion rules; postcondition 7 of this BC defers to BC-1.14.003 for PPTX/web exclusion semantics; BC-1.14.003 EC-001 explicitly covers the `section detail:` standalone case)
+- BC-3.05.001 v1.4.0 — supersedes this BC's PC8 scope boundary for slide-level rendering (the "follow-up story" deferred in PC8 is STORY-081, now closed; BC-3.05.001 is the authoritative contract for slide-level inline markup rendering across all five output surfaces)
 
 ## Architecture Anchors
 
