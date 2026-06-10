@@ -201,6 +201,132 @@ pub(crate) fn chunks_to_markup_source(chunks: &[TemplateChunk]) -> String {
 /// single-run content (PPTX single-run title constraint, AC-006).
 const INLINE_CONTENT_FIELDS: &[&str] = &["bullets", "body", "caption", "description", "subtitle"];
 
+// ─── eval_list_field ─────────────────────────────────────────────────────────
+
+/// Evaluate a `FieldValue::List` in the context of a named field.
+///
+/// Called by `eval_slide_node` for the `FieldValue::List` arm.
+/// Extracted to keep `eval_slide_node` within the 150-line clippy limit.
+///
+/// # Returns
+///
+/// - `FieldValue::InlinesList(items)` — when `field_name` is in
+///   `INLINE_CONTENT_FIELDS` AND at least one item is a `Template` with inline
+///   markup.  Each item is converted to `Vec<InlineNode>` via
+///   `chunks_to_inline_nodes`; items that produce an empty node vec are dropped.
+///   Error recovery: a `Template` item whose conversion pushes a diagnostic falls
+///   back to `Plain(flattened_string)` for that item only.
+///
+/// - `FieldValue::Literal(Value::List(vals))` — for all other cases (no markup,
+///   or field is not an inline-content field).  STORY-088 plain-list behaviour is
+///   preserved.
+///
+/// # EC-007 invariant
+///
+/// `{{ var }}` resolving to `"**bold**"` produces `Plain("**bold**")` — resolved
+/// values are NOT re-parsed as markup.  `chunks_to_inline_nodes` satisfies this
+/// because it resolves `Expr` chunks via `eval_expr_to_string` and wraps the
+/// result as `Plain(resolved_string)`.
+fn eval_list_field(
+    items: &[FieldValue],
+    field_name: &Arc<str>,
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> slideforge_types::FieldValue {
+    let is_inline_field = INLINE_CONTENT_FIELDS.contains(&field_name.as_ref());
+
+    let any_item_has_markup = is_inline_field
+        && items.iter().any(|item| {
+            if let FieldValue::Template(chunks) = item {
+                chunks_has_inline_markup(chunks)
+            } else {
+                false
+            }
+        });
+
+    if any_item_has_markup {
+        // At least one item has inline markup — convert ALL items to InlineNode vecs.
+        let inlines_list: Vec<Vec<slideforge_types::InlineNode>> = items
+            .iter()
+            .filter_map(|item| eval_list_item_to_inlines(item, env, sink))
+            .collect();
+        slideforge_types::FieldValue::InlinesList(inlines_list)
+    } else {
+        // Plain list (no markup, or not an inline-content field) — STORY-088 path.
+        let vals: Vec<Value> = items
+            .iter()
+            .filter_map(|item| {
+                use crate::eval::eval_field_value_to_value;
+                eval_field_value_to_value(item, env, sink)
+            })
+            .collect();
+        slideforge_types::FieldValue::Literal(Value::List(vals))
+    }
+}
+
+/// Convert a single list item (from `FieldValue::List`) to `Vec<InlineNode>`.
+///
+/// Returns `None` when the item produces no content (empty template, Error sentinel,
+/// or unevaluable non-template item).  The caller filters out `None` entries so the
+/// resulting `InlinesList` contains only non-empty item vecs.
+///
+/// # Error recovery
+///
+/// When `chunks_to_inline_nodes` pushes a diagnostic, falls back to
+/// `Plain(flattened_string)` for that item (consistent with `eval_slide_node`'s
+/// per-field error recovery).
+fn eval_list_item_to_inlines(
+    item: &FieldValue,
+    env: &Env,
+    sink: &mut DiagnosticSink,
+) -> Option<Vec<slideforge_types::InlineNode>> {
+    match item {
+        FieldValue::Template(chunks) => {
+            let error_count_before = sink.error_and_fatal_count();
+            let nodes = crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
+            let had_error = sink.error_and_fatal_count() > error_count_before;
+            if had_error {
+                let (result, _) = crate::eval::flatten_chunks_to_string(
+                    chunks, env, sink, /*preserve_brand_ref=*/ false,
+                );
+                let s: Arc<str> = Arc::from(result.as_str());
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(vec![slideforge_types::InlineNode::Plain(s)])
+                }
+            } else if nodes.is_empty() {
+                None
+            } else {
+                Some(nodes)
+            }
+        },
+        FieldValue::Error => None, // parser already pushed diagnostic
+        other => {
+            // Non-template items: evaluate to Value and represent as Plain.
+            use crate::eval::eval_field_value_to_value;
+            if let Some(v) = eval_field_value_to_value(other, env, sink) {
+                let s: Arc<str> = match &v {
+                    Value::Str(s) => Arc::clone(s),
+                    Value::Int(n) => Arc::from(n.to_string().as_str()),
+                    Value::Bool(b) => Arc::from(if *b { "true" } else { "false" }),
+                    Value::Null | Value::List(_) | Value::Map(_) => Arc::from(""),
+                    Value::Float(f) => {
+                        Arc::from(crate::filters::format_float_display(f.0).as_str())
+                    },
+                };
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(vec![slideforge_types::InlineNode::Plain(s)])
+                }
+            } else {
+                None
+            }
+        },
+    }
+}
+
 // ─── eval_for_block ──────────────────────────────────────────────────────────
 
 /// Evaluate one `@for item in collection:` block, returning the slides it
@@ -462,17 +588,10 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
             },
             FieldValue::List(items) => {
                 // STORY-088: evaluate each list item and collect to Value::List.
-                // Items that eval to None (e.g. FieldValue::Error sentinels from
-                // the parser) are silently dropped — the parser already pushed a
-                // diagnostic for them (BC-1.15.001 error accumulation).
-                let vals: Vec<Value> = items
-                    .iter()
-                    .filter_map(|item| {
-                        use crate::eval::eval_field_value_to_value;
-                        eval_field_value_to_value(item, env, sink)
-                    })
-                    .collect();
-                slideforge_types::FieldValue::Literal(Value::List(vals))
+                // STORY-081×STORY-088: when the field is an inline-content field
+                // and any item contains inline markup, upgrade to InlinesList.
+                // Delegated to eval_list_field for line-count compliance.
+                eval_list_field(items, &field_name, env, sink)
             },
         };
         fields.insert(field_name, field_value);

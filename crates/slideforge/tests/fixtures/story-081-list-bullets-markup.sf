@@ -1,0 +1,16 @@
+# STORY-081×STORY-088 list-bullets inline markup fixture.
+#
+# Tests that `bullets: ["**bold**", "_italic_", "plain"]` (list-literal DSL form)
+# produces format-native markup, NOT literal ** / _ characters.
+#
+# Used by: story_081_inline_markup_e2e.rs (list-form bullets tests)
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "List-Form Bullets Test Deck"
+
+slide content:
+  title "List-Form Bullets with Inline Markup"
+  bullets: ["**Key finding**: up 12%", "_note item_", "plain item"]

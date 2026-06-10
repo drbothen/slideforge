@@ -815,6 +815,262 @@ fn test_P27_MED_001_italic_title_diagnostic_has_distinguishing_fields() {
     );
 }
 
+// ─── AC-001 list-form (STORY-081×STORY-088 integration gap) ─────────────────────
+//
+// When `bullets:` uses the list-literal form `bullets: ["**bold**", "_note_", "plain"]`
+// (DSL-sourced `FieldValue::List` in the AST, not `FieldValue::Template`), each
+// markup-bearing item MUST be converted to `Vec<InlineNode>` — NOT flattened to a
+// plain `Value::Str` with literal `**` / `_` characters.
+//
+// Before this fix (STORY-081×STORY-088 gap): the `FieldValue::List` arm in
+// `eval_slide_node` (for_eval.rs ~463) called `eval_field_value_to_value` which
+// flattens markup → produces `FieldValue::Literal(Value::List([Str("**bold**"), ...]))`.
+// `field_to_block.rs` then builds `BulletItem { inlines: [Plain("**bold**")] }`.
+// PPTX output contains literal `**` — not `b="1"`.
+//
+// After this fix: the `FieldValue::List` arm checks `INLINE_CONTENT_FIELDS` and, when
+// any item has inline markup, produces `FieldValue::InlinesList(Vec<Vec<InlineNode>>)`.
+// `field_to_block.rs` builds each `BulletItem` from the per-item `Vec<InlineNode>`.
+
+/// AC-001 (list-form) RED GATE: `bullets: ["**Key finding**: up 12%", "_note_", "plain item"]`
+/// via `FieldValue::List` must produce `FieldValue::InlinesList` — NOT
+/// `FieldValue::Literal(Value::List([Str("**Key finding**..."), ...]))`.
+///
+/// ## Distinguishing assertion
+/// - Item 0 carries `InlineNode::Bold` (not `Plain("**Key finding**...")`).
+/// - Item 2 (plain) stays `Plain("plain item")` — no regression.
+/// - The result variant is `FieldValue::InlinesList`.
+///
+/// ## Red Gate path
+/// Before fix: `eval_slide_node` List arm → `eval_field_value_to_value` → flattens
+/// markup → `FieldValue::Literal(Value::List([Str("**Key finding**..."), ...]))` →
+/// assertion `matches!(FieldValue::InlinesList(_))` FAILS.
+///
+/// Traceability: BC-3.05.001 AC-001 list-form; STORY-081×STORY-088 integration gap.
+#[test]
+#[allow(clippy::similar_names)]
+fn test_BC_3_05_001_ac001_list_form_bullet_bold_produces_inlines_list() {
+    // Simulate the AST that the parser emits for:
+    //   bullets: ["**Key finding**: up 12%", "_note_", "plain item"]
+    let item0 = FieldValue::List(vec![
+        // Item 0: "**Key finding**: up 12%" — contains Bold markup
+        FieldValue::Template(vec![
+            TemplateChunk::Bold(vec![TemplateChunk::Literal("Key finding".to_string())]),
+            TemplateChunk::Literal(": up 12%".to_string()),
+        ]),
+        // Item 1: "_note_" — contains Italic markup
+        FieldValue::Template(vec![TemplateChunk::Italic(vec![TemplateChunk::Literal(
+            "note".to_string(),
+        )])]),
+        // Item 2: "plain item" — no markup
+        FieldValue::Template(vec![TemplateChunk::Literal("plain item".to_string())]),
+    ]);
+
+    let slide_node = SlideNode {
+        kind: Spanned::new("content".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("bullets".to_string(), dummy_span()),
+            value: Spanned::new(item0, dummy_span()),
+        }],
+        inline_items: vec![],
+        tags: vec![],
+    };
+    let (env, mut sink) = make_env_and_sink();
+    let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
+
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+        .expect("eval_slide_node must succeed for list-form bullets");
+
+    assert!(
+        sink.is_empty(),
+        "AC-001 list-form RED GATE: eval must produce 0 diagnostics; got: {:?}",
+        sink.errors()
+    );
+
+    let field_value = get_field(&result, "bullets").expect("bullets field must be present");
+
+    // RED GATE: before fix, this is FieldValue::Literal(Value::List([...])).
+    // After fix, it must be FieldValue::InlinesList([...]).
+    assert!(
+        matches!(&field_value, TypedFieldValue::InlinesList(_)),
+        "AC-001 list-form RED GATE: bullets with markup items must produce \
+         FieldValue::InlinesList; got: {field_value:?}\n\
+         Before fix: FieldValue::Literal(Value::List([Str(\"**Key finding**...\"), ...])). \
+         After fix: FieldValue::InlinesList([[Bold, Plain], [Italic], [Plain]])."
+    );
+
+    if let TypedFieldValue::InlinesList(items) = &field_value {
+        assert_eq!(
+            items.len(),
+            3,
+            "AC-001 list-form: InlinesList must have 3 items (one per bullet)"
+        );
+
+        // Item 0: must start with InlineNode::Bold (not Plain("**Key finding**...")).
+        assert!(
+            !items[0].is_empty(),
+            "AC-001 list-form: item 0 must be non-empty"
+        );
+        assert!(
+            matches!(items[0][0], InlineNode::Bold(_)),
+            "AC-001 list-form: item 0 first node must be Bold; got: {:?}\n\
+             RED GATE: before fix, items[0] == [Plain(\"**Key finding**: up 12%\")] \
+             (literal asterisks) — the distinguishing b=\"1\" assertion in PPTX XML \
+             would fail because no Bold node reaches the OOXML engine.",
+            items[0][0]
+        );
+
+        // Item 1: must be Italic.
+        assert!(
+            !items[1].is_empty(),
+            "AC-001 list-form: item 1 must be non-empty"
+        );
+        assert!(
+            matches!(items[1][0], InlineNode::Italic(_)),
+            "AC-001 list-form: item 1 first node must be Italic; got: {:?}",
+            items[1][0]
+        );
+
+        // Item 2: plain text — no markup, kept as Plain.
+        assert!(
+            !items[2].is_empty(),
+            "AC-001 list-form: item 2 must be non-empty"
+        );
+        assert!(
+            matches!(items[2][0], InlineNode::Plain(_)),
+            "AC-001 list-form: item 2 (no markup) must be Plain; got: {:?}",
+            items[2][0]
+        );
+        if let InlineNode::Plain(s) = &items[2][0] {
+            assert_eq!(
+                s.as_ref(),
+                "plain item",
+                "AC-001 list-form: plain item text must be preserved verbatim"
+            );
+        }
+    }
+}
+
+/// AC-001 (list-form) plain-only regression guard: `bullets: ["A", "B"]` (no markup)
+/// must NOT be converted to `FieldValue::InlinesList` — it must stay as
+/// `FieldValue::Literal(Value::List([Str("A"), Str("B")]))` (STORY-088 no-regression).
+///
+/// This guards against over-eager conversion that would break STORY-088's plain behavior.
+#[test]
+fn test_BC_3_05_001_ac001_list_form_plain_bullets_stay_literal_list() {
+    let list_field = FieldValue::List(vec![
+        FieldValue::Template(vec![TemplateChunk::Literal("Item A".to_string())]),
+        FieldValue::Template(vec![TemplateChunk::Literal("Item B".to_string())]),
+    ]);
+
+    let slide_node = SlideNode {
+        kind: Spanned::new("content".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("bullets".to_string(), dummy_span()),
+            value: Spanned::new(list_field, dummy_span()),
+        }],
+        inline_items: vec![],
+        tags: vec![],
+    };
+    let (env, mut sink) = make_env_and_sink();
+    let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
+
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+        .expect("eval_slide_node must succeed for plain list bullets");
+
+    assert!(
+        sink.is_empty(),
+        "AC-001 plain list regression: must produce 0 diagnostics; got: {:?}",
+        sink.errors()
+    );
+
+    let field_value = get_field(&result, "bullets").expect("bullets field must be present");
+
+    // Plain bullets → FieldValue::Literal(Value::List) — STORY-088 behavior preserved.
+    assert!(
+        matches!(
+            &field_value,
+            TypedFieldValue::Literal(slideforge_types::Value::List(_))
+        ),
+        "AC-001 plain list regression: bullets without markup must stay \
+         FieldValue::Literal(Value::List); got: {field_value:?}"
+    );
+}
+
+/// EC-007 (list-form): A list item that is `{{ var }}` resolving to `"**bold**"` must
+/// produce `InlineNode::Plain("**bold**")` in its per-item nodes — NOT further re-parsed.
+///
+/// This guards the EC-007 invariant (resolved values are not re-parsed) for the list path.
+#[test]
+fn test_BC_3_05_001_ec007_list_form_var_resolves_to_asterisks_stays_plain() {
+    use slideforge_syntax::Expr;
+
+    // bullets: ["**bold**", {{ var_with_asterisks }}]
+    // Item 0 has literal markup (Bold); item 1 resolves "**bold**" from env.
+    let list_field = FieldValue::List(vec![
+        FieldValue::Template(vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+            "bold".to_string(),
+        )])]),
+        // Item 1: {{ var_with_asterisks }} where var = "**bold**" — must stay Plain
+        FieldValue::Template(vec![TemplateChunk::Expr(Expr::Ident(
+            "var_with_asterisks".to_string(),
+        ))]),
+    ]);
+
+    let slide_node = SlideNode {
+        kind: Spanned::new("content".to_string(), dummy_span()),
+        fields: vec![FieldNode {
+            name: Spanned::new("bullets".to_string(), dummy_span()),
+            value: Spanned::new(list_field, dummy_span()),
+        }],
+        inline_items: vec![],
+        tags: vec![],
+    };
+
+    let mut deck_vars = indexmap::IndexMap::new();
+    deck_vars.insert(
+        Arc::from("var_with_asterisks"),
+        slideforge_types::Value::Str(Arc::from("**bold**")),
+    );
+    let env = Env::new(deck_vars);
+    let mut sink = DiagnosticSink::new();
+    let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
+
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+        .expect("eval_slide_node must succeed");
+
+    let field_value = get_field(&result, "bullets").expect("bullets field must be present");
+
+    // Item 0 has markup → result is InlinesList.
+    if let TypedFieldValue::InlinesList(items) = &field_value {
+        assert_eq!(items.len(), 2, "EC-007 list-form: must have 2 items");
+
+        // Item 0: Bold("bold")
+        assert!(
+            matches!(items[0][0], InlineNode::Bold(_)),
+            "EC-007 list-form: item 0 must be Bold; got: {:?}",
+            items[0][0]
+        );
+
+        // Item 1: resolved var "**bold**" must be Plain("**bold**"), NOT Bold.
+        // EC-007 invariant: resolved values are not re-parsed.
+        assert!(
+            !items[1].is_empty(),
+            "EC-007 list-form: item 1 must be non-empty"
+        );
+        assert!(
+            matches!(&items[1][0], InlineNode::Plain(s) if s.as_ref() == "**bold**"),
+            "EC-007 list-form: item 1 resolved from var must be Plain(\"**bold**\"), not Bold; \
+             got: {:?}",
+            items[1][0]
+        );
+    } else {
+        panic!(
+            "EC-007 list-form: expected InlinesList (item 0 has Bold markup); got: {field_value:?}"
+        );
+    }
+}
+
 /// F-P27-MED-001: Test code-span title — `slide_title` must carry `` `Code Title` ``
 /// while `stripped_text` is `Code Title`.
 #[test]

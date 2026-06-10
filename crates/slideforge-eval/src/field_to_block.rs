@@ -206,6 +206,25 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                     span: SourceSpan::default(),
                 });
             },
+            Some(FieldValue::InlinesList(items)) => {
+                // STORY-081×STORY-088: list-literal bullets with inline markup.
+                // Each Vec<InlineNode> in items is one bullet item with full inline
+                // structure. Build BulletItem directly from the preserved nodes.
+                let bullet_items: Vec<BulletItem> = items
+                    .iter()
+                    .filter(|item_nodes| !item_nodes.is_empty())
+                    .map(|item_nodes| BulletItem {
+                        inlines: item_nodes.clone(),
+                        children: vec![],
+                        span: SourceSpan::default(),
+                    })
+                    .collect();
+                slide.blocks.push(Block {
+                    content: ContentBlock::Bullets(bullet_items),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
+            },
             _ => {},
         }
 
@@ -585,7 +604,7 @@ fn make_text_block_tagged_inlines(inlines: Vec<InlineNode>, tag: TextTag) -> Blo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slideforge_types::{Deck, DeckMetadata, FieldValue, OrderedMap, Slide, Value};
+    use slideforge_types::{Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap, Slide, Value};
 
     fn make_metadata() -> DeckMetadata {
         DeckMetadata {
@@ -766,5 +785,72 @@ mod tests {
                 spec.alt
             );
         }
+    }
+
+    /// STORY-081×STORY-088: `FieldValue::InlinesList` bullets → `ContentBlock::Bullets`
+    /// with per-item `BulletItem` carrying `InlineNode::Bold` (not `Plain("**bold**")`).
+    ///
+    /// This is the Stage 2b threading test for the fix: list-literal bullets with
+    /// markup must produce proper `InlineNode` structure in `ContentBlock::Bullets`.
+    #[test]
+    fn test_inlines_list_bullets_produce_bold_bullet_items() {
+        let mut slide = make_slide("content");
+        // Simulate what eval_slide_node now produces for:
+        //   bullets: ["**Key finding**: up 12%", "_note_", "plain item"]
+        let item0_nodes = vec![
+            InlineNode::Bold(vec![InlineNode::Plain(Arc::from("Key finding"))]),
+            InlineNode::Plain(Arc::from(": up 12%")),
+        ];
+        let item1_nodes = vec![InlineNode::Italic(vec![InlineNode::Plain(Arc::from(
+            "note",
+        ))])];
+        let item2_nodes = vec![InlineNode::Plain(Arc::from("plain item"))];
+        slide.fields.insert(
+            Arc::from("bullets"),
+            FieldValue::InlinesList(vec![
+                item0_nodes.clone(),
+                item1_nodes.clone(),
+                item2_nodes.clone(),
+            ]),
+        );
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            1,
+            "must produce exactly 1 block"
+        );
+        let block = &deck.slides[0].blocks[0];
+        let ContentBlock::Bullets(bullet_items) = &block.content else {
+            panic!("must be ContentBlock::Bullets; got: {:?}", block.content);
+        };
+
+        assert_eq!(
+            bullet_items.len(),
+            3,
+            "must have 3 bullet items (one per InlinesList entry)"
+        );
+
+        // Item 0: first node must be InlineNode::Bold (not Plain("**Key finding**...")).
+        assert!(
+            matches!(bullet_items[0].inlines[0], InlineNode::Bold(_)),
+            "item 0 first inline must be Bold; got: {:?}",
+            bullet_items[0].inlines[0]
+        );
+
+        // Item 1: first node must be InlineNode::Italic.
+        assert!(
+            matches!(bullet_items[1].inlines[0], InlineNode::Italic(_)),
+            "item 1 first inline must be Italic; got: {:?}",
+            bullet_items[1].inlines[0]
+        );
+
+        // Item 2: first node must be Plain("plain item").
+        assert!(
+            matches!(&bullet_items[2].inlines[0], InlineNode::Plain(s) if s.as_ref() == "plain item"),
+            "item 2 must be Plain(\"plain item\"); got: {:?}",
+            bullet_items[2].inlines[0]
+        );
     }
 }

@@ -636,6 +636,189 @@ fn test_fp25_high_001_strict_mode_title_markup_fails_build() {
     );
 }
 
+// =============================================================================
+// STORY-081×STORY-088 AC-001 list-form bullets integration tests
+//
+// slide5 = "List-Form Bullets with Inline Markup"
+//   bullets: ["**Key finding**: up 12%", "_note item_", "plain item"]
+//
+// The gap: before this fix, list-literal bullets with markup silently stripped
+// `**`/`_` to literal text characters. These tests assert format-native markup
+// AND absence of literal `**`/`_` in the bullet runs.
+// =============================================================================
+
+/// STORY-081×STORY-088 AC-001 list-form: PPTX (list-literal bullets with
+/// markup) must contain `b="1"` (bold run property) AND NOT contain literal `**`
+/// in `<a:t>` elements.
+///
+/// ## RED GATE (before fix)
+/// `eval_slide_node` FieldValue::List arm → `eval_field_value_to_value` flattens
+/// markup → `FieldValue::Literal(Value::List([Str("**Key finding**..."), ...]))` →
+/// `field_to_block.rs` builds `BulletItem { inlines: [Plain("**Key finding**...")] }` →
+/// PPTX exporter emits `<a:t>**Key finding**: up 12%</a:t>` with no `b="1"`.
+/// Both assertions FAIL.
+#[test]
+fn test_story_081_list_form_bullets_pptx_has_b1_no_literal_asterisks() {
+    let brand = BrandTmpDir::new("s081_list_bullets_pptx");
+    let source = fixture_source("story-081-list-bullets-markup.sf");
+    let opts = brand.build_options("pptx", false);
+
+    let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
+        panic!(
+            "STORY-081 list-bullets PPTX: build() must return Ok; got Err: {e:?}\n\
+             Check: eval list-form bullets with markup → FieldValue::InlinesList."
+        )
+    });
+
+    let mut archive = open_zip(&output.bytes, "S081-list-bullets-PPTX");
+    // slide2 = "List-Form Bullets with Inline Markup" (fixture slide index 2)
+    let slide_xml = read_zip_entry(
+        &mut archive,
+        "ppt/slides/slide2.xml",
+        "S081-list-bullets-PPTX",
+    );
+
+    // b="1" must appear — the **Key finding** item must produce a Bold run.
+    assert!(
+        slide_xml.contains("b=\"1\""),
+        "STORY-081 list-bullets RED GATE (PPTX): slide5.xml must contain b=\"1\" \
+         for the bold list-literal bullet item \"**Key finding**: up 12%\".\n\
+         Before fix: FieldValue::List flattens markup → Plain(\"**Key finding**...\") → \
+         no Bold node → no b=\"1\".\n\
+         slide5.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+
+    // No literal ** — markup must be structural, not text.
+    assert!(
+        !slide_xml.contains("**"),
+        "STORY-081 list-bullets (PPTX): slide5.xml must NOT contain literal '**' characters.\n\
+         slide5.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+
+    // i="1" must appear — the _note item_ produces an Italic run.
+    assert!(
+        slide_xml.contains("i=\"1\""),
+        "STORY-081 list-bullets (PPTX): slide5.xml must contain i=\"1\" for _note item_.\n\
+         slide5.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+
+    // The plain item text must appear verbatim.
+    assert!(
+        slide_xml.contains("plain item"),
+        "STORY-081 list-bullets (PPTX): slide5.xml must contain 'plain item' text.\n\
+         slide5.xml (first 800 chars): {:.800}",
+        slide_xml
+    );
+}
+
+/// STORY-081×STORY-088 AC-001 list-form: DOCX `word/document.xml` must contain
+/// `<w:b/>` for the bold bullet AND NOT contain literal `**`.
+#[test]
+fn test_story_081_list_form_bullets_docx_has_wb_no_literal_asterisks() {
+    let brand = BrandTmpDir::new("s081_list_bullets_docx");
+    let source = fixture_source("story-081-list-bullets-markup.sf");
+    let opts = brand.build_options("docx", false);
+
+    let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
+        panic!("STORY-081 list-bullets DOCX: build() must return Ok; got Err: {e:?}")
+    });
+
+    let mut archive = open_zip(&output.bytes, "S081-list-bullets-DOCX");
+    let doc_xml = read_zip_entry(&mut archive, "word/document.xml", "S081-list-bullets-DOCX");
+
+    // <w:b/> must appear — bold bullet item.
+    assert!(
+        doc_xml.contains("<w:b/>") || doc_xml.contains("<w:b "),
+        "STORY-081 list-bullets RED GATE (DOCX): word/document.xml must contain <w:b/> \
+         for the bold list-literal bullet \"**Key finding**: up 12%\".\n\
+         doc_xml (first 800 chars): {:.800}",
+        doc_xml
+    );
+
+    // No literal **.
+    assert!(
+        !doc_xml.contains("**"),
+        "STORY-081 list-bullets (DOCX): word/document.xml must NOT contain literal '**'.\n\
+         doc_xml (first 800 chars): {:.800}",
+        doc_xml
+    );
+}
+
+/// STORY-081×STORY-088 AC-001 list-form: HTML output must contain `<strong>` for the
+/// bold list-literal bullet AND NOT contain literal `**`.
+#[test]
+fn test_story_081_list_form_bullets_html_has_strong_no_literal_asterisks() {
+    let brand = BrandTmpDir::new("s081_list_bullets_html");
+    let source = fixture_source("story-081-list-bullets-markup.sf");
+    let opts = brand.build_options("html", false);
+
+    let output = slideforge::build(&source, &opts).unwrap_or_else(|e| {
+        panic!("STORY-081 list-bullets HTML: build() must return Ok; got Err: {e:?}")
+    });
+
+    let html_str = String::from_utf8_lossy(&output.bytes);
+
+    // <strong> must appear.
+    assert!(
+        html_str.contains("<strong>"),
+        "STORY-081 list-bullets RED GATE (HTML): output must contain <strong> \
+         for the bold list-literal bullet.\n\
+         html (first 800 chars): {:.800}",
+        &html_str[..html_str.len().min(800)]
+    );
+
+    // No literal **.
+    assert!(
+        !html_str.contains("**"),
+        "STORY-081 list-bullets (HTML): HTML output must NOT contain literal '**'.\n\
+         html (first 800 chars): {:.800}",
+        &html_str[..html_str.len().min(800)]
+    );
+}
+
+/// STORY-081×STORY-088 AC-001 list-form: STORY-088 no-regression — slide with
+/// plain `bullets: ["Item A", "Item B"]` (no markup) must still produce `<a:t>`
+/// runs containing the plain text without any bold/italic run properties.
+#[test]
+fn test_story_088_plain_list_bullets_no_regression_in_pptx() {
+    let brand = BrandTmpDir::new("s088_plain_regression");
+    // Use the STORY-088 plain fixture (separate file, no markup) to confirm
+    // the plain-only code path is unaffected by the STORY-081 fix.
+    let source = {
+        let path = format!(
+            "{}/tests/fixtures/story-088-bullets-direct-literal.sf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("S088 regression: cannot read fixture: {e}"))
+    };
+    let opts = brand.build_options("pptx", false);
+
+    let output = slideforge::build(&source, &opts)
+        .unwrap_or_else(|e| panic!("S088 regression: build() must return Ok; got Err: {e:?}"));
+
+    let mut archive = open_zip(&output.bytes, "S088-regression");
+    let slide_xml = read_zip_entry(&mut archive, "ppt/slides/slide1.xml", "S088-regression");
+
+    // Plain bullets must still be present.
+    assert!(
+        slide_xml.contains("Item A"),
+        "S088 regression: 'Item A' must still appear in PPTX; got: {:.800}",
+        slide_xml
+    );
+    assert!(
+        slide_xml.contains("Item B"),
+        "S088 regression: 'Item B' must still appear in PPTX"
+    );
+    assert!(
+        slide_xml.contains("Item C"),
+        "S088 regression: 'Item C' must still appear in PPTX"
+    );
+}
+
 /// F-P25-HIGH-001, part B: the same deck in --warn-only (strict=false) mode
 /// must SUCCEED — the diagnostic is non-blocking, output is produced, and the
 /// PPTX title placeholder contains plain text "Bold Title" (no `b="1"`).

@@ -47,6 +47,20 @@ pub enum FieldValue {
     Interpolated(Vec<StringPart>),
     /// An inline content sequence (for rich-text field values).
     Inlines(Vec<InlineNode>),
+    /// A list of per-item inline content sequences.
+    ///
+    /// Produced by `eval_slide_node` when a `bullets:` (or other
+    /// `INLINE_CONTENT_FIELDS`) field is written as a list-literal
+    /// (`bullets: ["**bold**", "_italic_", "plain"]`) AND at least one item
+    /// contains inline markup variants. Each `Vec<InlineNode>` corresponds to
+    /// one bullet item.
+    ///
+    /// Plain-only list-literals produce `Literal(Value::List([Str(...)]))` instead
+    /// (STORY-088 behaviour is preserved for plain items).
+    ///
+    /// `Hash + Eq + Clone` are derived from the inner `Vec<Vec<InlineNode>>`.
+    /// `InlineNode` already derives `Hash + Eq + Clone` (comemo / ADR-013 requirement).
+    InlinesList(Vec<Vec<InlineNode>>),
 }
 
 /// A single slide in the semantic IR.
@@ -236,10 +250,12 @@ mod tests {
         let fv_expr = FieldValue::Expr(Arc::from("{{ count + 1 }}"));
         let fv_interpolated = FieldValue::Interpolated(vec![StringPart::Literal(Arc::from("hi"))]);
         let fv_inlines = FieldValue::Inlines(vec![]);
+        let fv_inlines_list = FieldValue::InlinesList(vec![]);
         assert!(matches!(fv_literal, FieldValue::Literal(_)));
         assert!(matches!(fv_expr, FieldValue::Expr(_)));
         assert!(matches!(fv_interpolated, FieldValue::Interpolated(_)));
         assert!(matches!(fv_inlines, FieldValue::Inlines(_)));
+        assert!(matches!(fv_inlines_list, FieldValue::InlinesList(_)));
     }
 
     #[test]

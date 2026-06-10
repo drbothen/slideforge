@@ -252,6 +252,29 @@ impl DocumentBodySerializer {
                 }
             }
 
+            // ── TextRun (FrameContent::TextRun → Normal paragraphs for bullets) ──
+            // BC-4.02.001 v1.2: STORY-073 — the layout stage converts each
+            // BulletItem in ContentBlock::Bullets to a FrameContent::TextRun frame
+            // (one per bullet item). The DOCX exporter must render each TextRun as
+            // a Normal-styled paragraph so that bullet items are visible in DOCX.
+            //
+            // STORY-081×STORY-088: TextRun frames from markup-bearing list-literal
+            // bullets carry InlineNode::Bold / Italic etc. — render with
+            // make_inline_paragraph so markup is preserved (not stripped to plain
+            // text). This is the DOCX half of the list-form bullets fix.
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::TextRun(inlines) = &frame.content
+                    && !inlines.is_empty()
+                {
+                    let para = self.make_inline_paragraph("Normal", inlines).map_err(|e| {
+                        ExportError::OoxmlError {
+                            message: format!("TextRun frame inline paragraph: {e}"),
+                        }
+                    })?;
+                    body_paragraphs.push(BodyChoice::WP(Box::new(para)));
+                }
+            }
+
             // ── ColorBar (FrameContent::ColorBar → percentage text fallback) ───
             // BC-1.17.002 PC-9 (DOCX clause): "DOCX: percentage text fallback".
             // DOCX has no native progress-bar element, so the DOCX exporter emits
