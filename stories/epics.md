@@ -47,7 +47,7 @@ traces_to:
 | EPIC-16 | Package Management | SS-16 | slideforge-package | BC-5.03, BC-1.06 (import) | 5 | 4 | P1 |
 | EPIC-17 | Workspace Configuration | SS-17 | slideforge-config | BC-5.04 | 5 | 2 | P1 |
 | EPIC-18 | Writing Registers | SS-02, SS-06, SS-08 | slideforge-eval + exporters | BC-1.14 | 4 | 2 | P0 |
-| EPIC-19 | CI/CD Infrastructure | — | cross-cutting | NFR-016 through NFR-031 | 1 | 4 | P0 |
+| EPIC-19 | CI/CD Infrastructure | — | cross-cutting | NFR-016 through NFR-031 | 1/5 | 7 | P0 |
 | EPIC-20 | Formal Verification (Phase 6) | SS-01,02,03,05,06,07 | multiple | VP-001 through VP-015 | 6 | 6 | P0 |
 | EPIC-21 | Plugin Registry Assembly | SS-14, SS-18 | slideforge (root) | BC-5.02 | 4 | 2 | P0 |
 | **Total** | | | | **112 BCs** | | **71** | |
@@ -479,7 +479,7 @@ benchmark regression gate. Reproducible builds job.
 
 **NFR Scope:** NFR-016 through NFR-031
 
-**Story Count:** 4 stories (CI matrix + linting, visual regression CI, supply-chain CI, release pipeline)
+**Story Count:** 7 stories (CI matrix + linting, visual regression CI, supply-chain CI, release pipeline [Wave 1]; test de-flake [Wave 5]; pipeline-integration test mandate [Wave TBD]; tiered CI + merge queue, cache reliability, arm64 build-time [Wave 5, PRIORITY: NEXT, added 2026-06-10])
 
 ---
 

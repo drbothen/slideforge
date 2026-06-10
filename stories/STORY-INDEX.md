@@ -10,8 +10,8 @@ traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 90
-stories_written: 90
+total_stories: 93
+stories_written: 93
 stories_ready: 0
 stories_in_progress: 4
 stories_merged: 68
@@ -35,10 +35,10 @@ stories_merged: 68
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
 | Wave 4 | 23 | 0 | 0 | 0 | 23 | 0 |
-| Wave 5 | 22 | 11 | 0 | 4 | 7 | 0 |
+| Wave 5 | 25 | 14 | 0 | 4 | 7 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
 | Wave TBD | 1 | 1 | 0 | 0 | 0 | 0 |
-| **Total** | **90** | **18** | **0** | **4** | **68** | **0** |
+| **Total** | **93** | **21** | **0** | **4** | **68** | **0** |
 
 ---
 
@@ -165,8 +165,11 @@ stories_merged: 68
 | [STORY-081](stories/STORY-081-slide-level-inline-markup.md) | EPIC-18 | Slide-Level Inline Markup: eval + layout + all-exporter structural formatting | BC-3.05.001 | P0 | 13 | strict | in-progress |
 | [STORY-082](stories/STORY-082-pptx-slide-sections.md) | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | BC-4.01.003, BC-1.14.003 | P0 | 5 | strict | in-progress |
 | [STORY-088](stories/STORY-088-bullets-list-literal-dsl-syntax.md) | EPIC-02 | Bullets list-literal field-value DSL syntax (`bullets: ["A","B","C"]`) | BC-1.01.002 | P1 | 8 | strict | in-progress |
+| [STORY-091](stories/STORY-091-ci-tiered-triggers-merge-queue.md) | EPIC-19 | CI: Tiered triggers + GitHub merge queue (remove slow legs from per-PR critical path) | — | NEXT | 5 | facade | draft |
+| [STORY-092](stories/STORY-092-ci-cache-reliability-disk.md) | EPIC-19 | CI: Cache reliability + disk headroom (eliminate cold-build flakes) | — | NEXT | 5 | facade | draft |
+| [STORY-093](stories/STORY-093-ci-arm64-build-time.md) | EPIC-19 | CI: arm64 build-time reduction (mold linker + CI profile tuning) | — | NEXT | 5 | facade | draft |
 
-**Wave 5 total points: 130** _(122 prior + 8 STORY-089 added [human-authorized 2026-06-07, Wave-4 follow-up (d) folded into Wave 5 slot 1])_
+**Wave 5 total points: 145** _(130 prior + 15 STORY-091/092/093 added [human-authorized 2026-06-10: CI performance stories, PRIORITY: NEXT, ahead of remaining Wave-5 feature stories])_
 
 ---
 
@@ -205,11 +208,19 @@ _STORY-090 created 2026-06-08 per S-7.02 cycle-closing checklist (PROC-GAP-PIPEL
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
 | Wave 4 | 23 | 163 | 7.1 |
-| Wave 5 | 22 | 130 | 5.9 |
+| Wave 5 | 25 | 145 | 5.8 |
 | Wave 6 | 6 | 42 | 7.0 |
 | Wave TBD | 1 | 3 | 3.0 |
-| **Total** | **90** | **556** | **6.2** |
+| **Total** | **93** | **571** | **6.1** |
 
+> STORY-091/092/093 (CI performance stories, 5 pts each, PRIORITY: NEXT, Wave 5, EPIC-19)
+> created 2026-06-10 per human direction. Delivery order: STORY-091 → STORY-092 → STORY-093.
+> All three MUST be delivered BEFORE remaining Wave-5 feature stories. STORY-091 (tiered
+> CI + merge queue) is the single largest per-PR wall-clock win. STORY-092 (cache + disk)
+> fixes the cold-build flake root cause. STORY-093 (mold + profile tuning) shrinks the
+> arm64 cold-build itself. Wave 5: 22 → 25 stories, 130 → 145 pts.
+> Total: 90 → 93 stories, 556 → 571 pts.
+>
 > STORY-090 (Mandate pipeline-origin integration tests for multi-crate eval→exporter stories,
 > 3 pts, P1, Wave TBD, EPIC-19) created 2026-06-08 per S-7.02 cycle-closing checklist.
 > PROC-GAP-PIPELINE-BYPASS-TESTS, 3x recurrence (STORY-082/072/081 dead wiring). Wave TBD:
@@ -354,6 +365,27 @@ _STORY-090 created 2026-06-08 per S-7.02 cycle-closing checklist (PROC-GAP-PIPEL
 For fast BC-to-story lookup, see `dependency-graph.md §BC-to-Stories Traceability Matrix`.
 For VP-to-story lookup, see `dependency-graph.md §VP-to-Stories Traceability Matrix`.
 For NFR-to-story lookup, see `dependency-graph.md §NFR-to-Stories Traceability Matrix`.
+
+---
+
+## CI Performance Stories Dispatch Order (PRIORITY: NEXT)
+
+STORY-091, STORY-092, and STORY-093 are sequentially dependent and MUST be dispatched
+in order before the remaining Wave-5 feature stories:
+
+```
+STEP 1: STORY-091 (Tiered CI + merge queue)
+  → Restructures ci.yml triggers; enables merge queue; creates playbook doc.
+  → No Rust code changes; pure GitHub Actions YAML.
+
+STEP 2: STORY-092 (Cache reliability + disk headroom) [after STORY-091 merged]
+  → Bumps rust-cache SHA; adds cache-on-failure everywhere; adds disk-cleanup steps.
+  → Verifies cache budget hypothesis via gh cache list.
+
+STEP 3: STORY-093 (arm64 build-time: mold + profile tuning) [after STORY-092 merged]
+  → Captures --timings baseline FIRST; adds mold to arm64-only; adds line-tables-only.
+  → Two CI observation cycles (before + after).
+```
 
 ---
 

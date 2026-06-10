@@ -11,7 +11,7 @@ traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
 topological_sort: validated
 cycle_check: PASS
-total_stories: 85
+total_stories: 93
 ---
 
 # Story Dependency Graph — slideforge v1.0
@@ -209,6 +209,17 @@ canonical — individual story files use these exact IDs.
 | STORY-065 | EPIC-17 | Workspace: .sfconfig cascade + config explain provenance | STORY-064 | — |
 
 | STORY-082 | EPIC-08 | PPTX: Slide-Grouping Sections (sectionLst) — DSL + IR + Eval + Exporter | STORY-040, STORY-078 | — |
+| STORY-091 | EPIC-19 | CI: Tiered triggers + GitHub merge queue (remove slow legs from per-PR critical path) | — | STORY-092 |
+| STORY-092 | EPIC-19 | CI: Cache reliability + disk headroom (eliminate cold-build flakes) | STORY-091 | STORY-093 |
+| STORY-093 | EPIC-19 | CI: arm64 build-time reduction (mold linker + CI profile tuning) | STORY-091, STORY-092 | — |
+
+> **CI-performance story scheduling note (human-authorized 2026-06-10):** STORY-091,
+> STORY-092, and STORY-093 MUST be dispatched and merged BEFORE the remaining Wave-5
+> feature stories (STORY-048, STORY-056, STORY-057, STORY-058, STORY-059, STORY-060-065,
+> STORY-072). They have no product feature dependencies. Their sequencing is internal:
+> STORY-091 → STORY-092 → STORY-093. They do not block any feature story (no feature
+> story declares `depends_on` against them), but per human direction they have PRIORITY:
+> NEXT and take scheduling precedence.
 
 ### Wave 6 Stories (Phase 6 Formal Verification)
 
@@ -318,6 +329,9 @@ canonical — individual story files use these exact IDs.
 | STORY-087 | EPIC-01 | color-coded-slide-types | 4 | P1 | 13 |
 | STORY-088 | EPIC-02 | bullets-list-literal-dsl-syntax | 5 | P1 | 8 |
 | STORY-089 | EPIC-01 | field-value-type-validation | 5 | P0 | 8 |
+| STORY-091 | EPIC-19 | ci-tiered-triggers-merge-queue | 5 | NEXT | 5 |
+| STORY-092 | EPIC-19 | ci-cache-reliability-disk | 5 | NEXT | 5 |
+| STORY-093 | EPIC-19 | ci-arm64-build-time | 5 | NEXT | 5 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -362,6 +376,9 @@ Wave 4 (prereqs all in Waves 1-3):
   STORY-086, STORY-087                          ← EPIC-03/01 (Wave 4 remediation + pull-in)
 
 Wave 5 (prereqs all in Waves 1-4):
+  STORY-091,                                    ← EPIC-19 CI-performance [PRIORITY: NEXT, deliver FIRST]
+  STORY-092,                                    ← EPIC-19 CI-performance [PRIORITY: NEXT, after STORY-091]
+  STORY-093,                                    ← EPIC-19 CI-performance [PRIORITY: NEXT, after STORY-092]
   STORY-089,                                    ← EPIC-01 (slot 1 — independent, zero Wave 5 deps; Wave-4 follow-up (d))
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
   STORY-055, STORY-056, STORY-057, STORY-058, STORY-059,  ← EPIC-15
@@ -557,15 +574,15 @@ its dependencies. The dependency graph is a DAG.
 | NFR-026 | STORY-051 | CI matrix: macos-14 |
 | NFR-027 | STORY-051 | CI matrix: macos-13 |
 | NFR-028 | STORY-051 | CI matrix: ubuntu-latest |
-| NFR-029 | STORY-051 | CI matrix: ubuntu-24.04-arm |
-| NFR-030 | STORY-051 | CI matrix: windows-latest |
+| NFR-029 | STORY-051, STORY-092, STORY-093 | CI matrix: ubuntu-24.04-arm; cache reliability + mold linker for arm64 build-time |
+| NFR-030 | STORY-051, STORY-092 | CI matrix: windows-latest; cache-on-failure for windows leg |
 | NFR-031 | STORY-054 | reproducible-build CI job |
 | NFR-032 | STORY-055 | tracing instrumentation audit |
 | NFR-033 | STORY-058 | JSON output unit test |
 | NFR-034 | STORY-050 | holdout-evaluator Phase 4 |
 | NFR-035 | STORY-050 | holdout-evaluator Phase 4 |
 
-**Coverage result: 35/35 NFRs covered.**
+**Coverage result: 35/35 NFRs covered.** _(NFR-029 now covered by STORY-051 + STORY-092 + STORY-093; NFR-030 by STORY-051 + STORY-092 — 2026-06-10 per CI-performance story addition)_
 
 ---
 
