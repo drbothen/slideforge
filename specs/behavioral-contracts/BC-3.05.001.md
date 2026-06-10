@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.4.0"
+version: "1.4.1"
 status: active
 producer: product-owner
 timestamp: 2026-05-29T00:00:00
@@ -24,6 +24,7 @@ modified:
   - "v1.3.5 — adversary pass 2 OBS-2 (STORY-073): subsystem corrected from SS-TBD to SS-05 (Layout Engine); BC governs layout-stage validation and STORY-073 anchors subsystems: [SS-05]"
   - "v1.3.6 — STORY-085 adversary F-004 [HIGH]: tighten HTML postcondition to require HTML-escaping of ALL interpolated values — attribute values (href/url/Xref id) AND text content (Math latex source) — not just Plain text. Added EC-009. Escaping rule: &, <, >, \" must be escaped in all HTML output positions (both attribute and content contexts)."
   - "v1.4.0 — STORY-081 re-anchor (human ruling 2026-06-09): BC-3.05.001 is now the primary anchor for slide-level inline markup rendering. Added: (1) explicit slide-level field scope list (title/subtitle/body/bullets/caption/description) with AC-006 dual-title shadow invariant; (2) per-exporter rendering matrix (5 surfaces: PPTX body, PPTX notes, DOCX, HTML, PDF) with unified-engine detail per ADR-024 — body via ooxml_run_to_ooxmlsdk, notes via serialize_ooxml_run, both call render_inline_nodes_to_runs; (3) corrected PPTX Highlight postcondition from attribute form to child-element form (<a:highlight><a:srgbClr val=\"FFFF00\"/></a:highlight>) per ADV-P11-HIGH-001 fix; (4) corrected hyperlink reference-set invariant (replacing false count-equality claim) per ADR-024 INV-4; (5) rId namespace isolation (slide vs notes rels parts); (6) nested/wrapped link behavior (F-040-P3-001); (7) safe-URL-scheme and empty-display-text guards; (8) Math PPTX behavior (tracing::warn + degraded plain run); (9) EC-007 interpolation-stays-Plain; (10) ADR-024, ADR-017, BC-5.02.002 cross-references. STORY-081 added to Stories traceability."
+  - "v1.4.1 — F-P17-002 Math/HTML deferral codification: PC-4 Math clause corrected from aspirational 'Math → MathML <math>' to actual v1.0 behavior: Math → <code class=\"math\">{HTML-escaped LaTeX source}</code> as a degraded accessible-text fallback. Full MathML rendering explicitly deferred to STORY-045 (cited). EC-010 and canonical test vector updated to reference <code class=\"math\"> element (not <math>) as the v1.0 HTML output. No other PC-4 form changed — Footnote → <span role=\"note\"> confirmed correct (F-P17-002 Footnote half resolved by implementation in feature/STORY-081 at e5b1e92e)."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -167,7 +168,9 @@ final conversion step). This was hardened across the 16-pass STORY-081 adversari
 ### PC-4: HTML
 
 - Plain → bare text node, Bold → `<strong>`, Italic → `<em>`, Code → `<code>`,
-  Link → `<a href="...">`, Math → MathML `<math>`, Footnote → `<span role="note">`,
+  Link → `<a href="...">`, **Math → `<code class="math">{HTML-escaped LaTeX source}</code>`
+  (v1.0 degraded accessible-text fallback; full MathML `<math>` rendering DEFERRED to
+  STORY-045)**, Footnote → `<span role="note">`,
   Xref → `<a href="#...">`, Superscript → `<sup>`, Subscript → `<sub>`,
   Strikethrough → `<del>`, Highlight → `<mark>`
 - **HTML escaping is mandatory for ALL interpolated values in HTML output — not only
@@ -397,7 +400,7 @@ must produce `LayoutError::InlineDepthExceeded`.
 | EC-007 | `Xref("slide-title")` inside a `MathNode` | NOT validated by xref pass; math is a separate validation surface |
 | EC-008 | `"**bold using markdown"` (forbidden pattern) | No bold applied; literal `**bold using markdown` rendered as Plain text; lint warning |
 | EC-009 | `Link { text: vec![Plain("click")], url: "https://evil.com?a=1&b=<script>" }` rendered to HTML | `href` attribute value is HTML-attribute-escaped: `href="https://evil.com?a=1&amp;b=&lt;script&gt;"`. The unescaped raw URL is NEVER written directly into attribute position. Similarly, `Xref("my\"id")` produces `href="#my&quot;id"` — not `href="#my"id"`. |
-| EC-010 | `Math(MathNode { latex: "<b>not bold</b>" })` rendered to HTML | LaTeX source is HTML-content-escaped before being written to the `<math>` element or its children: `&lt;b&gt;not bold&lt;/b&gt;`. An unescaped `<` would break the HTML parse tree. |
+| EC-010 | `Math(MathNode { latex: "<b>not bold</b>" })` rendered to HTML | LaTeX source is HTML-content-escaped before being written as the text content of `<code class="math">`: `<code class="math">&lt;b&gt;not bold&lt;/b&gt;</code>`. An unescaped `<` would break the HTML parse tree. v1.0 renders `<code class="math">` (STORY-045 deferred MathML). |
 | EC-011 | `title: "**Bold Title**"` containing inline markup | Eval stage: `LayoutWarning::InlineMarkupInTitle` emitted; `FieldValue::Str("Bold Title")` for PPTX title placeholder; `title_inlines: vec![InlineNode::Bold([InlineNode::Plain("Bold Title")])]` shadow for DOCX/PDF/HTML. In strict mode: fatal error. In `--warn-only`: warning only. |
 | EC-012 | `Link { text: vec![Plain("click "), Bold([Plain("here")]), Plain(" now")], url: "https://example.com" }` in PPTX notes | THREE runs produced (one per leaf), each with `hyperlink_rid = Some("rId3")`; the "here" run has `bold=true` AND `hyperlink_rid=Some("rId3")`; ONE External rel registered. Count-equality test (`ext_rel_count == hlinkclick_count`) would be `1 != 3` — use reference-set invariant HI-1 instead. |
 | EC-013 | `Link { url: "javascript:evil()", text: vec![Plain("x")] }` in PPTX | Unsafe URL scheme: no External relationship registered; no `<a:hlinkClick>` emitted; display text "x" rendered as plain run; `tracing::warn!` emitted. |
@@ -420,7 +423,7 @@ must produce `LayoutError::InlineDepthExceeded`.
 | `Xref("nonexistent-slide")` in top-level text | `LayoutWarning::XrefTargetNotFound { target: "nonexistent-slide", source_slide_index: 0 }` | warning |
 | All 12 variants present in one `Vec<InlineNode>` | All 12 variants survive layout pass unchanged; `FrameContent::TextRun` preserves all | exhaustive |
 | `Link { text: vec![Plain("x")], url: "https://a.com?q=1&lang=<en>" }` → HTML | `<a href="https://a.com?q=1&amp;lang=&lt;en&gt;">x</a>` — `&` and `<` escaped in attribute | escaping-attribute |
-| `Math(MathNode { latex: "a < b & c > d" })` → HTML | LaTeX source escaped in HTML content: `a &lt; b &amp; c &gt; d` inside `<math>` element | escaping-content |
+| `Math(MathNode { latex: "a < b & c > d" })` → HTML | v1.0: `<code class="math">a &lt; b &amp; c &gt; d</code>` — LaTeX source HTML-escaped as text content of `<code class="math">`. (Full MathML deferred to STORY-045.) | escaping-content |
 | `Xref("slide\"with-quote")` → HTML | `<a href="#slide&quot;with-quote">` — `"` escaped in attribute value | escaping-attribute |
 | slide with `title: "**Bold**"` → PPTX (strict mode) | `LayoutError` (promoted from `InlineMarkupInTitle` warning); build exits 1; no PPTX output | title-constraint-strict |
 | slide with `title: "**Bold**"` → DOCX (--warn-only) | `LayoutWarning::InlineMarkupInTitle` warning; DOCX title rendered as bold via `title_inlines` shadow field | title-constraint-warn-only |
