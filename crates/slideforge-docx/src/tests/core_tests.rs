@@ -1320,9 +1320,10 @@ fn test_sec_001_javascript_url_rejected_by_exporter() {
 
     let slide = make_slide("XSS Slide", vec![rc]);
     let laid_out = make_laid_out_deck(vec![slide]);
+    let semantic_deck = minimal_deck(); // empty semantic deck — no title_inlines needed
 
     let mut body_ser = DocumentBodySerializer::new();
-    let result = body_ser.serialize(&laid_out);
+    let result = body_ser.serialize(&laid_out, &semantic_deck);
 
     assert!(
         result.is_err(),
@@ -1410,9 +1411,10 @@ fn test_sec_001_data_url_rejected_by_exporter() {
     };
     let slide = make_slide("Data Slide", vec![rc]);
     let laid_out = make_laid_out_deck(vec![slide]);
+    let semantic_deck = minimal_deck();
 
     let mut body_ser = DocumentBodySerializer::new();
-    let result = body_ser.serialize(&laid_out);
+    let result = body_ser.serialize(&laid_out, &semantic_deck);
 
     assert!(
         result.is_err(),
@@ -1775,4 +1777,159 @@ fn test_OBS_P6_002_docx_percent_double_floor_multiple_values() {
             &doc_xml[..doc_xml.len().min(3000)]
         );
     }
+}
+
+// ─── F-P17-001: Formatting INSIDE link display text preserved in DOCX ─────────
+
+/// F-P17-001 / BC-3.05.001 PC-3:
+/// `Link{text:[Bold([Plain("here")])]}` — Bold wrapping INSIDE the link's
+/// display text — must produce a `<w:b/>` run-property INSIDE the
+/// `<w:hyperlink>` element in `word/document.xml`.
+///
+/// ## Red Gate
+///
+/// FAILS against the current `collect_plain_text` path because the Link arm
+/// flattens the display-text children via `collect_plain_text(text)`, which
+/// recursively discards ALL inner formatting. The single WR run produced has
+/// no `<w:b/>` on it.
+///
+/// PASSES after the Link arm is changed to recurse `text` children through
+/// `inline_node_to_paragraph_choices` (the structured run builder) and wrap
+/// the resulting runs inside the `<w:hyperlink r:id="...">` element.
+#[test]
+fn test_f_p17_001_bold_inside_link_display_text_preserved_in_docx() {
+    // Build: Link{ text: [Bold([Plain("here")])], url: "https://example.com/bold" }
+    // DSL equivalent: [**here**](https://example.com/bold)
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from("here"))])],
+        url: Arc::from("https://example.com/bold"),
+    };
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Bold Link Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+    let deck = minimal_deck();
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    // 1. Clickability: <w:hyperlink> element must be present.
+    assert!(
+        doc_xml.contains("<w:hyperlink"),
+        "F-P17-001 RED GATE: word/document.xml must contain <w:hyperlink for \
+         Link{{text:[Bold(...)]}}, got:\n{doc_xml}"
+    );
+
+    // 2. Formatting: <w:b/> must appear INSIDE the <w:hyperlink> element.
+    // Extract the first hyperlink fragment and check for bold.
+    let hl_start = doc_xml
+        .find("<w:hyperlink")
+        .expect("hyperlink element must exist");
+    let hl_end = doc_xml[hl_start..]
+        .find("</w:hyperlink>")
+        .map(|off| hl_start + off + "</w:hyperlink>".len())
+        .expect("hyperlink must close");
+    let hl_fragment = &doc_xml[hl_start..hl_end];
+
+    assert!(
+        hl_fragment.contains("<w:b/>") || hl_fragment.contains("<w:b />"),
+        "F-P17-001 RED GATE: <w:b/> must appear inside <w:hyperlink> when link display \
+         text contains Bold children (BC-3.05.001 PC-3). \
+         Before fix: collect_plain_text silently drops bold. \
+         After fix: structured runs with <w:b/> are emitted inside the hyperlink. \
+         Got hyperlink fragment:\n{hl_fragment}"
+    );
+
+    // 3. Display text must be present inside the hyperlink.
+    assert!(
+        hl_fragment.contains("here"),
+        "F-P17-001: display text 'here' must appear inside <w:hyperlink>. \
+         Got fragment:\n{hl_fragment}"
+    );
+}
+
+/// F-P17-001 / BC-3.05.001 PC-3 — Italic variant:
+/// `Link{text:[Italic([Plain("here")])]}` must produce `<w:i/>` inside
+/// `<w:hyperlink>`.
+#[test]
+fn test_f_p17_001_italic_inside_link_display_text_preserved_in_docx() {
+    let link_node = InlineNode::Link {
+        text: vec![InlineNode::Italic(vec![InlineNode::Plain(Arc::from(
+            "italic link",
+        ))])],
+        url: Arc::from("https://example.com/italic"),
+    };
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Italic Link Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+    let deck = minimal_deck();
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    let hl_start = doc_xml
+        .find("<w:hyperlink")
+        .expect("hyperlink element must exist");
+    let hl_end = doc_xml[hl_start..]
+        .find("</w:hyperlink>")
+        .map(|off| hl_start + off + "</w:hyperlink>".len())
+        .expect("hyperlink must close");
+    let hl_fragment = &doc_xml[hl_start..hl_end];
+
+    assert!(
+        hl_fragment.contains("<w:i/>") || hl_fragment.contains("<w:i />"),
+        "F-P17-001 (italic variant): <w:i/> must appear inside <w:hyperlink> when link \
+         display text contains Italic children (BC-3.05.001 PC-3). \
+         Got hyperlink fragment:\n{hl_fragment}"
+    );
+    assert!(
+        hl_fragment.contains("italic link"),
+        "Display text 'italic link' must appear inside <w:hyperlink>. Got:\n{hl_fragment}"
+    );
+}
+
+/// F-P17-001 — regression: `Bold([Link{...}])` (formatting WRAPS the link,
+/// Pass-13 fix) must still produce `<w:b/>` inside `<w:hyperlink>` after the
+/// F-P17-001 fix (no regression to the Pass-13 fix).
+#[test]
+fn test_f_p17_001_regression_bold_wrapping_link_still_works() {
+    // Bold wraps Link — the Pass-13 path via apply_run_property WHyperlink branch.
+    let link_node = InlineNode::Bold(vec![InlineNode::Link {
+        text: vec![InlineNode::Plain(Arc::from("outer bold"))],
+        url: Arc::from("https://example.com/outer"),
+    }]);
+    let rc = RegisteredContent {
+        register: Register::Report,
+        content: vec![link_node],
+    };
+    let slide = make_slide("Outer Bold Slide", vec![rc]);
+    let laid_out = make_laid_out_deck(vec![slide]);
+    let deck = minimal_deck();
+
+    let docx_bytes = export_deck(&deck, &laid_out);
+    let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
+
+    let hl_start = doc_xml
+        .find("<w:hyperlink")
+        .expect("hyperlink element must exist");
+    let hl_end = doc_xml[hl_start..]
+        .find("</w:hyperlink>")
+        .map(|off| hl_start + off + "</w:hyperlink>".len())
+        .expect("hyperlink must close");
+    let hl_fragment = &doc_xml[hl_start..hl_end];
+
+    assert!(
+        hl_fragment.contains("<w:b/>") || hl_fragment.contains("<w:b />"),
+        "F-P17-001 regression: Bold([Link{{...}}]) must still produce <w:b/> inside \
+         <w:hyperlink> (Pass-13 fix must be preserved). Got:\n{hl_fragment}"
+    );
+    assert!(
+        hl_fragment.contains("outer bold"),
+        "Display text 'outer bold' must appear inside <w:hyperlink>. Got:\n{hl_fragment}"
+    );
 }

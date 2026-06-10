@@ -55,6 +55,7 @@ const H2_LEVEL: std::num::NonZeroU16 = match std::num::NonZeroU16::new(2) {
 };
 
 use crate::error::PdfExportError;
+use crate::slide_pdf::extract_all_inline_text;
 
 /// Result of tagging a single slide.
 ///
@@ -237,6 +238,24 @@ impl SlideTagEngine {
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
+                // STORY-081 C3: SubtitleInlines — subtitle with rich inline structure.
+                // Tagged the same as Subtitle (H2 heading), but uses extract_all_inline_text
+                // to get the subtitle text content from the inline nodes for the /Title attribute.
+                FrameContent::SubtitleInlines(nodes) => {
+                    let child_idx = part_group.children.len();
+                    let subtitle_text = extract_all_inline_text(nodes);
+                    let heading_group = TagGroup::new(Tag::<krilla::tagging::kind::Hn>::Hn(
+                        H2_LEVEL,
+                        if subtitle_text.is_empty() {
+                            None
+                        } else {
+                            Some(subtitle_text)
+                        },
+                    ));
+                    part_group.push(heading_group);
+                    frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                },
+
                 // ── Body content → P per paragraph or L+LI+LBody per list ────
                 //
                 // Body frames may push MULTIPLE children — one per content block.
@@ -342,13 +361,10 @@ impl SlideTagEngine {
                 // stored uncompressed even when content streams use FlateDecode).
                 FrameContent::TextRun(inlines) => {
                     let child_idx = part_group.children.len();
-                    let actual_text: String =
-                        inlines.iter().fold(String::new(), |mut acc, node| {
-                            if let slideforge_types::InlineNode::Plain(s) = node {
-                                acc.push_str(s.as_ref());
-                            }
-                            acc
-                        });
+                    // STORY-081 C1 fix: use extract_all_inline_text to extract
+                    // text from ALL inline variants (Bold, Italic, Code, etc.),
+                    // not just Plain nodes. Same fix as in tag_content_block.
+                    let actual_text = extract_all_inline_text(inlines);
                     let mut p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
                     if !actual_text.is_empty() {
                         p_group.tag.set_actual_text(Some(actual_text));
@@ -444,16 +460,13 @@ impl SlideTagEngine {
             // (BC-4.03.001 / STORY-086).
             ContentBlock::Text(text_block) => {
                 let mut p_group = TagGroup::new(Tag::<krilla::tagging::kind::P>::P);
-                let actual_text: String =
-                    text_block
-                        .inlines
-                        .iter()
-                        .fold(String::new(), |mut acc, node| {
-                            if let slideforge_types::InlineNode::Plain(s) = node {
-                                acc.push_str(s.as_ref());
-                            }
-                            acc
-                        });
+                // STORY-081 C1 fix: use extract_all_inline_text (via slide_to_krilla_runs)
+                // to extract text from ALL inline variants, not just Plain nodes.
+                // Previously, Bold([Plain("bold text")]) produced an empty actual_text
+                // because only InlineNode::Plain was matched, making bold text invisible
+                // in the uncompressed structure dictionary and therefore unfindable in
+                // raw PDF bytes for integration test verification (BC-3.05.001 PC-5).
+                let actual_text = extract_all_inline_text(&text_block.inlines);
                 if !actual_text.is_empty() {
                     p_group.tag.set_actual_text(Some(actual_text));
                 }

@@ -121,23 +121,51 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         // ── 2. Subtitle ──────────────────────────────────────────────────────
         // TextTag::Subtitle routes to FrameContent::Subtitle (PPTX subTitle placeholder,
         // DOCX Heading2 paragraph) per BC-4.01.001 v1.2 postcondition 10 / BC-4.02.001 v1.2 PC-9.
-        if let Some(text) = extract_str_field(slide, "subtitle")
-            && !text.trim().is_empty()
-        {
-            slide
-                .blocks
-                .push(make_text_block_tagged(text, TextTag::Subtitle));
+        //
+        // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
+        // when subtitle contains inline markup like `_italic subtitle_`). Previously
+        // extract_str_field returned None for Inlines, silently dropping the subtitle.
+        match slide.fields.get("subtitle") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+                slide.blocks.push(make_text_block_tagged_inlines(
+                    nodes.clone(),
+                    TextTag::Subtitle,
+                ));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "subtitle")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Subtitle));
+                }
+            },
         }
 
         // ── 3. Body ──────────────────────────────────────────────────────────
         // TextTag::Body routes to FrameContent::Body (PPTX body placeholder,
         // DOCX Normal paragraph) per BC-4.01.001 v1.2 postcondition 11 / BC-4.02.001 v1.2 PC-10.
-        if let Some(text) = extract_str_field(slide, "body")
-            && !text.trim().is_empty()
-        {
-            slide
-                .blocks
-                .push(make_text_block_tagged(text, TextTag::Body));
+        //
+        // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
+        // when body contains inline markup like `**bold body text**`). Previously
+        // extract_str_field returned None for Inlines, silently dropping the body.
+        // This is the primary failing path identified by adversary finding C2.
+        match slide.fields.get("body") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "body")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Body));
+                }
+            },
         }
 
         // ── 4. Bullets ───────────────────────────────────────────────────────
@@ -524,6 +552,28 @@ fn make_text_block_tagged(text: &str, tag: TextTag) -> Block {
     Block {
         content: ContentBlock::Text(TextBlock {
             inlines: vec![InlineNode::Plain(Arc::from(text.trim()))],
+            tag,
+            span: SourceSpan::default(),
+        }),
+        label: None,
+        span: SourceSpan::default(),
+    }
+}
+
+/// Build a typed `Block` from an already-evaluated inline node sequence.
+///
+/// Used when the field value is `FieldValue::Inlines` (produced by `eval_slide_node`
+/// for fields carrying inline markup). Carries the `Vec<InlineNode>` verbatim so
+/// that exporters receive the full structural information (bold, italic, etc.)
+/// instead of a flattened plain-text string.
+///
+/// STORY-081 C2 fix: `body` and `subtitle` fields with inline markup must reach
+/// the layout pass as `ContentBlock::Text` with non-plain inline nodes, not be
+/// silently dropped by `extract_str_field` which only matched `Literal(Str)`.
+fn make_text_block_tagged_inlines(inlines: Vec<InlineNode>, tag: TextTag) -> Block {
+    Block {
+        content: ContentBlock::Text(TextBlock {
+            inlines,
             tag,
             span: SourceSpan::default(),
         }),

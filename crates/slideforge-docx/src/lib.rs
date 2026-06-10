@@ -139,7 +139,8 @@ fn build_docx(deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand) -> Result<Vec<
 
     // ── `word/document.xml` and relationships ────────────────────────────
     let mut body_ser = DocumentBodySerializer::new();
-    let document_xml = body_ser.serialize(laid_out)?;
+    // Pass semantic_deck for STORY-081 I2 dual-title inline structure access.
+    let document_xml = body_ser.serialize(laid_out, deck)?;
     asm.add_part("word/document.xml", document_xml);
 
     let doc_rels = build_document_rels(body_ser.relationships());

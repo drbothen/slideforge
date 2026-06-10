@@ -48,6 +48,7 @@
 #![allow(clippy::panic)]
 #![allow(clippy::collapsible_match)]
 #![allow(clippy::case_sensitive_file_extension_comparisons)]
+#![allow(clippy::uninlined_format_args)]
 
 use std::io::Read as _;
 use std::sync::Arc;
@@ -62,6 +63,84 @@ use slideforge_types::{Brand, BrandFonts, BrandPalette, Deck, Emu, Register, Sou
 use zip::ZipArchive;
 
 use crate::PptxExporter;
+
+// ─── Reference-set invariant helper (BC-3.05.001 HI-1) ───────────────────────
+//
+// BC-3.05.001 HI-1 explicitly RETIRED count-equality (`external_rel_count ==
+// hlinkclick_count`) as FALSE: one External rel legitimately backs N
+// `<a:hlinkClick>` runs for multi-leaf link display text.
+//
+// The correct invariant is the REFERENCE-SET form:
+//   (a) every `<a:hlinkClick r:id="...">` rId resolves to a registered External rel
+//       (no dangling rId), AND
+//   (b) every registered External rel Id is referenced by ≥1 hlinkClick run
+//       (no orphan rel).
+fn assert_hyperlink_reference_set_invariant(slide_xml: &str, rels_xml: &str) {
+    use std::collections::HashSet;
+
+    // ── Collect rIds cited by <a:hlinkClick runs ──────────────────────────────
+    let hlinkclick_rids: HashSet<String> = {
+        let mut set = HashSet::new();
+        let mut remaining = slide_xml;
+        while let Some(pos) = remaining.find("<a:hlinkClick") {
+            let after_tag = &remaining[pos..];
+            if let Some(tag_end) = after_tag.find('>')
+                && let tag_body = &after_tag[..=tag_end]
+                && let Some(rid_pos) = tag_body.find("r:id=\"")
+                && let after_rid = &tag_body[rid_pos + 6..]
+                && let Some(quote_end) = after_rid.find('"')
+            {
+                set.insert(after_rid[..quote_end].to_owned());
+            }
+            remaining = &remaining[pos + 1..];
+        }
+        set
+    };
+
+    // ── Collect Ids of External rels ─────────────────────────────────────────
+    let external_rel_ids: HashSet<String> = {
+        let mut set = HashSet::new();
+        let mut remaining = rels_xml;
+        while let Some(pos) = remaining.find("<Relationship") {
+            let after_tag = &remaining[pos..];
+            let tag_end = after_tag.find('>').unwrap_or(after_tag.len());
+            let element = &after_tag[..=tag_end];
+            if element.contains("TargetMode=\"External\"")
+                && let Some(id_pos) = element.find("Id=\"")
+                && let after_id = &element[id_pos + 4..]
+                && let Some(quote_end) = after_id.find('"')
+            {
+                set.insert(after_id[..quote_end].to_owned());
+            }
+            remaining = &remaining[pos + 1..];
+        }
+        set
+    };
+
+    // ── (a) No dangling rId ───────────────────────────────────────────────────
+    for rid in &hlinkclick_rids {
+        assert!(
+            external_rel_ids.contains(rid),
+            "BC-3.05.001 HI-1: <a:hlinkClick> references rId={rid:?} with no matching \
+             External rel (dangling rId).\n\
+             hlinkClick rIds: {hlinkclick_rids:?}\n\
+             External rel Ids: {external_rel_ids:?}\n\
+             rels:\n{rels_xml}"
+        );
+    }
+
+    // ── (b) No orphan rel ────────────────────────────────────────────────────
+    for id in &external_rel_ids {
+        assert!(
+            hlinkclick_rids.contains(id),
+            "BC-3.05.001 HI-1: External rel Id={id:?} has no corresponding \
+             <a:hlinkClick> run (orphan rel).\n\
+             hlinkClick rIds: {hlinkclick_rids:?}\n\
+             External rel Ids: {external_rel_ids:?}\n\
+             rels:\n{rels_xml}"
+        );
+    }
+}
 
 // ─── Fixture builders ────────────────────────────────────────────────────────
 
@@ -1417,16 +1496,11 @@ fn test_f040_p3_001_nested_link_in_display_text_no_orphan_rel() {
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // CORE ASSERTION: rId count for External rels must equal hlinkClick count.
-    // An orphan rel would cause external_rel_count > hlinkclick_count.
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-040-P3-001: orphan External rel detected — \
-         TargetMode=External count ({external_rel_count}) != \
-         <a:hlinkClick count ({hlinkclick_count}). \
-         The nested link's URL inside the outer link's display text must NOT \
-         produce an External rel (it has no corresponding hlinkClick)."
-    );
+    // BC-3.05.001 HI-1 reference-set invariant: every hlinkClick rId resolves to a
+    // registered External rel; every External rel is cited ≥1× (no orphan rels).
+    // Count-equality is NOT asserted — 1 rel may back N runs for multi-leaf display
+    // text (EC-012). Here both sets are size 1 (outer link only).
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
     // Both counts must be exactly 1: only the outer link gets an rId + hlinkClick.
     assert_eq!(
@@ -1456,6 +1530,109 @@ fn test_f040_p3_001_nested_link_in_display_text_no_orphan_rel() {
          (it is rendered as plain text by the serializer); \
          got rels:\n{rels_xml}"
     );
+}
+
+// =============================================================================
+// ADV-P14-MED-001: Nested Link inside formatting wrapper — notes path
+//
+// `Bold([Link{text:"click", url:"https://example.com"}])` in notes register →
+// notesSlide1.xml must contain <a:hlinkClick> AND <a:rPr b="1">, and
+// notesSlide1.xml.rels must have the matching TargetMode="External" rel, AND
+// reference-set invariant: every hlinkClick rId resolves to a registered External
+// rel; every registered rel is referenced ≥1×; a single rel may back N hlinkClick
+// runs for multi-leaf display text — count-equality is FALSE ∀ and was retired in HI-1.
+//
+// MUST FAIL before fix: dispatch_inline_nodes_to_ooxml only sets hyperlink_rid
+// for top-level Link nodes; Bold([Link]) gets hyperlink_rid=None and
+// DefaultInlineFormat falls back to plain text with no <a:hlinkClick>.
+// =============================================================================
+
+/// ADV-P14-MED-001 notes: `Bold([Link])` in notes → run carries `b="1"` AND
+/// `<a:hlinkClick>`, External rel in rels, orphan-rel invariant holds.
+///
+/// **Red Gate:** Before fix, `dispatch_inline_nodes_to_ooxml` only wires
+/// `hyperlink_rid` for top-level `Link` nodes; `Bold([Link])` gets `None` →
+/// plain text fallback, no `<a:hlinkClick>`, silent URL drop.
+#[test]
+fn test_adv_p14_med_001_notes_bold_link_has_b1_and_hlinkclick() {
+    let target_url = "https://example.com/notes-bold-link";
+
+    let bold_link_node =
+        slideforge_types::InlineNode::Bold(vec![slideforge_types::InlineNode::Link {
+            text: vec![slideforge_types::InlineNode::Plain(Arc::from("click"))],
+            url: Arc::from(target_url),
+        }]);
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![bold_link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+            region_role: None,
+        }],
+        speaker_notes: Some(Arc::from("click")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("click")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+        slide_sections: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+
+    // Display text must appear.
+    assert!(
+        notes_xml.contains("click"),
+        "ADV-P14-MED-001 notes: link display text 'click' must appear;\n\
+         notes_xml (first 2000 chars): {:.2000}",
+        notes_xml
+    );
+
+    // b="1" — bold context inherited by the link run.
+    assert!(
+        notes_xml.contains("b=\"1\""),
+        "ADV-P14-MED-001 notes: Bold([Link]) must produce b=\"1\" in <a:rPr>;\n\
+         notes_xml (first 2000 chars): {:.2000}",
+        notes_xml
+    );
+
+    // <a:hlinkClick> must appear — nested link must be clickable.
+    assert!(
+        notes_xml.contains("<a:hlinkClick"),
+        "ADV-P14-MED-001 notes: Bold([Link]) must emit <a:hlinkClick> for the nested link;\n\
+         notes_xml (first 2000 chars): {:.2000}",
+        notes_xml
+    );
+
+    // External rel registered.
+    assert!(
+        rels_xml.contains("TargetMode=\"External\""),
+        "ADV-P14-MED-001 notes: rels must contain TargetMode=\"External\" for Bold([Link]);\n\
+         rels: {rels_xml}"
+    );
+    assert!(
+        rels_xml.contains(target_url),
+        "ADV-P14-MED-001 notes: rels must contain URL {target_url:?};\n\
+         rels: {rels_xml}"
+    );
+
+    // BC-3.05.001 HI-1 reference-set invariant: every hlinkClick rId resolves to a
+    // registered External rel; every External rel is cited ≥1× (no orphan rels).
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1638,41 +1815,42 @@ fn test_sec040_001_ampersand_in_url_query_string_is_xml_escaped_in_rels() {
 // =============================================================================
 
 /// AC-005 / BC-5.02.002 postcondition 5:
-/// After the OOXML dog-fooding refactor, `crates/slideforge-pptx/src/` must
+/// After the ADR-024 unified-engine refactor, `crates/slideforge-pptx/src/` must
 /// contain ZERO occurrences of:
-///   - the substring `"a:r"` (literal OOXML run tag fragment)
-///   - the substring `"a:rPr"` (literal OOXML run properties tag fragment)
+///   - the substring `"<a:r"` (literal OOXML run tag fragment)
+///   - the substring `"<a:rPr"` (literal OOXML run properties tag fragment)
 ///   - the string `serialize_inline` (legacy inline serializer function names)
 ///
-/// These are forbidden everywhere except the single documented dispatch call site
-/// (identified by the stable comment `// AC-005-DISPATCH-SITE` on that line).
+/// All OOXML run emission goes through the unified engine:
+///   `render_inline_nodes_to_runs` → `serialize_ooxml_run` / `ooxml_run_to_ooxmlsdk`
+///
+/// These forbidden substrings must not appear on any non-comment code line in
+/// the production source. Comment lines (starting with `//` or `///`) are
+/// exempted so that doc comments describing the engine can name these concepts.
 ///
 /// ## Why this test (F-002 / LESSON-17 / TD-VSDD-059)
 ///
 /// The previous version of this test checked only for legacy FUNCTION NAMES
 /// (`serialize_inline_nodes_to_xml`, `fn emit_run`). That was a paper-fix
 /// (TD-VSDD-059): the functions were removed, but the refactored code still
-/// hand-constructs `<a:r><a:rPr` strings inside `dispatch_inline_nodes_to_ooxml`
+/// hand-constructed `<a:r><a:rPr` strings inside `dispatch_inline_nodes_to_ooxml`
 /// for the `Link` arm — violating AC-005 / BC-5.02.002 postcondition 5.
 ///
 /// This rewritten test enforces the LITERAL AC-005/BC-5.02.002 vector: scan all
 /// production `.rs` files under `crates/slideforge-pptx/src/` (excluding
-/// `tests/` and `#[cfg(test)]` blocks) for the substrings `a:r`, `a:rPr`, and
-/// `serialize_inline`, and assert ZERO occurrences EXCEPT:
-///   1. Lines that are comments (starting with `//` or `///` after trimming).
-///   2. The single documented dispatch call site marked with `// AC-005-DISPATCH-SITE`.
+/// `tests/` and `#[cfg(test)]` blocks) for the forbidden substrings, and assert
+/// ZERO occurrences on non-comment code lines.
 ///
 /// ## Red Gate (F-002)
 ///
 /// FAILS before the F-001 fix because `notes_slide.rs` line ~269 contains:
 ///   `out.push_str("<a:r><a:rPr");`
-/// This is not a comment and not the dispatch site — it is a forbidden
-/// hand-construction of `<a:r>` and `<a:rPr>` in the pptx exporter.
+/// This is not a comment — it is a forbidden hand-construction of `<a:r>` and
+/// `<a:rPr>` in the pptx exporter.
 ///
-/// PASSES after F-001 routes the Link arm through `render_with_context` (which
-/// emits the OOXML from within `DefaultInlineFormat` in `slideforge-plugin-api`).
-/// The one permitted dispatch call site in `notes_slide.rs` must be marked:
-///   `// AC-005-DISPATCH-SITE`
+/// PASSES after ADR-024 routes all inline-node emission through
+/// `render_inline_nodes_to_runs` (body: `slide_serializer.rs`; notes:
+/// `notes_slide.rs`) — the sole construction sites for typed `Run` / `OoxmlRun`.
 #[test]
 fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
     use std::fs;
@@ -1690,14 +1868,10 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
     );
 
     // These literal substrings must not appear in slideforge-pptx production code
-    // outside the single AC-005-DISPATCH-SITE marked line.
-    // NOTE: "a:r" as a pattern will match both "a:r>" and "a:rPr" — we list them
+    // on any non-comment line.
+    // NOTE: "<a:r" as a pattern matches both "<a:r>" and "<a:rPr>" — we list them
     // separately for clear violation messages.
     let forbidden_substrings = ["<a:r", "<a:rPr", "serialize_inline"];
-
-    // The single permitted dispatch call site marker. Any line containing this
-    // marker is exempt from the forbidden-substring check.
-    let dispatch_site_marker = "// AC-005-DISPATCH-SITE";
 
     let mut violations: Vec<String> = Vec::new();
 
@@ -1716,15 +1890,10 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
             let line_num = line_num + 1; // 1-based
 
             // Skip pure comment lines (no production code on this line).
+            // Doc comments that describe the engine may name the forbidden substrings;
+            // they are not violations.
             let trimmed = line.trim();
             if trimmed.starts_with("//") || trimmed.starts_with("///") {
-                continue;
-            }
-
-            // The single permitted dispatch site: the one line where the
-            // InlineFormat::render / render_with_context call is made.
-            // That line must carry the marker `// AC-005-DISPATCH-SITE`.
-            if line.contains(dispatch_site_marker) {
                 continue;
             }
 
@@ -1746,8 +1915,9 @@ fn test_bc_5_02_002_ac005_grep_zero_ar_rpr_serialize_inline_outside_dispatch() {
         violations.is_empty(),
         "AC-005 FAILED — BC-5.02.002 postcondition 5 (literal grep-zero) violated.\n\
          Production code in slideforge-pptx/src/ must not hand-construct OOXML run \
-         markup. All OOXML run emission must go through InlineFormat::render_with_context \
-         at the single AC-005-DISPATCH-SITE. Found {} violation(s):\n{}",
+         markup. All OOXML run emission must go through the unified engine: \
+         render_inline_nodes_to_runs → serialize_ooxml_run / ooxml_run_to_ooxmlsdk. \
+         Found {} violation(s):\n{}",
         violations.len(),
         violations.join("\n")
     );
@@ -2272,7 +2442,16 @@ fn test_f003_ac006_notes_strikethrough_variant_in_ooxml() {
     );
 }
 
-/// F-003 (HIGH): Highlight node in notes path → `highlight="yellow"`.
+/// ADV-P11-HIGH-001 / F-003 (HIGH): Highlight node in notes path must emit
+/// `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child element, NOT the
+/// invalid `highlight="yellow"` attribute.
+///
+/// DrawingML `CT_TextCharacterProperties` (`<a:rPr>`) has NO `highlight` ATTRIBUTE.
+/// The schema-correct form is the `<a:highlight>` CHILD element. The sibling-site
+/// fix for ADV-P11-HIGH-001 (the notes raw-string path missed the Pass-10 body fix).
+///
+/// Red Gate: FAILS before fix because `emit_run` emits ` highlight="yellow"` attribute
+/// (visible in the notes XML via `DefaultInlineFormat::render` → `emit_run`).
 #[test]
 fn test_f003_ac006_notes_highlight_variant_in_ooxml() {
     use slideforge_types::InlineNode;
@@ -2308,9 +2487,23 @@ fn test_f003_ac006_notes_highlight_variant_in_ooxml() {
     let pptx = export_pptx(&deck, &laid_out);
     let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
 
+    // Must contain the schema-correct <a:highlight> child element.
     assert!(
-        notes_xml.contains("highlight=\"yellow\""),
-        "F-003: Highlight in notes must use highlight=\"yellow\"; got:\n{notes_xml}"
+        notes_xml.contains("<a:highlight>"),
+        "ADV-P11-HIGH-001: Highlight in notes must emit <a:highlight> child element; \
+         got:\n{notes_xml}"
+    );
+    // Must contain yellow FFFF00 value.
+    assert!(
+        notes_xml.contains("FFFF00"),
+        "ADV-P11-HIGH-001: Highlight in notes must contain FFFF00 color value; \
+         got:\n{notes_xml}"
+    );
+    // Must NOT emit the invalid highlight attribute (schema violation).
+    assert!(
+        !notes_xml.contains("highlight=\"yellow\""),
+        "ADV-P11-HIGH-001: highlight=\"yellow\" is NOT a valid DrawingML rPr attribute — \
+         must NOT appear in notes XML. Got:\n{notes_xml}"
     );
     insta::assert_snapshot!(
         "f003_notes_highlight_ooxml",
@@ -2533,8 +2726,10 @@ fn test_f006_registry_routing_notes_produces_same_ooxml() {
 ///
 /// Mirrors `test_f040_p3_001_nested_link_in_display_text_no_orphan_rel` but for
 /// the empty-text case (text: vec![]) rather than the nested-link case.
-/// Both tests assert the same count-equality invariant:
-///   `external_rel_count == hlinkclick_count` (zero orphan rels).
+/// Both tests assert the reference-set invariant (BC-3.05.001 HI-1): every
+/// `<a:hlinkClick>` rId resolves to a registered External rel; every registered
+/// rel is referenced ≥1×; a single rel may back N hlinkClick runs for multi-leaf
+/// display text — count-equality is FALSE ∀ and was retired in HI-1.
 ///
 /// ## RED → GREEN (OBS-1 fix in collect_hyperlink_urls)
 ///
@@ -2596,17 +2791,10 @@ fn test_obs1_empty_display_text_link_no_orphan_external_rel() {
     // Count <a:hlinkClick elements in the notes XML.
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // CORE INVARIANT: rId↔hlinkClick count-equality (no orphan rels).
-    // Before fix: external_rel_count=1, hlinkclick_count=0 → assertion fails.
-    // After fix:  external_rel_count=0, hlinkclick_count=0 → assertion passes.
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "OBS-1: orphan External rel detected for empty-display-text Link — \
-         TargetMode=External count ({external_rel_count}) != \
-         <a:hlinkClick count ({hlinkclick_count}). \
-         An empty-text Link must not register an rId (no run is emitted). \
-         rels:\n{rels_xml}\nnotes_xml:\n{notes_xml}"
-    );
+    // BC-3.05.001 HI-1 reference-set invariant (no orphan rels).
+    // Before fix: external_rel_count=1, hlinkclick_count=0 → dangling rId detected.
+    // After fix:  both sets empty → invariant trivially holds.
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
     // Both counts must be exactly 0: empty-text link produces no run and no rel.
     assert_eq!(
@@ -2682,13 +2870,8 @@ fn test_obs1_non_empty_display_text_link_still_produces_rel_and_hlinkclick() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // CORE INVARIANT: count-equality (no orphan rels).
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "OBS-1 regression: non-empty Link must have equal External rel and hlinkClick counts; \
-         TargetMode=External count ({external_rel_count}) != \
-         <a:hlinkClick count ({hlinkclick_count}).\nrels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
+    // BC-3.05.001 HI-1 reference-set invariant (no orphan rels, no dangling rIds).
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
     // Both counts must be exactly 1.
     assert_eq!(
@@ -2727,7 +2910,10 @@ fn test_obs1_non_empty_display_text_link_still_produces_rel_and_hlinkclick() {
 // i.e., `display_text_is_empty(text)` — same semantics as render_with_context.
 //
 // These tests confirm the gap and enforce the invariant:
-//   external_rel_count == hlinkclick_count for ALL empty-flatten variants.
+// reference-set invariant holds for ALL empty-flatten variants: every `<a:hlinkClick>`
+// rId resolves to a registered External rel; every registered rel is referenced ≥1×;
+// a single rel may back N hlinkClick runs for multi-leaf display text — count-equality
+// is FALSE ∀ and was retired in HI-1.
 // =============================================================================
 
 /// F-P5-001 [MED]: `Link { text: vec![Plain("")], url: <safe> }` — Vec is
@@ -2782,14 +2968,8 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_plain() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // CORE INVARIANT: no orphan rels (count-equality).
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-P5-001 [Plain(\"\")]: orphan External rel — \
-         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
-         Link with Plain(\"\") display text must not register an rId. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
+    // CORE INVARIANT: reference-set invariant (no orphan rels, no dangling rIds).
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
     // Both must be exactly 0.
     assert_eq!(
@@ -2862,13 +3042,8 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_bold_empty() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // CORE INVARIANT: no orphan rels.
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-P5-001 [Bold(vec![])]: orphan External rel — \
-         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
+    // CORE INVARIANT: reference-set invariant (no orphan rels, no dangling rIds).
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
     assert_eq!(
         external_rel_count, 0,
@@ -2888,26 +3063,35 @@ fn test_fp5_001_link_nonempty_vec_empty_flatten_no_orphan_rel_bold_empty() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F-085-P6-001 [HIGH] — orphan External rel for Link nested inside formatting wrapper
+// F-085-P6-001 [HIGH] — Wrapper-wrapped Link emits <a:hlinkClick> + External rel
 //
-// Root cause: collect_hyperlink_urls recurses into Bold/Italic/Strikethrough/
-// Superscript/Subscript/Highlight/Footnote and registers any safe Link URL
-// it finds — but dispatch_inline_nodes_to_ooxml only emits <a:hlinkClick>
-// for TOP-LEVEL Link nodes. A Link nested in a formatting wrapper gets
-// hyperlink_rid=None → renders as plain text + warn → no hlinkClick. Result:
-// external_rel_count=1, hlinkclick_count=0 → orphan rel.
+// ADV-P14-MED-001 fix: collect_hyperlink_urls now descends into formatting
+// wrappers (Bold/Italic/Strikethrough/…) to register nested Link URLs.
+// dispatch_inline_nodes_to_ooxml / DefaultInlineFormat::render_with_context
+// thread the rId through RunProps so the leaf run carries BOTH the formatting
+// property (b="1", i="1", etc.) AND <a:hlinkClick>.
 //
-// Fix: collect_hyperlink_urls must NOT recurse into formatting wrappers.
-// Registration and emission are now both top-level-only; count invariant holds.
+// Orphan-rel invariant: registration and emission are now both wrapper-aware
+// and symmetric (reference-set invariant holds ∀ inline tree shapes): every
+// `<a:hlinkClick>` rId resolves to a registered External rel; every registered rel is
+// referenced ≥1×; a single rel may back N hlinkClick runs for multi-leaf display text —
+// count-equality is FALSE ∀ and was retired in HI-1.
 //
-// All tests below FAIL before the fix (orphan rel) and PASS after the fix (counts equal).
+// All tests below verify: 1 External rel + 1 hlinkClick for Bold/Italic/etc.
+// wrapping a single safe Link. (ADV-P14-MED-001 updated from the original
+// F-085-P6-001 "plain text" expectation.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// F-085-P6-001 [HIGH]: `Bold([Link{url:safe, text:[Plain("x")]}])` — Link nested
-/// inside Bold creates an orphan External rel before the fix.
+/// ADV-P14-MED-001 / F-085-P6-001 [updated]: `Bold([Link{url:safe}])` in notes →
+/// MUST emit 1 External rel + 1 `<a:hlinkClick>` with b="1" on the run.
 ///
-/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
-/// PASSES after fix: both counts 0 (nested link is plain text, no rel registered).
+/// The original F-085-P6-001 fix prevented orphan rels by making nested-link
+/// wrappers no-ops (plain text). ADV-P14-MED-001 corrects the behavior: nested
+/// links are NOW clickable — both collector and dispatcher descend through wrappers.
+/// The reference-set invariant (BC-3.05.001 HI-1) holds: every `<a:hlinkClick>`
+/// rId resolves to a registered External rel; every registered rel is referenced ≥1×;
+/// a single rel may back N hlinkClick runs for multi-leaf display text — count-equality
+/// is FALSE ∀ and was retired in HI-1.
 #[test]
 fn test_f085_p6_001_bold_wrapping_link_no_orphan_rel() {
     let nested_url = "https://example.com/bold-wrapped-link";
@@ -2953,33 +3137,38 @@ fn test_f085_p6_001_bold_wrapping_link_no_orphan_rel() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
+    // Reference-set invariant: every hlinkClick rId resolves to a registered External
+    // rel; every registered rel is referenced ≥1×.
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
+
+    // ADV-P14-MED-001: Bold([Link]) must produce 1 External rel + 1 hlinkClick.
     assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-085-P6-001 [Bold(Link)]: orphan External rel — \
-         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
-         A Link nested inside Bold must NOT produce an External rel. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
+        external_rel_count, 1,
+        "ADV-P14-MED-001 [Bold(Link)]: expected 1 External rel; got {external_rel_count}. \
+         rels:\n{rels_xml}"
     );
     assert_eq!(
-        external_rel_count, 0,
-        "F-085-P6-001 [Bold(Link)]: expected 0 External rels (nested link is plain text); \
-         got {external_rel_count}. rels:\n{rels_xml}"
+        hlinkclick_count, 1,
+        "ADV-P14-MED-001 [Bold(Link)]: expected 1 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
     );
-    assert_eq!(
-        hlinkclick_count, 0,
-        "F-085-P6-001 [Bold(Link)]: expected 0 <a:hlinkClick (nested link is plain text); \
-         got {hlinkclick_count}. notes:\n{notes_xml}"
-    );
+
+    // URL must appear in rels.
     assert!(
-        !rels_xml.contains(nested_url),
-        "F-085-P6-001 [Bold(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+        rels_xml.contains(nested_url),
+        "ADV-P14-MED-001 [Bold(Link)]: URL must appear in rels; got:\n{rels_xml}"
+    );
+
+    // b="1" must appear in the notes XML — bold formatting preserved on the link run.
+    assert!(
+        notes_xml.contains("b=\"1\""),
+        "ADV-P14-MED-001 [Bold(Link)]: b=\"1\" must appear (bold preserved on link run); \
+         notes:\n{notes_xml}"
     );
 }
 
-/// F-085-P6-001 [HIGH]: `Italic([Link{...}])` — Link nested inside Italic.
-///
-/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
-/// PASSES after fix: both counts 0.
+/// ADV-P14-MED-001 / F-085-P6-001 [updated]: `Italic([Link{...}])` — Link nested
+/// inside Italic → 1 External rel + 1 hlinkClick with i="1".
 #[test]
 fn test_f085_p6_001_italic_wrapping_link_no_orphan_rel() {
     let nested_url = "https://example.com/italic-wrapped-link";
@@ -3025,26 +3214,30 @@ fn test_f085_p6_001_italic_wrapping_link_no_orphan_rel() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
     assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-085-P6-001 [Italic(Link)]: orphan External rel — counts mismatch. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
-    assert_eq!(
-        external_rel_count, 0,
-        "F-085-P6-001 [Italic(Link)]: expected 0 External rels; got {external_rel_count}. \
+        external_rel_count, 1,
+        "ADV-P14-MED-001 [Italic(Link)]: expected 1 External rel; got {external_rel_count}. \
          rels:\n{rels_xml}"
     );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "ADV-P14-MED-001 [Italic(Link)]: expected 1 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
+    );
     assert!(
-        !rels_xml.contains(nested_url),
-        "F-085-P6-001 [Italic(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+        rels_xml.contains(nested_url),
+        "ADV-P14-MED-001 [Italic(Link)]: URL must appear in rels; got:\n{rels_xml}"
+    );
+    assert!(
+        notes_xml.contains("i=\"1\""),
+        "ADV-P14-MED-001 [Italic(Link)]: i=\"1\" must appear (italic preserved on link run); \
+         notes:\n{notes_xml}"
     );
 }
 
-/// F-085-P6-001 [HIGH]: `Strikethrough([Link{...}])` — Link nested inside Strikethrough.
-///
-/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
-/// PASSES after fix: both counts 0.
+/// ADV-P14-MED-001 / F-085-P6-001 [updated]: `Strikethrough([Link{...}])` →
+/// 1 External rel + 1 hlinkClick with strike="sngStrike".
 #[test]
 fn test_f085_p6_001_strikethrough_wrapping_link_no_orphan_rel() {
     let nested_url = "https://example.com/strike-wrapped-link";
@@ -3090,26 +3283,25 @@ fn test_f085_p6_001_strikethrough_wrapping_link_no_orphan_rel() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
     assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-085-P6-001 [Strikethrough(Link)]: orphan External rel — counts mismatch. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
-    assert_eq!(
-        external_rel_count, 0,
-        "F-085-P6-001 [Strikethrough(Link)]: expected 0 External rels; got {external_rel_count}. \
+        external_rel_count, 1,
+        "ADV-P14-MED-001 [Strikethrough(Link)]: expected 1 External rel; got {external_rel_count}. \
          rels:\n{rels_xml}"
     );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "ADV-P14-MED-001 [Strikethrough(Link)]: expected 1 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
+    );
     assert!(
-        !rels_xml.contains(nested_url),
-        "F-085-P6-001 [Strikethrough(Link)]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+        rels_xml.contains(nested_url),
+        "ADV-P14-MED-001 [Strikethrough(Link)]: URL must appear in rels; got:\n{rels_xml}"
     );
 }
 
-/// F-085-P6-001 [HIGH]: deeply nested `Bold([Italic([Link{...}])])`.
-///
-/// FAILS before fix: external_rel_count=1, hlinkclick_count=0.
-/// PASSES after fix: both counts 0.
+/// ADV-P14-MED-001 / F-085-P6-001 [updated]: `Bold([Italic([Link{...}])])` →
+/// 1 External rel + 1 hlinkClick with b="1" AND i="1".
 #[test]
 fn test_f085_p6_001_deeply_nested_bold_italic_link_no_orphan_rel() {
     let nested_url = "https://example.com/deep-nested-link";
@@ -3156,42 +3348,46 @@ fn test_f085_p6_001_deeply_nested_bold_italic_link_no_orphan_rel() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
     assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-085-P6-001 [Bold(Italic(Link))]: orphan External rel — counts mismatch. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
-    assert_eq!(
-        external_rel_count, 0,
-        "F-085-P6-001 [Bold(Italic(Link))]: expected 0 External rels; got {external_rel_count}. \
+        external_rel_count, 1,
+        "ADV-P14-MED-001 [Bold(Italic(Link))]: expected 1 External rel; got {external_rel_count}. \
          rels:\n{rels_xml}"
     );
+    assert_eq!(
+        hlinkclick_count, 1,
+        "ADV-P14-MED-001 [Bold(Italic(Link))]: expected 1 <a:hlinkClick; got {hlinkclick_count}. \
+         notes:\n{notes_xml}"
+    );
     assert!(
-        !rels_xml.contains(nested_url),
-        "F-085-P6-001 [Bold(Italic(Link))]: nested URL must NOT appear in rels; got:\n{rels_xml}"
+        rels_xml.contains(nested_url),
+        "ADV-P14-MED-001 [Bold(Italic(Link))]: URL must appear in rels; got:\n{rels_xml}"
     );
 }
 
-/// F-085-P6-001 [HIGH]: MIXED entry — `[Link{top-level safe}, Bold([Link{nested safe}])]`.
+/// ADV-P14-MED-001 / F-085-P6-001 [updated]: MIXED entry —
+/// `[Link{top-level safe}, Bold([Link{nested safe}])]`.
 ///
-/// The top-level Link registers an rId + emits hlinkClick.
-/// The nested Link (inside Bold) renders as plain text — no External rel registered.
-/// Result: exactly 1 External rel AND 1 hlinkClick — count-equal, no orphan.
+/// After the ADV-P14-MED-001 fix, BOTH Links register + emit:
 ///
-/// FAILS before fix: external_rel_count=2, hlinkclick_count=1 (orphan from nested).
-/// PASSES after fix: external_rel_count=1, hlinkclick_count=1.
+/// - Top-level Link: 1 External rel + 1 hlinkClick (existing EC-004 path).
+/// - Bold([Link]) nested: 1 External rel + 1 hlinkClick (ADV-P14-MED-001 fix).
+///
+/// Total: 2 External rels + 2 hlinkClicks — count-equal, no orphan.
+///
+/// (Previously expected 1 rel + 1 click; updated to 2+2 by ADV-P14-MED-001.)
 #[test]
 fn test_f085_p6_001_mixed_toplevel_and_nested_link_exactly_one_rel_one_click() {
     let toplevel_url = "https://example.com/toplevel";
     let nested_url = "https://example.com/nested-inside-bold";
 
-    // Top-level Link (registers + emits hlinkClick)
+    // Top-level Link (registers + emits hlinkClick — EC-004 path)
     let toplevel_link = slideforge_types::InlineNode::Link {
         url: Arc::from(toplevel_url),
         text: vec![slideforge_types::InlineNode::Plain(Arc::from("top"))],
     };
 
-    // Nested Link inside Bold (renders as plain text — no rel, no hlinkClick)
+    // Nested Link inside Bold (ADV-P14-MED-001: ALSO registers + emits hlinkClick)
     let link_inside_bold = slideforge_types::InlineNode::Link {
         url: Arc::from(nested_url),
         text: vec![slideforge_types::InlineNode::Plain(Arc::from("nested"))],
@@ -3233,37 +3429,157 @@ fn test_f085_p6_001_mixed_toplevel_and_nested_link_exactly_one_rel_one_click() {
     let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
     let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
 
-    // COUNT-EQUAL invariant: no orphan rel.
-    assert_eq!(
-        external_rel_count, hlinkclick_count,
-        "F-085-P6-001 [mixed]: orphan External rel — \
-         TargetMode=External ({external_rel_count}) != <a:hlinkClick ({hlinkclick_count}). \
-         Only the top-level Link should register+emit; the Bold-nested Link renders plain. \
-         rels:\n{rels_xml}\nnotes:\n{notes_xml}"
-    );
+    // Reference-set invariant: every hlinkClick rId resolves to a registered External
+    // rel; every registered rel is referenced ≥1×.
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 
-    // Exactly 1 rel (top-level URL only), exactly 1 hlinkClick.
+    // ADV-P14-MED-001: both top-level Link AND Bold([Link]) register+emit.
     assert_eq!(
-        external_rel_count, 1,
-        "F-085-P6-001 [mixed]: expected exactly 1 External rel (top-level Link only); \
+        external_rel_count, 2,
+        "ADV-P14-MED-001 [mixed]: expected 2 External rels (top-level + bold-wrapped); \
          got {external_rel_count}. rels:\n{rels_xml}"
     );
     assert_eq!(
-        hlinkclick_count, 1,
-        "F-085-P6-001 [mixed]: expected exactly 1 <a:hlinkClick (top-level Link only); \
+        hlinkclick_count, 2,
+        "ADV-P14-MED-001 [mixed]: expected 2 <a:hlinkClick> (top-level + bold-wrapped); \
          got {hlinkclick_count}. notes:\n{notes_xml}"
     );
 
-    // Top-level URL appears in rels.
+    // Both URLs appear in rels.
     assert!(
         rels_xml.contains(toplevel_url),
-        "F-085-P6-001 [mixed]: top-level URL must appear in rels; got:\n{rels_xml}"
+        "ADV-P14-MED-001 [mixed]: top-level URL must appear in rels; got:\n{rels_xml}"
+    );
+    assert!(
+        rels_xml.contains(nested_url),
+        "ADV-P14-MED-001 [mixed]: bold-wrapped URL must appear in rels; got:\n{rels_xml}"
+    );
+}
+
+// =============================================================================
+// F-P16-M1 REGRESSION TEST (ADR-024)
+//
+// Notes silently dropped bold/italic/etc. formatting inside a hyperlink's
+// display text. `[click **here** now](https://example.com)` in notes rendered
+// as plain `click here now` with no `<a:rPr b="1"/>` on the bold span.
+//
+// Root cause: `dispatch_inline_nodes_to_ooxml` called `render_with_context` once
+// per top-level node; the Link arm called `extract_plain_text_depth_limited`,
+// discarding all formatting structure inside the display text.
+//
+// Fix (ADR-024): `render_inline_nodes_to_runs` recurses into link display text
+// with full RunProps accumulation. Each leaf in the display text becomes a
+// separate `OoxmlRun`, and the resolver-supplied rId is threaded onto ALL of them.
+// =============================================================================
+
+/// F-P16-M1 REGRESSION TEST: `[click **here** now](https://example.com)` in notes
+/// MUST produce three runs (one per leaf), all with `<a:hlinkClick>`, and the "here"
+/// run MUST have `b="1"` (bold preserved — BC-3.05.001 PC-1 compliance).
+///
+/// FAILS before ADR-024 migration (notes drops bold on link display-text children).
+/// PASSES after notes path is retargeted to `render_inline_nodes_to_runs`.
+///
+/// Traceability: ADR-024 INV-3, INV-4, F-P16-M1.
+#[test]
+fn test_f_p16_m1_bold_in_link_display_text_formatting_preserved_notes() {
+    let url = "https://example.com/fp16-m1";
+
+    // `[click **here** now](url)` = Link { text: [Plain("click "), Bold([Plain("here")]),
+    //                                              Plain(" now")], url }
+    let link_node = slideforge_types::InlineNode::Link {
+        url: Arc::from(url),
+        text: vec![
+            slideforge_types::InlineNode::Plain(Arc::from("click ")),
+            slideforge_types::InlineNode::Bold(vec![slideforge_types::InlineNode::Plain(
+                Arc::from("here"),
+            )]),
+            slideforge_types::InlineNode::Plain(Arc::from(" now")),
+        ],
+    };
+
+    let rc = slideforge_types::register::RegisteredContent {
+        register: Register::Notes,
+        content: vec![link_node],
+    };
+
+    let slide = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("title"),
+        frames: vec![Frame {
+            bbox: title_bbox(),
+            content: FrameContent::Empty,
+            text_flow: None,
+            region_role: None,
+        }],
+        speaker_notes: Some(Arc::from("click here now")),
+        register_tags: vec![],
+        register_content: vec![rc],
+    };
+
+    let deck = make_deck_with_notes(&[Some("click here now")]);
+    let laid_out = LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides: vec![slide],
+        sections: vec![],
+        warnings: vec![],
+        slide_sections: vec![],
+    };
+    let pptx = export_pptx(&deck, &laid_out);
+
+    let rels_xml = read_zip_member(&pptx, "ppt/notesSlides/_rels/notesSlide1.xml.rels");
+    let notes_xml = read_zip_member(&pptx, "ppt/notesSlides/notesSlide1.xml");
+
+    let external_rel_count = rels_xml.matches("TargetMode=\"External\"").count();
+    let hlinkclick_count = notes_xml.matches("<a:hlinkClick").count();
+
+    // INV-4: reference-set invariant (NOT count equality — 1 rel, 3 hlinkClicks).
+    // One External rel registered for the URL.
+    assert_eq!(
+        external_rel_count, 1,
+        "F-P16-M1: expected 1 External rel; got {external_rel_count}. \
+         rels:\n{rels_xml}"
     );
 
-    // Nested URL must NOT appear in rels.
-    assert!(
-        !rels_xml.contains(nested_url),
-        "F-085-P6-001 [mixed]: nested URL must NOT appear in rels (it is plain text); \
-         got:\n{rels_xml}"
+    // Three hlinkClick runs (one per leaf: "click ", "here", " now").
+    assert_eq!(
+        hlinkclick_count, 3,
+        "F-P16-M1: expected 3 <a:hlinkClick> (one per leaf run: 'click ', 'here', ' now'); \
+         got {hlinkclick_count}. notes:\n{notes_xml}"
     );
+
+    // URL must appear in rels.
+    assert!(
+        rels_xml.contains(url),
+        "F-P16-M1: URL must appear in rels; got:\n{rels_xml}"
+    );
+
+    // ALL hlinkClicks reference rId3 (the single External rel).
+    // (rId3 because rId1=slide, rId2=notesMaster)
+    assert_eq!(
+        notes_xml.matches("r:id=\"rId3\"").count(),
+        3,
+        "F-P16-M1: all 3 hlinkClick runs must reference rId3; \
+         notes:\n{notes_xml}"
+    );
+
+    // CORE: bold formatting preserved on the "here" run.
+    // The run for "here" must have BOTH b="1" AND <a:hlinkClick>.
+    // We verify this by checking that b="1" appears in the notes XML
+    // (it only appears on the "here" run — the bold leaf).
+    assert!(
+        notes_xml.contains("b=\"1\""),
+        "F-P16-M1: b=\"1\" must appear in notes XML (bold preserved on 'here' leaf run); \
+         notes:\n{notes_xml}"
+    );
+
+    // Also verify that the text "here" appears in the notes (not dropped).
+    assert!(
+        notes_xml.contains("here"),
+        "F-P16-M1: 'here' text must appear in notes XML; notes:\n{notes_xml}"
+    );
+
+    // BC-3.05.001 HI-1 reference-set invariant: all 3 hlinkClick runs cite the
+    // 1 External rel's rId; the External rel is cited ≥1×.  Count-equality
+    // (assert_eq!(1, 3)) would FALSE-FAIL here — the reference-set form passes.
+    assert_hyperlink_reference_set_invariant(&notes_xml, &rels_xml);
 }

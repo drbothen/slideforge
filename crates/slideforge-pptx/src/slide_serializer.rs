@@ -39,8 +39,9 @@
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::a::{
     Extents, FillRectangle, GradientFill, GradientFillChoice, GradientStop, GradientStopChoice,
-    GradientStopList, LinearGradientFill, Offset, ParagraphChoice, PictureLocks, RgbColorModelHex,
-    Run, SolidFill, SolidFillChoice, Stretch, Transform2D,
+    GradientStopList, Highlight, HighlightChoice, HyperlinkOnClick, LatinFont, LinearGradientFill,
+    Offset, ParagraphChoice, PictureLocks, RgbColorModelHex, Run, RunProperties, SolidFill,
+    SolidFillChoice, Stretch, TextStrikeValues, Transform2D,
 };
 use ooxmlsdk::schemas::p::{
     ApplicationNonVisualDrawingProperties, BlipFill, BlipFillChoice, ColorMapOverride,
@@ -51,9 +52,11 @@ use ooxmlsdk::schemas::p::{
 };
 
 use slideforge_layout::{FillSpec, FrameContent, LaidOutSlide, LayoutWarning, ShapeFrame};
-use slideforge_types::{AltText, BulletItem, ContentBlock, InlineNode, Rgb};
+use slideforge_plugin_api::inline_formats::{OoxmlRun, render_inline_nodes_to_runs};
+use slideforge_types::{AltText, ContentBlock, InlineNode, Rgb, display_text_is_empty};
 
 use crate::error::PptxError;
+use crate::link_safety::is_safe_link_scheme;
 use crate::xml_escape::strip_xml10_invalid_chars;
 
 /// Serializes one `LaidOutSlide` into `slide*.xml` bytes.
@@ -204,23 +207,24 @@ impl SlideSerializer {
         }
     }
 
-    /// Build a `<p:sp>` for a body or text-run frame, emitting the warn+omit
-    /// diagnostic (AC-011 / ADR-015 §7 item 3) when the layout lacks `idx=1`.
+    /// Build a `<p:sp>` for a frame using pre-built inline runs.
     ///
-    /// Shared by `FrameContent::Body` and `FrameContent::TextRun` arms in
-    /// `build_shape_tree` to keep the per-arm logic in one place and prevent
-    /// the warn from going missing in either arm (F-038-P12-M1 fix).
+    /// Used for both `FrameContent::TextRun` and `FrameContent::Body` frames that
+    /// carry `Vec<InlineNode>` with markup (STORY-081 AC-002 / C3 fix). Uses
+    /// `build_shape_with_runs` instead of `build_shape` so that OOXML run
+    /// properties (bold, italic, strike) are preserved in the output.
     ///
     /// `frame_label` is a human-readable label for the warn message (`"Body"` or
-    /// `"TextRun"`); `text` is the extracted plain text for the shape.
-    fn build_body_shape(
+    /// `"TextRun"`); the warn fires when the layout lacks `idx=1` placeholder
+    /// (AC-011 / ADR-015 §7 item 3 / F-038-P12-M1).
+    fn build_body_shape_with_runs(
         &self,
         shape_id: u32,
         slide_index: usize,
         frame_idx: usize,
         frame_label: &str,
         frame: &slideforge_layout::Frame,
-        text: &str,
+        runs: Vec<Run>,
     ) -> Shape {
         let body_kind = self.body_shape_kind();
         if matches!(body_kind, ShapeKind::BodyNoPlaceholder)
@@ -233,14 +237,14 @@ impl SlideSerializer {
                  emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
             );
         }
-        build_shape(
+        build_shape_with_runs(
             shape_id,
             body_kind,
             frame.bbox.x.0,
             frame.bbox.y.0,
             frame.bbox.width.0,
             frame.bbox.height.0,
-            text,
+            runs,
         )
     }
 
@@ -253,6 +257,17 @@ impl SlideSerializer {
     /// `FrameContent::Diagram` frames on this slide. For each pair, a typed
     /// `<p:pic>` element (`ShapeTreeChoice::PPic`) is added to the shape tree,
     /// referencing the media via `r:embed` (ADR-001 — no raw XML, F-037-005).
+    ///
+    /// `hlink_map` is a slice of `(url, rId)` pairs for External hyperlinks on this
+    /// slide. Each entry was produced by `slide_rels.add_external_hyperlink(url)` in
+    /// `build_slide_parts` BEFORE this method is called. The rIds are sequential and
+    /// stable: the same URL always maps to the same rId within a single export call.
+    ///
+    /// The caller (`build_slide_parts` in `lib.rs`) constructs this map by:
+    /// 1. Calling `collect_hyperlink_urls_from_slide` to get unique safe-scheme URLs.
+    /// 2. Calling `slide_rels.add_external_hyperlink(url)` for each, collecting rIds.
+    /// 3. Passing the `(url, rId)` pairs here so the serializer can wire
+    ///    `<a:hlinkClick r:id="rIdN">` onto the correct runs. EC-004.
     ///
     /// Returns the XML bytes and any non-fatal warnings detected during
     /// serialisation (e.g., a frame with zero-height content).
@@ -268,11 +283,12 @@ impl SlideSerializer {
         slide_index: usize,
         _layout_rel_id: &str,
         diagram_rids: &[(usize, String)],
+        hlink_map: &[(String, String)],
     ) -> Result<(Vec<u8>, Vec<LayoutWarning>), PptxError> {
         let warnings: Vec<LayoutWarning> = Vec::new();
         let part_name = format!("ppt/slides/slide{}.xml", slide_index + 1);
 
-        let shape_tree = self.build_shape_tree(slide, slide_index, diagram_rids)?;
+        let shape_tree = self.build_shape_tree(slide, slide_index, diagram_rids, hlink_map)?;
 
         // Build CommonSlideData with the shape tree.
         let csl = CommonSlideData {
@@ -365,6 +381,10 @@ impl SlideSerializer {
     /// `SlideSerializer` never sets `descr` inline; it always routes through the
     /// embedder.
     ///
+    /// `hlink_map` — the `(url, rId)` pairs for External hyperlinks on this slide,
+    /// pre-registered by the caller in `slide_rels`. Used to resolve rIds for
+    /// `InlineNode::Link` nodes in body and subtitle-inlines frames. EC-004.
+    ///
     /// # Errors
     ///
     /// Returns [`PptxError::InvalidEmu`] if any frame has an invalid bounding box.
@@ -374,6 +394,7 @@ impl SlideSerializer {
         slide: &LaidOutSlide,
         slide_index: usize,
         diagram_rids: &[(usize, String)],
+        hlink_map: &[(String, String)],
     ) -> Result<ShapeTree, PptxError> {
         // AltTextEmbedder is the SINGLE AUTHORITATIVE path for descr decisions.
         // Compute decisions once for all visual frames before the frame loop.
@@ -467,18 +488,56 @@ impl SlideSerializer {
                     shape_id += 1;
                 },
 
-                FrameContent::Body(blocks) => {
-                    let text = extract_body_text(blocks);
+                // STORY-081 C3: SubtitleInlines — rich subtitle with inline structure.
+                // PPTX subtitle placeholders (idx=1, type="subTitle") support multiple runs
+                // with <a:rPr> formatting. Unlike the title single-run constraint, subtitle
+                // allows inline formatting. We use build_shape_with_runs with ShapeKind::Subtitle.
+                FrameContent::SubtitleInlines(nodes) => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    let subtitle_kind = self.subtitle_shape_kind();
+                    if matches!(subtitle_kind, ShapeKind::SubtitleNoPlaceholder) {
+                        tracing::warn!(
+                            slide_index,
+                            frame_idx,
+                            "SubtitleInlines frame: resolved layout has no idx=1 placeholder; \
+                             emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
+                        );
+                    }
+                    // ADR-024: use unified engine via nodes_to_body_runs.
+                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map);
+                    let sp = build_shape_with_runs(
+                        shape_id,
+                        subtitle_kind,
+                        frame.bbox.x.0,
+                        frame.bbox.y.0,
+                        frame.bbox.width.0,
+                        frame.bbox.height.0,
+                        runs,
+                    );
+                    shape_tree
+                        .shape_tree_choice
+                        .push(ShapeTreeChoice::PSp(Box::new(sp)));
+                    shape_id += 1;
+                },
+
+                FrameContent::Body(blocks) => {
+                    validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    // STORY-081 C3 fix: route FrameContent::Body ContentBlock::Text inlines
+                    // through the unified ADR-024 engine so bold/italic/strikethrough are
+                    // preserved in the PPTX output. The old extract_body_text path (plain
+                    // text only) is replaced by extract_body_runs → nodes_to_body_runs
+                    // which preserves inline structure. AC-002 / BC-3.05.001 PC-1.
+                    // EC-004: pass hlink_map so Link nodes wire <a:hlinkClick>.
+                    let runs: Vec<Run> = extract_body_runs(blocks, hlink_map);
                     // AC-011 / ADR-015 §7 item 3: shared helper warns+omits when
                     // the layout has no idx=1 placeholder (F-038-P12-M1 fix).
-                    let sp = self.build_body_shape(
+                    let sp = self.build_body_shape_with_runs(
                         shape_id,
                         slide_index,
                         frame_idx,
                         "Body",
                         frame,
-                        &text,
+                        runs,
                     );
                     shape_tree
                         .shape_tree_choice
@@ -487,17 +546,21 @@ impl SlideSerializer {
                 },
 
                 FrameContent::TextRun(nodes) => {
-                    let text = extract_inline_text(nodes);
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
+                    // STORY-081 AC-002: route FrameContent::TextRun inlines through the
+                    // unified ADR-024 engine (nodes_to_body_runs) to preserve
+                    // bold/italic/strikethrough in the PPTX output. The old
+                    // extract_inline_text path (plain text only) is no longer used.
+                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map);
                     // AC-011 / ADR-015 §7 item 3: same idx-chain check as Body frames
                     // via the shared helper (F-038-P12-M1: single warn site, no drift).
-                    let sp = self.build_body_shape(
+                    let sp = self.build_body_shape_with_runs(
                         shape_id,
                         slide_index,
                         frame_idx,
                         "TextRun",
                         frame,
-                        &text,
+                        runs,
                     );
                     shape_tree
                         .shape_tree_choice
@@ -749,62 +812,289 @@ fn validate_emu(
     Ok(())
 }
 
-/// Extract plain text from a list of `ContentBlock` values.
-fn extract_body_text(blocks: &[ContentBlock]) -> String {
-    let mut lines: Vec<String> = Vec::new();
+/// Extract structured OOXML runs from a list of `ContentBlock` values.
+///
+/// STORY-081 C3 fix: replaces [`extract_body_text`] in the `FrameContent::Body`
+/// arm of `build_shape_tree`. Converts each `ContentBlock::Text` inline node
+/// sequence through [`nodes_to_body_runs`] (unified ADR-024 engine) so that
+/// bold/italic/strikethrough formatting AND hyperlink wiring are preserved as
+/// OOXML run properties.
+///
+/// `ContentBlock::Bullets` items are also converted through the same run-property
+/// path so bullet inline markup reaches the PPTX output.
+///
+/// `hlink_map` is the `(url, rId)` lookup table for External hyperlinks on this slide.
+/// Passed through to [`nodes_to_body_runs`] for EC-004 body-path hyperlink wiring. EC-004.
+fn extract_body_runs(blocks: &[ContentBlock], hlink_map: &[(String, String)]) -> Vec<Run> {
+    let mut runs: Vec<Run> = Vec::new();
     for block in blocks {
         match block {
             ContentBlock::Text(tb) => {
-                lines.push(extract_inline_text(&tb.inlines));
+                // ADR-024: use unified engine via nodes_to_body_runs.
+                runs.extend(nodes_to_body_runs(&tb.inlines, hlink_map));
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
-                    lines.push(extract_bullet_text(item));
+                    // ADR-024: use unified engine for each item's inlines.
+                    runs.extend(nodes_to_body_runs(&item.inlines, hlink_map));
+                    // Nested children are rendered after the parent item.
+                    for child in &item.children {
+                        runs.extend(nodes_to_body_runs(&child.inlines, hlink_map));
+                    }
                 }
             },
-            // Other block types (chart, diagram, shape, etc.) are not plain text.
+            // Non-text blocks do not contribute runs.
+            ContentBlock::Chart(_)
+            | ContentBlock::Diagram(_)
+            | ContentBlock::Math(_)
+            | ContentBlock::Image(_)
+            | ContentBlock::Table(_)
+            | ContentBlock::Shape(_)
+            | ContentBlock::ColorBar(_) => {},
+        }
+    }
+    runs
+}
+
+// ─── ADR-024: OoxmlRun → typed ooxmlsdk Run converter ───────────────────────
+
+/// Convert a neutral [`OoxmlRun`] (from [`render_inline_nodes_to_runs`]) to a
+/// typed `ooxmlsdk::schemas::a::Run` for schema-correct body-path output.
+///
+/// This is the body-path half of the ADR-024 unified engine: the engine produces
+/// `Vec<OoxmlRun>` format-agnostically; this function converts to the ooxmlsdk
+/// typed form for the slide-body serializer, delegating child-ordering enforcement
+/// to ooxmlsdk (ADR-024 INV-2 body variant).
+///
+/// The text is sanitized via [`strip_xml10_invalid_chars`] for XML 1.0 safety.
+fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun) -> Run {
+    let sanitized = strip_xml10_invalid_chars(&run.text);
+
+    let has_properties = run.bold
+        || run.italic
+        || run.strike
+        || run.code_font
+        || run.baseline.is_some()
+        || run.highlight
+        || run.hyperlink_rid.is_some();
+
+    let run_properties = if has_properties {
+        let mut rpr = RunProperties::default();
+        if run.bold {
+            rpr.bold = Some(true);
+        }
+        if run.italic {
+            rpr.italic = Some(true);
+        }
+        if run.strike {
+            rpr.strike = Some(TextStrikeValues::SingleStrike);
+        }
+        if let Some(baseline) = run.baseline {
+            rpr.baseline = Some(baseline);
+        }
+        if run.code_font {
+            rpr.a_latin = Some(LatinFont {
+                typeface: Some("Courier New".to_owned()),
+                ..LatinFont::default()
+            });
+        }
+        if run.highlight {
+            let yellow = RgbColorModelHex {
+                val: "FFFF00".to_owned(),
+                ..RgbColorModelHex::default()
+            };
+            rpr.a_highlight = Some(Box::new(Highlight {
+                highlight_choice: Some(HighlightChoice::ASrgbClr(Box::new(yellow))),
+                ..Highlight::default()
+            }));
+        }
+        if let Some(rid) = &run.hyperlink_rid {
+            rpr.a_hlink_click = Some(Box::new(HyperlinkOnClick {
+                id: Some(rid.clone()),
+                ..HyperlinkOnClick::default()
+            }));
+        }
+        Some(Box::new(rpr))
+    } else {
+        // Plain run — default rPr for consistent baseline.
+        Some(Box::default())
+    };
+
+    Run {
+        run_properties,
+        text: sanitized,
+        xmlns: vec![],
+        xml_other_children: vec![],
+    }
+}
+
+/// Convert a slice of [`InlineNode`]s to typed ooxmlsdk `Run` objects using the
+/// unified [`render_inline_nodes_to_runs`] engine with the slide-body resolver.
+///
+/// This is the ADR-024 unified body path: we call the single engine and convert
+/// each `OoxmlRun` to a typed `Run` via `ooxml_run_to_ooxmlsdk`.
+///
+/// `hlink_map` is the `(url, rId)` lookup table for External hyperlinks on this slide.
+/// The resolver closure is constructed here from `hlink_map` and passed to the engine.
+fn nodes_to_body_runs(nodes: &[InlineNode], hlink_map: &[(String, String)]) -> Vec<Run> {
+    let resolver = |url: &str| -> Option<String> {
+        hlink_map
+            .iter()
+            .find(|(u, _)| u == url)
+            .map(|(_, r)| r.clone())
+    };
+    match render_inline_nodes_to_runs(nodes, &resolver) {
+        Ok(ooxml_runs) => ooxml_runs.iter().map(ooxml_run_to_ooxmlsdk).collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "render_inline_nodes_to_runs failed for body OOXML; emitting empty runs"
+            );
+            Vec::new()
+        },
+    }
+}
+
+/// Collect all safe-scheme, non-empty-display-text hyperlink URLs from a slide's
+/// body frames, descending through formatting wrappers to reach nested `Link` nodes.
+///
+/// ## Registration scope (ADV-P14-MED-001)
+///
+/// After the ADV-P14-MED-001 fix, registration covers both top-level `Link` nodes
+/// AND `Link` nodes nested inside formatting wrappers (`Bold`, `Italic`, etc.).
+/// The unified [`render_inline_nodes_to_runs`] engine resolves rIds at the `Link` arm
+/// regardless of nesting depth. Registration and emission are symmetric:
+///
+/// ## Reference-set invariant (BC-3.05.001 HI-1)
+///
+/// Every `<a:hlinkClick>` references a registered External rel (no dangling
+/// rId), and every registered External rel is referenced ≥1× by a hlinkClick
+/// run (no orphan rel).  A single External rel may back N `<a:hlinkClick>`
+/// runs for multi-leaf link display text (e.g., `[click **here** now](url)`
+/// → 1 rel / 3 hlinkClick runs, all same rId — BC-3.05.001 EC-012).
+/// Count-equality (`external_rel_count == hlinkclick_count ∀`) is **FALSE**
+/// and was retired in BC-3.05.001 HI-1.
+///
+/// ## Orphan-rel invariant (F-085-P6-001 preserved)
+///
+/// When a `Link` is found by the collector, its display `text` children are NOT
+/// recursed into — a Link inside a Link's display text would create an orphan rel
+/// (the unified engine emits `<a:hlinkClick>` only for the outer Link, not for Links
+/// inside display text). F-040-P3-001 unchanged.
+///
+/// ## Unsafe-scheme filtering (F-040-P2-001 / CWE-601)
+///
+/// URLs whose scheme is not in `ALLOWED_LINK_SCHEMES` are skipped.
+///
+/// ## Empty display text guard (F-P5-001)
+///
+/// A `Link` whose display text is empty produces no run, so no rel should be registered.
+///
+/// Returns a deduplicated list (first-occurrence order) of safe-scheme, non-empty-display
+/// hyperlink URLs found in the slide's inline content.
+pub(crate) fn collect_hyperlink_urls_from_slide(slide: &LaidOutSlide) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    for frame in &slide.frames {
+        match &frame.content {
+            FrameContent::TextRun(nodes) | FrameContent::SubtitleInlines(nodes) => {
+                for node in nodes {
+                    collect_link_urls_from_node(node, &mut urls);
+                }
+            },
+            FrameContent::Body(blocks) => {
+                for block in blocks {
+                    match block {
+                        ContentBlock::Text(tb) => {
+                            for node in &tb.inlines {
+                                collect_link_urls_from_node(node, &mut urls);
+                            }
+                        },
+                        ContentBlock::Bullets(items) => {
+                            for item in items {
+                                for node in &item.inlines {
+                                    collect_link_urls_from_node(node, &mut urls);
+                                }
+                                for child in &item.children {
+                                    for node in &child.inlines {
+                                        collect_link_urls_from_node(node, &mut urls);
+                                    }
+                                }
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+            },
+            // Title, Subtitle (plain strings), Diagram, Image, Chart, Shape,
+            // Empty, ErrorSlidePlaceholder — no inline nodes to collect from.
             _ => {},
         }
     }
-    lines.join("\n")
+    // Deduplicate while preserving first-occurrence order.
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| seen.insert(u.clone()));
+    urls
 }
 
-/// Extract plain text from a `BulletItem`, including nested children.
-fn extract_bullet_text(item: &BulletItem) -> String {
-    let mut text = extract_inline_text(&item.inlines);
-    for child in &item.children {
-        text.push('\n');
-        text.push_str(&extract_bullet_text(child));
+/// Collect safe-scheme, non-empty-display-text hyperlink URLs from an [`InlineNode`],
+/// descending through formatting wrappers to reach nested `Link` nodes.
+///
+/// ## Wrapper descent (ADV-P14-MED-001)
+///
+/// `Bold([Link{url}])`, `Italic([Link{url}])`, `Strikethrough([Link{url}])`,
+/// `Superscript([Link{url}])`, `Subscript([Link{url}])`, `Highlight([Link{url}])`,
+/// and `Footnote([Link{url}])` are all traversed so the inner `Link` URL is
+/// registered. The unified [`render_inline_nodes_to_runs`] engine threads the rId
+/// through the accumulated `RunProps::hyperlink_rid` field, so the emitted run
+/// carries BOTH the formatting property (e.g. `b="1"`) AND `<a:hlinkClick>`.
+///
+/// ## Orphan-rel invariant (F-085-P6-001)
+///
+/// When a `Link` is found, its own display `text` children are NOT recursed into
+/// — a Link inside another Link's display text produces no second rel (that would
+/// be an orphan rel because the dispatcher never emits nested-link-in-display-text
+/// as a separate `<a:hlinkClick>`). The F-040-P3-001 invariant is preserved:
+///
+/// ## Reference-set invariant (BC-3.05.001 HI-1)
+///
+/// Every `<a:hlinkClick>` references a registered External rel (no dangling
+/// rId), and every registered External rel is referenced ≥1× by a hlinkClick
+/// run (no orphan rel).  A single External rel may back N `<a:hlinkClick>`
+/// runs for multi-leaf link display text.  Count-equality
+/// (`external_rel_count == hlinkclick_count ∀`) is **FALSE** and was retired
+/// in BC-3.05.001 HI-1.
+///
+/// ## Safe-scheme + non-empty display text guards
+///
+/// Same as the top-level case: unsafe-scheme URLs are skipped (CWE-601 /
+/// F-040-P2-001); Links with empty display text produce no run and therefore
+/// no rel (F-P5-001).
+fn collect_link_urls_from_node(node: &InlineNode, urls: &mut Vec<String>) {
+    match node {
+        InlineNode::Link { url, text } => {
+            // Register this Link if safe-scheme and non-empty display text.
+            // Do NOT recurse into `text` children — a Link inside a Link's display
+            // text would be an orphan rel (dispatcher emits no second hlinkClick).
+            if is_safe_link_scheme(url.as_ref()) && !display_text_is_empty(text) {
+                urls.push(url.as_ref().to_owned());
+            }
+        },
+        // ADV-P14-MED-001: Descend through formatting wrappers to reach nested Links.
+        InlineNode::Bold(children)
+        | InlineNode::Italic(children)
+        | InlineNode::Strikethrough(children)
+        | InlineNode::Superscript(children)
+        | InlineNode::Subscript(children)
+        | InlineNode::Highlight(children)
+        | InlineNode::Footnote(children) => {
+            for child in children {
+                collect_link_urls_from_node(child, urls);
+            }
+        },
+        // Leaf nodes that cannot contain a Link: no registration, no recursion.
+        InlineNode::Plain(_) | InlineNode::Code(_) | InlineNode::Xref(_) | InlineNode::Math(_) => {
+        },
     }
-    text
-}
-
-/// Extract plain text from a sequence of `InlineNode` values.
-fn extract_inline_text(nodes: &[InlineNode]) -> String {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            InlineNode::Plain(s) | InlineNode::Code(s) | InlineNode::Xref(s) => {
-                out.push_str(s);
-            },
-            InlineNode::Bold(children)
-            | InlineNode::Italic(children)
-            | InlineNode::Footnote(children)
-            | InlineNode::Superscript(children)
-            | InlineNode::Subscript(children)
-            | InlineNode::Strikethrough(children)
-            | InlineNode::Highlight(children) => {
-                out.push_str(&extract_inline_text(children));
-            },
-            InlineNode::Link { text, .. } => {
-                out.push_str(&extract_inline_text(text));
-            },
-            InlineNode::Math(_) => {
-                // Math nodes are not plain text.
-            },
-        }
-    }
-    out
 }
 
 /// The kind of placeholder shape being built.
@@ -969,6 +1259,131 @@ fn build_shape(
         ..ooxmlsdk::schemas::a::Paragraph::default()
     };
 
+    let tx_body = TextBody {
+        body_properties: Box::default(),
+        list_style: None,
+        a_p: vec![para],
+        xmlns: vec![],
+    };
+
+    Shape {
+        use_background_fill: None,
+        non_visual_shape_properties: Box::new(nv_sp_pr),
+        shape_properties: Box::new(sp_pr),
+        shape_style: None,
+        text_body: Some(Box::new(tx_body)),
+        extension_list_with_modification: None,
+    }
+}
+
+/// Build a `<p:sp>` shape with pre-built `<a:r>` runs (for inline markup).
+///
+/// Mirrors `build_shape` but accepts a `Vec<Run>` so that formatted runs
+/// produced by the unified [`nodes_to_body_runs`] engine can be embedded directly
+/// without flattening to plain text first.
+///
+/// Used by the `FrameContent::TextRun` and `FrameContent::Body` arms (STORY-081 AC-002).
+fn build_shape_with_runs(
+    shape_id: u32,
+    kind: ShapeKind,
+    x: i64,
+    y: i64,
+    cx: i64,
+    cy: i64,
+    runs: Vec<Run>,
+) -> Shape {
+    let cnv_pr = NonVisualDrawingProperties {
+        id: shape_id,
+        name: format!("Shape {shape_id}"),
+        description: None,
+        hidden: None,
+        title: None,
+        hyperlink_on_click: None,
+        hyperlink_on_hover: None,
+        non_visual_drawing_properties_extension_list: None,
+        xmlns: vec![],
+    };
+    let cnv_sp_pr = NonVisualShapeDrawingProperties::default();
+
+    let placeholder_shape_opt: Option<PlaceholderShape> = match kind {
+        ShapeKind::Title => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::Title),
+            orientation: None,
+            size: None,
+            index: Some(0u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        ShapeKind::Subtitle => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::SubTitle),
+            orientation: None,
+            size: None,
+            index: Some(1u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        ShapeKind::Body => Some(PlaceholderShape {
+            r#type: Some(PlaceholderValues::Body),
+            orientation: None,
+            size: None,
+            index: Some(1u32),
+            has_custom_prompt: None,
+            extension_list_with_modification: None,
+        }),
+        ShapeKind::TitleNoPlaceholder
+        | ShapeKind::SubtitleNoPlaceholder
+        | ShapeKind::BodyNoPlaceholder => None,
+    };
+
+    let nv_pr = ApplicationNonVisualDrawingProperties {
+        is_photo: None,
+        user_drawn: None,
+        placeholder_shape: placeholder_shape_opt.map(Box::new),
+        application_non_visual_drawing_properties_choice: None,
+        p_cust_data_lst: None,
+        p_ext_lst: None,
+    };
+    let nv_sp_pr = NonVisualShapeProperties {
+        non_visual_drawing_properties: Box::new(cnv_pr),
+        non_visual_shape_drawing_properties: Box::new(cnv_sp_pr),
+        application_non_visual_drawing_properties: Box::new(nv_pr),
+    };
+
+    let xfrm = Transform2D {
+        rotation: None,
+        horizontal_flip: None,
+        vertical_flip: None,
+        offset: Some(Offset { x, y }),
+        extents: Some(Extents { cx, cy }),
+        xmlns: vec![],
+    };
+    let sp_pr = ShapeProperties {
+        transform2_d: Some(Box::new(xfrm)),
+        shape_properties_choice1: Some(ShapePropertiesChoice::APrstGeom(Box::new(
+            ooxmlsdk::schemas::a::PresetGeometry {
+                preset: ooxmlsdk::schemas::a::ShapeTypeValues::Rectangle,
+                adjust_value_list: None,
+                xmlns: vec![],
+            },
+        ))),
+        shape_properties_choice2: None,
+        shape_properties_choice3: None,
+        black_white_mode: None,
+        a_ln: None,
+        a_scene3d: None,
+        a_sp3d: None,
+        a_ext_lst: None,
+        xmlns: vec![],
+    };
+
+    let paragraph_choices: Vec<ParagraphChoice> = runs
+        .into_iter()
+        .map(|r| ParagraphChoice::AR(Box::new(r)))
+        .collect();
+    let para = ooxmlsdk::schemas::a::Paragraph {
+        paragraph_choice: paragraph_choices,
+        ..ooxmlsdk::schemas::a::Paragraph::default()
+    };
     let tx_body = TextBody {
         body_properties: Box::default(),
         list_style: None,
@@ -1498,5 +1913,89 @@ fn build_picture(
         shape_properties: Box::new(sp_pr),
         shape_style: None,
         extension_list_with_modification: None,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+mod tests {
+    use std::sync::Arc;
+
+    use slideforge_types::{InlineNode, MathNode, SourceSpan};
+
+    fn make_math_node(latex: &str) -> InlineNode {
+        InlineNode::Math(MathNode {
+            latex: Arc::from(latex),
+            display: false,
+            span: SourceSpan::default(),
+        })
+    }
+
+    /// STORY-081 I1 — PPTX body path: `InlineNode::Math` is handled without panic,
+    /// and the LaTeX source is emitted as a plain text run (EC-001 fallback from the
+    /// unified [`render_inline_nodes_to_runs`] engine via [`super::nodes_to_body_runs`]).
+    ///
+    /// Intent: Math in PPTX body does not panic. The production body path emits the
+    /// LaTeX source as a diagnostic fallback text run so the content is not silently
+    /// dropped. Full OMML rendering is deferred to STORY-009.
+    ///
+    /// This test exercises the PRODUCTION code path (`nodes_to_body_runs` →
+    /// `render_inline_nodes_to_runs`) — not a test-only helper — so a regression
+    /// in the unified engine will cause this test to fail.
+    #[test]
+    fn test_story_081_i1_pptx_math_in_body_returns_latex_run_no_panic() {
+        let latex = "x^2 + y^2 = z^2";
+        let math_node = make_math_node(latex);
+        // Drive through the production body-path engine (hlink_map = empty).
+        let runs = super::nodes_to_body_runs(&[math_node], &[]);
+        // EC-001 fallback: the unified engine emits the LaTeX source as a plain text run.
+        assert_eq!(
+            runs.len(),
+            1,
+            "STORY-081 I1: InlineNode::Math must produce exactly 1 EC-001 fallback run \
+             containing the LaTeX source via the unified engine. Got {} runs.",
+            runs.len()
+        );
+        assert_eq!(
+            runs[0].text, latex,
+            "STORY-081 I1: Math fallback run must carry the LaTeX source text; got {:?}",
+            runs[0].text
+        );
+    }
+
+    /// STORY-081 I1 — PPTX body path: Bold + Math mixed inline.
+    ///
+    /// Bold produces a run with `bold=true`; Math produces a run with the LaTeX
+    /// source as text (EC-001 fallback). Both are driven through the production
+    /// `nodes_to_body_runs` → `render_inline_nodes_to_runs` engine.
+    #[test]
+    fn test_story_081_i1_pptx_bold_plus_math_both_produce_runs() {
+        let bold_node = InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold"))]);
+        let math_node = make_math_node("\\alpha");
+
+        let bold_runs = super::nodes_to_body_runs(&[bold_node], &[]);
+        let math_runs = super::nodes_to_body_runs(&[math_node], &[]);
+
+        assert!(!bold_runs.is_empty(), "Bold must produce at least one run");
+        let has_bold = bold_runs.iter().any(|r| {
+            r.run_properties
+                .as_ref()
+                .and_then(|rpr| rpr.bold)
+                .unwrap_or(false)
+        });
+        assert!(has_bold, "Bold run must have bold=true in run_properties");
+
+        // EC-001: Math produces the LaTeX source as a plain text run.
+        assert_eq!(
+            math_runs.len(),
+            1,
+            "Math must produce exactly 1 EC-001 fallback run; got {} runs",
+            math_runs.len()
+        );
+        assert_eq!(
+            math_runs[0].text, "\\alpha",
+            "Math fallback run must carry the LaTeX source; got {:?}",
+            math_runs[0].text
+        );
     }
 }

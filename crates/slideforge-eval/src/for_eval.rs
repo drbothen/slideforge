@@ -51,7 +51,7 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 use slideforge_syntax::error::ParseSeverity;
-use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode};
+use slideforge_syntax::{BlockItem, DiagnosticSink, Expr, FieldValue, SlideNode, TemplateChunk};
 use slideforge_types::{OrderedMap, Slide, SourceSpan, Value};
 
 use crate::config::EvalConfig;
@@ -59,6 +59,147 @@ use crate::env::Env;
 use crate::error::EvalError;
 use crate::eval::flatten_chunks_to_string;
 use crate::expr::eval_expr;
+
+// ─── Inline markup detection ─────────────────────────────────────────────────
+
+/// Return `true` if any chunk in `chunks` is an inline markup variant
+/// (Bold, Italic, Code, Link, Superscript, Subscript, Strikethrough, Highlight).
+///
+/// Used by `eval_slide_node` to decide whether a template field value should
+/// produce `FieldValue::Inlines` (STORY-081 AC-001 / BC-3.05.001 precondition 5).
+///
+/// `Literal` and `Expr` chunks are NOT markup — they may appear in both
+/// plain-text and inline-markup fields.  Math chunks are also not in scope
+/// for slide-level inline markup (math rendering is STORY-009).
+fn chunks_has_inline_markup(chunks: &[TemplateChunk]) -> bool {
+    chunks.iter().any(|c| {
+        matches!(
+            c,
+            TemplateChunk::Bold(_)
+                | TemplateChunk::Italic(_)
+                | TemplateChunk::Code(_)
+                | TemplateChunk::Link { .. }
+                | TemplateChunk::Superscript(_)
+                | TemplateChunk::Subscript(_)
+                | TemplateChunk::Strikethrough(_)
+                | TemplateChunk::Highlight(_)
+        )
+    })
+}
+
+/// Reconstruct a markup-source representation from a `TemplateChunk` slice.
+///
+/// This function produces the canonical DSL delimiter notation for each
+/// `TemplateChunk` variant so that the `EvalError::InlineMarkupInTitle`
+/// diagnostic's `slide_title` field carries the markup form (e.g.
+/// `"**Bold Title**"`) rather than the stripped plain form (e.g. `"Bold Title"`).
+///
+/// The output is intended for diagnostic messages only — it is NOT a lossless
+/// round-trip serialiser for the full DSL.  In particular, `Expr` chunks
+/// (template interpolations like `{{ var }}`) are rendered as `"{{ ... }}"`,
+/// which is a placeholder rather than re-serialising the expression AST.
+///
+/// ## Delimiter mapping (canonical DSL set, STORY-077 DIR-077-002 §1)
+///
+/// | `TemplateChunk` | Rendered form |
+/// |---|---|
+/// | `Literal(s)` | `s` (verbatim) |
+/// | `Bold(children)` | `**<children>**` |
+/// | `Italic(children)` | `_<children>_` |
+/// | `Code(s)` | `` `s` `` |
+/// | `Link { text, url }` | `[<text>](url)` |
+/// | `Superscript(children)` | `^<children>^` |
+/// | `Subscript(children)` | `~<children>~` |
+/// | `Strikethrough(children)` | `~~<children>~~` |
+/// | `Highlight(children)` | `==<children>==` |
+/// | `Expr(_)` | `{{ ... }}` |
+/// | `MathInline(latex)` | `$<latex>$` |
+/// | `MathDisplay(latex)` | `$$<latex>$$` |
+/// | `MathInterp(_)` | `@{...}` |
+///
+/// # F-P27-MED-001
+///
+/// BC-3.05.001 EC-011 + field doc: `slide_title` in `EvalError::InlineMarkupInTitle`
+/// must carry the title "as it appeared (may include partial markup)".  This
+/// function provides that representation at the callsite in `eval_slide_node`
+/// without requiring the raw DSL source span to be threaded through the evaluator.
+pub(crate) fn chunks_to_markup_source(chunks: &[TemplateChunk]) -> String {
+    let mut out = String::new();
+    for chunk in chunks {
+        match chunk {
+            TemplateChunk::Literal(s) => out.push_str(s),
+            TemplateChunk::Bold(children) => {
+                out.push_str("**");
+                out.push_str(&chunks_to_markup_source(children));
+                out.push_str("**");
+            },
+            TemplateChunk::Italic(children) => {
+                out.push('_');
+                out.push_str(&chunks_to_markup_source(children));
+                out.push('_');
+            },
+            TemplateChunk::Code(s) => {
+                out.push('`');
+                out.push_str(s);
+                out.push('`');
+            },
+            TemplateChunk::Link { text, url } => {
+                out.push('[');
+                out.push_str(&chunks_to_markup_source(text));
+                out.push_str("](");
+                out.push_str(url);
+                out.push(')');
+            },
+            TemplateChunk::Superscript(children) => {
+                out.push('^');
+                out.push_str(&chunks_to_markup_source(children));
+                out.push('^');
+            },
+            TemplateChunk::Subscript(children) => {
+                out.push('~');
+                out.push_str(&chunks_to_markup_source(children));
+                out.push('~');
+            },
+            TemplateChunk::Strikethrough(children) => {
+                out.push_str("~~");
+                out.push_str(&chunks_to_markup_source(children));
+                out.push_str("~~");
+            },
+            TemplateChunk::Highlight(children) => {
+                out.push_str("==");
+                out.push_str(&chunks_to_markup_source(children));
+                out.push_str("==");
+            },
+            // Expression interpolations and math regions are not round-trippable
+            // from the AST without a full expression serialiser.  Use a placeholder
+            // that makes the markup nature clear in the diagnostic message.
+            TemplateChunk::Expr(_) => out.push_str("{{ ... }}"),
+            TemplateChunk::MathInline(latex) => {
+                out.push('$');
+                out.push_str(latex);
+                out.push('$');
+            },
+            TemplateChunk::MathDisplay(latex) => {
+                out.push_str("$$");
+                out.push_str(latex);
+                out.push_str("$$");
+            },
+            TemplateChunk::MathInterp(_) => out.push_str("@{...}"),
+        }
+    }
+    out
+}
+
+/// Field names that semantically carry inline content in slide definitions.
+///
+/// When the `TemplateChunk` sequence for one of these fields contains inline
+/// markup variants, `eval_slide_node` calls `chunks_to_inline_nodes` and
+/// stores `FieldValue::Inlines` instead of flattening to `FieldValue::Str`
+/// (STORY-081 AC-001 / BC-3.05.001 precondition 5 / Invariant 10).
+///
+/// `"title"` is NOT in this set — PPTX title placeholders require plain-text
+/// single-run content (PPTX single-run title constraint, AC-006).
+const INLINE_CONTENT_FIELDS: &[&str] = &["bullets", "body", "caption", "description", "subtitle"];
 
 // ─── eval_for_block ──────────────────────────────────────────────────────────
 
@@ -183,20 +324,106 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     let slide_type: Arc<str> = Arc::from(slide_node.kind.value().as_str());
 
     let mut fields: OrderedMap<Arc<str>, slideforge_types::FieldValue> = OrderedMap::new();
+    // Extra insertions collected during the field loop and applied after.
+    // Used by the dual-title path (STORY-081 I2) to insert "title_inlines"
+    // as a shadow field alongside the plain-text "title" field.
+    let mut extra_insertions: Vec<(Arc<str>, slideforge_types::FieldValue)> = Vec::new();
 
     for field_node in &slide_node.fields {
         let field_name: Arc<str> = Arc::from(field_node.name.value().as_str());
         let field_value = match field_node.value.value() {
             FieldValue::Template(chunks) => {
-                // Flatten all chunks — including inline-markup variants introduced in
-                // STORY-077 — to their plain-text content (DIR-077-002 §4 / EC-013).
-                // Site 3 (@for body): brand refs are NOT preserved here — only
-                // the set-rule path (Site 2) preserves brand refs (AC-015).
-                let (result, had_error) =
-                    flatten_chunks_to_string(chunks, env, sink, /*preserve_brand_ref=*/ false);
-                // Error already accumulated in sink; use partial result for error-recovery.
-                let _ = had_error;
-                slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
+                // STORY-081 AC-001 / BC-3.05.001 precondition 5:
+                // Slide fields that semantically carry inline content (bullets, body,
+                // caption, description, subtitle) are upgraded to FieldValue::Inlines
+                // when their template contains inline markup variants.
+                //
+                // STORY-081 AC-006: Title fields with inline markup emit a warning
+                // and strip to plain text for the PPTX path.
+                //
+                // All other fields (and plain-text-only templates) fall through to
+                // the existing flatten_chunks_to_string path.
+                let is_inline_field = INLINE_CONTENT_FIELDS.contains(&field_name.as_ref());
+                let is_title_field = field_name.as_ref() == "title";
+                let has_markup = chunks_has_inline_markup(chunks);
+
+                if is_inline_field && has_markup {
+                    // AC-001: convert to FieldValue::Inlines via chunks_to_inline_nodes.
+                    // The conversion is pure — no env mutation.
+                    let error_count_before = sink.error_and_fatal_count();
+                    let nodes = crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
+                    let had_error = sink.error_and_fatal_count() > error_count_before;
+                    if had_error {
+                        // Conversion failed — fall back to plain text so the slide
+                        // is still produced (error-recovery mode per BC-3.05.001).
+                        let (result, _) = flatten_chunks_to_string(
+                            chunks, env, sink, /*preserve_brand_ref=*/ false,
+                        );
+                        slideforge_types::FieldValue::Literal(Value::Str(Arc::from(
+                            result.as_str(),
+                        )))
+                    } else {
+                        slideforge_types::FieldValue::Inlines(nodes)
+                    }
+                } else if is_title_field && has_markup {
+                    // AC-006 / BC-3.05.001 EC-011: title field contains inline markup.
+                    //
+                    // PPTX title placeholders require plain-text single-run content.
+                    // We reconstruct the markup-source form from the chunk tree (using
+                    // canonical DSL delimiter notation) so that the diagnostic message
+                    // shows the distinguishing before/after:
+                    //   slide_title:   "**Bold Title**"  (markup form, as it appeared)
+                    //   stripped_text: "Bold Title"      (plain text for PPTX output)
+                    //
+                    // The markup_source reconstruction uses `chunks_to_markup_source`
+                    // (defined in this module — F-P27-MED-001 fix).  We reconstruct
+                    // BEFORE flattening so both representations derive from the same
+                    // chunk tree.
+                    let markup_source: Arc<str> =
+                        Arc::from(chunks_to_markup_source(chunks).as_str());
+                    let (stripped, _) = flatten_chunks_to_string(
+                        chunks, env, sink, /*preserve_brand_ref=*/ false,
+                    );
+                    let stripped_arc: Arc<str> = Arc::from(stripped.as_str());
+                    // Emit E-EVL-015 at Error severity so that the strict gate in
+                    // `slideforge::compile_inner` (strict=true) fires and returns
+                    // BuildError::EvalFailed — non-zero exit, no output.
+                    //
+                    // In warn-only mode (strict=false) the gate does NOT fire
+                    // (lib.rs checks `options.strict`) and output is produced with the
+                    // title stripped to plain text — satisfying BC-3.05.001 EC-011.
+                    sink.push_with_severity(
+                        EvalError::InlineMarkupInTitle {
+                            slide_title: markup_source,
+                            stripped_text: stripped_arc.clone(),
+                            span: SourceSpan::default(),
+                        },
+                        ParseSeverity::Error,
+                    );
+                    // STORY-081 I2 (dual-title): for non-PPTX exporters, preserve
+                    // the inline structure as a shadow "title_inlines" field.
+                    // Collect inline nodes for the inlines shadow field.
+                    let error_count_before = sink.error_and_fatal_count();
+                    let title_inlines =
+                        crate::register_routing::chunks_to_inline_nodes(chunks, env, sink);
+                    let had_inline_error = sink.error_and_fatal_count() > error_count_before;
+                    if !had_inline_error && !title_inlines.is_empty() {
+                        extra_insertions.push((
+                            Arc::from("title_inlines"),
+                            slideforge_types::FieldValue::Inlines(title_inlines),
+                        ));
+                    }
+                    slideforge_types::FieldValue::Literal(Value::Str(stripped_arc))
+                } else {
+                    // Plain text path (no markup, or a non-inline field).
+                    // Site 3 (@for body / slide body): brand refs NOT preserved.
+                    let (result, had_error) = flatten_chunks_to_string(
+                        chunks, env, sink, /*preserve_brand_ref=*/ false,
+                    );
+                    // Error already accumulated in sink; use partial result for error-recovery.
+                    let _ = had_error;
+                    slideforge_types::FieldValue::Literal(Value::Str(Arc::from(result.as_str())))
+                }
             },
             FieldValue::Num(n) => slideforge_types::FieldValue::Literal(Value::Int(*n)),
             FieldValue::Float(f) => slideforge_types::FieldValue::Literal(Value::Float(*f)),
@@ -249,6 +476,12 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
             },
         };
         fields.insert(field_name, field_value);
+    }
+
+    // Apply extra insertions collected during the field loop.
+    // Currently used only by the dual-title path to insert "title_inlines".
+    for (key, value) in extra_insertions {
+        fields.insert(key, value);
     }
 
     // ── Apply set-rule defaults (AC-014 / C01) ──────────────────────────────
@@ -1620,5 +1853,145 @@ mod tests {
             "1 slide + @for(2) + 1 slide = 4 slides total"
         );
         assert!(sink.is_empty(), "no errors expected");
+    }
+
+    // ─── chunks_to_markup_source unit tests (F-P27-MED-001) ──────────────────
+
+    #[test]
+    fn test_chunks_to_markup_source_literal() {
+        let chunks = vec![TemplateChunk::Literal("hello".to_string())];
+        assert_eq!(chunks_to_markup_source(&chunks), "hello");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_bold() {
+        let chunks = vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+            "Bold Title".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "**Bold Title**");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_italic() {
+        let chunks = vec![TemplateChunk::Italic(vec![TemplateChunk::Literal(
+            "Italic Title".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "_Italic Title_");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_code() {
+        let chunks = vec![TemplateChunk::Code("Code Title".to_string())];
+        assert_eq!(chunks_to_markup_source(&chunks), "`Code Title`");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_link() {
+        let chunks = vec![TemplateChunk::Link {
+            text: vec![TemplateChunk::Literal("click here".to_string())],
+            url: "https://example.com".to_string(),
+        }];
+        assert_eq!(
+            chunks_to_markup_source(&chunks),
+            "[click here](https://example.com)"
+        );
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_superscript() {
+        let chunks = vec![TemplateChunk::Superscript(vec![TemplateChunk::Literal(
+            "2".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "^2^");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_subscript() {
+        let chunks = vec![TemplateChunk::Subscript(vec![TemplateChunk::Literal(
+            "n".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "~n~");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_strikethrough() {
+        let chunks = vec![TemplateChunk::Strikethrough(vec![TemplateChunk::Literal(
+            "old".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "~~old~~");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_highlight() {
+        let chunks = vec![TemplateChunk::Highlight(vec![TemplateChunk::Literal(
+            "important".to_string(),
+        )])];
+        assert_eq!(chunks_to_markup_source(&chunks), "==important==");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_nested_bold_italic() {
+        let chunks = vec![TemplateChunk::Bold(vec![TemplateChunk::Italic(vec![
+            TemplateChunk::Literal("both".to_string()),
+        ])])];
+        assert_eq!(chunks_to_markup_source(&chunks), "**_both_**");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_mixed_literal_and_bold() {
+        let chunks = vec![
+            TemplateChunk::Bold(vec![TemplateChunk::Literal("Key".to_string())]),
+            TemplateChunk::Literal(": plain text".to_string()),
+        ];
+        assert_eq!(chunks_to_markup_source(&chunks), "**Key**: plain text");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_expr_placeholder() {
+        let chunks = vec![TemplateChunk::Expr(slideforge_syntax::Expr::Ident(
+            "var".to_string(),
+        ))];
+        assert_eq!(chunks_to_markup_source(&chunks), "{{ ... }}");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_math_inline() {
+        let chunks = vec![TemplateChunk::MathInline("x^2".to_string())];
+        assert_eq!(chunks_to_markup_source(&chunks), "$x^2$");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_math_display() {
+        let chunks = vec![TemplateChunk::MathDisplay(r"\sum".to_string())];
+        assert_eq!(chunks_to_markup_source(&chunks), r"$$\sum$$");
+    }
+
+    #[test]
+    fn test_chunks_to_markup_source_empty() {
+        assert_eq!(chunks_to_markup_source(&[]), "");
+    }
+
+    /// F-P27-MED-001: markup_source must differ from stripped plain text for bold.
+    #[test]
+    fn test_chunks_to_markup_source_differs_from_stripped_bold() {
+        use crate::eval::flatten_chunks_to_string;
+        use slideforge_syntax::DiagnosticSink;
+        let chunks = vec![TemplateChunk::Bold(vec![TemplateChunk::Literal(
+            "Bold Title".to_string(),
+        )])];
+        let env = super::super::env::Env::new(indexmap::IndexMap::new());
+        let mut sink = DiagnosticSink::new();
+        let (stripped, _) =
+            flatten_chunks_to_string(&chunks, &env, &mut sink, /*preserve_brand_ref=*/ false);
+        let markup = chunks_to_markup_source(&chunks);
+        assert_ne!(
+            markup, stripped,
+            "markup_source must differ from stripped plain text for bold chunks"
+        );
+        assert!(markup.contains("**"), "markup_source must contain '**'");
+        assert_eq!(
+            stripped, "Bold Title",
+            "stripped must be plain 'Bold Title'"
+        );
     }
 }

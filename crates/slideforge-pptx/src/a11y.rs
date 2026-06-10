@@ -144,8 +144,10 @@ impl AltTextEmbedder {
                 },
                 // Text frames and non-visual frames do not get descr attributes.
                 // STORY-087 pass-2: ColorBar is geometry-only; no descr attribute.
+                // STORY-081 C3: SubtitleInlines is a text frame — no descr attribute.
                 FrameContent::Title(_)
                 | FrameContent::Subtitle(_)
+                | FrameContent::SubtitleInlines(_)
                 | FrameContent::Body(_)
                 | FrameContent::TextRun(_)
                 | FrameContent::Shape(_)

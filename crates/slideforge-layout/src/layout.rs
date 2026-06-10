@@ -335,8 +335,20 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             )?;
                         },
                         TextTag::Subtitle => {
-                            let text = extract_inline_text_str(&text_block.inlines);
-                            let content = crate::types::FrameContent::Subtitle(text);
+                            // STORY-081 C3: preserve inline structure for subtitles.
+                            // When the subtitle contains inline markup nodes (produced by
+                            // eval when `FieldValue::Inlines` is set for the subtitle field),
+                            // emit FrameContent::SubtitleInlines to carry the rich structure.
+                            // Plain-text subtitles (all Plain nodes, or a single Plain leaf)
+                            // continue to use FrameContent::Subtitle(Arc<str>) for backward compat.
+                            let content = if text_block.inlines.iter().any(has_non_plain_inline) {
+                                crate::types::FrameContent::SubtitleInlines(
+                                    text_block.inlines.clone(),
+                                )
+                            } else {
+                                let text = extract_inline_text_str(&text_block.inlines);
+                                crate::types::FrameContent::Subtitle(text)
+                            };
                             fill_region_slot_or_append(
                                 &mut all_frames,
                                 TextTag::Subtitle,
@@ -764,6 +776,18 @@ fn speaker_notes_from_register_content(
                 Some(Arc::from(text.as_str()))
             }
         })
+}
+
+/// Return `true` if the inline slice contains any non-Plain node (i.e., has rich markup).
+///
+/// Used by the subtitle routing path (STORY-081 C3) to decide whether to emit
+/// `FrameContent::SubtitleInlines` (rich) or `FrameContent::Subtitle` (plain).
+/// A subtitle that contains only `InlineNode::Plain` nodes can be represented
+/// as a plain `Arc<str>` without loss; a subtitle with Bold/Italic/Code/etc.
+/// MUST be represented as `SubtitleInlines` to preserve inline structure.
+pub(crate) fn has_non_plain_inline(node: &slideforge_types::InlineNode) -> bool {
+    use slideforge_types::InlineNode;
+    !matches!(node, InlineNode::Plain(_))
 }
 
 /// Extract plain text from a slice of [`slideforge_types::InlineNode`] values into an [`Arc<str>`].

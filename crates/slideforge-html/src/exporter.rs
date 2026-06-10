@@ -15,7 +15,9 @@ use slideforge_layout::{BoundingBox, FrameContent, LaidOutDeck, LaidOutSlide};
 use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, ContentBlock, Deck};
 
-use crate::render::{HeadingLevel, render_slide_to_html};
+use slideforge_types::FieldValue;
+
+use crate::render::{HeadingLevel, render_slide_to_html, render_slide_to_html_with_title_override};
 
 /// Returns `true` iff the bounding box has strictly positive width AND height.
 ///
@@ -358,12 +360,30 @@ impl Exporter for HtmlExporter {
         let page_size = &laid_out.page_size;
         let mut slides_html = String::new();
         for (slide, &heading_level) in laid_out.slides.iter().zip(assignment.levels.iter()) {
-            slides_html.push_str(&render_slide_to_html(
-                slide,
-                brand,
-                heading_level,
-                page_size,
-            ));
+            // STORY-081 I2: check for title_inlines shadow field in the semantic deck.
+            // If present, render the title frame with rich inline content (Bold, Italic, etc.)
+            // instead of the plain-text fallback. This mirrors what the DOCX exporter does.
+            let title_inlines_opt: Option<&[slideforge_types::InlineNode]> =
+                deck.slides.get(slide.source_index).and_then(|s| {
+                    if let Some(FieldValue::Inlines(nodes)) = s.fields.get("title_inlines") {
+                        Some(nodes.as_slice())
+                    } else {
+                        None
+                    }
+                });
+
+            let rendered = if title_inlines_opt.is_some() {
+                render_slide_to_html_with_title_override(
+                    slide,
+                    brand,
+                    heading_level,
+                    page_size,
+                    title_inlines_opt,
+                )
+            } else {
+                render_slide_to_html(slide, brand, heading_level, page_size)
+            };
+            slides_html.push_str(&rendered);
             slides_html.push('\n');
         }
 
