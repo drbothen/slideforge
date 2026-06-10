@@ -30,11 +30,12 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 (**LOCAL ADVERSARIAL CONVERGED 3/3** (passes 28-29-30 strict-CLEAN) at code HEAD f047348c / BC-3.05.001 v1.4.3. 30-pass cascade complete (ADR-024 unification + BC re-anchor BC-3.02.002→BC-3.05.001 + 12-form×5-surface reconciliation + many defect fixes). STORY-081 spec→v1.5 (demo step surfaced + fixed story-spec drift vs BC v1.4.3: DOCX Code rStyle→RunFonts, title diag LayoutWarning→EvalError, EC-008 a:highlight, EC-005 Math v1.0). Code branch 5c61eb17 (rebased onto develop 15838de1 + demo evidence + tightened DOCX Code assertion). NEXT: push feature/STORY-081 + pr-manager 9-step. CI infra fix PR#79 merged."
+wave_5_status: "10 of 22 Wave-5 stories MERGED (…STORY-072 PR#76, STORY-082 PR#77, STORY-088 PR#78). 12 stories remain. In-flight (1 active worktree): STORY-081 PR #80 OPEN (feature/STORY-081 → develop, MERGEABLE), pushed force-with-lease. PR-level adversarial cascade CONVERGED (passes P31-P34, all CRIT/HIGH/MED resolved); security CLEAN; pr-reviewer APPROVE. Pre-PR fix: list-form bullets inline markup (STORY-081×STORY-088, FieldValue::InlinesList, HEAD ee8c69f8). CI running (most checks pass; test-matrix incl. linux-arm64 pending). Awaiting CI green → squash-merge into develop."
 develop_sha: "15838de1"
 develop_pr_count: 79
+open_prs: 1
 error_taxonomy_version: "v2.28"
-workspace_tests: "4075 pass / 20 skip / 0 fail (STORY-081 worktree HEAD 5c61eb17; rebased onto develop 15838de1; includes STORY-072/082/088 tests)"
+workspace_tests: "4083 pass / 20 skip / 0 fail (STORY-081 worktree HEAD ee8c69f8; post list-bullets×088 fix; includes STORY-072/082/088 tests)"
 workspace_test_failures: 0
 ---
 
@@ -45,11 +46,11 @@ workspace_test_failures: 0
 **Project:** slideforge — data-reactive branded document platform (Rust, greenfield, Phase 3 TDD)
 **Repository:** https://github.com/drbothen/slideforge | **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `15838de1` (79 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `15838de1` (79 merged PRs, 1 open PR: #80).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. STORY-088 MERGED PR #78 (15838de1, ADMIN OVERRIDE). CI fix PR #79 merged. 10 of 22 done. 12 stories remain. STORY-081 rebased onto develop 15838de1 at HEAD 5c61eb17; story spec v1.5; demo evidence recorded. NEXT: push feature/STORY-081 (force-with-lease) → pr-manager 9-step.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 10 of 22 done. 12 stories remain. STORY-081 PR #80 OPEN (feature/STORY-081 → develop, MERGEABLE). PR-level adversary CONVERGED (P31-P34); security CLEAN; pr-reviewer APPROVE. Pre-PR list-bullets×STORY-088 fix (FieldValue::InlinesList, HEAD ee8c69f8). CI running. NEXT: CI green → STANDING MERGE AUTH → squash-merge PR #80.
 
 ---
 
@@ -57,13 +58,13 @@ workspace_test_failures: 0
 
 Both branches are on origin (durable, machine-independent):
 
-- `origin/factory-artifacts` — all `.factory/` state, all 30 STORY-081 adversary pass reports + orchestrator-EC004 note, ADR-023, ADR-024, BC-5.02.002 v1.5, BC-3.05.001 v1.4.3, BC-3.02.002 v1.5.1. LOCAL adversarial CONVERGED 3/3 (passes 28-29-30). (Run `git -C .factory log -1` for current HEAD.)
-- `origin/feature/STORY-081` @ `5c61eb17` — rebased onto develop `15838de1`; demo evidence recorded in docs/demo-evidence/STORY-081/; story spec v1.5 (DOCX Code RunFonts, EvalError title diag, a:highlight, Math v1.0 degraded); tightened DOCX Code assertion. Pre-rebase local HEAD was f047348c (Pass-27 fix: chunks_to_markup_source + slide_title shows markup form distinct from stripped_text per BC EC-011); rebase was single consolidated commit resolving 4 mechanical conflicts (FieldValue::Inlines/FrameContent::SubtitleInlines seams vs STORY-072/082/088 per OBS-P24-001). Push pending (force-with-lease, rewritten history). NEXT: pr-manager 9-step.
+- `origin/factory-artifacts` — all `.factory/` state, all 34 STORY-081 adversary pass reports + orchestrator-EC004 note, ADR-023, ADR-024, BC-5.02.002 v1.5, BC-3.05.001 v1.4.3, BC-3.02.002 v1.5.1. LOCAL adversarial CONVERGED 3/3 (passes 28-29-30); PR-level CONVERGED (passes P31-P34). (Run `git -C .factory log -1` for current HEAD.)
+- `origin/feature/STORY-081` @ `ee8c69f8` — PR #80 OPEN (→ develop, MERGEABLE). Pre-PR list-bullets×STORY-088 fix (FieldValue::InlinesList). Workspace 4083 pass / 20 skip / 0 fail. PR-level adversary P31-P34 CONVERGED; security CLEAN; pr-reviewer APPROVE.
 
 **Same-machine resume:** `.factory/` and `.worktrees/STORY-081/` worktrees already exist on disk.
 1. Run `vsdd-factory:factory-worktree-health`
-2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `5c61eb17`
-3. Continue at NEXT ACTION: push feature/STORY-081 (force-with-lease) → pr-manager 9-step.
+2. Verify `git -C .worktrees/STORY-081 rev-parse HEAD` == `ee8c69f8`
+3. Continue at NEXT ACTION: CI green → squash-merge PR #80.
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
@@ -75,30 +76,26 @@ git rev-parse develop   # must equal origin/develop == 15838de1
 ```
 Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
-**Exact resume point:** Phase 3 / Wave 5 / STORY-081 LOCAL adversarial **CONVERGED 3/3** (passes 28-29-30 strict-CLEAN). Code HEAD `5c61eb17` (rebased onto develop `15838de1`; demo evidence recorded; story spec v1.5); BC-3.05.001 v1.4.3. 30-pass cascade complete. NEXT: push feature/STORY-081 (force-with-lease, rewritten history) → pr-manager 9-step PR cycle.
+**Exact resume point:** Phase 3 / Wave 5 / STORY-081 PR #80 OPEN. PR-level adversary CONVERGED (passes P31-P34, all CRIT/HIGH/MED resolved). Security CLEAN. pr-reviewer APPROVE. Code HEAD `ee8c69f8` (pre-PR list-bullets×STORY-088 fix applied, FieldValue::InlinesList). CI running (most checks pass; linux-arm64 pending). NEXT: CI green → STANDING MERGE AUTH → squash-merge PR #80 → post-merge state burst → worktree cleanup.
 
 ---
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**1 active worktree. Based on cbebfd57; MUST rebase onto develop 15838de1 at PR step.**
+**1 active worktree.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.05.001, 13 pts)
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `5c61eb17` (rebased onto develop 15838de1; demo evidence recorded in docs/demo-evidence/STORY-081/; tightened DOCX Code assertion; story spec→v1.5. Prior local HEAD f047348c: Pass-27 fix — chunks_to_markup_source + slide_title markup form distinct from stripped_text per BC EC-011); tests 4075 pass / 20 skip / 0 fail (now includes develop STORY-072/082/088 tests).
-- **Adversary streak:** **3/3 CONVERGED** (passes 28-29-30 strict-CLEAN). Pre-rebase code HEAD f047348c; post-rebase HEAD 5c61eb17. Workspace 4075 pass / 20 skip / 0 fail. 30-pass cascade complete. Story spec v1.5 (demo-surfaced drift reconciled to BC v1.4.3). NEXT ACTION: push rebased branch (force-with-lease, rewritten history) → pr-manager 9-step PR cycle (PR targets develop).
-- **BC ANCHOR RESOLVED (human ruling 2026-06-09):** re-anchored BC-3.02.002 → BC-3.05.001 v1.4.3 (Rich Inline Formatting, CAP-024). BC-3.05.001 amended with slide-level field scope + PC-1..PC-5 per-exporter rendering matrix + HI-1..HI-5 hyperlink invariants + unified-engine Invariant 9 + v1.4.1 Math/Footnote PC-4 corrections + v1.4.2 full 12-form×5-surface reconciliation to actual v1.0 behavior + v1.4.3 EvalError type-name correction + DOCX unsafe-scheme policy + FU-LINK-SCHEME-CONSISTENCY. BC-3.02.002→v1.5.1 (cross-ref added; slide-level follow-up closed by STORY-081 via BC-3.05.001).
-
-- **Pass 17 findings (all REMEDIATED):**
-  - F-P17-001[MED] — DOCX Link arm used collect_plain_text on display children → `[**here**](url)` dropped bold; PPTX+HTML preserved it; DOCX lone divergent surface. BC-3.05.001 PC-3 violation. REMEDIATED d185badb: DOCX Link arm recurses via build_hyperlink_display_runs → structured WR runs with `<w:rPr>` in `<w:hyperlink>`.
-  - F-P17-002[MED] — HTML Footnote → `<small>` (PC-4 says `<span role="note">`); Math → `<code class="math">` but PC-4 v1.4.0 said `<math>` unconditionally. Footnote REMEDIATED d185badb (impl fix). Math REMEDIATED as spec reconciliation: BC-3.05.001 v1.4.1 codifies `<code class="math">` as v1.0 behavior; full MathML deferred to STORY-045.
-  - OBS-P17-A[OBS] — stale dispatch-site comments + dead exemption branch in grep-zero guard. REMEDIATED d185badb (comments updated; dead branch removed; guard re-verified).
-  - OBS-P17-B[OBS] — EC-011 strict-mode trace out-of-scope (BC-1.15.003). Non-finding.
-- **ADR-024 implementation summary (HEAD e5b1e92e, confirmed clean at Pass 17):** New unified engine `render_inline_nodes_to_runs(nodes, hlink_resolver)` + `OoxmlRun` + `serialize_ooxml_run` in `slideforge-plugin-api/src/inline_formats/ooxml_runs.rs`. Body path via `ooxml_run_to_ooxmlsdk`; notes path via `serialize_ooxml_run`. Old body generator cluster (~312 lines) DELETED. AC-005 grep-zero audit clean. FU-PPTX-DUAL-RUN-GENERATOR CONFIRMED RESOLVED.
-- **Pre-PR blockers:** FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED. FU-CI-ARM64-TEST-FAILURE RESOLVED. Confirm arm64 CI green on STORY-081 PR.
-- **fontdb pin:** =0.23.0 direct pin retained; cargo deny PASS.
-- **Workspace tests at HEAD f047348c:** 3848 pass / 20 skip / 0 fail.
-- **BC:** BC-3.05.001 now **v1.4.3** (v1.4.2 full-surface reconciliation + EvalError::InlineMarkupInTitle type-name correction; dead LayoutWarning::InlineMarkupInTitle variant removed; DOCX unsafe-scheme policy in PC-3/EC-013; FU-LINK-SCHEME-CONSISTENCY open question). Code HEAD f047348c.
-- **NEXT ACTION:** push rebased branch feature/STORY-081 (force-with-lease, rewritten history onto develop 15838de1) → pr-manager 9-step PR cycle (PR targets develop).
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `ee8c69f8` (pre-PR list-bullets×STORY-088 fix: FieldValue::InlinesList). PR #80 OPEN → develop, MERGEABLE.
+- **Adversary streak:** LOCAL **3/3 CONVERGED** (passes 28-29-30 strict-CLEAN). PR-level **CONVERGED** (passes P31-P34, all CRIT/HIGH/MED resolved). 34-pass cascade complete. Workspace 4083 pass / 20 skip / 0 fail.
+- **PR-level findings (all RESOLVED):** Passes P31-P34 complete; all CRIT/HIGH/MED resolved. Pre-PR integration gap: list-form bullets inline markup (STORY-081×STORY-088 — AC-001 gap that the 30-pass LOCAL cascade missed; tests used Rust constructors not real-DSL list bullets; caught by PR-level fresh review). Fixed via FieldValue::InlinesList at HEAD ee8c69f8.
+- **Security:** CLEAN. **pr-reviewer:** APPROVE.
+- **Non-blocking follow-ups (post-merge cleanup; do NOT block PR #80):**
+  - FU-S1-FONTDB-COUNT-VISIBILITY: `slideforge-diagrams::normalize::font_db_load_count()` is `pub` but test-only — should be `#[cfg(test)] pub(crate)` (mirror slideforge-pdf pattern). Leaks test-instrumentation into public API.
+  - FU-S3-CAPTION-FIXTURE: `crates/slideforge/tests/fixtures/story-081-caption-markup.sf` references `test-image.png` (nonexistent) — add comment that path is intentionally absent (test verifies caption markup only) or use `decorative: true`.
+  - FU-TD1-DEAD-FONT-COUNTER: `slideforge-pdf/src/font.rs` `LOAD_SYSTEM_FONTS_COUNT` process-global counter is `#[allow(dead_code)]` with no reader after thread-local migration — remove it or wire a tracing/metrics reader.
+  - (S2 was documentation-only / pre-existing `build_hyperlink_display_runs` — no action; covered by test.)
+- **FU-CI-ARM64-TEST-FAILURE:** STORY-081's deterministic timing-gate fixes are ON the PR. Confirm linux-arm64 CI green on PR #80 to fully close.
+- **NEXT ACTION:** CI green → STANDING MERGE AUTH → squash-merge PR #80 → post-merge state burst → worktree cleanup.
 
 ---
 
@@ -148,8 +145,8 @@ Then read `.factory/STATE.md` and continue at the NEXT ACTION below.
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 done. 12 stories remain. 90 stories / 556 pts total.
 
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c61eb17`. LOCAL adversarial CONVERGED 3/3 (passes 28-29-30 strict-CLEAN). BC-3.05.001 v1.4.3. Story spec v1.5. Demo evidence recorded. NEXT: push (force-with-lease) → pr-manager 9-step. Open PRs: 0.
-- Workspace: 4075 pass / 20 skip / 0 fail (STORY-081 worktree at HEAD 5c61eb17; rebased onto develop 15838de1; cargo deny PASS; cold_budget PERMANENTLY FIXED; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm on STORY-081 PR arm64 CI).
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `ee8c69f8`. PR #80 OPEN (→ develop, MERGEABLE). PR-level adversary CONVERGED (P31-P34); security CLEAN; pr-reviewer APPROVE. Open PRs: 1 (PR #80).
+- Workspace: 4083 pass / 20 skip / 0 fail (STORY-081 worktree HEAD ee8c69f8; cargo deny PASS; cold_budget PERMANENTLY FIXED; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 CI green on PR #80).
 - Uncertainty pass: COMPLETE. ADR-022 dep-centralization: DONE. ADR-008 P4 amendment: DONE. ADR-021 async runtime: DONE.
 
 ---
@@ -162,7 +159,7 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `15838de1`, 79 merged PRs). 10 of 22 do
 3. Confirm workspace tests green (`cargo nextest run --workspace --no-fail-fast` — expect ~3916+ pass, ~20 skip; cold_budget PERMANENTLY FIXED; NOTE: linux-arm64 CI has 1 unresolved nextest failure — FU-CI-ARM64-TEST-FAILURE; capture test name on next PR run)
 4. Read BACKLOG.md WAVE5-DELIVERY for in-flight status
 5. For each in-flight story, check `git -C .worktrees/STORY-<NNN> log --oneline -5` to confirm HEAD matches the table above
-6. **Continue in priority order:** STORY-081 — LOCAL adversarial **CONVERGED 3/3** (passes 28-29-30 strict-CLEAN). HEAD `5c61eb17` (rebased onto develop `15838de1`; demo evidence recorded; story spec v1.5). NEXT: push feature/STORY-081 (force-with-lease) → pr-manager 9-step.
+6. **Continue in priority order:** STORY-081 — PR #80 OPEN (feature/STORY-081 → develop, MERGEABLE). HEAD `ee8c69f8`. PR-level adversary CONVERGED (P31-P34); security CLEAN; pr-reviewer APPROVE. NEXT: CI green → STANDING MERGE AUTH → squash-merge PR #80 → post-merge state burst → worktree cleanup.
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
 adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → rebase onto develop `15838de1` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
@@ -195,18 +192,17 @@ adversary LOCAL 3-CLEAN (passes run SEQUENTIALLY) → demo-recorder per-AC → r
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs). STORY-081 LOCAL adversarial CONVERGED 3/3 (passes 28-29-30 strict-CLEAN) at HEAD 5c61eb17 (rebased onto develop 15838de1) / BC-3.05.001 v1.4.3 / story spec v1.5. Demo evidence recorded. 1 worktree active. 12 stories remain. NEXT: push feature/STORY-081 (force-with-lease) → pr-manager 9-step.**
+**Wave 5 IN PROGRESS. develop 15838de1 (79 merged PRs, 1 open PR). STORY-081 PR #80 OPEN (MERGEABLE). PR-level adversary CONVERGED (P31-P34); security CLEAN; pr-reviewer APPROVE. Pre-PR list-bullets×STORY-088 fix applied (FieldValue::InlinesList, HEAD ee8c69f8). CI running. NEXT: CI green → squash-merge PR #80.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-10 |
-| **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 0 open PRs) |
-| **Merged this session** | STORY-088 PR#78 (ADMIN OVERRIDE), CI-fix PR#79; STORY-072/082/088 also merged this session |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c61eb17`. |
-| **STORY-081 state** | HEAD `5c61eb17` (rebased onto develop 15838de1; demo evidence recorded; story spec v1.5). LOCAL adversarial **CONVERGED 3/3** (passes 28-29-30 strict-CLEAN). BC-3.05.001 v1.4.3. 30-pass cascade complete. |
-| **Workspace tests** | 4075 pass / 20 skip / 0 fail (HEAD 5c61eb17; cargo deny PASS; FU-DIAGRAMS-COLD-BUDGET-TIMING-GATE RESOLVED; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 on STORY-081 PR) |
+| **develop SHA** | `15838de1` (79 merged PRs; origin/develop confirmed; 1 open PR: #80) |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `ee8c69f8`. |
+| **STORY-081 state** | PR #80 OPEN (→ develop, MERGEABLE). HEAD `ee8c69f8`. LOCAL adversarial CONVERGED 3/3 (passes 28-29-30). PR-level adversary CONVERGED (passes P31-P34, all CRIT/HIGH/MED resolved). Security CLEAN. pr-reviewer APPROVE. Pre-PR fix: FieldValue::InlinesList (list-form bullets inline markup). Workspace 4083 pass / 20 skip / 0 fail. |
+| **Workspace tests** | 4083 pass / 20 skip / 0 fail (HEAD ee8c69f8; cargo deny PASS; FU-CI-ARM64-TEST-FAILURE RESOLVED — confirm arm64 on PR #80) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-081 LOCAL adversarial CONVERGED 3/3 (passes 28-29-30 strict-CLEAN) at HEAD 5c61eb17 / BC-3.05.001 v1.4.3 / story spec v1.5. Rebased onto develop 15838de1 (single consolidated commit, 4 mechanical conflicts). Demo evidence recorded in docs/demo-evidence/STORY-081/. NEXT: push feature/STORY-081 (force-with-lease, rewritten history) → pr-manager 9-step → STANDING MERGE AUTH → squash-merge → state-manager post-merge burst → worktree cleanup. HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
+| **RESUME INSTRUCTION** | STORY-081 PR #80 OPEN (MERGEABLE). PR-level adversary CONVERGED (P31-P34). Security CLEAN. pr-reviewer APPROVE. NEXT: CI green → STANDING MERGE AUTH → squash-merge PR #80 → post-merge state burst → worktree cleanup. HELD next batch: STORY-056/048 (unblocked ←047), STORY-057/058/064 (serialize cli), STORY-060/061 (GIT2-OPENSSL first). |
 
 ---
 
@@ -257,6 +253,7 @@ _Entries before STORY-050-MERGE archived to `.factory/cycles/wave-4-gate/decisio
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-10 | STORY-081-PR80 | PR #80 created (rebased onto develop 15838de1, 4 commits); PR-level adversary P31-P34 converged (all CRIT/HIGH/MED resolved); security CLEAN; pr-reviewer APPROVE. Pre-PR integration gap: list-form bullets inline markup (STORY-081×STORY-088, AC-001 gap — 30-pass LOCAL cascade missed it; tests used Rust constructors not real-DSL list bullets; caught by PR-level fresh review). Fixed via FieldValue::InlinesList at HEAD ee8c69f8. Non-blocking follow-ups registered: FU-S1-FONTDB-COUNT-VISIBILITY, FU-S3-CAPTION-FIXTURE, FU-TD1-DEAD-FONT-COUNTER (all below BC-5.39.001 PR-merge gate of CRIT+HIGH+MED). CI running; linux-arm64 pending. NEXT: CI green → squash-merge. |
 | 2026-06-10 | STORY-081-SPEC-v1.5 | Demo-surfaced story-spec drift reconciled to BC-3.05.001 v1.4.3: (1) DOCX Code RunFonts `<w:rFonts ascii/hAnsi="Courier New"/>` (was rStyle CodeSpan, 5 locations); (2) title diagnostic EvalError::InlineMarkupInTitle E-EVL-015 3-field eval-stage (was dead LayoutWarning::InlineMarkupInTitle, 5 locations); (3) EC-008 PPTX Highlight corrected to `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child-element form (was false "DrawingML lacks a:highlight"); (4) EC-005 Math degraded v1.0 behavior codified (PPTX plain+warn, DOCX plain LaTeX, HTML `<code class="math">`, PDF skipped; STORY-045 deferral cited). spec_version 1.4→1.5. Rebased branch 5c61eb17 onto develop 15838de1 (single consolidated commit, 4 mechanical conflicts resolved; demo evidence recorded in docs/demo-evidence/STORY-081/). NEXT: push feature/STORY-081 (force-with-lease) → pr-manager 9-step. |
 | 2026-06-10 | STORY-081-CONVERGED | STORY-081 LOCAL adversarial cascade CONVERGED 3/3 strict-CLEAN (passes 28-29-30) at code HEAD f047348c / BC-3.05.001 v1.4.3. 30-pass cascade complete. Passes 28/29/30 all CLEAN (strict + PR-merge). Summary: pass-28 verified F-P27-MED-001 fix (chunks_to_markup_source 13-variant, slide_title markup form, Red-Gate + 14 unit tests); pass-29 comprehensive 13-seam re-derivation ALL PASS (eval/PPTX/DOCX/HTML/PDF/depth/determinism/escaping/security/e2e/anchor-sweep/snapshot-hygiene/semantic-anchoring); pass-30 final convergence gate per-seam verdict table all PASS. OBS-P30-001 [carried]: SubtitleInlines/Body validation-skip parser-gated (E-PAR-021 MAX_INLINE_NESTING=64) — non-exploitable; equivalent to codified OBS-P22-001. ADR-024 unification + BC re-anchor BC-3.02.002→BC-3.05.001 + 12-form×5-surface reconciliation (BC v1.4.2) + EvalError type-name correction + DOCX unsafe-scheme policy (BC v1.4.3) + all defect fixes. S-7.02 cycle-closing checklist: FU-PPTX-DUAL-RUN-GENERATOR RESOLVED (ADR-024); FU-REANCHOR-COMPLETENESS-GREP lessons; FU-BC-ACCURACY-AUDIT lessons; FU-DIAGNOSTIC-FIELD-PINNING lessons; FU-EXIT-GATE-DISTINGUISHING-OUTPUT lessons; FU-LINK-SCHEME-CONSISTENCY OPEN (architect adjudication); FU-STORY-045-HTML-MATHML deferred STORY-045; FU-VP-043-NOTES-PATH Phase-6; FU-CI-ARM64-TEST-FAILURE + OBS-P28-001 cosmetic — note for PR step. All process-gap follow-ups tracked. NEXT: demo-recorder per-AC → rebase onto 15838de1 → pr-manager 9-step. |
 | 2026-06-10 | STORY-081-PASS26-27 | Pass 26 strict-CLEAN (1/3). Pass 27 NOT CLEAN — F-P27-MED-001[MED]: EvalError::InlineMarkupInTitle.slide_title was set to the same stripped value as stripped_text in for_eval.rs:350,361-368 → miette diagnostic rendered "Inline markup in title field: 'Bold Title' … Stripped to: 'Bold Title'" (identical, misleading); contradicts BC EC-011 canonical vector (slide_title:"**Bold Title**", stripped_text:"Bold Title") + field doc in error.rs:380-387 + "for now" production-grade-default smell comment. AC-006 eval test asserted presence-by-error-code only; let defect survive 26 passes (OBS-P27-001 lessons-codification). REMEDIATED commit f047348c: added `chunks_to_markup_source` (pub(crate), all 13 TemplateChunk variants, canonical DSL delimiters per DIR-077-002 §1) reconstructing markup form from chunks; slide_title now shows "**Bold Title**" distinct from stripped_text "Bold Title"; Red-Gate tests (bold/italic/code) assert markup-delimiters-present + slide_title!=stripped_text + rendered message differs; AC-006 test strengthened; 14 unit tests for chunks_to_markup_source; "for now" comments removed. SourceSpan::default() unchanged (full span threading is STORY-012 SourceMap systematic gap — documented). New code HEAD f047348c; tests 3848 pass; streak reset 0/3. FU-DIAGNOSTIC-FIELD-PINNING registered (process-gap lessons-codification). NEXT: adversary Pass 28 fresh at f047348c against BC v1.4.3. |
