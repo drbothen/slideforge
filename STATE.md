@@ -5,6 +5,7 @@ created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
 last_updated: 2026-06-11
+demo_review: "DEMO-REVIEW-2026-06-11 — 10 product defects (3 CRIT/4 HIGH/3 MED). Rendering-fix wave scheduled after CI stabilization + STORY-081 merge. See .factory/reviews/demo-deep-review-2026-06-11.md."
 state_version: "1.3"
 phase_1_approved: 2026-05-25
 phase_2_approved: 2026-05-25
@@ -245,7 +246,26 @@ All reviews already DONE. PR #80 OPEN, HEAD `5c665cd0`, PARKED.
 4. Post-merge state burst: STORY-INDEX / dependency-graph / STATE.md → MERGED; record new develop SHA. LESSON-18: `git fetch && git merge --ff-only origin/develop` in any active worktrees.
 5. Worktree cleanup: remove `.worktrees/STORY-081`; prune `feature/STORY-081`.
 
-### Step 4 — Remaining Wave-5 feature stories
+### Step 4 — RENDERING-FIX WAVE (human-directed 2026-06-11 — BEFORE remaining feature stories)
+
+**Trigger:** Demo deep review on develop `f3502c50` found 10 product defects (3 CRIT/4 HIGH/3 MED). Full findings: `.factory/reviews/demo-deep-review-2026-06-11.md`.
+
+**Fix-wave prep (at wave start):** story-writer + product-owner create stories with BC anchoring for each REND finding. Verify which gaps (REND-010b chart/image deferral, media embedding, chart pipeline) are covered by pending stories vs. need new stories.
+
+| ID | Sev | Summary | Crates |
+|----|-----|---------|--------|
+| REND-001 | CRIT | Bullets stacked at (0,0); placeholder bbox never finalized (layout.rs:1039-1064, STORY-073/088 seam); duplicate ph idx | `slideforge-layout`, `slideforge-pptx` |
+| REND-002 | CRIT | PDF no line-wrapping engine — text clips at page edge | `slideforge-pdf` |
+| REND-003 | CRIT | slide/notes `<p:spTree>` missing required `<p:nvGrpSpPr>` (CT_GroupShape violation; repair-prompt risk) | `slideforge-pptx` |
+| REND-004 | HIGH | `takeaway` field never renders on-slide in any format | `slideforge-eval`, `slideforge-layout`, all renderers |
+| REND-005 | HIGH | Strict-mode exits 0 silently dropping content (W-VAL-103); `body` schema drift at field_to_block.rs:135 | `slideforge-validate`, `slideforge-eval` |
+| REND-006 | HIGH | DOCX: bullets empty `<w:p/>`; numbering.xml stub; no sectPr; lang dropped | `slideforge-docx` |
+| REND-007 | MED | PPTX: master 4:3 on 16:9 deck; progress_bar no layout; run lang dropped | `slideforge-pptx` |
+| REND-008 | MED | HTML: chart SVG empty + EMU/px mismatch; image empty; bullets as `<p>` not `<ul>/<li>`; PDF: progress_bar /Artifact; no bold font subset | `slideforge-html`, `slideforge-pdf` |
+| REND-009 | HIGH | CLI: bare-path `Path::parent()` yields "" — brand I/O error | `slideforge-cli` |
+| REND-010 | MED | Chart no-data renders silently empty; unanchored deferral comment in PPTX chart/image serializer (NO story ID cited — discipline violation) | `slideforge-pptx`, `slideforge-eval` |
+
+### Step 5 — Remaining Wave-5 feature stories
 
 STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU-SEC-001-GIT2-OPENSSL first).
 
@@ -282,20 +302,22 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. STORY-091 MERGED PR #82 (develop f3502c50, 81 PRs). Tiered CI live, fast tier 6m02s. Branch protection on develop CREATED. Merge-queue UI toggle PENDING HUMAN ACTION. STORY-092 is NEXT (cache/disk root-cause). STANDING MERGE AUTH active.**
+**Wave 5 IN PROGRESS. STORY-091 MERGED PR #82 (develop f3502c50, 81 PRs). Tiered CI live, fast tier 6m02s. Branch protection on develop CREATED. Merge-queue UI toggle PENDING HUMAN ACTION. STORY-092 impl+review-fix DONE (HEAD c264910a); spec v1.2 + adversarial cascade NEXT. RENDERING-FIX WAVE scheduled after CI stabilization + STORY-081 merge. STANDING MERGE AUTH active.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-11 |
 | **develop SHA** | `f3502c50` (81 merged PRs; origin/develop confirmed; 1 open PR: #80 parked) |
 | **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c665cd0`. **PARKED pending STORY-092 cache fix.** |
+| **STORY-092 state** | Impl + review-fix COMPLETE at feature/STORY-092 HEAD `c264910a`. Spec amendment v1.2 in progress. LOCAL adversarial cascade NEXT (3-CLEAN per BC-5.39.001 before PR). |
 | **PR #82 / STORY-091 state** | MERGED 2026-06-11 → develop `f3502c50`. Tiered CI live. Fast tier ~6m02s ACHIEVED. Branch protection on `develop` CREATED. **HUMAN ACTION REQUIRED: merge-queue UI toggle** (Settings → Branches → develop → "Require merge queue"). Worktree + branches deleted. |
 | **PR #81 state** | MERGED 2026-06-11 → develop `20a51e0c`. Bench timeout 60m + cache-on-failure live. Remote branch deleted. |
 | **PR #80 / STORY-081 state** | OPEN (PARKED). HEAD `5c665cd0`. All reviews DONE (LOCAL 3/3, PR-level P31-P34 converged, security CLEAN, pr-reviewer APPROVE). Bench failed: cache thrash (STORY-092 fixes). |
+| **Demo review** | DEMO-REVIEW-2026-06-11: 10 product defects (3 CRIT/4 HIGH/3 MED) on develop `f3502c50`. Rendering-fix wave scheduled after STORY-081 merge. Full findings: `.factory/reviews/demo-deep-review-2026-06-11.md`. |
 | **Workspace tests** | 4083 pass / 20 skip / 0 fail (HEAD 5c665cd0; cargo deny PASS) |
 | **Cache situation** | CONFIRMED ROOT CAUSE: 9.77 GB / 23 active caches / 97.7% of ~10 GB limit. arm64 LRU-evicted. STORY-092 is the structural fix. First full-matrix develop run IN PROGRESS (run 27317895683 — arm64 may still flake; known-cause, does not block delivery). |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts feature/STORY-081` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **STEP 1:** Human enables merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 2:** Deliver STORY-092 (cache+disk; also folds FU-FACTORY-PLAYBOOK-COF-LIST + FU-AGGREGATOR-TIMEOUT-COMMENT). **STEP 3:** Deliver STORY-093 (arm64 build-time). **STEP 4:** Rebase STORY-081 onto develop ≥ `f3502c50` → merge PR #80. **STEP 5:** Remaining wave-5 feature stories. |
+| **RESUME INSTRUCTION** | **STEP 1:** Human enables merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 2:** Complete STORY-092 adversarial cascade (3-CLEAN) then PR + merge. **STEP 3:** Deliver STORY-093 (arm64 build-time). **STEP 4:** Rebase STORY-081 onto develop ≥ `f3502c50` → merge PR #80. **STEP 5:** RENDERING-FIX WAVE (REND-001..010; fix-wave prep at wave start). **STEP 6:** Remaining wave-5 feature stories. |
 
 ---
 
@@ -348,6 +370,8 @@ _Wave-5 per-story pass logs archived to `.factory/cycles/wave-5-merges-archive.m
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-11 | DEMO-REVIEW-FIX-WAVE | Fable-model deep review of sample deck on develop `f3502c50` found 10 product defects (3 CRIT/4 HIGH/3 MED): REND-001 bullets at (0,0), REND-002 PDF no line-wrap, REND-003 missing `<p:nvGrpSpPr>`, REND-004 takeaway not on-slide, REND-005 strict-mode silent drop, REND-006 DOCX empty bullets, REND-007 master 4:3/16:9 mismatch, REND-008 HTML/PDF chart+image+bullet defects, REND-009 CLI bare-path error, REND-010 silent empty chart + unanchored deferral. Human decision: complete CI stabilization (STORY-092→093→STORY-081 merge) FIRST, then run a dedicated RENDERING-FIX WAVE for all REND findings BEFORE remaining Wave-5 feature stories. Fix-wave prep (story creation with BC anchoring) at wave start. Full findings: `.factory/reviews/demo-deep-review-2026-06-11.md`. |
+| 2026-06-11 | STORY-092-DELIVERY-STATUS | STORY-092 implementation + review-fix complete at feature/STORY-092 HEAD `c264910a`. Spec amendment v1.2 in progress. Adversarial cascade next (LOCAL 3-CLEAN per BC-5.39.001 before PR). |
 | 2026-06-11 | STORY-091-MERGE | PR #82 squash-merged → develop `f3502c50` (81 PRs). STORY-091 tiered CI triggers + merge queue. Spec v1.4. LOCAL cascade: 10 passes, CONVERGED 3/3 strict-CLEAN (passes 8-9-10); 4 MED findings + 1 LOW finding closed (F-091-P1-001, F-091-P4-001, F-091-P5-001, F-091-P7-001). ci-workflow-analyzer pre-review: 12 findings fixed (incl. CRIT wrong required-check context name). Security CLEAN (SEC-001/002/003 closed; re-reviewed CLEAN per LESSON-9). pr-reviewer APPROVE. Fast tier wall-clock: ~6m02s ACHIEVED (target 6-8 min). Branch protection on `develop` CREATED (required check `all-checks-pass`, strict=true, approvals=0). Merge-queue UI toggle PENDING HUMAN ACTION. Worktree `.worktrees/STORY-091` removed; remote + local branch deleted. Demo evidence: `.factory/demos/STORY-091-demo-evidence.md`. |
 | 2026-06-11 | PR81-ADMIN-MERGE | PR #81 (`ci/bench-timeout-cache-on-failure`) admin-merged → develop `20a51e0c` (80 PRs). EXPLICIT per-request human authorization: resume-gate selection 2026-06-10 ("Admin-merge PR #81 first"). Supersedes the "fold into STORY-092" recommendation from decision STORY-081-PR81-FOLD. Failing `test (linux-arm64)` check confirmed infra flake (cache-thrash cold-build), not a code defect. Bench timeout 60m + cache-on-failure now live on develop. Remote branch `ci/bench-timeout-cache-on-failure` deleted. STORY-092 remains Step 1 (root-cause structural cache/disk fix still required). |
 | 2026-06-10 | STORY-081-PR81-FOLD | Admin-merge of PR #81 (`ci/bench-timeout-cache-on-failure`) CORRECTLY BLOCKED by environment guardrail: `gh pr merge --admin` on a failing required check requires EXPLICIT per-request human authorization — NOT pre-authorized by standing "drive to merge" direction. Re-run results: bench PASS, snapshots PASS, macos PASS; `test (linux-arm64)` FAILED AGAIN (1h3m, runner lost communication — cache-thrash cold-build flake). Resolution: fold PR #81's bench-timeout change into STORY-092 delivery (root-cause fix subsumes it); close PR #81 once STORY-092 lands. Corrected STATE.md: removed agent-written admin-override authorization claim for PR #81; clarified that STORY-088 admin-merge precedent does NOT constitute blanket standing authorization for future PRs. NEXT ACTIONS reordered: STORY-092 is now unambiguous Step 1 (folds PR #81 + fixes root cause). SUPERSEDED by PR81-ADMIN-MERGE. |
