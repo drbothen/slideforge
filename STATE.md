@@ -34,9 +34,9 @@ wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centrali
 wave_5_status: "15 of 34 Wave-5 stories MERGED. 19 remain (9 rendering-fix [STORY-094..102, P0] + 10 feature [P1/P2]). RENDERING-FIX WAVE READY — STORY-094..102 created+indexed 2026-06-11; BC-3.07.001/002/003 + BC-3.03.002 v1.2 + BC-1.15.001 v1.2 authored; error-taxonomy v2.29. Delivery begins next session (CRITs first: 094→095→098→096/099/100/101→097→102)."
 develop_sha: "433b3c01"
 develop_pr_count: 84
-open_prs: 0
-error_taxonomy_version: "v2.29"
-workspace_tests: "4091 pass / 20 skip / 0 fail (develop 433b3c01)"
+open_prs: 1
+error_taxonomy_version: "v2.30"
+workspace_tests: "4140 pass / 20 skip (worktree STORY-094 @ c8f96258)"
 workspace_test_failures: 0
 ---
 
@@ -48,11 +48,11 @@ workspace_test_failures: 0
 **Repository:** https://github.com/drbothen/slideforge (public) | **Default branch:** `main` | **Dev branch:** `develop`
 **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `433b3c01` (84 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `433b3c01` (84 merged PRs, 1 open PR: #85 DRAFT — STORY-094).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 15 of 34 done (102 stories / 642 pts). 19 remain (9 rendering-fix P0 + 10 feature). **RENDERING-FIX WAVE READY (STORY-094..102). CI INITIATIVE COMPLETE. STORY-081 MERGED.** Workstream B CLOSED.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 15 of 34 done (102 stories / 642 pts). 19 remain (9 rendering-fix P0 + 10 feature). **STORY-094 IN PROGRESS (LOCAL adversary cascade pass 17 done, streak 0/3, resume at pass 18). CI INITIATIVE COMPLETE. STORY-081 MERGED.** Workstream B CLOSED.
 
 **STANDING MERGE AUTH:** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking human.
 
@@ -135,7 +135,17 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. RENDERING-FIX WAVE is Step 1 (ST
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**0 active worktrees. 0 open PRs. `.worktrees/` EMPTY. STORY-081 MERGED (PR #80 → develop `433b3c01`). RENDERING-FIX WAVE is next.**
+**1 active worktree. 1 open PR (#85 DRAFT). SESSION PAUSED mid-cascade.**
+
+### STORY-094 — REND-001/003 fix (EPIC-08, BC-3.06.003 + BC-4.01.001, 8 pts) — IN PROGRESS, LOCAL adversary cascade
+
+- Worktree: `.worktrees/STORY-094`, branch `feature/STORY-094`, HEAD `c8f96258` (15 commits atop develop `433b3c01`), PUSHED to origin.
+- PR #85 OPEN as DRAFT (created prematurely by implementer; converted to draft pending cascade + demo evidence; pr-manager will adopt it later).
+- Red Gate + TDD done. LOCAL adversary cascade IN PROGRESS: 17 passes complete, 22 findings closed, streak 0/3 (strict-CLEAN at passes 8, 11, 13, 14; resets at 9, 12, 15, 16, 17). NEXT ACTION: dispatch adversary pass 18 (streak candidate 1/3).
+- Pass log: P1 6 findings (master-part nvGrpSpPr sweep, (0,0) fallback, body+bullets, EC-004, cNvPr ids, notes raw-XML deferral); P2 CRIT identical-bbox stacking relocation + body overlap + E-LAY-008 authored (error-taxonomy v2.30, PO commit b8e76999); P3 CRIT fabricated span → field_spans IR threading (architect-approved Option (b)); P4 VOIDED (reviewer relative-path error — main-repo reads) then re-run: span renders `<byte:N>:0:0` → SourceMap resolution + CompileOptions.source_name (real filename); P5 stale comments; P6 E-LAY-008 cross-slide accumulation via LayoutError::Multiple; P7 JSON render sibling; P9 exit-code 2 + warn-only error-slide placeholder demotion; P10 placeholder rendered blank → per-slide re-threading; P12 per-slide placeholder messages; P15 bullet width page-relative → region-relative (two_col overlap); P16 degenerate-WIDTH sliver detection in validate_post_layout; P17 degenerate-HEIGHT floor detection (symmetric axis).
+- Standing adjudications for future passes (do NOT re-litigate): notes_slide.rs raw-string XML = F-094-P1-006 ACKNOWLEDGED-DEFERRED (human adjudication pending); 31-vs-35 slide-type count drift = wave-gate reconciliation item (STORY-087 origin); byte-column span semantics pre-existing (STORY-006); exit-code catch-all conservative mapping accepted; HTML-only e2e error-slide assertion bar consistent; body-arm dedup asymmetry unreachable; clamp+post-layout-detection design accepted.
+- OPEN TRIAGE on resume: implementer's pass-17 exit gate reported "1 flaky bench test unrelated" — verify before pass 18 (run `cargo nextest` in worktree; confirm 4140/4140 or triage).
+- RESUME SEQUENCE: (1) factory-worktree-health, (2) verify worktree HEAD `c8f96258` == `origin/feature/STORY-094` and tree clean, (3) triage flaky bench note, (4) adversary pass 18 with the standing-adjudication list + PATH DISCIPLINE preamble (adversary file tools resolve relative paths to MAIN repo — all Reads MUST use absolute worktree paths; pass 4 was VOIDED for this), (5) continue BC-5.39.001 to 3 consecutive strict-CLEAN, (6) then demo-recorder per-AC → pr-manager adopts draft PR #85 → security-reviewer + pr-reviewer (LESSON-5) → CI → STANDING MERGE AUTH merge → post-merge burst (include process-gap lessons: adversary path-resolution voiding = LESSON candidate; FU-NOTES-SLIDE-RAW-XML-ADR001 follow-up needs human adjudication; spec artifacts touched this story: error-taxonomy v2.29→v2.30 commits b8e76999 on factory-artifacts).
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.05.001, 13 pts) — PR #80 — MERGED 2026-06-11
 - PR #80 squash-merged → develop `433b3c01` (84 PRs; 64 files, +12,672/−880). Worktree removed; remote+local branch deleted.
@@ -210,9 +220,9 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. RENDERING-FIX WAVE is Step 1 (ST
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `433b3c01`, 84 merged PRs). 15 of 34 done. 19 remain (9 rendering-fix P0 + 10 feature). **RENDERING-FIX WAVE READY. CI INITIATIVE COMPLETE. STORY-081 MERGED. Workstream B CLOSED.**
 
-- **NEXT:** Per-story delivery of STORY-094..102 (CRITs first: 094→095→098→096/099/100/101→097→102). BC-3.07.001/002/003 + BC-3.03.002 v1.2 + BC-1.15.001 v1.2 authored. error-taxonomy v2.29.
-- Active worktrees: 0. Open PRs: 0. `.worktrees/` EMPTY.
-- Workspace: 4091 pass / 20 skip / 0 fail (develop `433b3c01`). First mold develop run `27323925653` SUCCESS — arm64 13m32s; CI STABILIZATION CONFIRMED.
+- **NEXT:** Resume STORY-094 adversary cascade at pass 18 (streak 0/3; 3 consecutive strict-CLEAN required). See IN-FLIGHT WORKTREES for full resume sequence.
+- Active worktrees: 1 (STORY-094 @ `c8f96258`). Open PRs: 1 (#85 DRAFT).
+- Workspace (worktree STORY-094): 4140 pass / 20 skip (HEAD `c8f96258`). Develop base: 4091 pass / 20 skip / 0 fail (`433b3c01`). CI STABILIZATION CONFIRMED.
 
 ---
 
@@ -269,10 +279,10 @@ STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU
 | T2 | Deliver STORY-092 — CI cache reliability + disk headroom | DONE | PR #83 merged 2026-06-11 |
 | T3 | Deliver STORY-093 — CI arm64 build-time (mold + profile.ci) | DONE | PR #84 merged 2026-06-11 |
 | T4 | Merge STORY-081 PR #80 | DONE | merged 2026-06-11, develop 433b3c01 |
-| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — prep DONE, delivery PENDING | see checklist below |
+| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — STORY-094 cascade pass 17 done, streak 0/3, resume at pass 18 | see checklist below |
 
 T5 delivery checklist (per-story, full BC-5.39.001 flow each: worktree → implement → ci-workflow-analyzer where CI-relevant → LOCAL adversary 3-CLEAN sequential → demo evidence → push → PR → security-reviewer + pr-reviewer (orchestrator-dispatched, LESSON-5) → CI green → STANDING MERGE AUTH squash-merge → post-merge state burst → worktree cleanup):
-- [ ] STORY-094 (CRIT: layout bbox stacking + dup ph idx + nvGrpSpPr) — 8 pts — FIRST
+- [~] STORY-094 — IN PROGRESS (see IN-FLIGHT WORKTREES) — cascade pass 17 done, streak 0/3, resume at pass 18
 - [ ] STORY-095 (CRIT: PDF line-wrap + /Figure tag + bold subset) — 8 pts
 - [ ] STORY-098 (HIGH: strict-mode content-drop Route A + chart no-data) — 5 pts
 - [ ] STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang) — 5 pts
@@ -323,19 +333,19 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. RENDERING-FIX WAVE READY (STORY-094..102 created+indexed; BCs authored; wave-prep COMPLETE 2026-06-11). STORY-081 MERGED. CI INITIATIVE COMPLETE. 0 open PRs. 0 active worktrees. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
+**Wave 5 IN PROGRESS. STORY-094 LOCAL adversary cascade PAUSED at pass 17, streak 0/3. SESSION PAUSE CHECKPOINT — human relocating. Resume at pass 18. 1 open PR (#85 DRAFT). STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-11 |
-| **develop SHA** | `433b3c01` (84 merged PRs; origin/develop; 0 open PRs) |
-| **Active worktrees** | 0 — `.worktrees/` EMPTY |
-| **Rendering-fix wave** | READY. STORY-094..102 (9 stories, 71 pts). BC-3.07.001/002/003 (new); BC-3.03.002 v1.2; BC-1.15.001 v1.2. error-taxonomy v2.29. Delivery order: 094→095→098→096/099/100/101→097→102 (CRITs first). |
+| **develop SHA** | `433b3c01` (84 merged PRs; origin/develop; 1 open PR: #85 DRAFT STORY-094) |
+| **Active worktrees** | 1 — `.worktrees/STORY-094` branch `feature/STORY-094` HEAD `c8f96258` (PUSHED to origin) |
+| **STORY-094 cascade state** | 17 passes complete, 22 findings closed, streak 0/3 (strict-CLEAN at P8/P11/P13/P14; resets at P9/P12/P15/P16/P17). error-taxonomy v2.30 (PO commit b8e76999). PR #85 DRAFT. |
 | **CI initiative** | COMPLETE. Run `27323925653` SUCCESS — arm64 13m32s; full matrix ~17 min; per-PR fast tier ~6-10 min. CI STABILIZATION CONFIRMED. FU-093-BASELINE-REMOVAL still open. |
 | **STORY-081 state** | MERGED PR #80 2026-06-11 → develop `433b3c01`. LOCAL 3/3 (passes 28-29-30). PR-level P31-P34 CONVERGED. Open follow-ups: FU-S1-FONTDB-COUNT-VISIBILITY, FU-S3-CAPTION-FIXTURE, FU-TD1-DEAD-FONT-COUNTER. |
-| **Workspace tests** | 4091 pass / 20 skip / 0 fail (develop `433b3c01`) |
+| **Workspace tests** | 4140 pass / 20 skip (worktree STORY-094 @ `c8f96258`) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **READ FIRST:** STATE.md § TASK LEDGER — reconstruct exact task list and T5 per-story checklist from there. **STEP 0 (HUMAN):** Enable merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 1:** RENDERING-FIX WAVE — per-story delivery of STORY-094..102 (BC-5.39.001 full flow, CRITs first; see T5 checklist in TASK LEDGER). **STEP 2:** Remaining Wave-5 feature stories (STORY-056/048 unblocked; STORY-057/058/064 cli-serialized; STORY-060/061 after FU-SEC-001-GIT2-OPENSSL). |
+| **RESUME INSTRUCTION** | Resume STORY-094 adversary cascade at pass 18 — read IN-FLIGHT WORKTREES section. Full sequence: (1) factory-worktree-health, (2) verify HEAD `c8f96258` == origin + tree clean, (3) triage flaky bench note (run `cargo nextest` in worktree), (4) adversary pass 18 with standing-adjudication list + PATH DISCIPLINE preamble, (5) BC-5.39.001 to 3 consecutive strict-CLEAN, (6) demo-recorder per-AC → pr-manager adopts #85 → security-reviewer + pr-reviewer → CI → STANDING MERGE AUTH → post-merge burst. |
 
 ---
 
