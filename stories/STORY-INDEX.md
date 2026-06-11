@@ -4,14 +4,14 @@ version: "1.1"
 status: draft
 producer: story-writer
 timestamp: 2026-05-25T00:00:00
-last_updated: 2026-06-08
+last_updated: 2026-06-11
 phase: 2
 traces_to:
   - .factory/stories/epics.md
   - .factory/stories/dependency-graph.md
   - .factory/stories/wave-schedule.md
-total_stories: 93
-stories_written: 93
+total_stories: 101
+stories_written: 101
 stories_ready: 0
 stories_in_progress: 4
 stories_merged: 68
@@ -35,10 +35,10 @@ stories_merged: 68
 | Wave 2 | 7 | 0 | 0 | 0 | 7 | 0 |
 | Wave 3 | 17 | 0 | 0 | 0 | 17 | 0 |
 | Wave 4 | 23 | 0 | 0 | 0 | 23 | 0 |
-| Wave 5 | 25 | 14 | 0 | 4 | 7 | 0 |
+| Wave 5 | 33 | 22 | 0 | 4 | 7 | 0 |
 | Wave 6 | 6 | 6 | 0 | 0 | 0 | 0 |
 | Wave TBD | 1 | 1 | 0 | 0 | 0 | 0 |
-| **Total** | **93** | **21** | **0** | **4** | **68** | **0** |
+| **Total** | **101** | **29** | **0** | **4** | **68** | **0** |
 
 ---
 
@@ -168,8 +168,16 @@ stories_merged: 68
 | [STORY-091](stories/STORY-091-ci-tiered-triggers-merge-queue.md) | EPIC-19 | CI: Tiered triggers + GitHub merge queue (remove slow legs from per-PR critical path) | — | NEXT | 5 | facade | draft |
 | [STORY-092](stories/STORY-092-ci-cache-reliability-disk.md) | EPIC-19 | CI: Cache reliability + disk headroom (eliminate cold-build flakes) | — | NEXT | 5 | facade | draft |
 | [STORY-093](stories/STORY-093-ci-arm64-build-time.md) | EPIC-19 | CI: arm64 build-time reduction (mold linker + CI profile tuning) | — | NEXT | 5 | facade | draft |
+| [STORY-094](stories/STORY-094-rend-layout-pptx-bbox-nvgrpsppr.md) | EPIC-08 | REND-001/003: Finalize placeholder bbox in layout pass + add nvGrpSpPr to slide spTree | BC-3.06.003, BC-4.01.001 | P0 | 8 | strict | draft |
+| [STORY-095](stories/STORY-095-rend-pdf-line-wrap-a11y.md) | EPIC-13 | REND-002/008-pdf: PDF line-wrapping engine + progress_bar /Figure tag + bold font subset | BC-4.03.001, BC-4.03.002 | P0 | 8 | strict | draft |
+| [STORY-096](stories/STORY-096-rend-pptx-master-geometry-lang.md) | EPIC-08 | REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang on runs | BC-4.01.001, BC-4.01.005, BC-5.01.005 | P0 | 5 | strict | draft |
+| [STORY-097](stories/STORY-097-rend-takeaway-on-slide.md) | EPIC-07 | REND-004: takeaway field renders as visible bar on PPTX/HTML/PDF slides | (pending PO) | P0 | 8 | strict | draft |
+| [STORY-098](stories/STORY-098-rend-strict-mode-content-drop.md) | EPIC-04 | REND-005/010a: Strict-mode exit on W-VAL-103 content drop + chart no-data enforcement | BC-3.03.002, BC-1.11.002 | P0 | 5 | strict | draft |
+| [STORY-099](stories/STORY-099-rend-docx-bullets-secpr-lang.md) | EPIC-09 | REND-006: DOCX bullet run content + numbering.xml + sectPr + lang on runs | BC-4.02.001, BC-3.05.001 | P0 | 8 | strict | draft |
+| [STORY-100](stories/STORY-100-rend-html-chart-emu-bullets-image.md) | EPIC-14 | REND-008-html: HTML chart SVG EMU/px fix + image src + bullet list semantics | BC-4.03.003, BC-3.05.001 | P0 | 5 | strict | draft |
+| [STORY-101](stories/STORY-101-rend-cli-brand-path-pptx-chart-embed.md) | EPIC-15 | REND-009/010b: CLI bare-path brand discovery fix + PPTX chart SVG embedding | BC-4.01.001, BC-1.11.001 | P0 | 8 | strict | draft |
 
-**Wave 5 total points: 145** _(130 prior + 15 STORY-091/092/093 added [human-authorized 2026-06-10: CI performance stories, PRIORITY: NEXT, ahead of remaining Wave-5 feature stories])_
+**Wave 5 total points: 200** _(145 prior + 55 REND-fix wave [human-authorized 2026-06-11: 8 rendering-fix stories STORY-094..101, none deferred, all REND-001..010 covered, deliver BEFORE remaining Wave-5 feature stories])_
 
 ---
 
@@ -208,11 +216,28 @@ _STORY-090 created 2026-06-08 per S-7.02 cycle-closing checklist (PROC-GAP-PIPEL
 | Wave 2 | 7 | 41 | 5.9 |
 | Wave 3 | 17 | 100 | 5.9 |
 | Wave 4 | 23 | 163 | 7.1 |
-| Wave 5 | 25 | 145 | 5.8 |
+| Wave 5 | 33 | 200 | 6.1 |
 | Wave 6 | 6 | 42 | 7.0 |
 | Wave TBD | 1 | 3 | 3.0 |
-| **Total** | **93** | **571** | **6.1** |
+| **Total** | **101** | **634** | **6.3** |
 
+> RENDERING-FIX WAVE (human-authorized 2026-06-11): STORY-094..101 (8 stories, 55 pts, P0,
+> Wave 5). Covers all 10 REND-001..010 findings from demo-deep-review-2026-06-11.md. None
+> deferred. No tech-debt-register entries. Delivery order: STORY-094 (bbox/nvGrpSpPr) →
+> STORY-096 (master geometry/lang) → STORY-098 (strict-mode/chart-nodata) → STORY-099
+> (DOCX bullets/sectPr/lang) → STORY-100 (HTML chart EMU/bullets) → STORY-095 (PDF
+> line-wrap/a11y) → STORY-101 (CLI bare-path/chart-embed) → STORY-097 (takeaway on-slide,
+> pending PO BC authorship). ALL 8 MUST be delivered BEFORE remaining Wave-5 feature
+> stories (per SEQUENCING-RENDERING-FIX-WAVE human decision). Wave 5: 25 → 33 stories,
+> 145 → 200 pts. Total: 93 → 101 stories, 571 → 634 pts.
+>
+> BC gaps requiring PO authorship before STORY-097 can be dispatched:
+>   - STORY-097: on-slide takeaway bar rendering (suggest BC-3.07.001)
+>   - STORY-098: W-VAL-103 content-drop reclassification (route A: upgrade severity;
+>     route B: new E-VAL-105) — PO must confirm route before implementer chooses path
+>   - STORY-101: CLI path-normalization contract (extend BC-1.15.001 or new BC)
+>   - STORY-101: image binary embedding in PPTX (STORY-102 stub anchor, PO confirms scope)
+>
 > STORY-091/092/093 (CI performance stories, 5 pts each, PRIORITY: NEXT, Wave 5, EPIC-19)
 > created 2026-06-10 per human direction. Delivery order: STORY-091 → STORY-092 → STORY-093.
 > All three MUST be delivered BEFORE remaining Wave-5 feature stories. STORY-091 (tiered
