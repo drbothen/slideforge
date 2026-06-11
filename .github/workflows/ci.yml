@@ -390,36 +390,58 @@ jobs:
         # BEFORE the "Install mold linker" step below so GNU ld is still the
         # active linker for this cargo invocation.
         #
-        # The --profile ci / --cargo-profile ci flags match the compile units
-        # used by the nextest step so the baseline covers the same set of
-        # artifacts (and the resulting target/ci objects serve as a head-start
-        # for the nextest build — both steps share the same target directory).
+        # --tests is deliberately included here (deviates from the AC-001 prose
+        # example) to match the exact compile units used by the nextest step.
+        # The after-mold capture MUST use the IDENTICAL flag set for AC-003
+        # comparability: cargo build --workspace --all-features --tests
+        # --profile ci --timings.
+        #
+        # The resulting target/ci objects serve as a head-start for the nextest
+        # build — both steps share the same target directory.
         #
         # REMOVE THIS STEP (and the paired upload step below) after the
         # before/after numbers have been captured and recorded in the PR
         # description. See the REMOVE-AFTER-BASELINE block comment on the
         # upload step for the after-mold data collection plan.
+        # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
         if: matrix.target.name == 'linux-arm64'
         run: cargo build --workspace --all-features --tests --profile ci --timings
+      - name: Guard timings presence before upload (linux-arm64 ONE-OFF; AC-001)
+        # Fail loudly if the baseline build produced no timing artifacts.
+        # An empty target/cargo-timings/ means cargo-timings.html was never
+        # written — indicating the baseline build did not complete (e.g., hard
+        # cancel before codegen finished). Absence of timings is NOT a passing
+        # state (AC-002 principle: absence of the check is a failure).
+        # The upload step below uses if: always() so it still runs on failure
+        # and uploads whatever partial state exists for diagnostics.
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          [ -n "$(ls -A target/cargo-timings 2>/dev/null)" ] || {
+            echo "::error::no timings produced — baseline build did not complete (target/cargo-timings/ is empty or missing)"
+            exit 1
+          }
       - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
-        # REMOVE-AFTER-BASELINE: remove this step once before/after numbers are
-        # recorded. The after-mold timings come from a workflow_dispatch
-        # full-tier run after this PR merges (the nextest step already builds
-        # under --profile ci so a second dispatch with this baseline step
-        # retained but placed after mold install captures the mold numbers).
+        # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
+        # The after-mold timings come from a workflow_dispatch full-tier run
+        # after this PR merges (the nextest step already builds under --profile
+        # ci so a second dispatch with this baseline step retained but placed
+        # after mold install captures the mold numbers).
         # The removal commit lands only once both before and after numbers are
         # recorded in the PR description.
         #
         # Note: cargo only writes cargo-timings.html at build completion. A
-        # mid-build hard cancel (e.g., runner timeout) yields no timings file;
-        # the artifact upload will simply upload an empty directory in that
-        # case. The if: condition below uses always() so the upload attempt
-        # runs even when earlier steps fail.
+        # mid-build hard cancel (e.g., runner timeout) yields no timings file.
+        # if: always() ensures the upload attempt runs even when the guard step
+        # above fails — partial-write dirs still upload for diagnostics.
+        # if-no-files-found: error ensures CI fails if the dir is truly absent
+        # (guards against a silent empty-artifact upload masking a build failure).
         if: always() && matrix.target.name == 'linux-arm64'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: cargo-timings-arm64-baseline
           path: target/cargo-timings/
+          if-no-files-found: error
       - name: Install mold linker (linux-arm64 ONLY)
         # STORY-093 AC-002: mold installed on the linux-arm64 leg only.
         # aarch64-unknown-linux-gnu still uses GNU ld as the default linker as of
@@ -449,6 +471,8 @@ jobs:
         # if bumping the mold version.
         if: matrix.target.name == 'linux-arm64'
         uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+        with:
+          make-default: true
       - name: cargo nextest run
         # STORY-093 AC-002: mold activates on the linux-arm64 leg via the
         # /usr/bin/ld symlink installed by setup-mold (make-default: true).
@@ -465,15 +489,29 @@ jobs:
         # nextest binaries were actually linked by mold (not silently falling
         # back to GNU ld). Uses readelf to inspect the .comment ELF section,
         # which mold stamps with its version string.
+        #
+        # Search is narrowed to target/ci/deps at maxdepth 1 (the canonical
+        # location where nextest deposits test binaries for --cargo-profile ci).
+        # Absence of a binary in this location after a successful nextest run is
+        # itself an anomaly and must fail — per AC-002: absence of the check is
+        # NOT a passing state.
+        #
+        # The file(1) ELF guard ensures we don't hand a non-ELF file to readelf
+        # (e.g., a Rust proc-macro .so symlink or a build script artifact that
+        # slips through the ! -name '*.so' filter on edge-case rustc outputs).
         if: matrix.target.name == 'linux-arm64'
         run: |
           set -euo pipefail
-          bin=$(find target/ci -maxdepth 2 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | head -1)
+          bin=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' | head -1)
           if [ -z "$bin" ]; then
-            echo "::warning::No test binary found in target/ci — skipping mold verification"
-            exit 0
+            echo "::error::No test binary found in target/ci/deps — nextest build may have failed or target dir layout changed; cannot verify mold linkage"
+            exit 1
           fi
-          readelf -p .comment "$bin" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default"; exit 1; }
+          if ! file "$bin" | grep -q ELF; then
+            echo "::error::Candidate binary '$bin' is not an ELF file — cannot verify mold linkage (unexpected artifact type)"
+            exit 1
+          fi
+          readelf -p .comment "$bin" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default: true is set"; exit 1; }
 
   # ─── MSRV check (slow tier) ────────────────────────────────────────────────
   # Validates the declared rust-version = "1.88" in Cargo.toml.
