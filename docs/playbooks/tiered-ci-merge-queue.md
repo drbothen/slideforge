@@ -220,6 +220,26 @@ protection fresh — it does not modify existing protection.
    protection exists yet, so there is no deadlock window during migration.
 2. After the merge completes, run the commands below to establish protection.
 
+> **WARNING — Security review note (SEC-002 / CWE-284):**
+> The payload below sets `required_approving_review_count: 0` and
+> `enforce_admins: false`. These are **intentional** for the slideforge project's
+> operating model and are justified by the VSDD factory multi-agent review
+> pipeline: every PR passes a local adversary 3-CLEAN convergence protocol,
+> a dedicated security-reviewer agent scan, and a pr-reviewer final-eyes pass
+> before the orchestrator merges under standing human-granted authorisation.
+> Review rigour is enforced by the pipeline (documented in CLAUDE.md and
+> STATE.md), not by GitHub-native approval gates. `enforce_admins: false`
+> preserves the explicit per-request human escape hatch for emergency overrides.
+>
+> **Any team adopting this playbook WITHOUT an equivalent automated multi-review
+> pipeline MUST change these values before applying branch protection:**
+> - `required_approving_review_count` → **1 or higher** (human review required)
+> - `enforce_admins` → **true** (no admin bypass without deliberate override)
+>
+> Applying this payload as-is on a repo that lacks the factory pipeline is a
+> security misconfiguration that leaves the default branch unprotected from
+> direct force-pushes and unapproved merges.
+
 ```bash
 # Step 1 — Create branch protection with all-checks-pass as the ONLY required
 #           status check.
@@ -344,6 +364,29 @@ gh run watch --repo drbothen/slideforge
 
 This replaces the previous workaround of triggering the workflow on `main`
 before it was merged. You can now fire the full matrix on `develop` directly.
+
+**Manual dispatch target guidance (SEC-003):**
+`workflow_dispatch` does not support a `branches:` filter — it always accepts
+any ref the caller provides, including unreviewed feature branches and arbitrary
+SHAs. To avoid triggering unnecessary cost and CI exposure on unreviewed code:
+
+- **Target `develop` or `main` only** for routine full-matrix validation.
+  Dispatching on a feature branch before the PR adversarial/security review
+  cycle completes risks wasting slow-tier runner time (including the LibreOffice
+  install in `visual-regression` and the full arm64/macOS/Windows matrix) on
+  code that has not yet passed the factory review gates.
+- **Use the `full-ci` label instead** for per-PR full-matrix runs. The label
+  trigger fires via `pull_request.labeled` and targets only the commits already
+  in the PR, which have passed the fast tier. This is the preferred path for
+  cross-platform investigation on feature branches.
+- If you must dispatch on a non-develop/main ref (e.g., to diagnose a
+  platform-specific failure before merge), use:
+  ```bash
+  gh workflow run ci.yml --repo drbothen/slideforge --ref feature/STORY-NNN
+  ```
+  and be aware that all slow-tier jobs — including `visual-regression`
+  (LibreOffice install ~2min) and `test-matrix-slow` (up to 75min per
+  platform) — will run on that unreviewed branch.
 
 **Developer action required:** after the develop → main release merge, verify
 that the nightly run fires by checking the Actions tab the morning after the

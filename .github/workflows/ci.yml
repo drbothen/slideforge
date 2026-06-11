@@ -40,6 +40,13 @@ on:
     # NOTE: only fires from the default branch ('main'). See header comment above.
     - cron: "0 6 * * *"
 
+# Workflow-level least-privilege permissions (fork-PR hardening, CWE-272).
+# No job in this workflow writes to contents, packages, or pull-requests.
+# actions/checkout uses contents: read; Swatinem/rust-cache uses the
+# runner-scoped ACTIONS_RUNTIME_TOKEN (not GITHUB_TOKEN) for cache I/O.
+permissions:
+  contents: read
+
 # Cancel in-progress runs when a new commit is pushed to the same ref.
 # Do not cancel merge_group or scheduled runs — they must complete.
 concurrency:
