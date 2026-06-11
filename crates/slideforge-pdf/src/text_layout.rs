@@ -108,8 +108,10 @@ pub struct FontMetrics<'a> {
 ///
 /// ## Pure function guarantee
 ///
-/// This function has no side effects. It does not perform I/O, mutate global
-/// state, or allocate heap memory beyond the returned `Vec<String>`.
+/// This function has no side effects. It does not perform I/O or mutate global
+/// state. Intermediate heap allocations (line buffers, candidate strings) are
+/// freed before the function returns; the only heap memory that escapes the
+/// call is the returned `Vec<String>` and its contents.
 ///
 /// # Panics
 ///
