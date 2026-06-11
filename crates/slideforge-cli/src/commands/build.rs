@@ -128,12 +128,21 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     // - Undefined variant → E-EVL-001 in EvalFailed → exit 2
     // The blanket --variant rejection that was here before is removed; the eval
     // layer now correctly handles both defined and undefined variant names.
+    //
+    // F-094-P4-006 fix: thread the real source file path as source_name so that
+    // all span-carrying diagnostics (parse, eval, layout) cite the actual filename
+    // (e.g., "quarterly-review.sf") instead of the library fallback "<source>".
+    // to_string_lossy() is correct here: PathBuf paths are OS-native and may
+    // contain non-UTF-8 components on some platforms; lossy conversion is
+    // acceptable because source_name is used only for human-readable diagnostic output.
+    let source_name = std::sync::Arc::from(args.source.to_string_lossy().as_ref());
     let compile_opts = CompileOptions {
         brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
             brand_toml_path.as_str(),
         ))),
         strict,
         active_variant: args.variant.clone(),
+        source_name: Some(source_name),
     };
 
     let compiled = match slideforge::compile(&source_text, &compile_opts) {

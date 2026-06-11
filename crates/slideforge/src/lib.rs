@@ -483,6 +483,33 @@ pub struct CompileOptions {
     /// (E-EVL-001) that is gated by `strict` mode, producing `EvalFailed` or
     /// `ValidationFailed` (exit 2) rather than silently being ignored.
     pub active_variant: Option<String>,
+
+    /// Display name registered in the `SourceMap` for diagnostic `file:line:col` output.
+    ///
+    /// When `Some(name)`, `compile_inner` registers the source text under `name` in
+    /// the `SourceMap` so that all span-carrying diagnostics (parse errors, eval errors,
+    /// layout errors) cite `name` in their `file:` field rather than a fabricated
+    /// sentinel.
+    ///
+    /// **CLI callers** should pass the path of the `.sf` file as displayed to the user
+    /// (e.g., `args.source.to_string_lossy().into_owned()`).
+    ///
+    /// **Library callers** that compile in-memory source strings without a backing file
+    /// should pass `Some(Arc::from("<in-memory>"))` or another descriptive label so that
+    /// diagnostics remain meaningful.
+    ///
+    /// When `None`, `compile_inner` uses the documented fallback `"<source>"`.
+    /// This fallback:
+    /// - Is visually distinct from any real user-owned file path.
+    /// - Does NOT match the `is_unknown()` guard patterns (`"<byte:N>"`, `"<unknown>"`),
+    ///   so the unknown-guard bypass is not triggered.
+    /// - Communicates "library input without a known path" to users and tooling.
+    ///
+    /// **Prior art / regression guard:** The previous hard-coded value `"deck.sf"` is
+    /// forbidden as a fallback because it is a fabricated real-sounding filename that
+    /// users may own, causing `[E-LAY-008] … at deck.sf:4:3` for a file named
+    /// `quarterly-review.sf` (F-094-P4-006 finding).
+    pub source_name: Option<std::sync::Arc<str>>,
 }
 
 impl Default for CompileOptions {
@@ -491,6 +518,7 @@ impl Default for CompileOptions {
             brand_source: None,
             strict: true,
             active_variant: None,
+            source_name: None,
         }
     }
 }
@@ -648,10 +676,17 @@ fn compile_inner(
         let _span =
             tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
         tracing::info!("pipeline stage: parse");
-        let file_id = source_map.add_file(
-            std::sync::Arc::from("deck.sf"),
-            std::sync::Arc::from(source),
-        );
+        // F-094-P4-006 fix: use the caller-supplied source_name so diagnostics cite the
+        // real filename (e.g., "quarterly-review.sf") instead of the old hardcoded
+        // "deck.sf" sentinel. When source_name is None, fall back to "<source>" —
+        // a visually-distinct, non-file-path label that does not match any real user
+        // file and does not trigger the is_unknown() guard (which checks for "<byte:N>"
+        // and "<unknown>" only).
+        let registered_name: std::sync::Arc<str> = options
+            .source_name
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::from("<source>"));
+        let file_id = source_map.add_file(registered_name, std::sync::Arc::from(source));
         let mut sink = DiagnosticSink::new();
         parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
             let diagnostics =
@@ -1103,6 +1138,9 @@ fn build_inner(
         brand_source: options.brand_source.clone(),
         strict: options.strict,
         active_variant: None,
+        // build_inner is called by the legacy build() API which does not expose a
+        // source_name to callers; use None → compile_inner falls back to "<source>".
+        source_name: None,
     };
 
     // Stages 2–6: delegate to compile_inner (single canonical pipeline).
@@ -2577,6 +2615,7 @@ mod tests {
             ))),
             strict: true, // strict mode must gate the eval error
             active_variant: None,
+            source_name: None,
         };
 
         let result = compile(source, &compile_opts);
@@ -2704,6 +2743,7 @@ mod tests {
             ))),
             strict: false, // warn-only: eval errors demoted, build continues
             active_variant: None,
+            source_name: None,
         };
 
         let result = compile(source, &compile_opts);
@@ -2857,6 +2897,205 @@ mod tests {
         assert!(
             !err_msg.contains(":0:0"),
             "F-094-P4-005: E-LAY-008 message must not contain ':0:0' (unresolved span); got: {err_msg}"
+        );
+    }
+
+    // ── F-094-P4-006 — source_name in CompileOptions propagates to diagnostics ───
+
+    /// F-094-P4-006 (a): `compile()` with `source_name: Some("quarterly-review.sf")`
+    /// must register the source file under that name in the SourceMap so that any
+    /// span-carrying diagnostic cites `quarterly-review.sf`, NOT the old hard-coded
+    /// `"deck.sf"` sentinel.
+    ///
+    /// RED: before the fix, `compile_inner` always registers the source as `"deck.sf"`.
+    /// After the fix, `source_name` is threaded into `source_map.add_file(...)`.
+    ///
+    /// The fixture triggers `E-LAY-008 BulletsOnContentlessSlideType` which carries
+    /// a `SourceSpan.file` that must equal the supplied source_name.
+    #[test]
+    #[allow(clippy::items_after_statements)]
+    fn test_f094_p4_006_a_source_name_some_propagates_to_lay_008_span() {
+        use std::io::Write as _;
+        use std::sync::Arc;
+
+        let source = concat!(
+            "slideforge_version \"1\"\n", // line 1
+            "lang \"en-US\"\n",           // line 2
+            "slide title:\n",             // line 3
+            "  bullets: [\"item\"]\n",    // line 4 — bullets: invalid on content-less type
+        );
+
+        // Write a brand.toml to a temp dir alongside the source (same minimal pattern
+        // as other tests in this module that need brand loading — no tempfile crate dep).
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_p4_006a_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir for F-094-P4-006a");
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        {
+            let mut f = std::fs::File::create(tmp_dir.join("logo.png")).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo.png");
+        }
+        let brand_toml_content = concat!("[logo]\n", "path = \"logo.png\"\n",);
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f =
+                std::fs::File::create(&brand_toml_path).expect("create brand.toml for test");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            strict: false, // non-strict so E-LAY-008 is returned in the error, not early-exit
+            active_variant: None,
+            source_name: Some(Arc::from("quarterly-review.sf")),
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        // The build must fail (E-LAY-008: bullets on content-less type).
+        // Extract error via let-else rather than unwrap_err/expect_err, because
+        // CompiledDeck doesn't implement Debug (it holds PluginRegistry).
+        let Err(err) = result else {
+            panic!(
+                "F-094-P4-006a: bullets on 'title' must fail with BuildError, but compile() returned Ok"
+            )
+        };
+
+        // Extract the file field from the diagnostic.
+        // E-LAY-008 surfaces through ValidationFailed (via the layout validator path).
+        let file_name = match &err {
+            crate::error::BuildError::ValidationFailed { diagnostics, .. } => {
+                diagnostics.first().map_or_else(
+                    || "<no diagnostics>".to_owned(),
+                    |d| d.span.file.as_ref().to_owned(),
+                )
+            },
+            crate::error::BuildError::Layout(layout_err) => {
+                // Direct LayoutError — extract span from the error's Display or match fields.
+                layout_err.to_string()
+            },
+            other => panic!(
+                "F-094-P4-006a: unexpected error variant {other:?}; expected ValidationFailed or Layout"
+            ),
+        };
+
+        assert!(
+            file_name.contains("quarterly-review.sf"),
+            "F-094-P4-006a: diagnostic span.file must contain 'quarterly-review.sf' when \
+             source_name=Some(\"quarterly-review.sf\"); got: {file_name:?}"
+        );
+        assert!(
+            !file_name.contains("deck.sf"),
+            "F-094-P4-006a: diagnostic span.file must NOT contain the old hardcoded 'deck.sf' \
+             sentinel; got: {file_name:?}"
+        );
+    }
+
+    /// F-094-P4-006 (b): `compile()` with `source_name: None` must use the documented
+    /// library-default fallback name `"<source>"` (or a non-empty, non-real-file name
+    /// that does NOT look like `"deck.sf"` or `"<byte:N>"`).
+    ///
+    /// The fallback name `"<source>"` is chosen because:
+    ///   - It is visually distinct from any real user-owned file path.
+    ///   - `is_unknown()` semantics only test for `"<byte:N>"` and `"<unknown>"` —
+    ///     `"<source>"` is neither, so it does NOT trigger the unknown-guard bypass.
+    ///   - It communicates "library input without a known path" to users/tooling.
+    ///
+    /// RED: before the fix, `compile_inner` hard-codes `"deck.sf"`, so the None
+    /// branch would incorrectly yield `"deck.sf"` (a fabricated real-looking name).
+    #[test]
+    fn test_f094_p4_006_b_source_name_none_uses_safe_fallback_not_deck_sf() {
+        use std::io::Write as _;
+        use std::sync::Arc;
+
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide title:\n",
+            "  bullets: [\"item\"]\n",
+        );
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_p4_006b_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir for F-094-P4-006b");
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        {
+            let mut f = std::fs::File::create(tmp_dir.join("logo.png")).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo.png");
+        }
+        let brand_toml_content = concat!("[logo]\n", "path = \"logo.png\"\n",);
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f =
+                std::fs::File::create(&brand_toml_path).expect("create brand.toml for test");
+            f.write_all(brand_toml_content.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            strict: false,
+            active_variant: None,
+            source_name: None, // ← the case under test
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        // Extract error via let-else rather than unwrap_err/expect_err, because
+        // CompiledDeck doesn't implement Debug (it holds PluginRegistry).
+        let Err(err) = result else {
+            panic!(
+                "F-094-P4-006b: bullets on 'title' must fail with BuildError, but compile() returned Ok"
+            )
+        };
+
+        let file_name = match &err {
+            crate::error::BuildError::ValidationFailed { diagnostics, .. } => {
+                diagnostics.first().map_or_else(
+                    || "<no diagnostics>".to_owned(),
+                    |d| d.span.file.as_ref().to_owned(),
+                )
+            },
+            crate::error::BuildError::Layout(layout_err) => layout_err.to_string(),
+            other => panic!(
+                "F-094-P4-006b: unexpected error variant {other:?}; expected ValidationFailed or Layout"
+            ),
+        };
+
+        // Must NOT be the old hard-coded fabricated filename.
+        assert!(
+            !file_name.contains("deck.sf"),
+            "F-094-P4-006b: None source_name must NOT yield the old 'deck.sf' fabricated \
+             sentinel; got: {file_name:?}"
+        );
+        // Must NOT be the byte-sentinel (which would indicate the old unresolved-span bug).
+        assert!(
+            !file_name.contains("<byte:"),
+            "F-094-P4-006b: None source_name must NOT yield '<byte:N>' sentinel; got: {file_name:?}"
+        );
+        // Must not be empty.
+        assert!(
+            !file_name.is_empty(),
+            "F-094-P4-006b: fallback source name must not be empty"
         );
     }
 }

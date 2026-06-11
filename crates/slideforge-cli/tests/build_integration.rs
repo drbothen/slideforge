@@ -1984,3 +1984,163 @@ fn test_OBS_1_bc_1_15_002_exact_error_count_in_rendered_output() {
          got {hint_count} hint occurrences"
     );
 }
+
+// ── F-094-P4-006: real source filename threaded through CompileOptions ────────
+
+/// F-094-P4-006 / BC-1.15.001 (file:line:col):
+/// When a build fails with a span-carrying diagnostic, the `file:` field in the
+/// rendered output must cite the REAL source filename (the path the user passed),
+/// NOT the old hardcoded `"deck.sf"` sentinel and NOT the library fallback
+/// `"<source>"`.
+///
+/// Fixture: `.sf` source named `"quarterly-review.sf"` that triggers a
+/// parse-error (E-PAR-003 — tab indentation) so the diagnostic path through
+/// `run_build` → `compile` → parse failure exercises the source_name field.
+///
+/// This is a CLI-level regression guard for F-094-P4-006: the CLI MUST thread
+/// `args.source.to_string_lossy()` into `CompileOptions::source_name` so that
+/// diagnostics cite the real file.
+#[test]
+fn test_f094_p4_006_cli_diagnostic_cites_real_source_filename() {
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use std::sync::Arc;
+
+    // Use a uniquely-named source file ("quarterly-review.sf") to verify
+    // it appears in diagnostics — NOT "deck.sf" or "<source>".
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("quarterly-review.sf");
+    write_parse_error_sf(&src_path); // tab error → E-PAR-003 parse failure
+    write_brand_toml(tmp.path());
+
+    let args = slideforge_cli::cli::BuildArgs {
+        source: src_path.clone(),
+        output_dir: tmp.path().join("dist"),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    let global = default_global();
+
+    // run_build internally calls compile() which threads source_name.
+    // It will fail (exit 1) due to the parse error in quarterly-review.sf.
+    let code = run_build(&args, &global);
+    assert_eq!(
+        code,
+        ExitCode::from(1),
+        "F-094-P4-006: parse-error .sf must produce exit 1"
+    );
+
+    // Now verify source_name propagation directly by exercising the compile API
+    // the same way run_build does, so we can assert on the rendered error string.
+    //
+    // We construct CompileOptions manually with the real path, matching what
+    // build.rs does after the F-094-P4-006 fix, and call slideforge::compile.
+    // This tests the API contract directly without spawning a subprocess.
+    let source_text = std::fs::read_to_string(&src_path).expect("read quarterly-review.sf");
+    let brand_toml_path = tmp.path().join("brand.toml");
+    let brand_toml_str = brand_toml_path
+        .to_str()
+        .expect("brand.toml path UTF-8")
+        .to_owned();
+
+    let compile_opts = slideforge::CompileOptions {
+        brand_source: Some(slideforge::BrandSource::TomlFile(Arc::from(
+            brand_toml_str.as_str(),
+        ))),
+        strict: true,
+        active_variant: None,
+        // This is the fix under test: pass the real filename.
+        source_name: Some(Arc::from(src_path.to_string_lossy().as_ref())),
+    };
+
+    let result = slideforge::compile(&source_text, &compile_opts);
+    let err = match result {
+        Err(e) => e,
+        Ok(_) => panic!("F-094-P4-006: parse-error source must produce Err from compile(), not Ok"),
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // The rendered output MUST contain a reference to the real file name.
+    // (The exact path format varies by OS so we check just the file stem.)
+    assert!(
+        rendered.contains("quarterly-review.sf"),
+        "F-094-P4-006: rendered diagnostic must contain 'quarterly-review.sf' \
+         (the real source filename); got:\n{rendered}"
+    );
+
+    // Must NOT contain the old hardcoded sentinel.
+    assert!(
+        !rendered.contains("deck.sf"),
+        "F-094-P4-006: rendered diagnostic must NOT contain old 'deck.sf' sentinel; \
+         got:\n{rendered}"
+    );
+
+    // Must NOT contain the byte-offset synthetic sentinel.
+    assert!(
+        !rendered.contains("<byte:"),
+        "F-094-P4-006: rendered diagnostic must NOT contain '<byte:N>' synthetic sentinel; \
+         got:\n{rendered}"
+    );
+}
+
+/// F-094-P4-006 (CLI None-fallback guard):
+/// When `CompileOptions::source_name` is `None` (e.g., from a library caller
+/// that doesn't know the filename), the fallback `"<source>"` must appear in
+/// diagnostics — NOT the old `"deck.sf"` fabricated name.
+///
+/// This tests the library fallback path, not the CLI path.
+#[test]
+fn test_f094_p4_006_library_fallback_is_not_deck_sf() {
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use std::sync::Arc;
+
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("deck.sf"); // intentionally named "deck.sf"
+    write_parse_error_sf(&src_path); // tab error → E-PAR-003
+    write_brand_toml(tmp.path());
+
+    let source_text = std::fs::read_to_string(&src_path).expect("read deck.sf");
+    let brand_toml_path = tmp.path().join("brand.toml");
+    let brand_toml_str = brand_toml_path
+        .to_str()
+        .expect("brand.toml path UTF-8")
+        .to_owned();
+
+    let compile_opts = slideforge::CompileOptions {
+        brand_source: Some(slideforge::BrandSource::TomlFile(Arc::from(
+            brand_toml_str.as_str(),
+        ))),
+        strict: true,
+        active_variant: None,
+        // Deliberately pass None to exercise the library fallback.
+        source_name: None,
+    };
+
+    let result = slideforge::compile(&source_text, &compile_opts);
+    let err = match result {
+        Err(e) => e,
+        Ok(_) => panic!(
+            "F-094-P4-006 fallback: parse-error source must produce Err from compile(), not Ok"
+        ),
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // With source_name=None, the fallback "<source>" must appear, NOT "deck.sf".
+    // Note: miette renders the file name as part of the "× " header + source label.
+    // We assert "<source>" appears somewhere in the rendered output.
+    assert!(
+        rendered.contains("<source>"),
+        "F-094-P4-006 fallback: rendered diagnostic must contain '<source>' when \
+         source_name=None; got:\n{rendered}"
+    );
+
+    // The old hardcoded "deck.sf" must NOT appear (even though the file is literally
+    // named "deck.sf" — we passed source_name=None, not source_name=Some("deck.sf")).
+    // This test verifies the library fallback is "<source>", not a file scan.
+    assert!(
+        !rendered.contains("deck.sf"),
+        "F-094-P4-006 fallback: rendered diagnostic must NOT contain 'deck.sf' when \
+         source_name=None (fallback must be '<source>', not a file path); got:\n{rendered}"
+    );
+}
