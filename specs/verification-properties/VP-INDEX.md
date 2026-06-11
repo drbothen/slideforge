@@ -20,14 +20,14 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 
 | Metric | Count |
 |--------|-------|
-| Total VPs | 53 |
-| Kani proofs | 16 |
+| Total VPs | 54 |
+| Kani proofs | 17 |
 | Proptest suites | 6 |
 | Fuzz targets | 2 |
 | Unit test VPs | 27 |
 | Integration test VPs | 2 |
 | P0 (Phase 6 blocking) | 7 |
-| P1 (stretch goals) | 46 |
+| P1 (stretch goals) | 47 |
 
 ---
 
@@ -88,6 +88,7 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-051 | Brand round-trip extraction: extract brand.toml from .pptx → synthesize → color values match | slideforge-brand | integration | P3 | P1 | draft |
 | VP-052 | Brand extraction is read-only: source .pptx byte-identical before and after extract | slideforge-brand | integration | P3 | P1 | draft |
 | VP-053 | Inline HTML: all interpolated values are HTML-escaped in all output positions (text + attribute) | slideforge-plugin-api | proptest | P3 | P1 | draft |
+| VP-054 | wrap_text termination, lossless wrapping, and max-width invariant | slideforge-pdf | Kani | P6 | P1 | draft |
 
 ---
 
@@ -148,3 +149,4 @@ traces_to: .factory/specs/architecture/ARCH-INDEX.md
 | VP-051 | BC-2.01.003, DI-015 |
 | VP-052 | BC-2.01.003 |
 | VP-053 | BC-3.05.001 (v1.3.6), EC-009, EC-010 |
+| VP-054 | BC-4.03.002 |
