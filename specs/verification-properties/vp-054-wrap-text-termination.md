@@ -7,6 +7,7 @@ tool: Kani
 phase: P6
 priority: P1
 status: draft
+spec_version: "1.1.0"
 bc_trace: [BC-4.03.002]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 origin: STORY-095 / F-095-P1-003
@@ -28,15 +29,25 @@ intervening characters, or with exactly the whitespace consumed at each wrap poi
 reconstructs the original input exactly. No character is silently dropped; no
 character is inserted. Formally: `output.join("").len() >= input.len() - whitespace_consumed_at_wrap_points`.
 
-**(c) Max-width invariant.** Every output line satisfies `line.len() <= max_width`
-when `max_width >= 1`. (When a single token exceeds `max_width`, that token is
-emitted as a single over-width line — no infinite splitting loop.)
+**(c) Max-width invariant.** Every output line satisfies
+`measure_line_width(line, metrics) <= max_width_pts` when `max_width_pts` is at
+least as wide as a single character under the given `FontMetrics`. (When a single
+token's measured width exceeds `max_width_pts`, that token is emitted as a single
+over-width line — no infinite splitting loop.)
 
-**Scope.** These properties target `wrap_text` as a pure function taking
-`(input: &str, max_width: usize)` and returning `Vec<String>`. The Kani proof
-focuses on sub-property (a) (bounded termination) and (c) (max-width bound for
-bounded inputs). Sub-property (b) is verified via proptest with string-generating
-strategies. Concrete unit tests cover all three sub-properties at fixed points.
+**Scope.** These properties target `wrap_text` as a pure function with the
+production signature `(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>)
+-> Vec<String>` in `crates/slideforge-pdf/src/text_layout.rs`. The `FontMetrics`
+struct carries a `mock_char_width_pts: Option<f64>` field: when `Some(w)`, every
+character is assumed to have advance `w` points (deterministic mock for proofs and
+unit tests); when `None`, real `ttf-parser` glyph metrics are used. The Kani proof
+targets sub-property (a) (bounded termination) and (c) (max-width bound for bounded
+inputs) using `mock_char_width_pts` to eliminate font I/O from the proof context.
+Sub-property (b) is verified via proptest with string-generating strategies.
+Concrete unit tests cover all three sub-properties at fixed points. This VP covers
+the pure `text_layout` module surface — `wrap_text` plus any pure helpers it
+exposes (such as `measure_line_width`) — not specific private helper names, which
+may change during Phase 3 implementation.
 
 ## Motivation
 
@@ -61,12 +72,18 @@ a proptest round-trip invariant.
 - Output elements whose combined length reconstructs the input
 
 **Kani (sub-properties a + c):** Prove termination and max-width bound over a bounded
-input space (`kani::assume(input.len() <= 64)`, `kani::assume(max_width >= 1 && max_width <= 32)`).
-The unwind bound is `input.len() + 1`. Feasible within Kani's bounded-model-check envelope.
+input space (`kani::assume(input.len() <= 64)`) using a `FontMetrics` constructed
+with a symbolic `mock_char_width_pts: Some(w)` where `kani::assume(w > 0.0 && w <= 20.0)`
+and `kani::assume(max_width_pts >= w && max_width_pts <= 640.0)` (ensures at least
+one character fits, keeping the invariant unconditional). The unwind bound is
+`input.len() + 1`. Eliminating real font I/O via `mock_char_width_pts` keeps the
+model check bounded and deterministic. Feasible within Kani's bounded-model-check
+envelope.
 
-**Proptest (sub-property b):** Generate arbitrary ASCII strings and arbitrary `max_width`
-values in `[1, 1024]`. Assert that `output.concat()` contains all non-whitespace
-characters from the input in the original order.
+**Proptest (sub-property b):** Generate arbitrary ASCII strings and arbitrary
+`mock_char_width_pts` in `(0.0, 10.0]` and `max_width_pts` in `[1.0, 1024.0]`.
+Assert that `output.concat()` contains all non-whitespace characters from the input
+in the original order.
 
 **Concrete unit tests:** Cover edge cases: empty input, single-character input, input
 exactly equal to `max_width`, input of a single token exceeding `max_width`, input
@@ -81,7 +98,8 @@ mod proofs {
     use super::*;
 
     /// Sub-property (a): wrap_text always terminates for bounded inputs.
-    /// Sub-property (c): no output line exceeds max_width (except single-token overflow).
+    /// Sub-property (c): no output line exceeds max_width_pts when at least one
+    ///                   character fits (i.e., max_width_pts >= mock_char_width_pts).
     #[kani::proof]
     #[kani::unwind(65)]  // input.len() <= 64 + 1 iteration overhead
     fn wrap_text_terminates_and_respects_max_width() {
@@ -89,12 +107,24 @@ mod proofs {
         let len: usize = kani::any();
         kani::assume(len > 0 && len <= 64);
 
-        let max_width: usize = kani::any();
-        kani::assume(max_width >= 1 && max_width <= 32);
+        // Deterministic width model: every character has advance `char_w` points.
+        // Real font I/O is bypassed via mock_char_width_pts — keeps the model bounded.
+        let char_w: f64 = kani::any();
+        kani::assume(char_w > 0.0 && char_w <= 20.0);
+
+        // max_width_pts must accommodate at least one character so the invariant holds
+        // unconditionally (single-char lines are the tightest case).
+        let max_width_pts: f64 = kani::any();
+        kani::assume(max_width_pts >= char_w && max_width_pts <= 640.0);
+
+        let metrics = FontMetrics {
+            font_bytes: &[],
+            face_index: 0,
+            font_size_pts: 12.0,
+            mock_char_width_pts: Some(char_w),
+        };
 
         // Build a synthetic ASCII string of `len` bytes (space + printable ASCII).
-        // Kani symbolic bytes — no actual &str needed if wrap_text accepts &[u8] proxy;
-        // if wrap_text takes &str, use a fixed-size stub or the char-array helper.
         let input: Vec<u8> = (0..len).map(|_| {
             let b: u8 = kani::any();
             kani::assume(b == b' ' || (b >= b'a' && b <= b'z'));
@@ -102,16 +132,15 @@ mod proofs {
         }).collect();
         let input_str = std::str::from_utf8(&input).expect("valid ASCII");
 
-        let lines = wrap_text(input_str, max_width);
+        let lines = wrap_text(input_str, max_width_pts, &metrics);
 
         // Termination is implicit: reaching this assertion proves the loop ended.
-        // Max-width invariant: every line whose source token fits must be <= max_width.
+        // Max-width invariant: when max_width_pts >= char_w, every output line fits.
+        // (The single-token over-width exception cannot occur here because we assumed
+        //  max_width_pts >= char_w, so at minimum one character always fits.)
         for line in &lines {
-            // A line may exceed max_width ONLY if it contains no space (single token).
-            let has_space = line.contains(' ');
-            if has_space {
-                kani::assert!(line.len() <= max_width);
-            }
+            let line_w = measure_line_width(line, &metrics);
+            kani::assert!(line_w <= max_width_pts);
         }
 
         // Losslessness (bounded check): output is non-empty iff input is non-empty.
@@ -130,9 +159,16 @@ proptest! {
     #[test]
     fn wrap_text_lossless(
         input in "[a-z ]{0,256}",
-        max_width in 1usize..=128,
+        char_w in 1.0f64..=10.0,
+        max_width_pts in 1.0f64..=1024.0,
     ) {
-        let lines = wrap_text(&input, max_width);
+        let metrics = FontMetrics {
+            font_bytes: &[],
+            face_index: 0,
+            font_size_pts: 12.0,
+            mock_char_width_pts: Some(char_w),
+        };
+        let lines = wrap_text(&input, max_width_pts, &metrics);
         // Non-whitespace characters must be preserved in order.
         let output_nonws: String = lines.concat()
             .chars()
@@ -148,14 +184,26 @@ proptest! {
     #[test]
     fn wrap_text_max_width_holds_for_multi_word(
         // Inputs guaranteed to have spaces so single-token exception doesn't apply.
+        // char_w <= max_width_pts ensures every single character fits (no over-wide
+        // single-token lines), making the invariant unconditional for this strategy.
         input in "[a-z]{1,16}( [a-z]{1,16}){1,15}",
-        max_width in 1usize..=32,
+        char_w in 1.0f64..=5.0,
+        max_width_pts in 5.0f64..=160.0,
     ) {
-        let lines = wrap_text(&input, max_width);
+        prop_assume!(max_width_pts >= char_w);
+        let metrics = FontMetrics {
+            font_bytes: &[],
+            face_index: 0,
+            font_size_pts: 12.0,
+            mock_char_width_pts: Some(char_w),
+        };
+        let lines = wrap_text(&input, max_width_pts, &metrics);
         for line in &lines {
+            let line_w = measure_line_width(line, &metrics);
             prop_assert!(
-                line.len() <= max_width || !line.contains(' '),
-                "line {:?} exceeds max_width {} and contains spaces", line, max_width
+                line_w <= max_width_pts,
+                "line {:?} has width {} > max_width_pts {} (char_w={})",
+                line, line_w, max_width_pts, char_w
             );
         }
     }
@@ -167,16 +215,19 @@ proptest! {
 Concrete unit tests to be written in STORY-095 (`#[cfg(test)] mod tests` in
 `crates/slideforge-pdf/src/text_layout.rs`):
 
-| Test | Input | max_width | Expected behavior |
-|------|-------|-----------|-------------------|
-| empty input | `""` | 10 | `vec![""]` or `vec![]` — no panic |
-| single word fits | `"hello"` | 10 | `vec!["hello"]` |
-| single word exact | `"hello"` | 5 | `vec!["hello"]` |
-| single word over-width | `"hello"` | 3 | `vec!["hello"]` (no split, no hang) |
-| two words fit | `"hi yo"` | 10 | `vec!["hi yo"]` |
-| two words wrap | `"hi yo"` | 4 | `vec!["hi", "yo"]` |
-| only spaces | `"   "` | 5 | no panic, terminates |
-| long line no spaces | 100 × `'a'` | 10 | single element, no hang |
+Tests use `mock_char_width_pts: Some(w)` to make widths deterministic (no font I/O).
+Widths below are computed as `char_count * char_width_pts`.
+
+| Test | Input | char_width_pts | max_width_pts | Expected behavior |
+|------|-------|----------------|---------------|-------------------|
+| empty input | `""` | 5.0 | 50.0 | `vec![]` — no panic (EC-002) |
+| single word fits | `"hello"` (5 ch) | 5.0 | 50.0 | `vec!["hello"]` (25 pts < 50 pts) |
+| single word exact | `"hello"` (5 ch) | 5.0 | 25.0 | `vec!["hello"]` (25 pts == 25 pts, EC-005) |
+| single word over-width | `"hello"` (5 ch) | 5.0 | 3.0 | at least 1 elem, lossless (AC-002) |
+| two words fit | `"hi yo"` (5 ch) | 5.0 | 50.0 | `vec!["hi yo"]` (25 pts < 50 pts) |
+| two words wrap | `"hi yo"` | 5.0 | 15.0 | `vec!["hi", "yo"]` ("hi yo"=25 pts > 15 pts) |
+| only spaces | `"   "` | 5.0 | 50.0 | no panic, terminates (empty Vec) |
+| long word char-wrap | 100 × `'a'` | 1.0 | 10.0 | lossless, each line ≤ 10 pts |
 
 ## Verification Layers
 
@@ -186,3 +237,9 @@ Concrete unit tests to be written in STORY-095 (`#[cfg(test)] mod tests` in
 | Losslessness round-trip | proptest | P3 | all |
 | Max-width with multi-word inputs | proptest | P3 | all |
 | Fixed-point edge cases | unit tests | P3 | all |
+
+## Changelog
+
+| Version | Date | Change |
+|---------|------|--------|
+| v1.1.0 | 2026-06-11 | F-095-P2-002 fix: updated Scope, Proof Harness Skeleton, and Proptest Strategy from stale 2-arg `(input: &str, max_width: usize)` to real 3-arg signature `(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>)` with `mock_char_width_pts: Some(w)` deterministic width model; restated max-width invariant in f64-points terms; updated Test Coverage table to pts notation; added spec_version frontmatter |
