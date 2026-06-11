@@ -71,7 +71,7 @@ env:
 # To update: resolve the new tag to its commit SHA and replace below.
 #
 #   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
-#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   Swatinem/rust-cache     v2.9.1  → c19371144df3bb44fab255c43d04cbc2ab54d1c4
 #   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
 #   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
 # ─────────────────────────────────────────────────────────────────────────────
@@ -149,13 +149,28 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: clippy
+          cache-on-failure: "true"
       - name: Install core fonts (Linux only — required for usvg text normalization)
         if: runner.os == 'Linux'
         run: |
@@ -187,10 +202,24 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: test-linux-x86_64
           cache-on-failure: "true"
@@ -225,9 +254,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: doctest
+          cache-on-failure: "true"
       - name: cargo test --doc (workspace)
         run: cargo test --doc --workspace --all-features
 
@@ -243,9 +273,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: supply-chain
+          cache-on-failure: "true"
       - name: Install cargo-audit and cargo-deny
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
         with:
@@ -314,10 +345,26 @@ jobs:
           - { name: "windows-x86_64", runner: "windows-latest"    }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
+          # Each rm -rf is guarded (|| true) so missing paths on ubuntu-24.04-arm
+          # do not fail the step. Path list is x86_64-derived; arm64 image may
+          # differ — guards prevent errors on absent paths (EC-001).
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: test-${{ matrix.target.name }}
           # cache-on-failure: "true" — saves cache even when the job is
@@ -361,9 +408,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: "1.88"
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: msrv
+          cache-on-failure: "true"
       - name: cargo check (MSRV)
         run: cargo check --workspace --all-features
 
@@ -388,9 +436,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: docs
+          cache-on-failure: "true"
       - name: cargo doc (workspace, no private items, warnings-as-errors)
         run: cargo doc --workspace --no-deps
 
@@ -411,12 +460,27 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: snapshots
+          cache-on-failure: "true"
       - name: Install core fonts (Linux only — required for usvg text normalization)
         if: runner.os == 'Linux'
         run: |
@@ -457,10 +521,24 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: bench
           # cache-on-failure: "true" — saves cache even when the job is canceled
@@ -508,12 +586,30 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Free disk space (Linux only — narrowed for LibreOffice compatibility)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          df -h
+          # Narrowed cleanup: remove .NET, Android SDK, GHC, CodeQL, and prune
+          # Docker images only. Do NOT remove /usr/local/lib/python* or general
+          # apt packages — LibreOffice and scikit-image depend on them (EC-002:
+          # visual-regression special case; do not strip Python or apt packages
+          # this job requires).
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune --all --force || true
+          df -h
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: visual-regression
+          cache-on-failure: "true"
       - name: Check for PPTX test fixture
         id: fixture-check
         shell: bash
@@ -591,9 +687,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: perf-smoke
+          cache-on-failure: "true"
       - name: Performance smoke tests (NFR-036/037)
         env:
           # F-PASS11-OBS-2: suppress color codes so the grep regex remains stable
@@ -646,6 +743,8 @@ jobs:
       - visual-regression
       - perf-smoke
     runs-on: ubuntu-latest
+    # timeout-minutes: 5 applies to this aggregator shell only — it does NOT cap
+    # the upstream needs jobs (each job has its own timeout-minutes declaration).
     timeout-minutes: 5
     if: always()
     env:

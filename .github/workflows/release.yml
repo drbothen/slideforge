@@ -22,7 +22,7 @@ env:
 
 # ─── Pinned action SHAs ──────────────────────────────────────────────────────
 #   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
-#   Swatinem/rust-cache       v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   Swatinem/rust-cache     v2.9.1  → c19371144df3bb44fab255c43d04cbc2ab54d1c4
 #   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
 #   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
 #   actions/upload-artifact   v4  → ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -53,7 +53,7 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target.rust_target }}
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: release-verify-${{ matrix.target.name }}
       - name: Install cargo-nextest
@@ -115,7 +115,7 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target.rust_target }}
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: release-build-${{ matrix.target.name }}
 
@@ -181,7 +181,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: sbom
       - name: Generate SBOM (SPDX format via anchore/sbom-action)
