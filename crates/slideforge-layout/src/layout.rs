@@ -462,16 +462,29 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                     //
                     // REND-001 fix: consume the Body-role Empty region slot so that bullet
                     // TextRun frames inherit its correct bbox (x > 0, y > 0) instead of
-                    // being pushed with the hardcoded (0, 0) fallback. The slot is removed
-                    // from `all_frames` before the bullet frames are appended, ensuring no
-                    // duplicate Empty slot appears in the output alongside the TextRun frames.
+                    // being pushed with a wrong position. The slot is removed from `all_frames`
+                    // before the bullet frames are appended, ensuring no duplicate Empty slot
+                    // appears in the output alongside the TextRun frames.
                     //
-                    // Slot search: Phase 1 — exact Body-role match (same logic as
-                    // `fill_region_slot_or_append`). Phase 2 — Generic/None fallback.
-                    // Phase 3 — None (no slot): use the clamped page-size bbox (fallback
-                    // matching legacy behaviour for custom slide types with no body slot).
+                    // F-094-P1-003 fix: Phase 1b — also capture the bbox from an
+                    // ALREADY-FILLED Body-role frame (FrameContent::Body). This fires when a
+                    // ContentBlock::Body was processed before ContentBlock::Bullets on the same
+                    // slide. The Body block has already claimed the Empty Body slot via
+                    // fill_region_slot_or_append; the bullets must use the same region bbox.
+                    // The Body frame itself is NOT removed (it still carries its content).
+                    //
+                    // F-094-P1-002 fix: Phase 3 — when no Body or Generic Empty slot exists
+                    // AND no already-filled Body frame exists, the slide type has no content
+                    // region for bullets. Return Err(InvalidBoundingBox) with a sentinel
+                    // zero-bbox rather than silently placing frames at (0,0).
+                    //
+                    // Slot search order:
+                    //   Phase 1a: Empty Body-role slot — consume it (normal path).
+                    //   Phase 1b: Already-filled Body-role slot — borrow its bbox (body+bullets coexistence fix).
+                    //   Phase 2:  Empty Generic/None slot — consume it (multi-body fallback).
+                    //   Phase 3:  None — Err(InvalidBoundingBox) (no silent (0,0) placement).
                     let body_bbox: Option<crate::types::BoundingBox> = {
-                        // Phase 1: exact Body-role match.
+                        // Phase 1a: Empty Body-role match — consume the slot.
                         let exact_idx = all_frames.iter().position(|f| {
                             matches!(f.content, crate::types::FrameContent::Empty)
                                 && f.region_role == Some(crate::types::RegionRole::Body)
@@ -481,21 +494,36 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             all_frames.remove(idx);
                             Some(bbox)
                         } else {
-                            // Phase 2: Generic/None fallback (mirrors fill_region_slot_or_append).
-                            let generic_idx = all_frames.iter().position(|f| {
-                                matches!(f.content, crate::types::FrameContent::Empty)
-                                    && matches!(
-                                        f.region_role,
-                                        Some(crate::types::RegionRole::Generic) | None
-                                    )
+                            // Phase 1b: already-filled Body-role slot (F-094-P1-003).
+                            // A ContentBlock::Body arrived before this Bullets block and
+                            // has already consumed the Empty Body slot. Borrow its bbox
+                            // so bullets share the same region geometry.
+                            let filled_body_idx = all_frames.iter().position(|f| {
+                                matches!(f.content, crate::types::FrameContent::Body(_))
+                                    && f.region_role == Some(crate::types::RegionRole::Body)
                             });
-                            if let Some(idx) = generic_idx {
-                                let bbox = all_frames[idx].bbox;
-                                all_frames.remove(idx);
-                                Some(bbox)
+                            if let Some(idx) = filled_body_idx {
+                                // Borrow only — do not remove (the Body frame stays).
+                                Some(all_frames[idx].bbox)
                             } else {
-                                // Phase 3: no Empty slot — fall back to page-size bbox.
-                                None
+                                // Phase 2: Generic/None fallback (mirrors fill_region_slot_or_append).
+                                let generic_idx = all_frames.iter().position(|f| {
+                                    matches!(f.content, crate::types::FrameContent::Empty)
+                                        && matches!(
+                                            f.region_role,
+                                            Some(crate::types::RegionRole::Generic) | None
+                                        )
+                                });
+                                if let Some(idx) = generic_idx {
+                                    let bbox = all_frames[idx].bbox;
+                                    all_frames.remove(idx);
+                                    Some(bbox)
+                                } else {
+                                    // Phase 3: no usable slot — this slide type has no content
+                                    // region for bullets (e.g., title, closing, section_break,
+                                    // blank). Return None to trigger InvalidBoundingBox below.
+                                    None
+                                }
                             }
                         }
                     };
@@ -1104,27 +1132,32 @@ fn push_bullet_frames_inner(
     }
 
     for item in items {
-        // STORY-094 T-004 / BC-3.06.003 AC-001 — finalized bbox from region slot.
+        // F-094-P1-002 / BC-3.06.003 AC-001 / postcondition 2 — region-map bbox required.
         //
-        // Use the body_bbox extracted from the Body-role region slot when available
-        // (non-zero x, y coordinates from the region map). Fall back to the clamped
-        // full-page-size bbox ONLY when no region slot was found (custom slide types
-        // with no pre-allocated body placeholder). The fallback bbox is validated
-        // below; an invalid result triggers Err(InvalidBoundingBox) per BC-3.06.003.
-        let bbox = if let Some(b) = body_bbox {
-            b
-        } else {
-            // Fallback: clamped full-width placeholder (legacy path for slide
-            // types with no Body-role region slot). Clamp height per F-P4-LOW-001.
-            let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
-            crate::types::BoundingBox {
+        // `body_bbox` must be `Some` when this function is called. A `None` value means
+        // the calling slide type has no Body or Generic content region, so bullets cannot
+        // be correctly positioned. Return `Err(InvalidBoundingBox)` with a sentinel
+        // zero-bbox rather than silently placing frames at (0,0).
+        //
+        // Silent fallback to any position not derived from the region map is forbidden
+        // (BC-3.06.003 postcondition 2 / F-094-P1-002). Production-grade default: if the
+        // slide type cannot host bullets, the error surfaces to the user rather than
+        // producing a visually wrong deck.
+        let Some(bbox) = body_bbox else {
+            let frame_index = frames.len();
+            let sentinel_bbox = crate::types::BoundingBox {
                 x: crate::types::Emu(0),
                 y: crate::types::Emu(0),
-                width: page_size.width,
-                height: placeholder_height,
-            }
+                width: crate::types::Emu(0),
+                height: crate::types::Emu(0),
+            };
+            return Err(LayoutError::InvalidBoundingBox {
+                source_slide_index,
+                frame_index,
+                bbox: sentinel_bbox,
+            });
         };
-        // BC-3.06.003 defensive check: reject invalid bounding boxes regardless of source.
+        // BC-3.06.003 defensive check: reject invalid bounding boxes from region maps.
         let frame_index = frames.len();
         if !bbox.is_valid(page_size.width, page_size.height) {
             return Err(LayoutError::InvalidBoundingBox {

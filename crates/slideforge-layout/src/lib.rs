@@ -1953,8 +1953,10 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot). "title" slides have no Body slot
+        // and now correctly return Err(InvalidBoundingBox) for bullets.
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -1972,7 +1974,7 @@ mod tests {
         let slide_out = &result.slides[0];
 
         // Count only the TextRun frames produced for bullet items.
-        // The title slide has region-map frames (Title + Subtitle) before the bullet frames.
+        // The content slide has region-map frames (Title + Body) before the bullet frames.
         let text_run_frames: Vec<_> = slide_out
             .frames
             .iter()
@@ -2020,8 +2022,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2178,8 +2181,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2224,8 +2228,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2290,8 +2295,10 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot). "title" now returns
+        // Err(InvalidBoundingBox) which would mask the InlineDepthExceeded error.
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2409,8 +2416,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2516,8 +2524,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2628,8 +2637,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2868,8 +2878,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before the
+        // depth guard can fire).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2938,8 +2951,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before the
+        // depth guard can fire, masking the depth-exceeded signal).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -3007,8 +3023,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before slide1
+        // is reached, masking the source_slide_index threading test).
         let slide0 = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![slide0_block],
             register: None,

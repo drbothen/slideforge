@@ -224,7 +224,8 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
         InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold"))]),
     ]);
     let item2 = flat_bullet(vec![InlineNode::Plain(Arc::from("second item"))]);
-    let slide = bullets_slide("title", vec![item1.clone(), item2.clone()]);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    let slide = bullets_slide("content", vec![item1.clone(), item2.clone()]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -263,8 +264,10 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
 /// no warning in LaidOutDeck.warnings → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_unknown_xref_in_bullet_warns() {
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // before inline validation can fire, masking the XrefTargetNotFound warning).
     let slide = bullets_slide(
-        "title",
+        "content",
         vec![flat_bullet(vec![InlineNode::Xref(Arc::from(
             "missing-slide",
         ))])],
@@ -313,7 +316,9 @@ fn test_bc_3_05_001_story073_ac_int1_depth_65_bullet_is_hard_error() {
     for _ in 0..=MAX_INLINE_DEPTH {
         node = InlineNode::Bold(vec![node]);
     }
-    let slide = bullets_slide("title", vec![flat_bullet(vec![node])]);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // before inline validation runs, masking the InlineDepthExceeded error).
+    let slide = bullets_slide("content", vec![flat_bullet(vec![node])]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -384,7 +389,9 @@ fn test_bc_3_05_001_story073_ec001_empty_bullets_no_frames_no_error_no_warning()
 #[test]
 fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error() {
     let empty_item = flat_bullet(vec![]);
-    let slide = bullets_slide("title", vec![empty_item]);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // even for empty-inlines items because the bbox check fires before inlines are read).
+    let slide = bullets_slide("content", vec![empty_item]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -419,7 +426,8 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
         children: vec![child],
         span: SourceSpan::default(),
     };
-    let slide = bullets_slide("title", vec![parent]);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    let slide = bullets_slide("content", vec![parent]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -492,7 +500,8 @@ fn test_bc_3_05_001_story073_ec003_integration_frame_order_parent_before_child()
         children: vec![child],
         span: SourceSpan::default(),
     };
-    let slide = bullets_slide("title", vec![parent]);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    let slide = bullets_slide("content", vec![parent]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -578,8 +587,10 @@ fn test_bc_3_05_001_story073_ec003_integration_frame_order_parent_before_child()
 #[test]
 fn test_bc_3_05_001_story073_ec004_deep_nested_xref_in_bullet_layout_run() {
     let unknown = Arc::from("__ec004_deep_xref__");
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // before inline validation runs, masking the XrefTargetNotFound warning).
     let slide = bullets_slide(
-        "title",
+        "content",
         vec![flat_bullet(vec![InlineNode::Bold(vec![
             InlineNode::Italic(vec![InlineNode::Xref(Arc::clone(&unknown))]),
         ])])],
@@ -629,7 +640,9 @@ fn test_bc_3_05_001_story073_ec005_multiple_depth_exceeded_bullets_returns_error
         flat_bullet(vec![make_deep_node()]),
         flat_bullet(vec![make_deep_node()]),
     ];
-    let slide = bullets_slide("title", items);
+    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // before inline validation runs, masking the InlineDepthExceeded error).
+    let slide = bullets_slide("content", items);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -812,11 +825,12 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
 /// passes. Becomes load-bearing after implementation.
 #[test]
 fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
+    // This test uses a "content" slide (has Body slot) so bullets get correct bbox.
     let items = vec![
         flat_bullet(vec![InlineNode::Plain(Arc::from("first"))]),
         flat_bullet(vec![InlineNode::Plain(Arc::from("second"))]),
     ];
-    let slide = bullets_slide("title", items);
+    let slide = bullets_slide("content", items);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
 
@@ -846,7 +860,215 @@ fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
                     "bullet TextRun frame height must be > 0 EMU; got {:?}",
                     frame.bbox.height
                 );
+                // BC-3.06.003: position must be non-zero (from region map, not fallback).
+                // Bullets on a content slide must be at the body region position, not (0,0).
+                assert!(
+                    frame.bbox.x.0 > 0,
+                    "BC-3.06.003 F-094-P1-002: bullet bbox.x must be > 0 EMU (region-map \
+                     position expected, not (0,0) fallback); got x={:?}",
+                    frame.bbox.x
+                );
+                assert!(
+                    frame.bbox.y.0 > 0,
+                    "BC-3.06.003 F-094-P1-002: bullet bbox.y must be > 0 EMU (region-map \
+                     position expected, not (0,0) fallback); got y={:?}",
+                    frame.bbox.y
+                );
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P1-002: bullets on slide types with no Body slot must error
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P1-002 (MED) / BC-3.06.003 postcondition 2:
+/// When bullets appear on a slide type that has no Body or Generic Empty slot
+/// (`title`, `closing`, `section_break`, `blank`), `layout::run()` must return
+/// `Err(LayoutError::InvalidBoundingBox)` rather than silently placing frames
+/// at (0,0).
+///
+/// DEFECT: current code hits Phase 3 (no Empty slot) and returns `None` →
+/// uses the clamped `(x=0, y=0, width=page_width, height=914_400)` fallback,
+/// which passes `is_valid` because x=0 is `>= 0`. This is a silent wrong
+/// positioning that violates the "no silent fallback to ANY position not a
+/// defined region" rule.
+///
+/// This test MUST FAIL against the unfixed code (run succeeds instead of erring).
+/// It will pass only after the Phase-3 fallback is replaced with
+/// `Err(LayoutError::InvalidBoundingBox)`.
+///
+/// Load-bearing: `.is_err()` fails when `run` returns `Ok(...)` with (0,0) frames.
+#[test]
+fn test_f094_p1_002_bullets_on_title_slide_returns_invalid_bbox_error() {
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    let slide = bullets_slide("title", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P1-002 Red Gate: bullets on a 'title' slide (no Body slot) must return \
+         Err(LayoutError::InvalidBoundingBox); layout::run returned Ok(..)"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, LayoutError::InvalidBoundingBox { .. }),
+        "F-094-P1-002 Red Gate: error must be LayoutError::InvalidBoundingBox; \
+         got: {err:?}"
+    );
+}
+
+/// F-094-P1-002 / BC-3.06.003 — closing slide type (no Body slot).
+#[test]
+fn test_f094_p1_002_bullets_on_closing_slide_returns_invalid_bbox_error() {
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    let slide = bullets_slide("closing", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P1-002 Red Gate: bullets on a 'closing' slide (no Body slot) must return \
+         Err(LayoutError::InvalidBoundingBox); layout::run returned Ok(..)"
+    );
+    assert!(
+        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
+        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+    );
+}
+
+/// F-094-P1-002 / BC-3.06.003 — `section_break` slide type (no Body slot).
+#[test]
+fn test_f094_p1_002_bullets_on_section_break_returns_invalid_bbox_error() {
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    let slide = bullets_slide("section_break", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P1-002 Red Gate: bullets on 'section_break' (no Body slot) must error"
+    );
+    assert!(
+        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
+        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+    );
+}
+
+/// F-094-P1-002 / BC-3.06.003 — blank slide type (zero regions, no Body slot).
+#[test]
+fn test_f094_p1_002_bullets_on_blank_slide_returns_invalid_bbox_error() {
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    let slide = bullets_slide("blank", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P1-002 Red Gate: bullets on 'blank' (no slots at all) must error"
+    );
+    assert!(
+        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
+        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P1-003: body text + bullets coexistence — bullets must get body region bbox
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P1-003 (MED) / BC-3.06.003 postcondition 1:
+/// When a `content` slide has BOTH a Body text block AND a Bullets block, bullets
+/// must get the correct (non-zero, region-map) bbox — NOT the (0,0) fallback.
+///
+/// DEFECT: `ContentBlock::Body` fills the Body-role Empty slot via
+/// `fill_region_slot_or_append`, replacing the Empty frame with `FrameContent::Body`.
+/// When `ContentBlock::Bullets` then searches for an Empty Body-role slot, it finds
+/// none (already replaced), falls through to Generic/None search (also none on
+/// `content` slides), and hits Phase-3 → (0,0) bbox.
+///
+/// This test MUST FAIL against the unfixed code (bullets get x=0, y=0).
+/// It will pass only after the Bullets lookup also finds already-filled Body slots.
+///
+/// Load-bearing: asserts `bbox.x.0 > 0` on all `TextRun` frames (from bullets),
+/// which fails when x=0.
+#[test]
+fn test_f094_p1_003_body_text_plus_bullets_bullets_get_body_region_bbox() {
+    use slideforge_types::{Block, TextBlock, TextTag};
+
+    // Build a content slide with:
+    //   1. Body text block (fills the Body-role Empty slot)
+    //   2. Bullets block (must inherit the same body region bbox)
+    let body_block = Block {
+        content: ContentBlock::Text(TextBlock {
+            tag: TextTag::Body,
+            inlines: vec![InlineNode::Plain(Arc::from("body text"))],
+            span: SourceSpan::default(),
+        }),
+        label: None,
+        span: SourceSpan::default(),
+    };
+    let bullet_items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from(
+        "bullet item",
+    ))])];
+    let bullet_block = Block {
+        content: ContentBlock::Bullets(bullet_items),
+        label: None,
+        span: SourceSpan::default(),
+    };
+
+    let slide = Slide {
+        slide_type: Arc::from("content"),
+        fields: OrderedMap::new(),
+        blocks: vec![body_block, bullet_block],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+    };
+
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand).expect(
+        "F-094-P1-003 Red Gate: layout::run must succeed for content slide with body+bullets",
+    );
+
+    // Find TextRun frames (from bullets).
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert!(
+        !text_run_frames.is_empty(),
+        "F-094-P1-003: content slide with bullets must produce at least one TextRun frame"
+    );
+
+    for frame in text_run_frames {
+        assert!(
+            frame.bbox.x.0 > 0,
+            "F-094-P1-003 Red Gate: bullet TextRun bbox.x must be > 0 (body region position); \
+             got x={} — indicates (0,0) fallback still in effect when Body+Bullets coexist",
+            frame.bbox.x.0
+        );
+        assert!(
+            frame.bbox.y.0 > 0,
+            "F-094-P1-003 Red Gate: bullet TextRun bbox.y must be > 0 (body region position); \
+             got y={}",
+            frame.bbox.y.0
+        );
     }
 }

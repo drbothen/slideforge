@@ -438,7 +438,12 @@ impl SlideSerializer {
             xml_other_attrs: vec![],
         };
 
-        let mut shape_id: u32 = 1;
+        // F-094-P1-005 fix: seed shape_id at 2.
+        // The group `<p:nvGrpSpPr>` uses `id=1` (NonVisualDrawingProperties { id: 1 }).
+        // If shapes also start at id=1, the first shape and the group share the same
+        // cNvPr id — a schema violation (ECMA-376 §19.3.1.13: cNvPr ids must be unique
+        // within a presentation part). Starting at 2 avoids the collision.
+        let mut shape_id: u32 = 2;
         // STORY-094 T-007 / BC-4.01.001 AC-002 — deduplicate body placeholder (REND-001).
         //
         // ECMA-376 §19.3.1.33: placeholder `idx` must be unique within a slide. Both

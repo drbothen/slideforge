@@ -443,6 +443,148 @@ fn test_BC_4_01_001_handout_master_always_present() {
     );
 }
 
+// ─── F-094-P1-001: notesMaster/handoutMaster spTree must have nvGrpSpPr ───────
+
+/// F-094-P1-001 (HIGH) / BC-4.01.001 postcondition 2:
+/// The `<p:spTree>` in `notesMaster1.xml` must have `<p:nvGrpSpPr>` as its
+/// FIRST child element (CT_GroupShape mandatory first-child per ECMA-376).
+///
+/// DEFECT: `NOTES_MASTER_XML` constant in `notes_master.rs` has `<p:grpSpPr>` as
+/// the first spTree child with `<p:nvGrpSpPr>` absent entirely.
+///
+/// This test MUST FAIL against the unfixed constant.
+/// It will pass only after `<p:nvGrpSpPr>` is inserted before `<p:grpSpPr>`.
+///
+/// Load-bearing: uses `first_child_element_name` to assert FIRST child, not
+/// mere string presence — avoids false-positive if nvGrpSpPr appears elsewhere.
+#[test]
+fn test_f094_p1_001_notes_master_sptree_first_child_is_nvgrpsppr() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let notes_master_xml = zip_read_entry(&pptx_bytes, "ppt/notesMasters/notesMaster1.xml");
+
+    assert!(
+        notes_master_xml.contains("<p:spTree"),
+        "notesMaster1.xml must contain <p:spTree>"
+    );
+
+    let first_child = first_child_element_name(&notes_master_xml, "p:spTree")
+        .expect("p:spTree in notesMaster1.xml must have at least one child element");
+    assert_eq!(
+        first_child,
+        "p:nvGrpSpPr",
+        "F-094-P1-001 Red Gate: first child of <p:spTree> in notesMaster1.xml must be \
+         <p:nvGrpSpPr> (CT_GroupShape mandatory first-child, ECMA-376); \
+         got: {first_child:?}\n\
+         notesMaster1.xml excerpt:\n{}",
+        &notes_master_xml[..notes_master_xml.len().min(1000)]
+    );
+}
+
+/// F-094-P1-001 (HIGH) / BC-4.01.001 postcondition 2:
+/// The `<p:spTree>` in `handoutMaster1.xml` must have `<p:nvGrpSpPr>` as its
+/// FIRST child element (CT_GroupShape mandatory first-child per ECMA-376).
+///
+/// DEFECT: `HANDOUT_MASTER_XML` constant in `notes_master.rs` has `<p:grpSpPr>` as
+/// the first spTree child with `<p:nvGrpSpPr>` absent entirely.
+///
+/// This test MUST FAIL against the unfixed constant.
+/// It will pass only after `<p:nvGrpSpPr>` is inserted before `<p:grpSpPr>`.
+#[test]
+fn test_f094_p1_001_handout_master_sptree_first_child_is_nvgrpsppr() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let handout_master_xml = zip_read_entry(&pptx_bytes, "ppt/handoutMasters/handoutMaster1.xml");
+
+    assert!(
+        handout_master_xml.contains("<p:spTree"),
+        "handoutMaster1.xml must contain <p:spTree>"
+    );
+
+    let first_child = first_child_element_name(&handout_master_xml, "p:spTree")
+        .expect("p:spTree in handoutMaster1.xml must have at least one child element");
+    assert_eq!(
+        first_child,
+        "p:nvGrpSpPr",
+        "F-094-P1-001 Red Gate: first child of <p:spTree> in handoutMaster1.xml must be \
+         <p:nvGrpSpPr> (CT_GroupShape mandatory first-child, ECMA-376); \
+         got: {first_child:?}\n\
+         handoutMaster1.xml excerpt:\n{}",
+        &handout_master_xml[..handout_master_xml.len().min(1000)]
+    );
+}
+
+// ─── F-094-P1-005: slide shape cNvPr IDs must start at 2 (group uses id=1) ────
+
+/// F-094-P1-005 (OBS) / BC-4.01.001 postcondition 2:
+/// In every `slideN.xml`, the `<p:cNvPr>` `id` attribute of the FIRST shape (the
+/// first `<p:sp>` or `<p:pic>` child in `<p:spTree>`) must be `id="2"`.
+///
+/// DEFECT: `SlideSerializer::build_shape_tree` seeds `shape_id = 1`. The group
+/// `<p:nvGrpSpPr>` also uses `id=1` (`NonVisualDrawingProperties { id: 1, ... }`).
+/// The first shape therefore receives `id=1` — a duplicate cNvPr id within the
+/// same `<p:spTree>`, violating ECMA-376 §19.3.1.13 (cNvPr IDs must be unique
+/// within a presentation part).
+///
+/// This test MUST FAIL against the unfixed code (shape_id seeds at 1).
+/// It passes only after `shape_id` is seeded at `2`.
+///
+/// Load-bearing: inspects the actual `cNvPr id="N"` value of the second `<p:cNvPr>`
+/// occurrence (the first is the group's) in `slide1.xml` — not mere presence of
+/// the string `id="2"`.
+#[test]
+fn test_f094_p1_005_slide_shape_cnvpr_ids_start_at_2() {
+    // Build a title slide so there is at least one <p:sp> shape with a <p:cNvPr>.
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // The first <p:cNvPr> in spTree is the group's (id=1).
+    // The SECOND <p:cNvPr> belongs to the first child shape — it MUST be id="2".
+    //
+    // Strategy: find all occurrences of `cNvPr id="` and capture the id value
+    // for the second occurrence.
+    let marker = r#"cNvPr id=""#;
+    let mut remaining = slide_xml.as_str();
+    let mut occurrences: Vec<u32> = Vec::new();
+    while let Some(pos) = remaining.find(marker) {
+        let after_marker = &remaining[pos + marker.len()..];
+        let end = after_marker.find('"').unwrap_or(after_marker.len());
+        let id_str = &after_marker[..end];
+        if let Ok(id) = id_str.parse::<u32>() {
+            occurrences.push(id);
+        }
+        remaining = &remaining[pos + marker.len()..];
+    }
+
+    assert!(
+        occurrences.len() >= 2,
+        "F-094-P1-005: slide1.xml must contain at least 2 <p:cNvPr> id attributes \
+         (group + at least one shape); found occurrences: {occurrences:?}\n\
+         slide1.xml excerpt:\n{}",
+        &slide_xml[..slide_xml.len().min(2000)]
+    );
+
+    // occurrences[0] = group nvGrpSpPr id (must be 1).
+    assert_eq!(
+        occurrences[0], 1,
+        "F-094-P1-005: group nvGrpSpPr cNvPr id must be 1; got {}",
+        occurrences[0]
+    );
+
+    // occurrences[1] = first shape's cNvPr id (must be 2, not 1).
+    assert_eq!(
+        occurrences[1],
+        2,
+        "F-094-P1-005 Red Gate: first shape cNvPr id must be 2 (group uses id=1; \
+         shapes must start at 2 to avoid duplicate ids); \
+         got id={} — shape_id counter seeds at 1 instead of 2\n\
+         slide1.xml excerpt:\n{}",
+        occurrences[1],
+        &slide_xml[..slide_xml.len().min(2000)]
+    );
+}
+
 // ─── SEC-002: notes/handout rels non-empty (CWE-755) ─────────────────────────
 
 /// SEC-002 (CWE-755): `notesMaster1.xml.rels` in the produced ZIP must be
@@ -2125,6 +2267,155 @@ fn test_BC_4_01_001_nvgrpsppr_slide_serializer() {
          slide1.xml excerpt: {}",
         &slide_xml[..slide_xml.len().min(1000)]
     );
+}
+
+// ─── F-094-P1-004: all-35-types: nvGrpSpPr + shape cNvPr ids start at 2 ──────
+
+/// F-094-P1-004 (LOW) / BC-4.01.001 postconditions 2+3:
+///
+/// For every one of the 35 built-in slide types:
+/// 1. The `<p:spTree>` in `slideN.xml` has `<p:nvGrpSpPr>` as its FIRST child
+///    element (CT_GroupShape mandatory first-child, ECMA-376).
+/// 2. The second `<p:cNvPr id="...">` (the first non-group shape) has `id >= 2`
+///    (group nvGrpSpPr uses id=1; shape ids must start at 2 to avoid duplicates).
+///
+/// The spTree first-child invariant is already covered by
+/// `test_BC_4_01_001_nvgrpsppr_slide_serializer` for a single title slide; this
+/// companion test proves the same property holds for ALL 35 types as a regression
+/// guard against per-type special-casing.
+///
+/// The shape-id-start-at-2 invariant is covered by
+/// `test_f094_p1_005_slide_shape_cnvpr_ids_start_at_2` for a single title slide;
+/// this companion test proves it holds for all slide types with at least one shape.
+///
+/// Load-bearing: iterates every type, parses the actual XML, and asserts the
+/// first child name — does NOT accept mere substring presence.
+#[test]
+fn test_f094_p1_004_all_35_slide_types_nvgrpsppr_first_and_shape_ids_start_at_2() {
+    // All 35 built-in slide type keywords (from regions.rs, count verified
+    // by test_bc_3_06_003_all_slide_types_valid_bounding_boxes).
+    const ALL_SLIDE_TYPES: &[&str] = &[
+        "title",
+        "content",
+        "section_break",
+        "two_col",
+        "image",
+        "blank",
+        "agenda",
+        "toc",
+        "quote",
+        "team",
+        "bio",
+        "executive_summary",
+        "problem_statement",
+        "recommendation",
+        "risk_register",
+        "severity_cards",
+        "timeline",
+        "stat_callout",
+        "comparison",
+        "process_flow",
+        "matrix",
+        "financials",
+        "kpi_dashboard",
+        "chart",
+        "diagram",
+        "screenshot",
+        "code_sample",
+        "video",
+        "survey_results",
+        "org_chart",
+        "roadmap",
+        "closing",
+        "status",
+        "progress_bar",
+        "weighted_composite",
+    ];
+    assert_eq!(ALL_SLIDE_TYPES.len(), 35, "sanity: must cover all 35 types");
+
+    // Build a 35-slide deck: one slide per type, title slide geometry (all are
+    // Empty-region slides for the purpose of this structural test).
+    let slides: Vec<slideforge_layout::LaidOutSlide> = ALL_SLIDE_TYPES
+        .iter()
+        .enumerate()
+        .map(|(i, kw)| slideforge_layout::LaidOutSlide {
+            source_index: i,
+            slide_type_keyword: Arc::from(*kw),
+            frames: vec![],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        })
+        .collect();
+
+    let laid_out = slideforge_layout::LaidOutDeck {
+        page_size: slideforge_layout::PageSize::default(),
+        slides,
+        sections: vec![],
+        warnings: vec![],
+        slide_sections: vec![],
+    };
+    let pptx_bytes = build_pptx(&laid_out);
+
+    for (slide_num, slide_type) in ALL_SLIDE_TYPES.iter().enumerate() {
+        let path = format!("ppt/slides/slide{}.xml", slide_num + 1);
+        let slide_xml = zip_read_entry(&pptx_bytes, &path);
+
+        // Assertion 1: <p:spTree> must exist.
+        assert!(
+            slide_xml.contains("<p:spTree"),
+            "F-094-P1-004: slide {} ({}) must contain <p:spTree>",
+            slide_num + 1,
+            slide_type
+        );
+
+        // Assertion 2: first child of <p:spTree> must be <p:nvGrpSpPr>.
+        let first_child = first_child_element_name(&slide_xml, "p:spTree")
+            .expect("p:spTree must have at least one child element");
+        assert_eq!(
+            first_child,
+            "p:nvGrpSpPr",
+            "F-094-P1-004: slide {} ({}) <p:spTree> first child must be \
+             <p:nvGrpSpPr>; got {first_child:?}",
+            slide_num + 1,
+            slide_type
+        );
+
+        // Assertion 3 (only for slides with shapes — empty slides have no shapes):
+        // If a second <p:cNvPr id="..."> exists, its id must be >= 2.
+        let marker = r#"cNvPr id=""#;
+        let mut ids: Vec<u32> = Vec::new();
+        let mut remaining = slide_xml.as_str();
+        while let Some(pos) = remaining.find(marker) {
+            let after = &remaining[pos + marker.len()..];
+            let end = after.find('"').unwrap_or(after.len());
+            if let Ok(id) = after[..end].parse::<u32>() {
+                ids.push(id);
+            }
+            remaining = &remaining[pos + marker.len()..];
+        }
+        if ids.len() >= 2 {
+            // ids[0] = group nvGrpSpPr id (must be 1).
+            assert_eq!(
+                ids[0],
+                1,
+                "F-094-P1-004: slide {} ({}) group nvGrpSpPr cNvPr id must be 1; \
+                 got {}",
+                slide_num + 1,
+                slide_type,
+                ids[0]
+            );
+            // ids[1] = first shape cNvPr id (must be >= 2).
+            assert!(
+                ids[1] >= 2,
+                "F-094-P1-004: slide {} ({}) first shape cNvPr id must be >= 2 \
+                 (group uses id=1; found id={})",
+                slide_num + 1,
+                slide_type,
+                ids[1]
+            );
+        }
+    }
 }
 
 /// STORY-094 T-002 companion / BC-4.01.001 AC-004 / EC-003 (REND-003 Red Gate):
