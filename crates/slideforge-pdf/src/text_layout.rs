@@ -465,18 +465,25 @@ mod tests {
 
     // ── VP-054 Table row: only spaces ────────────────────────────────────────
 
-    /// VP-054 sub-property (a): input of only whitespace — terminates without panic.
+    /// VP-054 sub-property (a) + (b): input of only whitespace — terminates without
+    /// panic and is returned verbatim (lossless whole-string fast-path).
     #[test]
     fn test_VP_054_only_spaces_terminates() {
         let m = mock_metrics(5.0, 12.0);
-        // All whitespace — `split_whitespace` yields no words; should terminate cleanly.
+        // "   " (3 spaces) — measured width = 3 * 5.0 = 15.0 pts ≤ 50.0 pts.
+        // The whole-string fast-path fires BEFORE `split_whitespace` is reached:
+        //   `if measure_line_width(text, metrics) <= max_width_pts { return vec![text.to_owned()]; }`
+        // So `split_whitespace` is NEVER called for this input.
+        // The function returns `vec!["   "]` — the input string, unchanged.
+        // Sub-property (a): test completion is proof of termination (no hang).
+        // Sub-property (b): the whitespace characters are preserved verbatim
+        //   (lossless — the fast-path emits the whole string without alteration).
         let result = wrap_text("   ", 50.0, &m);
-        // Acceptable: returns empty Vec (no words to emit) OR returns a single empty
-        // string. The contract is: no panic, terminates.
-        // The current implementation returns empty Vec for all-whitespace input
-        // (fast-path: split_whitespace is empty, so `current_line` is never filled).
-        // Both outcomes satisfy VP-054 sub-property (a).
-        drop(result); // terminates — proof of sub-property (a).
+        assert_eq!(
+            result,
+            vec!["   ".to_owned()],
+            "VP-054 sub-property b: whole-string fast-path must return input verbatim; got: {result:?}"
+        );
     }
 
     // ── VP-054 Table row: long line no spaces (char-wrap) ────────────────────
