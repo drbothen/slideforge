@@ -1,18 +1,63 @@
 name: CI
 
-# Triggers: PRs to develop/main, and direct pushes to develop/main.
-# Feature branches only run CI via PR; direct pushes to those branches are
-# intentionally not covered here (worktree-based development model).
+# Triggers: PRs to develop/main, direct pushes to develop/main, merge queue,
+# workflow_dispatch (manual), and a nightly schedule (see IMPORTANT note on
+# schedule: below).
+#
+# TIERED TRIGGER DESIGN (STORY-091):
+#   FAST tier — runs on every PR push and every trigger:
+#     fmt, clippy, test (linux-x86_64), doctest, check-panic-profile,
+#     check-pdf-deps, supply-chain
+#   SLOW tier — runs only on: merge_group, push to develop/main, schedule,
+#     workflow_dispatch, or pull_request carrying the 'full-ci' label:
+#     test (linux-arm64, macos-arm64, windows-x86_64), snapshots, msrv, docs,
+#     visual-regression, bench, perf-smoke
+#
+# IMPORTANT — schedule: and the default branch:
+#   GitHub Actions only fires schedule: triggers from the workflow file on the
+#   DEFAULT branch (currently 'main'). A nightly cron defined here on 'develop'
+#   will NOT fire until this file is merged to 'main'. The nightly leg activates
+#   automatically once this story is merged to main via the normal develop→main
+#   release flow. See docs/playbooks/tiered-ci-merge-queue.md for details.
+#
+# ANTI-DEADLOCK RULES (AC-004):
+#   - Slow legs use job-level if: ONLY — no workflow-level paths/paths-ignore.
+#   - all-checks-pass has if: always() and treats 'skipped' as PASS.
+#   - Branch protection must declare ONLY 'all-checks-pass' as the required
+#     status check context (API name). The PR UI shows it as
+#     "CI / all-checks-pass" but the API context string is 'all-checks-pass'.
+#   See docs/playbooks/tiered-ci-merge-queue.md for the full rationale.
 on:
   push:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
+  workflow_dispatch:
+  schedule:
+    # Nightly full-matrix run at 06:00 UTC.
+    # NOTE: only fires from the default branch ('main'). See header comment above.
+    - cron: "0 6 * * *"
+
+# Workflow-level least-privilege permissions (fork-PR hardening, CWE-272).
+# No job in this workflow writes to contents, packages, or pull-requests.
+# actions/checkout uses contents: read; Swatinem/rust-cache uses the
+# runner-scoped ACTIONS_RUNTIME_TOKEN (not GITHUB_TOKEN) for cache I/O.
+permissions:
+  contents: read
 
 # Cancel in-progress runs when a new commit is pushed to the same ref.
+# Do not cancel merge_group or scheduled runs — they must complete.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+  cancel-in-progress: >-
+    ${{
+      github.ref != 'refs/heads/main' &&
+      github.ref != 'refs/heads/develop' &&
+      github.event_name != 'merge_group' &&
+      github.event_name != 'schedule'
+    }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,7 +76,28 @@ env:
 #   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─── FULL-TIER CONDITION ─────────────────────────────────────────────────────
+# Applied at job level to ALL slow legs. The workflow must NOT have workflow-level
+# paths/paths-ignore on any job feeding all-checks-pass (deadlock prevention).
+#
+#   github.event_name == 'merge_group' ||
+#   github.event_name == 'schedule' ||
+#   github.event_name == 'workflow_dispatch' ||
+#   (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+#   (github.event_name == 'pull_request' &&
+#    contains(github.event.pull_request.labels.*.name, 'full-ci'))
+#
+# This expression is reused verbatim on every slow job below.
+# TD-VSDD-060: keep ALL copies byte-identical. Currently 8 copies (7 slow jobs +
+# this header comment). When adding a slow job, copy the expression from an
+# existing slow job, not from this comment (avoids transcription drift).
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # FAST TIER — runs on every trigger
+  # ════════════════════════════════════════════════════════════════════════════
+
   # ─── panic=unwind safety perimeter (BC-5.02.001 EC-003 / STORY-049 AC-008) ─
   # Verifies that shipped Cargo profiles (release, dist) explicitly declare
   # panic = "unwind".  catch_unwind is a no-op under panic = "abort"; a silent
@@ -108,32 +174,17 @@ jobs:
           -D clippy::unwrap_used
           -W clippy::missing_docs_in_private_items
 
-  # ─── Tests (multi-platform matrix) ─────────────────────────────────────────
-  # Covers NFR-026 through NFR-030: macOS arm64, Linux x86_64,
-  # Linux arm64, Windows x86_64.
-  # Note: macos-x86_64 (macos-13) was removed — chronic runner availability
-  # issues (1+ hour queue times). macOS coverage is provided by macos-arm64.
-  # Intel macOS coverage is handled via cross-compilation in release.yml.
-  #
-  # timeout-minutes: 75 — raised from 30 to accommodate the linux-arm64
-  # emulated runner, which is ~2-3x slower than x86_64 for cold Rust builds.
-  # A foundational-crate change (slideforge-syntax, slideforge-eval) forces a
-  # large downstream rebuild; on arm64 this can exceed 35 min from cold cache.
-  # The higher ceiling lets the job complete AND reach the rust-cache post-step
-  # so the cache is saved — breaking the cold-build-timeout self-perpetuating
-  # loop.  x86_64, macOS, and Windows finish well within this limit.
+  # ─── Fast test: linux-x86_64 only ──────────────────────────────────────────
+  # This leg runs on every PR push (fast tier). It covers NFR-028 and provides
+  # the primary per-PR developer feedback signal.
+  # Slow platforms (linux-arm64, macos-arm64, windows-x86_64) are in the
+  # test-matrix-slow job below, gated by the full-tier condition.
+  # timeout-minutes: 30 — fast tier; linux-x86_64 warm builds complete in < 10min.
+  # The slow cross-platform matrix uses 75min to accommodate cold arm64 builds.
   test:
-    name: test (${{ matrix.target.name }})
-    runs-on: ${{ matrix.target.runner }}
-    timeout-minutes: 75
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - { name: "linux-x86_64",  runner: "ubuntu-latest"     }
-          - { name: "linux-arm64",   runner: "ubuntu-24.04-arm"   }
-          - { name: "macos-arm64",   runner: "macos-latest"       }
-          - { name: "windows-x86_64",runner: "windows-latest"     }
+    name: test (linux-x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -141,13 +192,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
-          shared-key: test-${{ matrix.target.name }}
-          # cache-on-failure: "true" — sets CACHE_ON_FAILURE=true so the
-          # rust-cache post-step runs even when nextest fails (post-if:
-          # success() || env.CACHE_ON_FAILURE == 'true'). This breaks the
-          # cold-build-timeout self-perpetuating loop on linux-arm64: the
-          # compiled artifacts are cached on failure so the NEXT run is warm.
-          # (save-always is an actions/cache keyword, not a rust-cache input.)
+          shared-key: test-linux-x86_64
           cache-on-failure: "true"
       - name: Install core fonts (Linux only — required for usvg text normalization)
         if: runner.os == 'Linux'
@@ -167,31 +212,14 @@ jobs:
           --no-fail-fast
           --profile ci
 
-  # ─── MSRV check ────────────────────────────────────────────────────────────
-  # Validates the declared rust-version = "1.88" in Cargo.toml.
-  msrv:
-    name: msrv (1.88)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: "1.88"
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
-        with:
-          shared-key: msrv
-      - name: cargo check (MSRV)
-        run: cargo check --workspace --all-features
-
-  # ─── Documentation build ───────────────────────────────────────────────────
-  # NFR-023: zero undocumented public API items (RUSTDOCFLAGS="-D warnings").
-  docs:
-    name: docs
+  # ─── Doctests (fast tier) ──────────────────────────────────────────────────
+  # cargo-nextest does not execute doctests (by design). This job closes DI-5
+  # by running `cargo test --doc` separately on a single Linux leg — doctests
+  # are platform-independent, so one runner is sufficient to keep CI cost bounded.
+  doctest:
+    name: doctest
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      RUSTDOCFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -199,40 +227,9 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
-          shared-key: docs
-      - name: cargo doc (workspace, no private items, warnings-as-errors)
-        run: cargo doc --workspace --no-deps
-
-  # ─── Snapshot tests (insta) ────────────────────────────────────────────────
-  # CI mode: fail if any snapshot has changed without being reviewed + committed.
-  # This job is a no-op until Phase 3 fixtures land; it does not fail on empty.
-  snapshots:
-    name: snapshots
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
-        with:
-          shared-key: snapshots
-      - name: Install core fonts (Linux only — required for usvg text normalization)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y -q
-          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
-          fc-cache -f
-      - name: Install cargo-insta
-        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
-        with:
-          tool: cargo-insta
-      - name: cargo insta test --check
-        # --unreferenced=reject will fail if a snapshot file exists with no
-        # corresponding test. Use --unreferenced=warn until Phase 3 to avoid
-        # blocking on stale fixtures from other tooling.
-        run: cargo insta test --check --workspace --unreferenced=warn
+          shared-key: doctest
+      - name: cargo test --doc (workspace)
+        run: cargo test --doc --workspace --all-features
 
   # ─── Supply chain security (cargo audit + cargo deny) ──────────────────────
   # NFR-016: 0 high/critical CVEs.  NFR-017: 0 license violations.
@@ -266,14 +263,55 @@ jobs:
           bans
           sources
 
-  # ─── Doctests ──────────────────────────────────────────────────────────────
-  # cargo-nextest does not execute doctests (by design). This job closes DI-5
-  # by running `cargo test --doc` separately on a single Linux leg — doctests
-  # are platform-independent, so one runner is sufficient to keep CI cost bounded.
-  doctest:
-    name: doctest
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  # ════════════════════════════════════════════════════════════════════════════
+  # SLOW TIER — gated by full-tier condition (job-level if:)
+  #
+  # These jobs are SKIPPED on normal PR pushes. They run on:
+  #   - merge_group (merge queue validation — always runs full matrix)
+  #   - push to refs/heads/develop OR refs/heads/main
+  #   - workflow_dispatch (manual trigger for ad-hoc full-matrix runs)
+  #   - schedule (nightly — only fires from default branch 'main')
+  #   - pull_request with 'full-ci' label (developer opt-in)
+  #
+  # The all-checks-pass aggregator treats 'skipped' as PASS so PRs without
+  # these conditions still see a green all-checks-pass status.
+  #
+  # DO NOT add workflow-level paths/paths-ignore to this file. That would
+  # prevent the workflow from starting on certain file changes and cause
+  # all-checks-pass to never be reported — permanently blocking merges.
+  # See docs/playbooks/tiered-ci-merge-queue.md for the full deadlock analysis.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  # ─── Slow-platform test matrix ─────────────────────────────────────────────
+  # Covers NFR-026 (macos-arm64), NFR-029 (linux-arm64), NFR-030 (windows-x86_64).
+  # linux-x86_64 (NFR-028) is covered by the fast 'test' job above.
+  # Note: macos-x86_64 (macos-13) was removed — chronic runner availability
+  # issues (1+ hour queue times). macOS coverage is provided by macos-arm64.
+  # Intel macOS coverage is handled via cross-compilation in release.yml.
+  #
+  # timeout-minutes: 75 — accommodates the linux-arm64 native runner which is
+  # ~2-3x slower than x86_64 for cold Rust builds (see ci-speed-research.md).
+  test-matrix-slow:
+    name: test (${{ matrix.target.name }})
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 75
+    # FULL-TIER CONDITION — must be applied verbatim to every slow job.
+    # Job-level if: ensures the workflow always starts and all-checks-pass
+    # always has a result to report (skipped counts as pass in the aggregator).
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "linux-arm64",    runner: "ubuntu-24.04-arm" }
+          - { name: "macos-arm64",    runner: "macos-latest"      }
+          - { name: "windows-x86_64", runner: "windows-latest"    }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -281,11 +319,121 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
-          shared-key: doctest
-      - name: cargo test --doc (workspace)
-        run: cargo test --doc --workspace --all-features
+          shared-key: test-${{ matrix.target.name }}
+          # cache-on-failure: "true" — saves cache even when the job is
+          # canceled at the timeout (post-if: success() || CACHE_ON_FAILURE).
+          # Breaks the cold-build-timeout self-perpetuating loop on linux-arm64.
+          cache-on-failure: "true"
+      - name: Install core fonts (Linux only — required for usvg text normalization)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: cargo nextest run
+        run: >
+          cargo nextest run
+          --workspace
+          --all-features
+          --no-fail-fast
+          --profile ci
 
-  # ─── Performance benchmark gate ────────────────────────────────────────────
+  # ─── MSRV check (slow tier) ────────────────────────────────────────────────
+  # Validates the declared rust-version = "1.88" in Cargo.toml.
+  msrv:
+    name: msrv (1.88)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: msrv
+      - name: cargo check (MSRV)
+        run: cargo check --workspace --all-features
+
+  # ─── Documentation build (slow tier) ──────────────────────────────────────
+  # NFR-023: zero undocumented public API items (RUSTDOCFLAGS="-D warnings").
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: docs
+      - name: cargo doc (workspace, no private items, warnings-as-errors)
+        run: cargo doc --workspace --no-deps
+
+  # ─── Snapshot tests / insta (slow tier) ───────────────────────────────────
+  # CI mode: fail if any snapshot has changed without being reviewed + committed.
+  # This job is a no-op until Phase 3 fixtures land; it does not fail on empty.
+  snapshots:
+    name: snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          shared-key: snapshots
+      - name: Install core fonts (Linux only — required for usvg text normalization)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y -q
+          sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
+          fc-cache -f
+      - name: Install cargo-insta
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-insta
+      - name: cargo insta test --check
+        # --unreferenced=reject will fail if a snapshot file exists with no
+        # corresponding test. Use --unreferenced=warn until Phase 3 to avoid
+        # blocking on stale fixtures from other tooling.
+        run: cargo insta test --check --workspace --unreferenced=warn
+
+  # ─── Performance benchmark gate (slow tier) ───────────────────────────────
   # NFR-001: cold build < 500ms; NFR-002: incremental rebuild < 50ms.
   # Skipped until Phase 3 when benchmark fixtures land (criterion benches).
   # The job is defined now so branch protection can reference "CI / bench".
@@ -295,12 +443,18 @@ jobs:
   # downstream rebuild; on a cold cache this exceeds the former 20-min ceiling
   # before the job reaches its first bench assertion. 60 min provides headroom
   # for cold compile + criterion bench runs while staying within cost limits.
-  # (The arm64 test job was given 75 min in PR #79; bench is x86_64-only so
-  # 60 min is sufficient.)
   bench:
     name: bench
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -309,13 +463,8 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: bench
-          # cache-on-failure: "true" — sets CACHE_ON_FAILURE=true so the
-          # rust-cache post-step runs even when the job is canceled at the
-          # timeout (post-if: success() || env.CACHE_ON_FAILURE == 'true').
-          # Without this, a canceled run never saves its cache → next run is
-          # cold again → times out again = self-perpetuating loop (same pattern
-          # fixed for linux-arm64 test job in PR #79).
-          # (save-always is an actions/cache keyword, not a rust-cache input.)
+          # cache-on-failure: "true" — saves cache even when the job is canceled
+          # at the timeout (same cold-build loop prevention as the test matrix).
           cache-on-failure: "true"
       - name: Check for benchmark fixtures
         id: bench-check
@@ -341,7 +490,7 @@ jobs:
         # CI fails if criterion reports a regression above the threshold.
         run: cargo bench --workspace --profile bench 2>&1 | tee /tmp/bench-output.txt
 
-  # ─── Visual regression ─────────────────────────────────────────────────────
+  # ─── Visual regression (slow tier) ────────────────────────────────────────
   # NFR-007/008: SSIM ≥ 0.99 / PSNR ≥ 35dB per slide against committed PNGs.
   # Requires LibreOffice Still 25.8.7 (or latest stable at time of activation).
   # Skipped until Phase 3 PPTX exporter is implemented and reference PNGs exist.
@@ -349,6 +498,14 @@ jobs:
     name: visual-regression
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -402,7 +559,7 @@ jobs:
             --psnr-threshold 35.0 \
             --fail-on-violation
 
-  # ─── Performance smoke gate (NFR-036 / NFR-037) ───────────────────────────
+  # ─── Performance smoke gate (slow tier, NFR-036/NFR-037) ──────────────────
   # Runs the #[ignore = "perf-gate"] integration tests from
   # crates/slideforge-data/tests/perf_smoke.rs.
   #
@@ -421,6 +578,14 @@ jobs:
     name: perf-smoke (NFR-036/037)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # FULL-TIER CONDITION — verbatim copy required on every slow job.
+    if: >
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -441,41 +606,63 @@ jobs:
           test "${PASSED:-0}" -ge 2 || { echo "::error::perf-smoke false-green: expected >=2 tests passed, got ${PASSED:-0}"; exit 1; }
           echo "Check passed: ${PASSED} perf-gate tests validated (NFR-036/037)"
 
+  # ════════════════════════════════════════════════════════════════════════════
+  # AGGREGATOR — single required status check
+  # ════════════════════════════════════════════════════════════════════════════
+
   # ─── Summary: all required checks passed ───────────────────────────────────
-  # This synthetic job depends on every required check. Branch protection
-  # can gate on "CI / all-checks-pass" as a single required status check.
+  # This synthetic job depends on every required check in both tiers.
+  # Branch protection MUST declare ONLY 'all-checks-pass' as the required status
+  # check context (the API context string). The PR UI displays it as
+  # "CI / all-checks-pass" but the branch-protection PUT payload uses the bare
+  # job name: 'all-checks-pass'. Never add individual slow legs as required checks
+  # (deadlock: a skipped individual required check is never reported, blocking
+  # the PR forever).
+  #
+  # SKIPPED == PASS: slow-tier jobs are skipped on normal PR pushes.
+  # The aggregator treats 'skipped' as success and only fails when a job that
+  # actually ran reported 'failure' or 'cancelled'.
+  #
+  # TD-VSDD-060 note: when adding a new job to ci.yml, add it to the needs: list
+  # below. The Python result-check iterates needs automatically — no other change
+  # to this aggregator is required.
   all-checks-pass:
     name: all-checks-pass
     needs:
+      # Fast tier — always runs
       - check-panic-profile
       - check-pdf-deps
       - fmt
       - clippy
       - test
       - doctest
+      - supply-chain
+      # Slow tier — skipped on normal PR pushes (treated as pass by aggregator)
+      - test-matrix-slow
       - msrv
       - docs
       - snapshots
-      - supply-chain
       - bench
       - visual-regression
       - perf-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
     steps:
       - name: Check all required jobs passed
         shell: bash
         run: |
           set -euo pipefail
-          results='${{ toJSON(needs) }}'
-          echo "Job results: $results"
+          echo "Job results: $NEEDS_JSON"
           # Fail if any required job did not succeed.
-          # Note: 'skipped' is treated as success here — gated jobs that skip
-          # intentionally (no fixtures yet) do not block merges.
-          failed=$(echo "$results" | python3 -c "
-          import json, sys
-          results = json.load(sys.stdin)
+          # 'skipped' is treated as success — slow-tier jobs that skip on normal
+          # PR pushes (full-tier condition false) do not block merges.
+          # 'failure' or 'cancelled' from any job that DID run causes failure.
+          failed=$(python3 -c "
+          import json, os
+          results = json.loads(os.environ['NEEDS_JSON'])
           failed = [name for name, info in results.items()
                     if info['result'] not in ('success', 'skipped')]
           if failed:
@@ -485,4 +672,4 @@ jobs:
             echo "FAILED jobs: $failed"
             exit 1
           fi
-          echo "All required CI jobs passed."
+          echo "All required CI jobs passed (skipped slow-tier jobs treated as OK)."
