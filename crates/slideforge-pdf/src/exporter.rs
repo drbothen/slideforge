@@ -857,13 +857,21 @@ fn draw_frame(
 
         // ColorBar — PDF filled rectangle (BC-1.17.002 PC-9).
         //
-        // The bar frame is tagged as a PDF Artifact by `tag_engine.rs`
-        // (pushed into `decorative_frame_indices`). At the call-site in the
-        // draw loop, Artifact frames are wrapped with
-        // `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`),
-        // which suppresses the bar from the PDF logical structure tree.
-        // WCAG accessibility co-encoding is satisfied by the adjacent
-        // ColorLabel (Body-role) text frame that renders the percentage label.
+        // Tagging (F-095-P1-002 / STORY-095 AC-003): `tag_engine.rs` dispatches
+        // on the `alt` field at tagging time (before this draw call):
+        //   - AltText::Provided(label): tagged as /Figure with /Alt = label.
+        //   - AltText::Decorative | AltText::Unspecified: pushed to Artifact.
+        //
+        // The DRAW PASS is ALWAYS the same (filled rectangle) regardless of the
+        // alt value. Tagging wraps the content stream region produced by this draw.
+        // When tagged as /Figure, the draw loop's start_tagged(ContentTag::Other)
+        // links this content to the Figure structure element in the tag tree.
+        // When tagged as Artifact, `ContentTag::Artifact(ArtifactType::Other)`
+        // suppresses the rectangle from the logical structure tree.
+        //
+        // WCAG co-encoding: when AltText::Unspecified/Decorative (no label was
+        // provided by the author), the adjacent ColorLabel (Body-role) text frame
+        // still co-encodes the percentage in text for assistive technology.
         //
         // Drawing: uses krilla's PathBuilder to build a rectangle path at the
         // filled sub-width, then sets the brand fill color and calls
@@ -1129,6 +1137,12 @@ fn text_fill_black() -> Fill {
 /// When `face` is `None`, the function returns without drawing — we cannot measure
 /// widths without font metrics, and non-fatal degradation is the correct behaviour.
 ///
+/// ## Frame-bottom clamp (F-095-P1-005 / BC-4.03.002)
+///
+/// Wrapped lines that overflow the frame height (baseline > frame bottom) are
+/// silently elided.  A `tracing::warn!` is emitted once per invocation when
+/// overflow occurs, with `frame_bottom_pt` and `baseline_y` as structured fields.
+///
 /// ## Paint-state determinism (OBS-044-22-01 fix)
 ///
 /// Explicitly sets fill to opaque black and clears stroke before calling
@@ -1190,7 +1204,23 @@ fn draw_text_at_bbox(
     // No ir_y_to_pdf_y — krilla handles the PDF Y-flip internally (DIR-044-001).
     let mut baseline_y = text_baseline_surface_y(bbox);
 
+    // F-095-P1-005: compute frame bottom to clamp overflow lines.
+    // In krilla's top-left Y-down coordinate system the frame bottom is the
+    // top-edge Y plus the frame height.  Lines whose baseline exceeds this
+    // are emitted off-slide (incorrect) and elided with a structured warning.
+    let frame_bottom_pt = emu_to_pt(bbox.y) + emu_to_pt(bbox.height);
+
     for line in &lines {
+        // F-095-P1-005: clamp — elide lines that overflow the frame height.
+        if baseline_y > frame_bottom_pt {
+            tracing::warn!(
+                frame_bottom_pt,
+                baseline_y,
+                "draw_text_at_bbox: baseline exceeds frame bottom; \
+                 eliding overflow wrapped lines (F-095-P1-005)"
+            );
+            break;
+        }
         let start = Point::from_xy(surface_x, baseline_y);
         surface.draw_text(
             start,
@@ -1258,7 +1288,7 @@ pub fn adjusted_baseline_y(span: &KrillaTextSpan, baseline_y: f32, base_font_siz
 ///
 /// This is the SINGLE authoritative slot-selection function called by BOTH the
 /// measurement path ([`compute_multi_span_x_positions`]) and the draw path
-/// ([`font_for_span`]).  Because both paths call this one function, it is
+/// (`draw_packed_line`).  Because both paths call this one function, it is
 /// **structurally impossible** for measurement and drawing to select different
 /// font slots for the same span kind — eliminating the recurring
 /// measure≠draw divergence (ADV-P06-MED-001 fix).
@@ -1307,7 +1337,7 @@ fn face_for_span_kind(
 /// that the draw path uses — making width-measurement and glyph-drawing
 /// structurally guaranteed to agree.
 ///
-/// Both this function and the draw path (`font_for_span`) delegate slot
+/// Both this function and the draw path (`draw_packed_line`) delegate slot
 /// selection to the single shared `face_for_span_kind` helper.  This makes it
 /// **structurally impossible** for the two paths to select different slots for the
 /// same `FontFaceKind` (ADV-P06-MED-001 fix).
@@ -1361,7 +1391,7 @@ pub fn compute_multi_span_x_positions(
 
         // Delegate slot selection to the single shared face_for_span_kind helper
         // (ADV-P06-MED-001 fix): guarantees identical slot selection between the
-        // measure path (here) and the draw path (font_for_span).
+        // measure path (here) and the draw path (draw_packed_line).
         let resolved_face_opt = face_for_span_kind(span.face, font_set);
 
         let effective_size = effective_span_font_size(span, font_size);
@@ -1378,37 +1408,6 @@ pub fn compute_multi_span_x_positions(
         // If no face at all: cursor stays (graceful degradation; span gets 0 width).
     }
     positions
-}
-
-/// Select the `krilla::text::Font` for a [`KrillaTextSpan`] from a
-/// [`ResolvedFontSet`], applying the fallback chain from ADR-023.
-///
-/// Delegates slot selection to the single shared [`face_for_span_kind`] helper
-/// and extracts the `font` field.  Because both the measurement path
-/// ([`compute_multi_span_x_positions`]) and this draw path call the SAME
-/// [`face_for_span_kind`] function, the measured face and the drawn face are
-/// **structurally guaranteed to agree** for every `FontFaceKind` variant
-/// (ADV-P06-MED-001 fix; extends the ADV-P05-MED-001 `raw`/`face_index` unification).
-///
-/// ## Dispatch table (via [`face_for_span_kind`])
-///
-/// | `FontFaceKind` | Face selected |
-/// |---|---|
-/// | `Regular` | `font_set.regular` |
-/// | `Bold` | `font_set.bold` → fallback to `font_set.regular` |
-/// | `Italic` | `font_set.italic` → fallback to `font_set.regular` |
-/// | `BoldItalic` | `font_set.bold` → `font_set.italic` → `font_set.regular` |
-/// | `Mono` | `font_set.mono` → fallback to `font_set.regular` |
-///
-/// The fallback is silent at this call site (the warn was emitted by
-/// `resolve_font_set` when the styled face was not found).
-fn font_for_span<'a>(
-    span: &KrillaTextSpan,
-    font_set: &'a ResolvedFontSet,
-) -> Option<&'a krilla::text::Font> {
-    // Delegate to the shared slot-selection helper so this draw path and the
-    // measure path in compute_multi_span_x_positions always select the same face.
-    face_for_span_kind(span.face, font_set).map(|f| &f.font)
 }
 
 /// Draw a sequence of [`KrillaTextSpan`]s at a bounding-box baseline position,
@@ -1437,7 +1436,238 @@ fn draw_inline_spans(
     draw_inline_spans_at_y(surface, spans, bbox, baseline_y, font_size, font_set);
 }
 
-/// Draw a sequence of [`KrillaTextSpan`]s at an explicit `baseline_y`.
+/// A single word extracted from a [`KrillaTextSpan`], retaining its font face
+/// and super/subscript offset signal.
+///
+/// Produced by [`expand_spans_to_words`] for the line-packing step in
+/// [`draw_inline_spans_at_y`]. Each `SpanWord` represents one whitespace-delimited
+/// token from a span; together they reconstruct the full text with per-word font
+/// face dispatch.
+///
+/// ## Why `String` and not `Arc<str>`?
+///
+/// The words are transient line-packing artifacts — they are never stored long-
+/// term and do not need reference-counted heap allocation.  Using `String` here
+/// is idiomatic and avoids a spurious `Arc` bump per word.
+#[derive(Debug, Clone)]
+struct SpanWord {
+    /// Font face kind for this word (inherits from the parent span).
+    face: FontFaceKind,
+    /// The text of this word (one whitespace-delimited token).
+    text: String,
+    /// Superscript/Subscript signal (non-zero iff the parent span is super/sub).
+    y_offset_units: i32,
+}
+
+/// Expand a slice of [`KrillaTextSpan`]s into individual words with their
+/// associated font face kind.
+///
+/// Splits each span's text on whitespace (consuming the whitespace, which is
+/// correct since line-packing re-adds inter-word space in the horizontal cursor).
+/// The font face and super/subscript signal from the parent span are inherited
+/// by every word extracted from that span.
+///
+/// Empty tokens (consecutive whitespace in the source) are discarded.
+///
+/// ## Why `face` and `y_offset_units` but not `text` from `KrillaTextSpan`?
+///
+/// The `text` of a `KrillaTextSpan` may contain multiple words (e.g., a bold
+/// span wrapping `"word1 word2 word3"`). Splitting on whitespace is necessary
+/// for word-boundary wrapping. The `face` and `y_offset_units` fields are
+/// span-wide attributes — they apply identically to every word in the span.
+fn expand_spans_to_words(spans: &[KrillaTextSpan]) -> Vec<SpanWord> {
+    let mut words = Vec::new();
+    for span in spans {
+        for token in span.text.split_whitespace() {
+            if !token.is_empty() {
+                words.push(SpanWord {
+                    face: span.face,
+                    text: token.to_owned(),
+                    y_offset_units: span.y_offset_units,
+                });
+            }
+        }
+    }
+    words
+}
+
+/// Measure the rendered width of a single word in PDF points using the
+/// face from `font_set` that corresponds to `face_kind`.
+///
+/// Returns `0.0` when the face is absent (graceful degradation — consistent
+/// with [`compute_multi_span_x_positions`]'s zero-advance path).
+fn measure_word_width_pt(
+    word: &str,
+    face_kind: FontFaceKind,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    face_for_span_kind(face_kind, font_set).map_or(0.0, |face| {
+        measure_text_width_pt(face.raw.as_ref(), face.face_index, font_size, word)
+    })
+}
+
+/// Measure the rendered width of an inter-word space in PDF points using the
+/// face from `font_set` that corresponds to `face_kind`.
+///
+/// Used by the line-packing step to correctly account for the horizontal space
+/// between adjacent words — critical for accurate line-width measurement.
+///
+/// Returns the width of a single ASCII space character " " for the given face.
+#[allow(clippy::inline_always)]
+#[inline(always)]
+fn measure_space_width_pt(
+    face_kind: FontFaceKind,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    measure_word_width_pt(" ", face_kind, font_size, font_set)
+}
+
+/// Pack [`SpanWord`]s greedily into lines that fit within `max_line_width_pt`.
+///
+/// Returns `Vec<Vec<SpanWord>>` — each inner `Vec` is one line's word sequence,
+/// ordered left-to-right as they should be drawn.
+///
+/// ## Algorithm (F-095-P1-001 fix — VP-054 analogue for multi-face text)
+///
+/// Maintains a running `cursor_x` for the current line. For each word:
+/// - Measure the word width using the word's face kind (preserving bold/italic
+///   metrics — they differ from regular face metrics).
+/// - If `cursor_x + space + word_width > max_line_width_pt` AND the line is
+///   non-empty: flush the current line, start a new one, reset cursor to `word_width`.
+/// - Otherwise: append the word to the current line and advance cursor.
+///
+/// ## Space handling
+///
+/// The inter-word space width is measured with the PRECEDING word's face (the
+/// most common convention — kerning between adjacent runs uses the dominant face).
+/// When a line is empty (first word on a new line), no space is prepended.
+///
+/// ## Empty line prevention
+///
+/// A word that is itself wider than `max_line_width_pt` is placed alone on its
+/// own line (no further char-splitting — that is handled by `wrap_text` for the
+/// simple-text path; multi-face char-splitting is deferred). This guarantees
+/// termination and ensures no word is silently dropped (VP-054 sub-property a).
+fn pack_words_into_lines(
+    words: &[SpanWord],
+    max_line_width_pt: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> Vec<Vec<SpanWord>> {
+    let mut lines: Vec<Vec<SpanWord>> = Vec::new();
+    let mut current_line: Vec<SpanWord> = Vec::new();
+    let mut cursor_x: f32 = 0.0;
+
+    for word in words {
+        let word_w = measure_word_width_pt(&word.text, word.face, font_size, font_set);
+
+        let space_w = if current_line.is_empty() {
+            0.0
+        } else {
+            // Measure a space using the face of the PRECEDING word.
+            let prev_face = current_line.last().map_or(word.face, |w| w.face);
+            measure_space_width_pt(prev_face, font_size, font_set)
+        };
+
+        if current_line.is_empty() {
+            // First word on this line — always append (even if over-wide).
+            current_line.push(word.clone());
+            cursor_x = word_w;
+        } else if cursor_x + space_w + word_w <= max_line_width_pt {
+            // Fits on current line.
+            current_line.push(word.clone());
+            cursor_x += space_w + word_w;
+        } else {
+            // Overflow: flush current line, start new line with this word.
+            lines.push(std::mem::take(&mut current_line));
+            current_line.push(word.clone());
+            cursor_x = word_w;
+        }
+    }
+
+    // Flush the last line (if any).
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    lines
+}
+
+/// Draw one packed line of [`SpanWord`]s at a given baseline Y.
+///
+/// Advances `cursor_x` after each word, inserting an inter-word space measured
+/// with the CURRENT word's face (consistent with [`pack_words_into_lines`]).
+/// Each word is drawn with the appropriate `krilla::text::Font` from `font_set`
+/// via [`face_for_span_kind`] — preserving bold/italic dispatch across all words
+/// on the line (F-095-P1-001: bold run split across lines keeps bold on both).
+///
+/// Super/subscript signals from [`SpanWord::y_offset_units`] are respected:
+/// reduced font size via [`effective_span_font_size`] and shifted baseline via
+/// [`adjusted_baseline_y`], both computed against the parent `font_size`.
+fn draw_packed_line(
+    surface: &mut krilla::surface::Surface<'_>,
+    line_words: &[SpanWord],
+    start_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) {
+    let mut cursor_x = start_x;
+
+    for (i, word) in line_words.iter().enumerate() {
+        if word.text.is_empty() {
+            continue;
+        }
+
+        // Add inter-word space (not before the first word on a line).
+        if i > 0 {
+            let prev_face = line_words[i - 1].face;
+            cursor_x += measure_space_width_pt(prev_face, font_size, font_set);
+        }
+
+        let Some(font) = face_for_span_kind(word.face, font_set).map(|f| &f.font) else {
+            let preview: String = word.text.chars().take(20).collect();
+            tracing::debug!(
+                text_preview = %preview,
+                face = ?word.face,
+                "draw_packed_line: skipping word — no resolved font for face"
+            );
+            cursor_x += measure_word_width_pt(&word.text, word.face, font_size, font_set);
+            continue;
+        };
+
+        // Super/subscript: reduced font size + shifted baseline (ADR-023 amendment).
+        // Create a synthetic KrillaTextSpan stub just to reuse the shared helper fns.
+        // (This avoids duplicating the scale/shift arithmetic.)
+        let stub_span = KrillaTextSpan {
+            face: word.face,
+            text: word.text.as_str().into(),
+            y_offset_units: word.y_offset_units,
+        };
+        let effective_size = effective_span_font_size(&stub_span, font_size);
+        let draw_y = adjusted_baseline_y(&stub_span, baseline_y, font_size);
+
+        surface.set_fill(Some(text_fill_black()));
+        surface.set_stroke(None);
+
+        let start = Point::from_xy(cursor_x, draw_y);
+        surface.draw_text(
+            start,
+            font.clone(),
+            effective_size,
+            &word.text,
+            false,
+            TextDirection::Auto,
+        );
+
+        cursor_x += measure_word_width_pt(&word.text, word.face, font_size, font_set);
+    }
+}
+
+/// Draw a sequence of [`KrillaTextSpan`]s at an explicit `baseline_y`,
+/// wrapping to new lines when the combined span width exceeds the frame width.
 ///
 /// Called by [`draw_body_blocks`] and [`draw_body_blocks_tagged`] for
 /// per-item cursor positioning, and by [`draw_inline_spans`] for bbox-derived
@@ -1447,22 +1677,40 @@ fn draw_inline_spans(
 ///
 /// Each span is drawn at a running horizontal cursor position that advances by
 /// the MEASURED width of the preceding span.  Width is computed via
-/// [`compute_multi_span_x_positions`] using real glyph horizontal-advances from
-/// `ttf-parser` (cmap → glyph ID → hmtx advance, scaled by `font_size` / upem).
-/// This eliminates the multi-span overprinting defect where every span was drawn
-/// at `surface_x = emu_to_pt(bbox.x)` with no cursor advance.
+/// per-word glyph horizontal-advances from `ttf-parser`.
+///
+/// ## Word-wrap (F-095-P1-001 fix / BC-4.03.002 postcondition 1)
+///
+/// The inline span path now applies word-boundary wrapping at the frame width
+/// derived from `bbox.width`. The implementation:
+/// 1. [`expand_spans_to_words`]: split all spans into individual word tokens,
+///    preserving each word's font face kind and super/subscript signal.
+/// 2. [`pack_words_into_lines`]: greedy line packing at `emu_to_pt(bbox.width)`.
+///    A word that is itself wider than the frame is placed alone on its line
+///    (no char-split in the multi-face path — VP-054 covers the single-face path).
+/// 3. [`draw_packed_line`]: draw each packed line at the current `baseline_y`,
+///    advancing the cursor with inter-word space using face-accurate metrics.
+/// 4. Advance `baseline_y` by `font_size * BODY_LINE_LEADING` after each line.
+///
+/// ## Frame-bottom clamp (F-095-P1-005 fix)
+///
+/// Lines whose baseline would exceed the frame bottom (`bbox.y + bbox.height`)
+/// are silently elided, with a `tracing::warn!` emitted once per overflow event.
+/// This prevents drawing off-slide and is consistent with the clamp applied in
+/// [`draw_text_at_bbox`].
+///
+/// ## Bold/italic preserved across wrap boundaries (F-095-P1-001)
+///
+/// Each word in a packed line retains its source face kind
+/// (`FontFaceKind::Bold`, `FontFaceKind::Italic`, etc.). A bold run that spans
+/// two lines has bold face on BOTH lines — no face information is lost at the
+/// wrap boundary.
 ///
 /// ## Super/Subscript size reduction (ADV-P04-HIGH-001 fix)
 ///
-/// Super/subscript spans are drawn with `font_size * SUPER_SUB_SCALE` (0.583 ×)
-/// via [`effective_span_font_size`], and their baselines are shifted via
-/// [`adjusted_baseline_y`]:
-/// - Superscript: `baseline_y - (font_size * SUPER_RISE_FRACTION)` (raised).
-/// - Subscript: `baseline_y + (font_size * SUB_DROP_FRACTION)` (lowered).
-///
-/// Both the shift and the scale are computed against the PARENT font size, not
-/// the reduced size — so the shift is proportional to the reading context
-/// (ADR-023 amendment, 2026-06-09).
+/// Unchanged from the single-line path: super/subscript spans use
+/// `font_size * SUPER_SUB_SCALE` (0.583 ×) via [`effective_span_font_size`],
+/// and their baselines are shifted via [`adjusted_baseline_y`].
 fn draw_inline_spans_at_y(
     surface: &mut krilla::surface::Surface<'_>,
     spans: &[KrillaTextSpan],
@@ -1472,44 +1720,44 @@ fn draw_inline_spans_at_y(
     font_set: &ResolvedFontSet,
 ) {
     let start_x = emu_to_pt(bbox.x);
+    let max_line_width_pt = emu_to_pt(bbox.width);
+    let frame_bottom_pt = emu_to_pt(bbox.y) + emu_to_pt(bbox.height);
 
-    // Compute per-span X positions using real glyph-metric widths.
-    // Passes font_set directly so each span's measurement uses the SAME
-    // ResolvedFace (same raw bytes AND same face_index) as the draw path
-    // (ADV-P05-MED-001 fix — eliminates hardcoded face_index=0).
-    let x_positions = compute_multi_span_x_positions(spans, start_x, font_size, font_set);
+    // Step 1: expand all spans to individual word tokens.
+    let words = expand_spans_to_words(spans);
+    if words.is_empty() {
+        return;
+    }
 
-    for (span, &surface_x) in spans.iter().zip(x_positions.iter()) {
-        if span.text.is_empty() {
-            continue;
-        }
-        let Some(font) = font_for_span(span, font_set) else {
-            let preview: String = span.text.chars().take(20).collect();
-            tracing::debug!(
-                text_preview = %preview,
-                face = ?span.face,
-                "skipping span draw: no resolved font for face"
+    // Step 2: pack words into lines that fit within the frame width.
+    let lines = pack_words_into_lines(&words, max_line_width_pt, font_size, font_set);
+
+    // Step 3: draw each line at the appropriate baseline.
+    let mut current_baseline_y = baseline_y;
+
+    for line_words in &lines {
+        // F-095-P1-005: clamp at frame bottom — elide lines that exceed the frame.
+        if current_baseline_y > frame_bottom_pt {
+            tracing::warn!(
+                frame_bottom_pt,
+                current_baseline_y,
+                remaining_lines = lines.len(),
+                "draw_inline_spans_at_y: baseline exceeds frame bottom; \
+                 eliding overflow lines (F-095-P1-005)"
             );
-            continue;
-        };
+            break;
+        }
 
-        // Super/Subscript: reduced font size + point-space baseline shift.
-        // BOTH are computed against the parent font_size (ADR-023 amendment).
-        let effective_size = effective_span_font_size(span, font_size);
-        let draw_y = adjusted_baseline_y(span, baseline_y, font_size);
-
-        surface.set_fill(Some(text_fill_black()));
-        surface.set_stroke(None);
-
-        let start = Point::from_xy(surface_x, draw_y);
-        surface.draw_text(
-            start,
-            font.clone(),
-            effective_size,
-            span.text.as_ref(),
-            false,
-            TextDirection::Auto,
+        draw_packed_line(
+            surface,
+            line_words,
+            start_x,
+            current_baseline_y,
+            font_size,
+            font_set,
         );
+
+        current_baseline_y += font_size * BODY_LINE_LEADING;
     }
 }
 

@@ -31,8 +31,9 @@ use std::sync::Arc;
 
 use slideforge_layout::{FrameContent, run};
 use slideforge_types::{
-    AltText, Block, Brand, BrandFonts, BrandPalette, ChartSpec, ContentBlock, Deck, DeckMetadata,
-    DiagramSpec, ImageSpec, OrderedMap, Slide, SourceSpan,
+    AltText, Block, Brand, BrandFonts, BrandPalette, ChartSpec, ColorBarSpec, ContentBlock, Deck,
+    DeckMetadata, DiagramSpec, ImageSpec, InlineNode, OrderedMap, Slide, SourceSpan, TextBlock,
+    TextTag,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -376,5 +377,154 @@ fn test_bc_3_06_039_ec006_chart_alt_none_maps_to_unspecified() {
         "EC-006 / ADR-019: FrameContent::Chart.alt must be AltText::Unspecified when \
          ChartSpec.alt is None; got: {:?}",
         chart_frame_alt[0]
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-095-P1-002 fix: ColorBar alt derived from TextTag::ColorLabel
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-095-P1-002 / F-095-P1-006 RED GATE: `layout::run` must derive
+/// `FrameContent::ColorBar.alt = AltText::Provided(label)` from the
+/// `ContentBlock::Text(TextBlock { tag: TextTag::ColorLabel, .. })` block on the
+/// same slide.
+///
+/// ## What this test guards
+///
+/// Before this fix, `layout::run` hardcoded `alt: AltText::Unspecified` for every
+/// `FrameContent::ColorBar`, regardless of whether the slide had a `ColorLabel` block.
+/// That caused ALL production `ColorBar` frames to be emitted as `/Artifact` (invisible
+/// to assistive technology) in the PDF exporter, violating WCAG SC 1.1.1 for progress
+/// bar slides.
+///
+/// This test builds a `progress_bar` slide with a `TextTag::ColorLabel` block ("75%
+/// complete") alongside a `ContentBlock::ColorBar { percent: 75 }`, runs `layout::run`,
+/// and asserts that the resulting `FrameContent::ColorBar.alt` carries
+/// `AltText::Provided("75% complete")`.
+///
+/// The test FAILS before the fix (alt is `Unspecified`) and PASSES after the fix
+/// (alt is `Provided("75% complete")`).
+///
+/// ## TD-VSDD-059 compliance
+///
+/// This is a load-bearing test: removing the `TextTag::ColorLabel` → `alt` derivation
+/// logic from `layout.rs` causes this test to fail (reverts to `Unspecified`).
+#[test]
+fn test_f095_p1_002_color_bar_alt_derived_from_color_label_block() {
+    // Build a TextTag::ColorLabel block with "75% complete" plain text.
+    let label_text = Arc::from("75% complete");
+    let label_block = ContentBlock::Text(TextBlock {
+        inlines: vec![InlineNode::Plain(Arc::clone(&label_text))],
+        tag: TextTag::ColorLabel,
+        span: SourceSpan::default(),
+    });
+    // ColorBar block at 75%.
+    let color_bar_block = ContentBlock::ColorBar(ColorBarSpec { percent: 75 });
+
+    // Build the slide with BOTH blocks (ColorLabel must come before ColorBar to
+    // mirror production eval output, but layout must scan all blocks regardless of order).
+    let slide = Slide {
+        slide_type: Arc::from("progress_bar"),
+        fields: OrderedMap::new(),
+        blocks: vec![
+            Block {
+                content: label_block,
+                label: None,
+                span: SourceSpan::default(),
+            },
+            Block {
+                content: color_bar_block,
+                label: None,
+                span: SourceSpan::default(),
+            },
+        ],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+        field_spans: OrderedMap::new(),
+    };
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("layout::run must succeed for progress_bar with ColorLabel + ColorBar");
+
+    // Extract FrameContent::ColorBar frames from the laid-out slide.
+    let color_bar_alts: Vec<&AltText> = result.slides[0]
+        .frames
+        .iter()
+        .filter_map(|f| match &f.content {
+            FrameContent::ColorBar { alt, .. } => Some(alt),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        color_bar_alts.len(),
+        1,
+        "progress_bar slide must produce exactly 1 FrameContent::ColorBar frame; \
+         got {} (total frames: {})",
+        color_bar_alts.len(),
+        result.slides[0].frames.len()
+    );
+
+    // F-095-P1-002 guard: layout::run must derive alt from TextTag::ColorLabel.
+    // Before fix: AltText::Unspecified (hardcoded). After fix: AltText::Provided("75% complete").
+    assert_eq!(
+        color_bar_alts[0],
+        &AltText::Provided(Arc::clone(&label_text)),
+        "F-095-P1-002: FrameContent::ColorBar.alt must be Provided(\"75% complete\") \
+         derived from TextTag::ColorLabel block; got: {:?} \
+         (regression: layout.rs still hardcodes AltText::Unspecified for ColorBar)",
+        color_bar_alts[0]
+    );
+}
+
+/// F-095-P1-002 fallback: when NO `TextTag::ColorLabel` block is present on the
+/// slide, `FrameContent::ColorBar.alt` must be `AltText::Unspecified` (safe
+/// fallback — the PDF exporter emits `/Artifact`, which is the correct PDF/UA-1
+/// behavior for an unmarked progress bar).
+///
+/// This test ensures the fallback branch is exercised and guards against
+/// accidentally emitting `AltText::Decorative` (which would be incorrect: the
+/// bar IS meaningful content, it just lacks a label from the author).
+#[test]
+fn test_f095_p1_002_color_bar_alt_unspecified_when_no_color_label_block() {
+    // ColorBar block only — no ColorLabel block on the slide.
+    let color_bar_block = ContentBlock::ColorBar(ColorBarSpec { percent: 40 });
+    let slide = slide_with_block("progress_bar", color_bar_block);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result =
+        run(&deck, &brand).expect("layout::run must succeed for progress_bar with ColorBar only");
+
+    let color_bar_alts: Vec<&AltText> = result.slides[0]
+        .frames
+        .iter()
+        .filter_map(|f| match &f.content {
+            FrameContent::ColorBar { alt, .. } => Some(alt),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        color_bar_alts.len(),
+        1,
+        "progress_bar slide must produce exactly 1 FrameContent::ColorBar frame; \
+         got {} (total frames: {})",
+        color_bar_alts.len(),
+        result.slides[0].frames.len()
+    );
+
+    // When no ColorLabel block, alt must fall back to Unspecified (not Decorative).
+    assert_eq!(
+        color_bar_alts[0],
+        &AltText::Unspecified,
+        "F-095-P1-002 fallback: FrameContent::ColorBar.alt must be AltText::Unspecified \
+         when no TextTag::ColorLabel block is present; got: {:?}",
+        color_bar_alts[0]
     );
 }

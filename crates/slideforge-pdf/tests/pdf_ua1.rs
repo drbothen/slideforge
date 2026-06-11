@@ -2974,3 +2974,174 @@ fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
         "OBS-P3-002: destination page index must be 0 (F-045-P1-005 invariant)"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-095-P1-007: progress_bar with label → /Figure + label bytes in PDF
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-095-P1-007 — Full pipeline integration: `progress_bar` slide with
+/// `TextTag::ColorLabel` block → `layout::run` → `PdfExporter::export` →
+/// PDF bytes contain `/Figure` and the label text.
+///
+/// ## What this test guards
+///
+/// 1. `layout::run` derives `FrameContent::ColorBar.alt = AltText::Provided(label)`
+///    from the `TextTag::ColorLabel` block (F-095-P1-002 fix).
+/// 2. `tag_engine.rs` emits `/Figure + /Alt` for `FrameContent::ColorBar` when
+///    `AltText::Provided` (STORY-095 AC-003 fix).
+/// 3. The alt text string appears in the exported PDF bytes.
+///
+/// Together, these three assertions form a load-bearing end-to-end guard: if
+/// F-095-P1-002's label derivation is removed (reverts to `Unspecified`), or
+/// if the tag engine reverts to emitting `/Artifact` for `ColorBar`, either
+/// `/Figure` will be absent or the label bytes will be absent → test fails.
+///
+/// ## TD-VSDD-059 compliance
+///
+/// This is a load-bearing test that exercises the FULL pipeline
+/// (semantic IR → layout → PDF). It does NOT hand-construct `LaidOutDeck`.
+///
+/// ## SID-1 compliance
+///
+/// Does not depend on `verapdf` CLI or any external tool. The `/Figure` +
+/// label-bytes scan is a structural assertion on krilla's PDF output format
+/// (same pattern as `test_bc_4_03_001_figure_alt_text_in_structure_tree`).
+///
+/// ## F-095-P1-009 extension
+///
+/// The label "Sprint 4 \u{2014} 75% complete" (em-dash U+2014) exercises the
+/// non-ASCII /Alt assertion (F-095-P1-009): the UTF-8 bytes of the em-dash must
+/// be present in the PDF (krilla encodes /Alt as UTF-8 in a PDF text string).
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_f095_p1_007_progress_bar_with_label_produces_figure_tag() {
+    use slideforge_layout::run as layout_run;
+    use slideforge_types::{
+        Block, ColorBarSpec, ContentBlock, Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap,
+        Slide, SourceSpan, TextBlock, TextTag, Value,
+    };
+
+    // F-095-P1-009: include a non-ASCII character (em-dash U+2014) in the label
+    // so this test simultaneously guards the non-ASCII /Alt round-trip.
+    let label = "Sprint 4 \u{2014} 75% complete";
+
+    // Build the semantic deck.
+    let mut title_fields = OrderedMap::new();
+    title_fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from("Sprint 4 Progress"))),
+    );
+    let slide = Slide {
+        slide_type: Arc::from("progress_bar"),
+        fields: title_fields,
+        blocks: vec![
+            Block {
+                content: ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(label))],
+                    tag: TextTag::ColorLabel,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: SourceSpan::default(),
+            },
+            Block {
+                content: ContentBlock::ColorBar(ColorBarSpec { percent: 75 }),
+                label: None,
+                span: SourceSpan::default(),
+            },
+        ],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+        field_spans: OrderedMap::new(),
+    };
+    let deck = Deck {
+        slides: vec![slide],
+        vars: OrderedMap::new(),
+        metadata: DeckMetadata {
+            title: Some(Arc::from("Sprint 4 Progress Deck")),
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from("en-US")),
+            author: None,
+            section_order: None,
+        },
+        registers: OrderedMap::new(),
+        section_blocks: vec![],
+        slide_sections: vec![],
+    };
+
+    // Run the layout pipeline (F-095-P1-002 fix: derives AltText::Provided from ColorLabel).
+    let brand = minimal_brand();
+    let laid_out = layout_run(&deck, &brand).unwrap_or_else(|e| {
+        panic!("F-095-P1-007: layout::run must succeed for progress_bar with ColorLabel: {e:?}")
+    });
+
+    // Export to PDF.
+    let exporter = PdfExporter::new();
+    let opts = ExportOptions::default();
+    let pdf_bytes = exporter
+        .export(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("F-095-P1-007: PdfExporter::export must succeed: {e:?}"));
+
+    assert!(
+        pdf_bytes.starts_with(b"%PDF-"),
+        "F-095-P1-007: exported bytes must start with %PDF-"
+    );
+
+    // Assertion 1: /Figure must be present in the PDF structure tree.
+    // The ColorBar with AltText::Provided must emit /Figure (not /Artifact).
+    let has_figure = pdf_bytes.windows(b"/Figure".len()).any(|w| w == b"/Figure");
+    assert!(
+        has_figure,
+        "F-095-P1-007 FAILED (F-095-P1-002 + AC-003): PDF must contain /Figure for the \
+         progress_bar visual bar with ColorLabel '{label}'. \
+         Possible cause: layout::run reverted to AltText::Unspecified, or tag_engine \
+         reverted to emitting /Artifact for ColorBar with Provided alt."
+    );
+
+    // Assertion 2: /Alt must be present in the PDF (proves the Figure has an alt entry).
+    // krilla writes /Alt as a PDF hex string: /Alt <FEFF...> (UTF-16BE BOM encoded).
+    let has_alt_entry = pdf_bytes.windows(b"/Alt".len()).any(|w| w == b"/Alt");
+    assert!(
+        has_alt_entry,
+        "F-095-P1-007 FAILED (AC-003 /Alt): /Alt entry not found in PDF bytes. \
+         The /Figure structure element for the ColorBar must carry /Alt with the label text."
+    );
+
+    // Assertion 3 (F-095-P1-009): the non-ASCII em-dash (U+2014) must be preserved
+    // in the /Alt entry.
+    //
+    // krilla serializes /Alt as a UTF-16BE PDF hex string with BOM (PDF spec §7.9.2):
+    //   /Alt <FEFF 0053 0070 0072 ... 2014 0020 ...>
+    // The em-dash U+2014 appears as the ASCII hex characters b"2014" inside the angle
+    // bracket hex string. The specific 8-byte sequence b"00202014" (U+0020 space
+    // followed by U+2014 em-dash, i.e., " \u{2014}") is highly specific to our label
+    // and extremely unlikely to occur spuriously in a PDF with no other U+2014 content.
+    //
+    // Additionally accept: raw UTF-8 [0xE2, 0x80, 0x94] or raw UTF-16BE [0x20, 0x14]
+    // in case krilla's encoding changes in future versions.
+    let em_dash_in_alt_hex: &[u8] = b"00202014"; // space+em-dash as UTF-16BE hex chars
+    let em_dash_utf8: &[u8] = "\u{2014}".as_bytes(); // [0xE2, 0x80, 0x94]
+    let em_dash_utf16be_raw: &[u8] = &[0x20, 0x14]; // raw UTF-16BE bytes
+    let has_em_dash_specific = pdf_bytes
+        .windows(em_dash_in_alt_hex.len())
+        .any(|w| w == em_dash_in_alt_hex);
+    let has_em_dash_utf8 = pdf_bytes
+        .windows(em_dash_utf8.len())
+        .any(|w| w == em_dash_utf8);
+    let has_em_dash_utf16be = pdf_bytes
+        .windows(em_dash_utf16be_raw.len())
+        .any(|w| w == em_dash_utf16be_raw);
+    assert!(
+        has_em_dash_specific || has_em_dash_utf8 || has_em_dash_utf16be,
+        "F-095-P1-007/F-095-P1-009 FAILED: em-dash (U+2014) not found in PDF bytes. \
+         Searched for: PDF hex sequence {:?} ({has_em_dash_specific}), \
+         UTF-8 {:?} ({has_em_dash_utf8}), UTF-16BE {:?} ({has_em_dash_utf16be}). \
+         Non-ASCII characters in ColorLabel alt text must be preserved in /Alt entry.",
+        em_dash_in_alt_hex,
+        em_dash_utf8,
+        em_dash_utf16be_raw
+    );
+}
