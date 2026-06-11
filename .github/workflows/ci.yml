@@ -289,10 +289,18 @@ jobs:
   # NFR-001: cold build < 500ms; NFR-002: incremental rebuild < 50ms.
   # Skipped until Phase 3 when benchmark fixtures land (criterion benches).
   # The job is defined now so branch protection can reference "CI / bench".
+  #
+  # timeout-minutes: 60 — raised from 20 to accommodate cold workspace builds
+  # on ubuntu-latest x86_64. A foundational-crate change forces a full
+  # downstream rebuild; on a cold cache this exceeds the former 20-min ceiling
+  # before the job reaches its first bench assertion. 60 min provides headroom
+  # for cold compile + criterion bench runs while staying within cost limits.
+  # (The arm64 test job was given 75 min in PR #79; bench is x86_64-only so
+  # 60 min is sufficient.)
   bench:
     name: bench
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -301,6 +309,14 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
         with:
           shared-key: bench
+          # cache-on-failure: "true" — sets CACHE_ON_FAILURE=true so the
+          # rust-cache post-step runs even when the job is canceled at the
+          # timeout (post-if: success() || env.CACHE_ON_FAILURE == 'true').
+          # Without this, a canceled run never saves its cache → next run is
+          # cold again → times out again = self-perpetuating loop (same pattern
+          # fixed for linux-arm64 test job in PR #79).
+          # (save-always is an actions/cache keyword, not a rust-cache input.)
+          cache-on-failure: "true"
       - name: Check for benchmark fixtures
         id: bench-check
         shell: bash
