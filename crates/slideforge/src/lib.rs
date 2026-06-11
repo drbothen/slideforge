@@ -642,6 +642,80 @@ fn all_are_demotion_eligible(err: &slideforge_layout::LayoutError) -> bool {
     }
 }
 
+/// Return the `Display` string of the `BulletsOnContentlessSlideType` leaf error
+/// whose `source_slide_index` equals `slide_idx` (zero-based), for use as the
+/// per-slide error message on warn-only demotion placeholders.
+///
+/// The caller supplies `slide_idx` from `affected_indices` (produced by
+/// [`collect_bullets_on_contentless_indices`]).  Under normal pipeline invariants
+/// every index in `affected_indices` has a corresponding leaf error in `err`, so a
+/// `None` result here indicates an internal engine bug (invariant violated between
+/// the two helpers).
+///
+/// ## Impossible-case handling (F-094-P12-001)
+///
+/// If no matching leaf error is found — which is impossible under correct pipeline
+/// invariants but defended-against here — the function logs a `tracing::error!`
+/// event (visible in test output with `RUST_LOG=error` and in production traces)
+/// and returns a deterministic sentinel string:
+///
+/// ```text
+/// "[E-LAY-008] internal error: no per-slide error found for slide index <N>"
+/// ```
+///
+/// This approach:
+/// - Does NOT panic (lib code must never panic on caller data).
+/// - Does NOT silently fall back to a misleading message (the sentinel is
+///   unambiguously wrong rather than quietly incorrect — TD-VSDD-059).
+/// - Is consistent with sibling impossible-case handling in `compile_inner`
+///   (re-layout failure after placeholder substitution, lines ~1044-1055).
+fn find_bullets_error_message_for_slide(
+    err: &slideforge_layout::LayoutError,
+    slide_idx: usize,
+) -> String {
+    use slideforge_layout::LayoutError;
+    match err {
+        LayoutError::BulletsOnContentlessSlideType {
+            source_slide_index, ..
+        } if *source_slide_index == slide_idx => err.to_string(),
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .find_map(|e| match e {
+                LayoutError::BulletsOnContentlessSlideType {
+                    source_slide_index, ..
+                } if *source_slide_index == slide_idx => Some(e.to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                // Impossible under correct pipeline invariants: affected_indices
+                // is derived from the same error tree, so every index must have a
+                // matching leaf.  Log and return a sentinel rather than panic.
+                tracing::error!(
+                    slide_idx,
+                    "compile_inner: impossible — no BulletsOnContentlessSlideType \
+                     found for affected slide index {slide_idx}; using sentinel message \
+                     (internal invariant violated between collect_bullets_on_contentless_indices \
+                     and find_bullets_error_message_for_slide)"
+                );
+                format!(
+                    "[E-LAY-008] internal error: no per-slide error found for slide index {slide_idx}"
+                )
+            }),
+        _ => {
+            // Called on a non-Multiple, non-matching single error — also impossible
+            // (same invariant).  Same sentinel pattern.
+            tracing::error!(
+                slide_idx,
+                "compile_inner: impossible — find_bullets_error_message_for_slide \
+                 called on non-Multiple LayoutError that does not match slide_idx {slide_idx}"
+            );
+            format!(
+                "[E-LAY-008] internal error: no per-slide error found for slide index {slide_idx}"
+            )
+        }
+    }
+}
+
 /// Core compile-phase implementation (parse → eval → brand → validate → layout).
 ///
 /// This is the **single canonical pipeline** shared by both [`compile`] (which
@@ -1001,11 +1075,26 @@ fn compile_inner(
                  on slides {affected_indices:?}"
             );
             // Substitute each affected slide with an error-slide placeholder.
+            //
+            // F-094-P12-001: pass the PER-SLIDE error message (the matching
+            // `BulletsOnContentlessSlideType` leaf for this `slide_idx`), NOT the
+            // aggregate `Multiple` Display string.  Using `layout_err.to_string()`
+            // here would yield "layout error: N accumulated errors; first: …" on
+            // every placeholder regardless of which slide it corresponds to.
+            //
+            // `find_bullets_error_message_for_slide` selects the matching leaf by
+            // `source_slide_index == slide_idx` and returns that error's
+            // `Display`.  On the impossible case (invariant broken between
+            // `collect_bullets_on_contentless_indices` and this helper) it logs a
+            // `tracing::error!` event and returns a deterministic sentinel string
+            // rather than panicking or falling back silently to the wrong message.
             for &slide_idx in &affected_indices {
                 if slide_idx < deck.slides.len() {
+                    let per_slide_msg =
+                        find_bullets_error_message_for_slide(&layout_err, slide_idx);
                     let placeholder = slideforge_validate::error_slide_placeholder(
                         "E-LAY-008",
-                        &layout_err.to_string(),
+                        &per_slide_msg,
                         slide_idx + 1, // 1-based position per error_slide_placeholder API
                     );
                     deck.slides[slide_idx] = placeholder;
@@ -3270,6 +3359,157 @@ mod tests {
         assert!(
             !file_name.is_empty(),
             "F-094-P4-006b: fallback source name must not be empty"
+        );
+    }
+
+    // ── F-094-P12-001 — per-slide error message on warn-only placeholders ────────
+
+    /// F-094-P12-001 (RED gate): warn-only demotion with TWO contentless-bullet
+    /// slides must place EACH slide's OWN distinguishing error message on its
+    /// placeholder, not the aggregate `Multiple` Display string.
+    ///
+    /// Root cause before fix: the demotion loop called `&layout_err.to_string()`
+    /// (the `Multiple` Display: "layout error: N accumulated errors; first: …")
+    /// for EVERY placeholder, so both placeholders received the same aggregate
+    /// message instead of per-slide messages.
+    ///
+    /// After fix: each placeholder's `body` / `error_message` field must contain
+    /// ITS OWN slide type's name ("title" for slide[0], "closing" for slide[1])
+    /// and must NOT contain the aggregate "accumulated errors" substring.
+    ///
+    /// Two contentless slide types are used so per-slide attribution is unambiguous:
+    ///   slide 0 → `slide title:`   (type name "title")
+    ///   slide 1 → `slide closing:` (type name "closing")
+    #[test]
+    #[allow(clippy::items_after_statements)]
+    fn test_f094_p12_001_warn_only_two_contentless_slides_get_per_slide_error_messages() {
+        use std::io::Write as _;
+        use std::sync::Arc;
+
+        // Two slides: both have `bullets:` on a slide type with no body region.
+        // `title` and `closing` both have Title + Subtitle regions but NO Body —
+        // so both trigger E-LAY-008 BulletsOnContentlessSlideType.
+        //
+        // Required fields per their SlideType definitions:
+        //   title   → title: "..."  (required)
+        //   closing → title: "..."  (required)
+        let source = concat!(
+            "slideforge_version \"1\"\n", // line 1
+            "lang \"en-US\"\n",           // line 2
+            "slide title:\n",             // line 3
+            "  title \"First slide\"\n",  // line 4
+            "  bullets: [\"item-a\"]\n",  // line 5  → E-LAY-008 on slide 0
+            "slide closing:\n",           // line 6
+            "  title \"Second slide\"\n", // line 7
+            "  bullets: [\"item-b\"]\n",  // line 8  → E-LAY-008 on slide 1
+        );
+
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_p12_001_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmpdir for F-094-P12-001");
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        {
+            let mut f = std::fs::File::create(tmp_dir.join("logo.png"))
+                .expect("create logo.png for P12-001");
+            f.write_all(logo_bytes).expect("write logo.png");
+        }
+        let brand_toml = concat!("[logo]\n", "path = \"logo.png\"\n");
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f =
+                std::fs::File::create(&brand_toml_path).expect("create brand.toml for P12-001");
+            f.write_all(brand_toml.as_bytes())
+                .expect("write brand.toml");
+        }
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            // warn-only (strict=false): E-LAY-008 is demoted to placeholders.
+            // compile() must return Ok(CompiledDeck) with 2 placeholder slides.
+            strict: false,
+            active_variant: None,
+            source_name: Some(Arc::from("p12-001.sf")),
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        // Must succeed — warn-only mode demotes E-LAY-008 to placeholders.
+        let Ok(compiled) = result else {
+            panic!(
+                "F-094-P12-001: warn-only compile with two contentless-bullet slides \
+                 must return Ok(CompiledDeck); got Err"
+            )
+        };
+
+        let slides = &compiled.deck.slides;
+        assert_eq!(
+            slides.len(),
+            2,
+            "F-094-P12-001: deck must have exactly 2 placeholder slides; got {}",
+            slides.len()
+        );
+
+        // Helper: extract the body field value string from a placeholder slide.
+        use slideforge_types::{FieldValue, Value};
+        let body_str = |slide: &slideforge_types::Slide, label: &str| -> String {
+            match slide.fields.get("body") {
+                Some(FieldValue::Literal(Value::Str(s))) => s.to_string(),
+                other => panic!(
+                    "F-094-P12-001: {label} placeholder missing 'body' string field; \
+                     got {other:?}"
+                ),
+            }
+        };
+
+        let body_0 = body_str(&slides[0], "slide[0] (title)");
+        let body_1 = body_str(&slides[1], "slide[1] (closing)");
+
+        // Slide 0 is a demoted `title` slide — its per-slide error must mention
+        // the slide type "title" and must NOT be the aggregate Multiple Display.
+        assert!(
+            body_0.contains("title"),
+            "F-094-P12-001: slide[0] body must contain its own slide type \
+             \"title\"; got: {body_0:?}"
+        );
+        assert!(
+            !body_0.contains("accumulated errors"),
+            "F-094-P12-001: slide[0] body must NOT contain the aggregate \
+             'accumulated errors' text; got: {body_0:?}"
+        );
+
+        // Slide 1 is a demoted `closing` slide — its per-slide error must mention
+        // "closing" and must NOT be the aggregate Multiple Display.
+        assert!(
+            body_1.contains("closing"),
+            "F-094-P12-001: slide[1] body must contain its own slide type \
+             \"closing\"; got: {body_1:?}"
+        );
+        assert!(
+            !body_1.contains("accumulated errors"),
+            "F-094-P12-001: slide[1] body must NOT contain the aggregate \
+             'accumulated errors' text; got: {body_1:?}"
+        );
+
+        // Cross-contamination check: slide[0]'s message must not leak into
+        // slide[1] and vice versa (each placeholder carries a truly per-slide message).
+        assert!(
+            !body_0.contains("closing"),
+            "F-094-P12-001: slide[0] body (title) must NOT contain \"closing\" \
+             from slide[1]; got: {body_0:?}"
+        );
+        assert!(
+            !body_1.contains("item-a"),
+            "F-094-P12-001: slide[1] body (closing) must NOT contain slide[0]'s \
+             bullet content 'item-a'; got: {body_1:?}"
         );
     }
 }
