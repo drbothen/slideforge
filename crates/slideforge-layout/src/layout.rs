@@ -573,10 +573,24 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 
                     match slot {
                         BulletSlot::Contentless => {
+                            // F-094-P3-001 (E-LAY-008 / BC-3.06.003): use the block's
+                            // source span for the error location. When block.span is unknown
+                            // (e.g., blocks built by test fixtures before field_spans threading
+                            // was introduced), fall back to slide.field_spans["bullets"] so
+                            // the error always carries the best available span.
+                            let bullets_err_span = if block.span.is_unknown() {
+                                slide
+                                    .field_spans
+                                    .get("bullets")
+                                    .cloned()
+                                    .unwrap_or_else(|| block.span.clone())
+                            } else {
+                                block.span.clone()
+                            };
                             return Err(LayoutError::BulletsOnContentlessSlideType {
                                 slide_type: Arc::clone(&slide_type_keyword),
                                 source_slide_index: source_index,
-                                span: block.span.clone(),
+                                span: bullets_err_span,
                             });
                         },
                         BulletSlot::Region(body_bbox, initial_y) => {

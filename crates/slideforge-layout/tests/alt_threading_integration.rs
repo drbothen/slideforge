@@ -91,6 +91,7 @@ fn slide_with_block(slide_type: &str, block: ContentBlock) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

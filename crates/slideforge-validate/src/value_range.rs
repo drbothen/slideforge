@@ -337,6 +337,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -368,6 +369,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -544,6 +546,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());
@@ -864,6 +867,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let diags = ValueRangeValidator.validate(&deck, &default_opts());

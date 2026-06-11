@@ -1129,6 +1129,7 @@ fn test_BC_3_05_001_adv_p08_high001_pdf_title_bold_uses_distinct_font_resource()
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
 
     let deck = Deck {

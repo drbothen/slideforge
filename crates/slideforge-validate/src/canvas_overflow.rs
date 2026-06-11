@@ -110,6 +110,84 @@ impl Validator for CanvasOverflowValidator {
 
         diagnostics
     }
+
+    /// Detect silently-stacked bullet frames after the layout pass (F-094-P3-002).
+    ///
+    /// The pre-layout `validate()` catches overflow by counting bullets against a
+    /// heuristic threshold (≥ 24). However, that heuristic misses a subtler defect:
+    /// when the layout engine overflows and clamps all excess frames to identical
+    /// coordinates (y = `page_height` − 1, height = 1). The count may be below 24
+    /// while the visual output is broken.
+    ///
+    /// This method detects that condition geometrically: it checks whether any
+    /// [`slideforge_layout::FrameContent::TextRun`] frames within a single slide
+    /// share an identical [`slideforge_layout::BoundingBox`]. Two or more
+    /// identically-positioned frames in the same slide means at least one frame is
+    /// visually invisible (stacked behind another) — silent overflow.
+    ///
+    /// When stacking is detected an `E-LAY-001` diagnostic is emitted.
+    /// Severity respects [`CanvasOverflowValidator::strict_overflow`]:
+    /// - `false` (default): `Warning`
+    /// - `true`: `Error`
+    ///
+    /// ## Complexity
+    ///
+    /// O(N) per slide where N = number of frames in the slide, using a `HashSet`.
+    fn validate_post_layout(
+        &self,
+        laid_out: &slideforge_layout::LaidOutDeck,
+        _opts: &ValidatorOptions,
+    ) -> Vec<Diagnostic> {
+        use slideforge_layout::{BoundingBox, FrameContent};
+        use std::collections::HashSet;
+
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for (slide_idx, slide) in laid_out.slides.iter().enumerate() {
+            // Collect bboxes from TextRun frames only.
+            // Non-TextRun frames (Title, Subtitle, Body, etc.) are intentionally
+            // excluded — stacking is a bullet-overflow defect, not a layout artifact
+            // of multi-region slides.
+            let mut seen_bboxes: HashSet<BoundingBox> = HashSet::new();
+            let mut stacked = false;
+            for frame in &slide.frames {
+                if let FrameContent::TextRun(_) = &frame.content
+                    && !seen_bboxes.insert(frame.bbox)
+                {
+                    // bbox was already present → duplicate → stacking detected.
+                    stacked = true;
+                    break;
+                }
+            }
+
+            if stacked {
+                let severity = if self.strict_overflow {
+                    DiagnosticSeverity::Error
+                } else {
+                    DiagnosticSeverity::Warning
+                };
+                let slide_label = slide.slide_type_keyword.as_ref();
+                let source_span = slideforge_types::SourceSpan::default();
+                diagnostics.push(Diagnostic {
+                    severity,
+                    code: std::sync::Arc::from(E_LAY_001),
+                    message: std::sync::Arc::from(format!(
+                        "CanvasOverflow: slide {slide_idx} (type '{slide_label}') has \
+                         geometrically stacked TextRun frames — bullet content overflowed \
+                         the body placeholder and frames were clamped to identical positions. \
+                         Count-based detection did not fire. \
+                         Split the slide or reduce bullet count (E-LAY-001)."
+                    )),
+                    span: source_span,
+                    hint: Some(std::sync::Arc::from(
+                        "Split the slide or reduce the number of bullet points (E-LAY-001)",
+                    )),
+                });
+            }
+        }
+
+        diagnostics
+    }
 }
 
 /// Count the total number of top-level bullet items in a slide's blocks.
@@ -201,7 +279,7 @@ mod tests {
 
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
-        Block, BulletItem, ContentBlock, Deck, DeckMetadata, InlineNode, OrderedMap, Slide,
+        Block, BulletItem, ContentBlock, Deck, DeckMetadata, Emu, InlineNode, OrderedMap, Slide,
         SourceSpan, block::TextBlock,
     };
 
@@ -258,6 +336,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -281,6 +360,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -604,6 +684,168 @@ mod tests {
         assert_eq!(
             h, expected,
             "estimate_height(usize::MAX) must equal estimate_height(MAX_BULLET_COUNT)"
+        );
+    }
+
+    // ── F-094-P3-002 — Geometric overflow detection (post-layout) ─────────────
+
+    /// F-094-P3-002: `validate_post_layout` must detect silently-stacked bullet
+    /// frames (identical bounding boxes) caused by layout overflow-clamping and
+    /// emit an E-LAY-001 diagnostic.
+    ///
+    /// 16 bullet frames are used — below the count-based threshold of 24 — but
+    /// frames 6..15 are identical (stacked at page bottom). The count-based
+    /// `validate()` would NOT catch this; `validate_post_layout()` MUST.
+    ///
+    /// RED: currently `validate_post_layout` is the inherited no-op from Validator
+    /// trait. Fails until `CanvasOverflowValidator::validate_post_layout` is
+    /// overridden to detect geometric overflow on `LaidOutDeck`.
+    #[test]
+    fn test_f094_p3_002_geometric_overflow_detected_not_count_based() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        // Build a LaidOutDeck simulating broken overflow-clamping:
+        // 16 bullet frames, frames 5..15 are clamped to identical positions.
+        let line_h = 228_600_i64; // layout::LINE_HEIGHT_EMU
+        let body_top: i64 = 1_143_000;
+        let body_height: i64 = 5 * line_h; // fits exactly 5 bullets
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+        let bullet_x: i64 = 457_200;
+        let bullet_w: i64 = page_w - bullet_x;
+
+        let make_frame = |y: i64, h: i64| -> Frame {
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(bullet_x),
+                    y: Emu(y),
+                    width: Emu(bullet_w),
+                    height: Emu(h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            }
+        };
+
+        let mut frames = Vec::new();
+        for i in 0..16_i64 {
+            let y = body_top + i * line_h;
+            if y + line_h <= body_top + body_height {
+                frames.push(make_frame(y, line_h));
+            } else {
+                // Broken behaviour: overflow bullets clamped to page bottom.
+                frames.push(make_frame(page_h - 1, 1));
+            }
+        }
+
+        // Verify setup: ≥2 frames share identical stacked position.
+        let stacked = frames
+            .iter()
+            .filter(|f| f.bbox.y == Emu(page_h - 1) && f.bbox.height == Emu(1))
+            .count();
+        assert!(
+            stacked >= 2,
+            "test setup: expected ≥2 stacked frames; got {stacked}"
+        );
+
+        // Confirm count-based would NOT fire (16 < 24).
+        assert!(frames.len() < 24, "test setup: {}", frames.len());
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            !diags.is_empty(),
+            "F-094-P3-002: geometric overflow with stacked frames (16 bullets, <24 count) \
+             must produce ≥1 diagnostic from validate_post_layout; got 0. \
+             Count-based detection is insufficient."
+        );
+        assert!(
+            diags.iter().any(|d| d.code.as_ref() == E_LAY_001),
+            "F-094-P3-002: overflow diagnostic must carry E-LAY-001 code; got: {diags:?}"
+        );
+    }
+
+    /// F-094-P3-002 (b): When all frames have distinct positions, `validate_post_layout`
+    /// must NOT produce a false-positive stacking diagnostic.
+    #[test]
+    fn test_f094_p3_002_no_false_positive_when_frames_are_distinct() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        let line_h = 228_600_i64;
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+        let bullet_x: i64 = 457_200;
+        let bullet_w: i64 = page_w - bullet_x;
+
+        // 5 bullets, all within the page — each with a distinct y position.
+        let frames: Vec<Frame> = (0..5_i64)
+            .map(|i| Frame {
+                bbox: BoundingBox {
+                    x: Emu(bullet_x),
+                    y: Emu(i * line_h),
+                    width: Emu(bullet_w),
+                    height: Emu(line_h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            })
+            .collect();
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            diags.is_empty(),
+            "F-094-P3-002: 5 distinct frames must produce 0 stacking diagnostics; got: {diags:?}"
         );
     }
 }

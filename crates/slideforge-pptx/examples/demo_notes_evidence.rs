@@ -116,6 +116,7 @@ fn make_deck_with_notes(notes_per_slide: &[Option<&str>]) -> Deck {
                 register_content: maybe_notes
                     .map(|t| vec![RegisteredContent::plain(Register::Notes, Arc::from(t))])
                     .unwrap_or_default(),
+                field_spans: OrderedMap::new(),
             })
             .collect(),
         vars: OrderedMap::new(),

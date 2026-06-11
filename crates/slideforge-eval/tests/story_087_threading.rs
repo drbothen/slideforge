@@ -63,6 +63,7 @@ fn make_slide(slide_type: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

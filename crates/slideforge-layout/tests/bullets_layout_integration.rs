@@ -79,6 +79,7 @@ fn make_slide(slide_type: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -97,6 +98,7 @@ fn make_slide_with_title(slide_type: &str, title: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -145,6 +147,7 @@ fn bullets_slide(slide_type: &str, items: Vec<BulletItem>) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -787,6 +790,7 @@ fn test_bc_3_05_001_story073_ac_int1_mixed_text_and_bullets_blocks() {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -1045,6 +1049,7 @@ fn test_f094_p1_003_body_text_plus_bullets_bullets_get_body_region_bbox() {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
 
     let deck = make_deck(vec![slide]);
@@ -1209,6 +1214,7 @@ fn test_f094_p2_001_child_bullet_x_greater_than_parent_x() {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -1289,6 +1295,7 @@ fn test_f094_p2_002_body_and_bullets_frames_non_overlapping() {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -1416,3 +1423,63 @@ fn test_f094_p2_003_bullets_on_contentless_returns_e_lay_008_variant_and_message
         "F-094-P2-003: error message must contain 'bullets_only' in the hint; got: {msg}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P3-001 — E-LAY-008 span is NOT fabricated (real field span)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P3-001 (a): `BulletsOnContentlessSlideType` must carry a non-default
+/// (non-unknown) `SourceSpan` when the slide was constructed with a real
+/// `field_spans` entry for "bullets".
+///
+/// Strengthen of `test_f094_p2_003`: in addition to checking the variant and
+/// message, assert `!span.is_unknown()` (FU-DIAGNOSTIC-FIELD-PINNING).
+///
+/// RED: currently the `Block` constructed by `field_to_block.rs` uses
+/// `SourceSpan::default()` → `span.is_unknown() == true`. Fails until
+/// `field_spans` is threaded from eval through to layout.
+#[test]
+fn test_f094_p3_001_bullets_on_contentless_span_is_non_default() {
+    use slideforge_types::SourceSpan;
+
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    // Build a slide where the "bullets" field has a non-default span.
+    // We do this by constructing a Slide with a field_spans entry for "bullets"
+    // that has a real byte offset.
+    let mut slide = bullets_slide("title", items);
+    // Inject a non-default span for the "bullets" key so that thread_fields_to_blocks
+    // (or layout) can surface it. After the fix, block.span should not be
+    // is_unknown() when field_spans carries a real span.
+    slide.field_spans.insert(
+        Arc::from("bullets"),
+        SourceSpan::new(Arc::from("test.sf"), 3, 1, 42),
+    );
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+    assert!(
+        result.is_err(),
+        "F-094-P3-001: bullets on 'title' must return Err; got Ok"
+    );
+    let err = result.unwrap_err();
+
+    // Must be BulletsOnContentlessSlideType, and its span must NOT be unknown.
+    match &err {
+        LayoutError::BulletsOnContentlessSlideType { span, .. } => {
+            assert!(
+                !span.is_unknown(),
+                "F-094-P3-001: BulletsOnContentlessSlideType.span must not be unknown (is_unknown=true); \
+                 expected a real field span after field_spans threading. Got span: {span:?}"
+            );
+        },
+        other => panic!("F-094-P3-001: expected BulletsOnContentlessSlideType, got: {other:?}"),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P3-002 — Geometric bullet-overflow detection (not count-based)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// F-094-P3-002 test is in crates/slideforge-validate/src/canvas_overflow.rs
+// (validate_post_layout test requires slideforge-layout dep — already in validate crate).

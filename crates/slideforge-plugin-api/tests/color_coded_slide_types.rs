@@ -102,6 +102,7 @@ fn make_slide_str(slide_type: &str, fields: Vec<(&str, &str)>) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -127,6 +128,7 @@ fn make_slide_mixed(
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -178,6 +180,7 @@ fn make_weighted_composite_slide(
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

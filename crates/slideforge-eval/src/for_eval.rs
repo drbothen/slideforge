@@ -454,9 +454,17 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     // Used by the dual-title path (STORY-081 I2) to insert "title_inlines"
     // as a shadow field alongside the plain-text "title" field.
     let mut extra_insertions: Vec<(Arc<str>, slideforge_types::FieldValue)> = Vec::new();
+    // F-094-P3-001: collect the source span of each authored field's keyword token.
+    // Populated below via span_to_source_span(field_node.name.span()).
+    // Non-zero byte-offset spans produce non-unknown SourceSpans; zero-offset test
+    // spans produce SourceSpan::default() per span_to_source_span contract.
+    let mut field_spans: OrderedMap<Arc<str>, SourceSpan> = OrderedMap::new();
 
     for field_node in &slide_node.fields {
         let field_name: Arc<str> = Arc::from(field_node.name.value().as_str());
+        // Record the source span of this field's name token (F-094-P3-001).
+        let name_span = crate::if_eval::span_to_source_span(field_node.name.span());
+        field_spans.insert(Arc::clone(&field_name), name_span);
         let field_value = match field_node.value.value() {
             FieldValue::Template(chunks) => {
                 // STORY-081 AC-001 / BC-3.05.001 precondition 5:
@@ -657,6 +665,9 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         overlay: None,
         // Initialised empty; populated immediately below.
         register_content: vec![],
+        // F-094-P3-001: field_spans populated above in the field loop.
+        // Each entry maps a field name to the source span of its keyword token.
+        field_spans,
     };
 
     // ── Step 2: Populate register_content (F-001 / STORY-035) ────────────────

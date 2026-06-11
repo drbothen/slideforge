@@ -136,6 +136,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -154,6 +155,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -459,6 +461,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -482,6 +485,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -527,6 +531,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content,
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -572,6 +577,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = slideforge_types::Deck {
             slides: vec![slide_with_takeaway],
@@ -652,6 +658,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -671,6 +678,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -871,6 +879,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -996,6 +1005,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1088,6 +1098,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1170,6 +1181,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1225,6 +1237,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1300,6 +1313,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1394,6 +1408,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1467,6 +1482,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1529,6 +1545,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
 
@@ -1707,6 +1724,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content,
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1964,6 +1982,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2032,6 +2051,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2116,6 +2136,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         // Provide "introduction" as a slide title so the Xref is known.
         let deck = {
@@ -2191,6 +2212,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2238,6 +2260,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2306,6 +2329,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2360,6 +2384,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2426,6 +2451,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2534,6 +2560,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2647,6 +2674,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2713,6 +2741,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let title_slide = make_slide_with_title("title", "known-slide-title");
         let deck = make_deck(vec![title_slide, bullets_slide]);
@@ -2890,6 +2919,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2919,7 +2949,7 @@ mod tests {
     /// BEFORE deep recursion exhausts the stack.
     ///
     /// Regression guard: `push_bullet_frames` has a structural depth guard.
-    /// A 65-deep children chain returns `Err(LayoutError::InlineDepthExceeded)`.
+    /// A 65-deep children chain returns `Err(LayoutError::BulletDepthExceeded)`.
     /// Depth 65 is chosen to be above the limit but below stack overflow depth.
     ///
     /// Anti-paper-fix (TD-VSDD-059): the variant check inside `match` ensures
@@ -2963,6 +2993,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3035,6 +3066,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         // Slide 1: a structurally 65-deep bullet chain (MAX_BULLET_DEPTH + 1 = 65).
@@ -3063,6 +3095,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         let deck = make_deck(vec![slide0, slide1]);
@@ -3156,6 +3189,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3277,6 +3311,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3513,6 +3548,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3753,6 +3789,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -4000,6 +4037,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();

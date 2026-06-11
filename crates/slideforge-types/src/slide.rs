@@ -118,6 +118,30 @@ pub struct Slide {
     /// insertion order in `slide.fields`. This ordering is enforced by
     /// `slideforge-eval::register_routing::extract_register_content`.
     pub register_content: Vec<RegisteredContent>,
+
+    /// Source spans of individual field keywords as authored in the `.sf` file.
+    ///
+    /// Maps a field name (e.g., `"bullets"`, `"title"`) to the [`SourceSpan`]
+    /// of that field's keyword token in the source.
+    ///
+    /// Populated by `slideforge-eval::for_eval::eval_slide_node` as it processes
+    /// each `FieldNode`. The span comes from `FieldNode.name.span()` via
+    /// `span_to_source_span`. Non-zero byte-offset spans (i.e., fields from real
+    /// source text) produce non-unknown spans; synthetic test helpers that use
+    /// `dummy_span()` (byte offset 0) produce `SourceSpan::default()`.
+    ///
+    /// Initialized to `OrderedMap::new()` in all constructors and test helpers.
+    /// The layout engine reads this map in `field_to_block.rs` to attach real
+    /// source locations to `ContentBlock` spans (fixing the E-LAY-008 /
+    /// F-094-P3-001 silent `<unknown>` span defect).
+    ///
+    /// ## Invariant
+    ///
+    /// Only fields that were AUTHORED in the `.sf` source have entries here.
+    /// Synthetic or auto-generated content (e.g., TOC slides, error placeholders)
+    /// legitimately has no entries and keeps default `SourceSpan::default()` for
+    /// any blocks they generate.
+    pub field_spans: OrderedMap<Arc<str>, SourceSpan>,
 }
 
 impl Slide {
@@ -142,6 +166,7 @@ impl Slide {
     ///     source_span: SourceSpan::default(),
     ///     overlay: None,
     ///     register_content: vec![],
+    ///     field_spans: OrderedMap::new(),
     /// };
     /// assert_eq!(slide.title_str(), Some("My Slide"));
     /// ```
@@ -169,6 +194,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -273,6 +299,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         assert_eq!(slide_with_register.register, Some(Register::Notes));
     }
@@ -326,6 +353,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: Some(overlay.clone()),
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let slide2 = slide.clone();
         assert_eq!(slide, slide2, "Slide with overlay must equal its clone");
@@ -363,6 +391,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: Some(overlay),
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         // Structural invariant: overlay is metadata only, no master reference.
         assert!(slide.overlay.is_some());

@@ -3703,6 +3703,7 @@ mod story_072_tests {
                 source_span: SourceSpan::default(),
                 overlay: None,
                 register_content: vec![],
+                field_spans: OrderedMap::new(),
             }],
             vars: OrderedMap::new(),
             metadata: DeckMetadata {

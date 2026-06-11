@@ -418,6 +418,8 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -436,6 +438,8 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -854,6 +858,8 @@ mod tests {
                         source_span: SourceSpan::default(),
                         overlay: None,
                         register_content: vec![],
+
+                        field_spans: OrderedMap::new(),
                     }
                 },
                 "progress_bar" => {
@@ -876,6 +882,8 @@ mod tests {
                         source_span: SourceSpan::default(),
                         overlay: None,
                         register_content: vec![],
+
+                        field_spans: OrderedMap::new(),
                     }
                 },
                 "weighted_composite" => {
@@ -909,6 +917,8 @@ mod tests {
                         source_span: SourceSpan::default(),
                         overlay: None,
                         register_content: vec![],
+
+                        field_spans: OrderedMap::new(),
                     }
                 },
                 _ => make_slide(kw.as_ref(), vec![]),

@@ -445,6 +445,7 @@ fn test_BC_1_17_002_html_bar_render_layout_ir_proxy() {
         source_span: TypesSourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
 
     let deck = Deck {

@@ -215,6 +215,14 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
         }
 
         // ── 5. Bullets ───────────────────────────────────────────────────────
+        // F-094-P3-001: Block.span is set from field_spans["bullets"] so that
+        // LayoutError::BulletsOnContentlessSlideType can report the authored
+        // keyword location instead of <unknown> (E-LAY-008 / BC-3.06.003).
+        let bullets_span = slide
+            .field_spans
+            .get("bullets")
+            .cloned()
+            .unwrap_or_default();
         match slide.fields.get("bullets") {
             Some(FieldValue::Literal(Value::List(items))) => {
                 let bullet_items: Vec<BulletItem> = items
@@ -234,7 +242,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 slide.blocks.push(Block {
                     content: ContentBlock::Bullets(bullet_items),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: bullets_span,
                 });
             },
             Some(FieldValue::Inlines(nodes)) => {
@@ -249,7 +257,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                         span: SourceSpan::default(),
                     }]),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: bullets_span,
                 });
             },
             Some(FieldValue::InlinesList(items)) => {
@@ -268,7 +276,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                 slide.blocks.push(Block {
                     content: ContentBlock::Bullets(bullet_items),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: bullets_span,
                 });
             },
             _ => {},
@@ -302,6 +310,12 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             // W-A11-002 fires only for chart slides, not for non-media slides.
             let alt = resolve_alt(slide);
             let decorative = is_decorative(slide);
+            // F-094-P3-001: thread field span for chart_type keyword.
+            let chart_span = slide
+                .field_spans
+                .get("chart_type")
+                .cloned()
+                .unwrap_or_default();
             if let Some(chart_type) = extract_str_field(slide, "chart_type") {
                 // Always emit the ContentBlock::Chart, even when alt=None.
                 // Pre-layout validate() is restricted to Shape; post-layout fires exactly once.
@@ -313,7 +327,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                         span: SourceSpan::default(),
                     }),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: chart_span,
                 });
             } else {
                 tracing::warn!(
@@ -328,6 +342,8 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
             let alt = resolve_alt(slide);
             let decorative = is_decorative(slide);
+            // F-094-P3-001: thread field span for src keyword.
+            let src_span = slide.field_spans.get("src").cloned().unwrap_or_default();
             // Same rule as chart: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(src) = extract_str_field(slide, "src") {
                 // Always emit the ContentBlock::Image, even when alt=None.
@@ -339,7 +355,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                         span: SourceSpan::default(),
                     }),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: src_span,
                 });
             } else {
                 tracing::warn!(
@@ -354,6 +370,8 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
             // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
             let alt = resolve_alt(slide);
             let decorative = is_decorative(slide);
+            // F-094-P3-001: thread field span for source keyword.
+            let source_span = slide.field_spans.get("source").cloned().unwrap_or_default();
             // Same rule as chart/image: emit unconditionally; pre-layout validate() is Shape-only.
             if let Some(source) = extract_str_field(slide, "source") {
                 // Always emit the ContentBlock::Diagram, even when alt=None.
@@ -365,7 +383,7 @@ pub fn thread_fields_to_blocks(deck: &mut Deck) {
                         span: SourceSpan::default(),
                     }),
                     label: None,
-                    span: SourceSpan::default(),
+                    span: source_span,
                 });
             } else {
                 tracing::warn!(
@@ -683,6 +701,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 

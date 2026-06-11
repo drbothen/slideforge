@@ -73,6 +73,7 @@ fn make_slide_with_shape(shape_spec: ShapeSpec) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -636,6 +637,7 @@ fn test_bc_3_04_001_ac001_mixed_em_and_inches_shapes_in_one_slide() {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     };
     let deck = make_deck(vec![slide]);
 
