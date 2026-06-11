@@ -7,7 +7,7 @@ tool: Kani
 phase: P6
 priority: P1
 status: draft
-spec_version: "1.1.0"
+spec_version: "1.2.0"
 bc_trace: [BC-4.03.002]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 origin: STORY-095 / F-095-P1-003
@@ -38,16 +38,29 @@ over-width line — no infinite splitting loop.)
 **Scope.** These properties target `wrap_text` as a pure function with the
 production signature `(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>)
 -> Vec<String>` in `crates/slideforge-pdf/src/text_layout.rs`. The `FontMetrics`
-struct carries a `mock_char_width_pts: Option<f64>` field: when `Some(w)`, every
-character is assumed to have advance `w` points (deterministic mock for proofs and
-unit tests); when `None`, real `ttf-parser` glyph metrics are used. The Kani proof
-targets sub-property (a) (bounded termination) and (c) (max-width bound for bounded
-inputs) using `mock_char_width_pts` to eliminate font I/O from the proof context.
+struct carries two mock fields for deterministic testing:
+
+- `mock_char_width_pts: Option<f64>` — when `Some(w)`, every character (except
+  space, when `mock_space_width_pts` is also `Some`) is assumed to have advance `w`
+  points. When `None`, real `ttf-parser` glyph metrics are used.
+- `mock_space_width_pts: Option<f64>` — active only when `mock_char_width_pts` is
+  also `Some`. When `Some(s)`, the ASCII space character `' '` is measured as `s`
+  points while all other characters use `mock_char_width_pts`. When `None`, spaces
+  use `mock_char_width_pts` like every other character. This field enables testing
+  asymmetric glyph metrics (space narrower than body glyphs) — the exact condition
+  that makes the F-095-P9-001 bug reachable: `prior + ' ' + frag0 ≤ max_width` while
+  `prior + frag0` (without the space) would also fit under a uniform mock, masking the
+  missing separator. In production, `mock_space_width_pts` is always `None`.
+
+The Kani proof targets sub-property (a) (bounded termination) and (c) (max-width
+bound for bounded inputs) using `mock_char_width_pts` (with `mock_space_width_pts:
+None`) to eliminate font I/O from the proof context.
 Sub-property (b) is verified via proptest with string-generating strategies.
-Concrete unit tests cover all three sub-properties at fixed points. This VP covers
-the pure `text_layout` module surface — `wrap_text` plus any pure helpers it
-exposes (such as `measure_line_width`) — not specific private helper names, which
-may change during Phase 3 implementation.
+Concrete unit tests cover all three sub-properties at fixed points, including the
+asymmetric-mock path via `mock_space_width_pts: Some(0.0)` for F-095-P9-001 guards.
+This VP covers the pure `text_layout` module surface — `wrap_text` plus any pure
+helpers it exposes (such as `measure_line_width`) — not specific private helper
+names, which may change during Phase 3 implementation.
 
 ## Motivation
 
@@ -122,6 +135,7 @@ mod proofs {
             face_index: 0,
             font_size_pts: 12.0,
             mock_char_width_pts: Some(char_w),
+            mock_space_width_pts: None, // uniform-width model for Kani proof
         };
 
         // Build a synthetic ASCII string of `len` bytes (space + printable ASCII).
@@ -167,6 +181,7 @@ proptest! {
             face_index: 0,
             font_size_pts: 12.0,
             mock_char_width_pts: Some(char_w),
+            mock_space_width_pts: None, // uniform-width: space == other chars
         };
         let lines = wrap_text(&input, max_width_pts, &metrics);
         // Non-whitespace characters must be preserved in order.
@@ -196,6 +211,7 @@ proptest! {
             face_index: 0,
             font_size_pts: 12.0,
             mock_char_width_pts: Some(char_w),
+            mock_space_width_pts: None, // uniform-width: space == other chars
         };
         let lines = wrap_text(&input, max_width_pts, &metrics);
         for line in &lines {
@@ -242,4 +258,5 @@ Widths below are computed as `char_count * char_width_pts`.
 
 | Version | Date | Change |
 |---------|------|--------|
+| v1.2.0 | 2026-06-11 | F-095-P9-001 fix: added `mock_space_width_pts: Option<f64>` to Scope/FontMetrics description (semantics: active only when `mock_char_width_pts` is `Some`; space measures as `mock_space_width_pts` pts while other chars use `mock_char_width_pts`; `None` in production and Kani proof); added `mock_space_width_pts: None` to all three `FontMetrics` struct literals in Proof Harness Skeleton and Proptest Strategy so skeletons compile against the real struct |
 | v1.1.0 | 2026-06-11 | F-095-P2-002 fix: updated Scope, Proof Harness Skeleton, and Proptest Strategy from stale 2-arg `(input: &str, max_width: usize)` to real 3-arg signature `(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>)` with `mock_char_width_pts: Some(w)` deterministic width model; restated max-width invariant in f64-points terms; updated Test Coverage table to pts notation; added spec_version frontmatter |
