@@ -505,12 +505,10 @@ When adopting this playbook in a new repository, parameterize the following:
 | `fmt` | ubuntu-latest (x86_64) | Format check, seconds |
 | `clippy` | ubuntu-latest (x86_64) | Lint, ~3–5 min warm |
 | `test (linux-x86_64)` | ubuntu-latest (x86_64) | Primary high-signal test leg |
-| `docs` | ubuntu-latest (x86_64) | Doc build + `RUSTDOCFLAGS=-D warnings` |
-| `supply-chain` | ubuntu-latest (x86_64) | `cargo audit`, `cargo deny` |
-| `snapshots` | ubuntu-latest (x86_64) | `cargo insta test --check` |
-| `msrv` | ubuntu-latest (x86_64) | MSRV build check |
+| `doctest` | ubuntu-latest (x86_64) | Doc-comment tests; fast, high signal |
 | `check-panic-profile` | ubuntu-latest (x86_64) | Enforcement check, fast |
 | `check-pdf-deps` | ubuntu-latest (x86_64) | Dependency check, fast |
+| `supply-chain` | ubuntu-latest (x86_64) | `cargo audit`, `cargo deny` |
 
 ### Slow legs (gated behind merge_group / schedule / develop push / full-ci label)
 
@@ -519,8 +517,10 @@ When adopting this playbook in a new repository, parameterize the following:
 | `test (linux-arm64)` | ubuntu-24.04-arm | 22-minute cold-build pole; native arm64 |
 | `test (macos-arm64)` | macos-latest | Slower macOS runner; cross-platform value |
 | `test (windows-x86_64)` | windows-latest | Slowest leg; Windows-specific behavior |
+| `msrv` | ubuntu-latest | MSRV build adds compile overhead; not per-push critical |
+| `docs` | ubuntu-latest (x86_64) | Doc build + `RUSTDOCFLAGS=-D warnings`; compile-heavy |
+| `snapshots` | ubuntu-latest (x86_64) | `cargo insta test --check`; requires snapshot fixtures |
 | `bench` | ubuntu-latest | Long-running; not per-push useful |
-| `doctest` | ubuntu-latest | Separate doctest run; secondary |
 | `visual-regression` | ubuntu-latest | Requires LibreOffice + ImageMagick install |
 | `perf-smoke` | ubuntu-latest | Timing-sensitive; not per-push useful |
 
