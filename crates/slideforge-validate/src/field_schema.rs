@@ -263,6 +263,89 @@ mod tests {
         );
     }
 
+    // ── STORY-098: W-VAL-103 content-drop + body/content schema consistency ──────
+    //
+    // AC-003: reconcile body/content schema drift.
+    //
+    // `body` on a `content` slide: `content.rs` schema does NOT declare `body` as a
+    // known field. `validate_fields` emits W-VAL-103 (currently Warning). After
+    // STORY-098, severity must be Error (content-drop set). `field_to_block.rs:135`
+    // threads body for all slide types — this is the drift to fix.
+    //
+    // FU-DIAGNOSTIC-FIELD-PINNING: assert message text, code, severity.
+
+    /// BC-3.03.002 AC-003 / EC-007 — body/content schema drift reconciliation.
+    ///
+    /// `body` on `content` slide is schema-invalid per content.rs (not in optional
+    /// or required fields). `FieldSchemaValidator` must emit W-VAL-103 for it.
+    /// After STORY-098 implementation, W-VAL-103 severity must be Error (content-drop
+    /// set `{"shape", "body"}` → broken in strict mode per BC-3.03.002 v1.2 Invariant 4).
+    ///
+    /// RED: Currently `validate_fields` emits Warning for `body` on `content` slide.
+    /// The Error assertion FAILS before implementation. This drives AC-003 resolution (b):
+    /// consistent rejection by both validate_fields AND field_to_block.rs.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_3_03_002_body_content_schema_consistency() {
+        // `content` slide: required = [title], optional = [bullets, takeaway, + common].
+        // `body` is NOT declared → W-VAL-103 from validate_fields.
+        let slide = make_slide(
+            "content",
+            vec![
+                ("title", Value::Str(Arc::from("My Content Slide"))),
+                ("body", Value::Str(Arc::from("body text that should be rejected"))),
+            ],
+        );
+        let deck = make_deck(vec![slide]);
+        let diags = FieldSchemaValidator.validate(&deck, &default_opts());
+
+        // Validator must emit W-VAL-103 for `body` (currently does, as Warning).
+        let w_val_103: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("'body'"))
+            .collect();
+        assert!(
+            !w_val_103.is_empty(),
+            "BC-3.03.002 AC-003: `body` on `content` slide must produce W-VAL-103 \
+             (content.rs schema does not include 'body'); got diags: {diags:?}"
+        );
+
+        // RED GATE: after STORY-098 implementation, severity must be Error.
+        // Currently Warning — this assertion FAILS before implementation.
+        assert_eq!(
+            w_val_103[0].severity,
+            DiagnosticSeverity::Error,
+            "BC-3.03.002 AC-003 (body/content schema drift): 'body' on 'content' slide \
+             must be Error severity (content-drop set, broken/exit-2 in strict mode). \
+             Currently Warning — RED GATE: this assertion fails before implementation. \
+             Implementer must: (1) promote W-VAL-103 for 'body' key to Error in \
+             validate_fields; (2) fix field_to_block.rs:135 to not thread 'body' for \
+             slide types where 'body' is schema-invalid. \
+             Got severity: {:?}. Message: {}",
+            w_val_103[0].severity,
+            w_val_103[0].message
+        );
+
+        // FU-DIAGNOSTIC-FIELD-PINNING: message format (unchanged — Route A).
+        assert!(
+            w_val_103[0].message.contains("Unknown field 'body'"),
+            "W-VAL-103 message must say \"Unknown field 'body'\"; got: {}",
+            w_val_103[0].message
+        );
+        assert!(
+            w_val_103[0].message.contains("content"),
+            "W-VAL-103 message must name the slide type 'content'; got: {}",
+            w_val_103[0].message
+        );
+        // Route A: code stays W-VAL-103 (no new E-VAL-105).
+        assert_eq!(
+            w_val_103[0].code.as_ref(),
+            "W-VAL-103",
+            "Route A: code must remain W-VAL-103; got: {}",
+            w_val_103[0].code
+        );
+    }
+
     // ── Accumulation: multiple slides, each with issues ────────────────────────
 
     /// Multiple slides, each with type mismatches, produce diagnostics for ALL of

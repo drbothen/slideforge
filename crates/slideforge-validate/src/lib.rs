@@ -34,6 +34,12 @@
 
 mod alt_text;
 mod canvas_overflow;
+// STORY-098: chart empty-data validator (BC-1.11.002 invariant 2).
+// `ChartEmptyDataValidator` is not yet implemented — this module declaration
+// and the `pub use` below are intentionally present so that the test module
+// in chart_empty_data.rs can reference `crate::ChartEmptyDataValidator`,
+// causing a compile-time Red Gate failure until the implementer provides the struct.
+mod chart_empty_data;
 mod error_slide;
 mod field_schema;
 mod image_path;
@@ -47,6 +53,9 @@ mod zero_slide;
 
 pub use alt_text::AltTextValidator;
 pub use canvas_overflow::CanvasOverflowValidator;
+// STORY-098 (BC-1.11.002 invariant 2): chart empty-data validator.
+// Stub implementation — returns vec![] — tests drive production implementation.
+pub use chart_empty_data::ChartEmptyDataValidator;
 pub use error_slide::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
 pub use field_schema::FieldSchemaValidator;
 pub use image_path::{E_VAL_012, ImagePathValidator};
