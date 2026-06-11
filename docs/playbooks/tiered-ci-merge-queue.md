@@ -434,3 +434,98 @@ When adding a new job to `.github/workflows/ci.yml`:
 | New slow job added without full-tier `if:` | Runs on every PR — breaks tiered design; see maintainer checklist above |
 | Branch protection accidentally adds a slow leg as required | Deadlock; fix: remove it from required checks immediately; use PATCH not PUT to avoid resetting other protection settings |
 | Branch protection `contexts` set to `"CI / all-checks-pass"` | Never satisfies — the check is never reported under that name; fix: use `"all-checks-pass"` (bare job name) |
+
+---
+
+## 9. Cache budget (STORY-092)
+
+**Introduced:** STORY-092 (Wave 5, EPIC-19)
+**Baseline (2026-06-10, pre-fix):** 9.77 GB / 23 active caches = 97.7% of the ~10 GB per-repo limit.
+`v0-rust-test-linux-arm64-*` was ABSENT (LRU-evicted) — confirmed root cause of
+arm64 cold-build flakiness.
+
+**Measured (2026-06-11, post-STORY-091 merge, pre-STORY-092 merge):**
+`gh api repos/drbothen/slideforge/actions/cache/usage` → 9.66 GB / 22 active caches.
+The arm64 test cache remains absent — the budget is still critically high.
+
+### 9.1 Active cache keys and estimated sizes
+
+The table below lists every `shared-key` value currently in `ci.yml`, its workflow source, and the
+measured or estimated per-key `target/` size from `gh cache list` output (2026-06-11).
+
+| shared-key | workflow | platform | measured size | notes |
+|---|---|---|---|---|
+| `clippy` | ci.yml | linux-x86_64 | ~331 MiB | |
+| `test-linux-x86_64` | ci.yml | linux-x86_64 | ~772 MiB | |
+| `doctest` | ci.yml | linux-x86_64 | ~772 MiB | shares Cargo.lock hash with test-linux-x86_64 — consolidation candidate |
+| `supply-chain` | ci.yml | linux-x86_64 | ~98 MiB | small (audit tools only) |
+| `test-linux-arm64` | ci.yml | linux-arm64 | 0 (evicted) | absent from cache — primary reliability issue |
+| `test-macos-arm64` | ci.yml | macos-arm64 | ~698 MiB | |
+| `test-windows-x86_64` | ci.yml | windows-x86_64 | ~759 MiB | |
+| `msrv` | ci.yml | linux-x86_64 | ~292 MiB | |
+| `docs` | ci.yml | linux-x86_64 | ~276 MiB | |
+| `snapshots` | ci.yml | linux-x86_64 | ~744 MiB | |
+| `bench` | ci.yml | linux-x86_64 | ~620 MiB | |
+| `visual-regression` | ci.yml | linux-x86_64 | ~99 MiB | |
+| `perf-smoke` | ci.yml | linux-x86_64 | ~229 MiB | |
+| `security-audit` | security.yml | linux-x86_64 | ~98 MiB | |
+| `pdf-ua1-structure` | pdf-ua1.yml | linux-x86_64 | ~98 MiB (est.) | |
+| `pdf-ua1-verapdf` | pdf-ua1.yml | linux-x86_64 | ~98 MiB (est.) | |
+| `html-wcag` | html-wcag.yml | linux-x86_64 | ~98 MiB (est.) | |
+| `html-wcag-axe` | html-wcag.yml | linux-x86_64 | ~98 MiB (est.) | |
+| `release-verify-*` | release.yml | multi-platform | ~98 MiB (est.) | only on tag push |
+| `release-build-*` | release.yml | multi-platform | ~700 MiB (est.) | only on tag push |
+| `sbom` | release.yml | linux-x86_64 | ~98 MiB (est.) | only on tag push |
+
+**Active (non-release) cache total estimate: ~6.1 GiB** (excluding release-only keys that only appear on tag push).
+**With arm64 cache restored: ~7.0 GiB** — within the ~8 GiB target budget with ~1 GiB headroom.
+
+### 9.2 STORY-092 fixes that reduce budget pressure
+
+1. **rust-cache v2.9.1 hash fix** — eliminates spurious cache misses that caused duplicate
+   cache entries with different lockfile-hash suffixes. The 2026-06-11 list shows multiple
+   stale entries per shared-key (e.g., two `clippy` entries, two `bench` entries from different
+   Cargo.lock hashes). After the SHA bump, rust-cache computes keys correctly and stops
+   writing redundant entries.
+
+2. **`cache-on-failure: "true"` on all 11 jobs** — ensures the arm64 test cache is saved
+   even when the job times out. Before this fix, a timeout on the cold arm64 build caused
+   the cache to not be written, perpetuating the cold-build loop on the next run.
+
+3. **No shared-key consolidation required** — the active budget is ~6.1 GiB without arm64
+   and ~7.0 GiB with it. This fits within the ~8 GiB target. The `doctest` key shares
+   the same feature flags and target triple as `test-linux-x86_64` and is a future
+   consolidation candidate, but the current budget does not require it.
+
+### 9.3 Verification
+
+After STORY-092 merges to develop and a subsequent develop push triggers a full matrix run:
+
+```bash
+# Check total budget:
+gh api repos/drbothen/slideforge/actions/cache/usage
+
+# Verify arm64 cache is present:
+gh cache list --repo drbothen/slideforge --limit 100 | grep arm64
+
+# Expected: v0-rust-test-linux-arm64-* present with a recent created_at timestamp.
+# Expected: total active_caches_size_in_bytes < ~8 GiB (~8,589,934,592 bytes).
+```
+
+### 9.4 Jobs with `cache-on-failure: "true"` (post-STORY-092)
+
+All 11 jobs that compile Rust code now have `cache-on-failure: "true"`:
+
+| job name | tier | had it before STORY-092 | added by STORY-092 |
+|---|---|---|---|
+| `test (linux-x86_64)` | fast | yes (PR #79) | — |
+| `test-matrix-slow` (all 3 legs) | slow | yes (PR #79) | — |
+| `bench` | slow | yes (PR #81) | — |
+| `clippy` | fast | no | yes |
+| `doctest` | fast | no | yes |
+| `supply-chain` | fast | no | yes |
+| `msrv` | slow | no | yes |
+| `docs` | slow | no | yes |
+| `snapshots` | slow | no | yes |
+| `visual-regression` | slow | no | yes |
+| `perf-smoke` | slow | no | yes |

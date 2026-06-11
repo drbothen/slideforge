@@ -29,7 +29,7 @@ env:
 #
 #   actions/checkout         v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
 #   dtolnay/rust-toolchain HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-#   Swatinem/rust-cache      v2  → 42dc69e1aa15d09112580998cf2ef0119e2e91ae
+#   Swatinem/rust-cache    v2.9.1  → c19371144df3bb44fab255c43d04cbc2ab54d1c4
 #   taiki-e/install-action   v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
 #   actions/setup-node       v4  → cdca7365b2dadb8aad0a33bc7601856ffabcc48e
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: html-wcag
       - name: Install cargo-nextest
@@ -84,7 +84,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: html-wcag-axe
       - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e
