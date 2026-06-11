@@ -89,7 +89,7 @@ git worktree add /Users/jmagady/Dev/slideforge/.worktrees/STORY-095 -b feature/S
 **Traced BCs (pass ABSOLUTE paths in every dispatch per LESSON-20):**
 - `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.03.001.md`
 - `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.03.002.md`
-**Traced VP:** `/Users/jmagady/Dev/slideforge/.factory/specs/verification-properties/VP-006.md`
+**Traced VP:** `/Users/jmagady/Dev/slideforge/.factory/specs/verification-properties/vp-054-wrap-text-termination.md` (VP-054: wrap_text termination/lossless/max-width; BC-4.03.002)
 **Target crate:** `slideforge-pdf` (SS-07). Depends on STORY-043/044/045.
 
 **Delivery order after STORY-095:** 098 → 096 → 099 → 100 → 101 → 097 → 102 (rate-limit: serialize, one at a time).

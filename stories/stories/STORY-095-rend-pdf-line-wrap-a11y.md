@@ -9,7 +9,8 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.1"
+# Changelog: 1.1 — F-095-P1-003 fix: VP-006 (EMU→PDF coord) replaced with VP-054 (wrap_text termination/lossless/max-width) per architect allocation.
 created: "2026-06-11"
 source_findings: [REND-002, REND-008]
 behavioral_contracts: [BC-4.03.001, BC-4.03.002]
@@ -20,7 +21,7 @@ behavioral_contracts: [BC-4.03.001, BC-4.03.002]
 # REND-002 root cause: slideforge-pdf has no word-wrap engine; text runs past page edge.
 # REND-008-pdf: progress_bar tagged /Artifact (must be /Figure with Alt);
 #               only single font subset embedded (bold weight missing).
-verification_properties: [VP-006]
+verification_properties: [VP-054]
 nfr_refs: []
 closes_findings: [REND-002, REND-008]
 depends_on:
@@ -76,7 +77,7 @@ defects discovered in demo output:
 - No f64 intermediate arithmetic in the EMU-to-PDF coordinate path.
 - `#![forbid(unsafe_code)]` in `slideforge-pdf`.
 - The word-wrap implementation MUST be a pure function (no side effects) for Kani
-  amenability per VP-006.
+  amenability per VP-054 (wrap_text termination, lossless wrapping, and max-width invariant).
 
 ## Library & Framework Requirements
 
@@ -194,5 +195,5 @@ Verified by: existing CI integration test in STORY-045 continues to pass.
 ## Test Strategy
 
 TDD strict mode. Write 4 failing tests first. `text_layout.rs` is a pure function module
-and should be Kani-amenable per VP-006 (proptest bounds + Kani proof in Phase 6 for
-wrap termination).
+and should be Kani-amenable per VP-054 (termination, lossless wrapping, and max-width
+invariant — Kani proof in Phase 6; proptest losslessness in P3).
