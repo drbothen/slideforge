@@ -123,8 +123,10 @@ use crate::types::{
 ///   count does not equal input count (BC-3.06.001 defensive check).
 /// * `Err(LayoutError::InvalidBoundingBox)` — A produced bounding box
 ///   violates coordinate invariants (BC-3.06.003 defensive check).
-/// * `Err(LayoutError::MissingAlt)` / `Err(LayoutError::Multiple)` — A shape
-///   node was missing `alt` text or `decorative: true` (BC-3.04.001 EC-001).
+/// * `Err(LayoutError::Multiple)` — Multiple accumulated layout errors in one pass.
+///   Contains `MissingAlt` / `ArithmeticOverflow` instances from shapes
+///   (BC-3.04.001 EC-001 / DI-018), OR multiple `BulletsOnContentlessSlideType`
+///   instances when more than one slide has E-LAY-008 (error-taxonomy v2.30 §234 / DI-018).
 /// * `Err(LayoutError::InlineDepthExceeded)` — An inline node tree exceeds the
 ///   maximum nesting depth (BC-3.05.001 E-LAY-005 / F-MED-006).
 ///
@@ -174,6 +176,14 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
     // Deck-level warning sink — shape off-canvas + inline xref-not-found warnings
     // are accumulated here and stored on LaidOutDeck::warnings (STORY-028 / AC-003 / AC-007).
     let mut deck_warnings: Vec<crate::types::LayoutWarning> = Vec::new();
+    // E-LAY-008 accumulator — error-taxonomy v2.30 §234 / DI-018.
+    //
+    // `BulletsOnContentlessSlideType` is a USER-AUTHORING error, not an internal
+    // invariant breach. Per the spec, ALL instances across the deck must be reported
+    // in a single build pass before the exit-code gate fires. Internal-invariant errors
+    // (InvalidBoundingBox, ArithmeticOverflow, etc.) retain hard-bail semantics and
+    // are NOT collected here.
+    let mut deck_contentless_errors: Vec<LayoutError> = Vec::new();
 
     for (source_index, slide) in deck.slides.iter().enumerate() {
         let slide_type_keyword: Arc<str> = Arc::clone(&slide.slide_type);
@@ -323,7 +333,7 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // For ContentBlock::Bullets: one TextRun frame per BulletItem (parent before
         // children, depth-first order). Nesting is structural via BulletItem.children;
         // layout preserves the flat frame sequence for exporters.
-        for block in &slide.blocks {
+        'blocks: for block in &slide.blocks {
             match &block.content {
                 ContentBlock::Text(text_block) => {
                     match text_block.tag {
@@ -483,16 +493,19 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                     //   Phase 1b: Already-filled Body-role slot — borrow bbox, shrink to content,
                     //             start bullet cursor after body content (F-094-P2-002).
                     //   Phase 2:  Empty Generic/None slot — consume it (multi-body fallback).
-                    //   Phase 3:  None — Err(BulletsOnContentlessSlideType) (F-094-P2-003).
+                    //   Phase 3:  None — accumulate BulletsOnContentlessSlideType + break 'blocks (F-094-P2-003 / F-094-P6-001).
                     //
                     // Per-bullet vertical flow (F-094-P2-001):
                     //   Each bullet gets a distinct y derived from a flow cursor starting at
                     //   `initial_y_cursor` and advancing by LINE_HEIGHT_EMU per item.
                     //   Depth-indented children get x += BULLET_DEPTH_INDENT_EMU * depth.
                     //
-                    // F-094-P1-002 / F-094-P2-003: contentless slide types (title, closing,
-                    //   section_break, blank) return Err(BulletsOnContentlessSlideType)
-                    //   per E-LAY-008 — NOT InvalidBoundingBox (reserved for geometry bugs).
+                    // F-094-P1-002 / F-094-P2-003 / F-094-P6-001: contentless slide types
+                    //   (title, closing, section_break, blank) accumulate
+                    //   BulletsOnContentlessSlideType into deck_contentless_errors per E-LAY-008
+                    //   (error-taxonomy v2.30 §234 / DI-018) — NOT InvalidBoundingBox
+                    //   (reserved for internal geometry bugs). All instances are reported in
+                    //   one build pass; no bail-on-first.
                     enum BulletSlot {
                         /// Body region bbox + starting y cursor.
                         Region(crate::types::BoundingBox, crate::types::Emu),
@@ -573,11 +586,15 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
 
                     match slot {
                         BulletSlot::Contentless => {
-                            // F-094-P3-001 (E-LAY-008 / BC-3.06.003): use the block's
-                            // source span for the error location. When block.span is unknown
-                            // (e.g., blocks built by test fixtures before field_spans threading
-                            // was introduced), fall back to slide.field_spans["bullets"] so
-                            // the error always carries the best available span.
+                            // F-094-P3-001 / E-LAY-008 / error-taxonomy v2.30 §234 / DI-018:
+                            //
+                            // Accumulate this E-LAY-008 instance into `deck_contentless_errors`
+                            // instead of bailing immediately. All instances across the deck are
+                            // reported together in a single build pass (not fail-on-first).
+                            //
+                            // Source span: use the block's span when known; fall back to
+                            // slide.field_spans["bullets"] so the error always carries the best
+                            // available location (F-094-P3-001 / BC-3.06.003).
                             let bullets_err_span = if block.span.is_unknown() {
                                 slide
                                     .field_spans
@@ -587,11 +604,16 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                             } else {
                                 block.span.clone()
                             };
-                            return Err(LayoutError::BulletsOnContentlessSlideType {
-                                slide_type: Arc::clone(&slide_type_keyword),
-                                source_slide_index: source_index,
-                                span: bullets_err_span,
-                            });
+                            deck_contentless_errors.push(
+                                LayoutError::BulletsOnContentlessSlideType {
+                                    slide_type: Arc::clone(&slide_type_keyword),
+                                    source_slide_index: source_index,
+                                    span: bullets_err_span,
+                                },
+                            );
+                            // Stop processing further blocks for THIS slide (remaining blocks
+                            // would produce frames for an errored slide that will be discarded).
+                            break 'blocks;
                         },
                         BulletSlot::Region(body_bbox, initial_y) => {
                             // STORY-073 / AC-001 / F-094-P2-001 — produce one FrameContent::TextRun
@@ -693,6 +715,22 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
             register_tags,
             register_content,
         });
+    }
+
+    // E-LAY-008 gate — error-taxonomy v2.30 §234 / DI-018.
+    //
+    // After all slides have been processed, report any accumulated
+    // `BulletsOnContentlessSlideType` instances. Returning here means no
+    // output is emitted (the laid-out slides are discarded), satisfying the
+    // spec requirement that strict mode exits with failure when E-LAY-008 fires.
+    //
+    // `LayoutError::multiple` handles both the single-error and multi-error cases:
+    //   - 1 error  → Multiple { inner: [BulletsOnContentlessSlideType { .. }] }
+    //   - N errors → Multiple { inner: [err_0, err_1, …, err_N-1] }
+    // The single-error Multiple wrapper is uniform with the shapes accumulation
+    // pattern (BC-3.04.001 item G / layout_shapes).
+    if !deck_contentless_errors.is_empty() {
+        return Err(LayoutError::multiple(deck_contentless_errors));
     }
 
     // BC-3.06.001 defensive check: slide count must be preserved exactly.

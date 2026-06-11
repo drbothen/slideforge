@@ -151,6 +151,36 @@ fn bullets_slide(slide_type: &str, items: Vec<BulletItem>) -> Slide {
     }
 }
 
+/// Return `true` if `err` is `BulletsOnContentlessSlideType` or a `Multiple` whose
+/// inner vec contains at least one `BulletsOnContentlessSlideType` entry.
+///
+/// Used by the E-LAY-008 family of tests to verify the error invariant without
+/// constraining whether the error is bare or wrapped in `Multiple` (the accumulation
+/// channel introduced by error-taxonomy v2.30 §234 / DI-018).
+fn is_or_contains_contentless(err: &LayoutError) -> bool {
+    match err {
+        LayoutError::BulletsOnContentlessSlideType { .. } => true,
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .any(|e| matches!(e, LayoutError::BulletsOnContentlessSlideType { .. })),
+        _ => false,
+    }
+}
+
+/// Extract the first `BulletsOnContentlessSlideType` from `err`, whether `err` is
+/// that variant directly or a `Multiple` wrapping it.
+///
+/// Returns `None` if `err` contains no `BulletsOnContentlessSlideType` entries.
+fn extract_first_contentless(err: &LayoutError) -> Option<&LayoutError> {
+    match err {
+        LayoutError::BulletsOnContentlessSlideType { .. } => Some(err),
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .find(|e| matches!(e, LayoutError::BulletsOnContentlessSlideType { .. })),
+        _ => None,
+    }
+}
+
 /// Count `FrameContent::TextRun` frames in a `LaidOutDeck` slide at index `slide_idx`.
 fn text_run_count(deck: &LaidOutDeck, slide_idx: usize) -> usize {
     deck.slides[slide_idx]
@@ -923,9 +953,12 @@ fn test_f094_p1_002_bullets_on_title_slide_returns_contentless_slide_error() {
          Err(LayoutError::BulletsOnContentlessSlideType); layout::run returned Ok(..)"
     );
     let err = result.unwrap_err();
+    // E-LAY-008 accumulation (error-taxonomy v2.30 §234): a single-slide deck returns
+    // Multiple { inner: [BulletsOnContentlessSlideType { .. }] } — the Multiple wrapper
+    // is the uniform accumulation channel per the DI-018 / LayoutError::multiple() contract.
     assert!(
-        matches!(err, LayoutError::BulletsOnContentlessSlideType { .. }),
-        "F-094-P2-003 Red Gate: error must be LayoutError::BulletsOnContentlessSlideType \
+        is_or_contains_contentless(&err),
+        "F-094-P2-003 Red Gate: error must be or contain LayoutError::BulletsOnContentlessSlideType \
          (E-LAY-008); got: {err:?}"
     );
 }
@@ -943,14 +976,11 @@ fn test_f094_p1_002_bullets_on_closing_slide_returns_contentless_slide_error() {
     assert!(
         result.is_err(),
         "F-094-P1-002 / F-094-P2-003: bullets on a 'closing' slide (no Body region) must return \
-         Err(LayoutError::BulletsOnContentlessSlideType); layout::run returned Ok(..)"
+         Err; layout::run returned Ok(..)"
     );
     assert!(
-        matches!(
-            result.unwrap_err(),
-            LayoutError::BulletsOnContentlessSlideType { .. }
-        ),
-        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
+        is_or_contains_contentless(&result.unwrap_err()),
+        "F-094-P2-003: error must be or contain LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -969,11 +999,8 @@ fn test_f094_p1_002_bullets_on_section_break_returns_contentless_slide_error() {
         "F-094-P1-002 / F-094-P2-003: bullets on 'section_break' (no Body region) must error"
     );
     assert!(
-        matches!(
-            result.unwrap_err(),
-            LayoutError::BulletsOnContentlessSlideType { .. }
-        ),
-        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
+        is_or_contains_contentless(&result.unwrap_err()),
+        "F-094-P2-003: error must be or contain LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -992,11 +1019,8 @@ fn test_f094_p1_002_bullets_on_blank_slide_returns_contentless_slide_error() {
         "F-094-P1-002 / F-094-P2-003: bullets on 'blank' (no slots at all) must error"
     );
     assert!(
-        matches!(
-            result.unwrap_err(),
-            LayoutError::BulletsOnContentlessSlideType { .. }
-        ),
-        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
+        is_or_contains_contentless(&result.unwrap_err()),
+        "F-094-P2-003: error must be or contain LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -1390,8 +1414,17 @@ fn test_f094_p2_003_bullets_on_contentless_returns_e_lay_008_variant_and_message
     );
     let err = result.unwrap_err();
 
+    // E-LAY-008 accumulation (error-taxonomy v2.30 §234): extract the first
+    // BulletsOnContentlessSlideType from the Multiple wrapper.
+    let contentless = extract_first_contentless(&err).unwrap_or_else(|| {
+        panic!(
+            "F-094-P2-003 Red Gate: expected error to be or contain \
+             LayoutError::BulletsOnContentlessSlideType (E-LAY-008); got: {err:?}"
+        )
+    });
+
     // Must be the E-LAY-008 variant (not InvalidBoundingBox).
-    let (variant_slide_type, variant_slide_index) = match &err {
+    let (variant_slide_type, variant_slide_index) = match contentless {
         LayoutError::BulletsOnContentlessSlideType {
             slide_type,
             source_slide_index,
@@ -1413,7 +1446,7 @@ fn test_f094_p2_003_bullets_on_contentless_returns_e_lay_008_variant_and_message
     );
 
     // E-LAY-008 message must contain code prefix, slide type, and hint.
-    let msg = err.to_string();
+    let msg = contentless.to_string();
     assert!(
         msg.contains("[E-LAY-008]"),
         "F-094-P2-003: error message must contain '[E-LAY-008]' code prefix; got: {msg}"
@@ -1468,8 +1501,12 @@ fn test_f094_p3_001_bullets_on_contentless_span_is_non_default() {
     );
     let err = result.unwrap_err();
 
-    // Must be BulletsOnContentlessSlideType, and its span must NOT be unknown.
-    match &err {
+    // E-LAY-008 accumulation (error-taxonomy v2.30 §234): extract the first
+    // BulletsOnContentlessSlideType from the Multiple wrapper, then check its span.
+    let contentless = extract_first_contentless(&err).unwrap_or_else(|| {
+        panic!("F-094-P3-001: expected error to be or contain BulletsOnContentlessSlideType, got: {err:?}")
+    });
+    match contentless {
         LayoutError::BulletsOnContentlessSlideType { span, .. } => {
             assert!(
                 !span.is_unknown(),
@@ -1487,3 +1524,161 @@ fn test_f094_p3_001_bullets_on_contentless_span_is_non_default() {
 
 // F-094-P3-002 test is in crates/slideforge-validate/src/canvas_overflow.rs
 // (validate_post_layout test requires slideforge-layout dep — already in validate crate).
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P6-001 — E-LAY-008 accumulates across slides (error-taxonomy v2.30 §234)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P6-001 (MED) / error-taxonomy v2.30 §234:
+/// When a deck contains TWO slides with `bullets:` on a contentless slide type,
+/// `layout::run` must return `Err(LayoutError::Multiple { inner })` containing
+/// BOTH `BulletsOnContentlessSlideType` instances — not just the first.
+///
+/// Deck shape:
+///   - Slide 0: `title` + bullets (E-LAY-008, `source_slide_index=0`, `slide_type="title"`)
+///   - Slide 1: `content` + bullets (valid — must NOT produce an error)
+///   - Slide 2: `closing` + bullets (E-LAY-008, `source_slide_index=2`, `slide_type="closing"`)
+///
+/// Expected:
+///   - `run` returns `Err(LayoutError::Multiple { inner })` where `inner` has exactly 2
+///     `BulletsOnContentlessSlideType` entries.
+///   - First entry: `slide_type="title"`, `source_slide_index=0`.
+///   - Second entry: `slide_type="closing"`, `source_slide_index=2`.
+///   - A single strict-mode build pass surfaces both (no bail-on-first).
+///
+/// RED: current code hard-`return Err(BulletsOnContentlessSlideType { .. })` at the
+/// first contentless slide — the second instance is never reported.
+#[test]
+fn test_f094_p6_001_e_lay_008_accumulates_across_two_slides() {
+    let items = || vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+
+    // Slide 0: title + bullets → E-LAY-008
+    let slide0 = bullets_slide("title", items());
+    // Slide 1: content + bullets → valid (must NOT be in the error set)
+    let slide1 = bullets_slide("content", items());
+    // Slide 2: closing + bullets → E-LAY-008
+    let slide2 = bullets_slide("closing", items());
+
+    let deck = make_deck(vec![slide0, slide1, slide2]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P6-001: deck with two contentless-bullets slides must return Err"
+    );
+    let err = result.unwrap_err();
+
+    // Must be Multiple containing exactly 2 BulletsOnContentlessSlideType entries.
+    let inner = match err {
+        LayoutError::Multiple { ref inner } => inner.clone(),
+        LayoutError::BulletsOnContentlessSlideType {
+            source_slide_index,
+            ref slide_type,
+            ..
+        } => {
+            panic!(
+                "F-094-P6-001 RED: got single BulletsOnContentlessSlideType (slide_index={source_slide_index}, \
+                 slide_type='{slide_type}') — expected Multiple with 2 entries. \
+                 The layout engine bailed on the first E-LAY-008 and never reported slide 2."
+            );
+        },
+        other => panic!("F-094-P6-001: expected Multiple, got: {other:?}"),
+    };
+
+    assert_eq!(
+        inner.len(),
+        2,
+        "F-094-P6-001: Multiple must contain exactly 2 BulletsOnContentlessSlideType entries \
+         (one per contentless slide); got {}: {inner:?}",
+        inner.len()
+    );
+
+    // Pin first entry: title slide (index 0).
+    match &inner[0] {
+        LayoutError::BulletsOnContentlessSlideType {
+            slide_type,
+            source_slide_index,
+            ..
+        } => {
+            assert_eq!(
+                slide_type.as_ref(),
+                "title",
+                "F-094-P6-001: first error must be for slide_type='title'; got '{slide_type}'"
+            );
+            assert_eq!(
+                *source_slide_index, 0,
+                "F-094-P6-001: first error source_slide_index must be 0; got {source_slide_index}"
+            );
+        },
+        other => {
+            panic!("F-094-P6-001: inner[0] must be BulletsOnContentlessSlideType, got: {other:?}")
+        },
+    }
+
+    // Pin second entry: closing slide (index 2).
+    match &inner[1] {
+        LayoutError::BulletsOnContentlessSlideType {
+            slide_type,
+            source_slide_index,
+            ..
+        } => {
+            assert_eq!(
+                slide_type.as_ref(),
+                "closing",
+                "F-094-P6-001: second error must be for slide_type='closing'; got '{slide_type}'"
+            );
+            assert_eq!(
+                *source_slide_index, 2,
+                "F-094-P6-001: second error source_slide_index must be 2; got {source_slide_index}"
+            );
+        },
+        other => {
+            panic!("F-094-P6-001: inner[1] must be BulletsOnContentlessSlideType, got: {other:?}")
+        },
+    }
+}
+
+/// F-094-P6-001 (b) — mixed deck: one E-LAY-008 + valid slides.
+///
+/// A deck with ONE contentless-bullets slide and other valid slides must:
+///   - Return Err (strict mode fails).
+///   - Report the single instance (not silently drop it).
+///   - NOT emit any output (since it's an error, run returns Err).
+///
+/// This test verifies that the fix didn't inadvertently suppress single-instance
+/// E-LAY-008 errors.
+#[test]
+fn test_f094_p6_001_mixed_deck_single_e_lay_008_still_reported() {
+    let items = || vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+
+    // Slide 0: content + bullets → valid
+    let slide0 = bullets_slide("content", items());
+    // Slide 1: title + bullets → E-LAY-008
+    let slide1 = bullets_slide("title", items());
+
+    let deck = make_deck(vec![slide0, slide1]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P6-001(b): mixed deck with one contentless-bullets slide must return Err"
+    );
+    let err = result.unwrap_err();
+
+    // Must report the E-LAY-008 error (either directly or wrapped in Multiple).
+    let is_e_lay_008 = match &err {
+        LayoutError::BulletsOnContentlessSlideType { .. } => true,
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .any(|e| matches!(e, LayoutError::BulletsOnContentlessSlideType { .. })),
+        _ => false,
+    };
+    assert!(
+        is_e_lay_008,
+        "F-094-P6-001(b): error must be or contain BulletsOnContentlessSlideType; got: {err:?}"
+    );
+}

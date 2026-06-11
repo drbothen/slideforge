@@ -414,20 +414,28 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
             }
         },
         BuildError::Layout(layout_err) => {
-            // F-094-P4-004: Layout errors must render with their structured message
-            // (which already contains the error code prefix and span from thiserror
-            // Display) rather than being wrapped in the raw "Error: layout failed: ..."
-            // bypass. The inner LayoutError Display is the authoritative user-facing form.
+            // F-094-P4-004 / error-taxonomy v2.30 §234 / DI-018:
+            // Layout errors render with their structured message (which embeds the
+            // error code prefix and source span from the thiserror Display).
             //
-            // The error taxonomy requires E-LAY-* errors to surface the error code
-            // prefix (e.g. "[E-LAY-008]") and the source span. The thiserror #[error]
-            // attributes on LayoutError variants embed both. Rendering the inner Display
-            // directly satisfies the taxonomy without requiring miette SourceCode
-            // attachment on LayoutError (which lacks miette::Diagnostic impl).
+            // When `layout_err` is `LayoutError::Multiple { inner }` (the accumulation
+            // wrapper for E-LAY-008 cross-slide accumulation), render EACH inner error
+            // on its own line so all instances are visible to the user in one build pass.
             //
-            // For future: if LayoutError grows miette::Diagnostic, this arm can be
-            // upgraded to render_box_diagnostic for source pointer support.
-            let _ = write!(buf, "{layout_err}");
+            // For all other (non-Multiple) LayoutError variants, render the error directly.
+            match layout_err {
+                slideforge::LayoutError::Multiple { inner } => {
+                    for (i, err) in inner.iter().enumerate() {
+                        if i > 0 {
+                            buf.push('\n');
+                        }
+                        let _ = write!(buf, "{err}");
+                    }
+                },
+                other => {
+                    let _ = write!(buf, "{other}");
+                },
+            }
         },
         other => {
             let _ = write!(buf, "Error: {other}");

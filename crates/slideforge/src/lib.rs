@@ -2849,8 +2849,23 @@ mod tests {
         let err =
             result.expect_err("F-094-P4-005: bullets on 'title' must return Err(LayoutError)");
 
-        // Unwrap to BulletsOnContentlessSlideType.
-        let span = match &err {
+        // E-LAY-008 accumulation (error-taxonomy v2.30 §234): layout::run now wraps even
+        // single BulletsOnContentlessSlideType instances in Multiple { inner: [...] } so
+        // all instances across the deck surface in one build pass (DI-018 accumulation).
+        // Extract the first contentless instance from Multiple.
+        let contentless = match &err {
+            LayoutError::BulletsOnContentlessSlideType { .. } => &err,
+            LayoutError::Multiple { inner } => inner
+                .iter()
+                .find(|e| matches!(e, LayoutError::BulletsOnContentlessSlideType { .. }))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "F-094-P4-005: Multiple contains no BulletsOnContentlessSlideType; got: {inner:?}"
+                    )
+                }),
+            other => panic!("F-094-P4-005: expected BulletsOnContentlessSlideType (or Multiple wrapping it), got: {other:?}"),
+        };
+        let span = match contentless {
             LayoutError::BulletsOnContentlessSlideType { span, .. } => span.clone(),
             other => panic!("F-094-P4-005: expected BulletsOnContentlessSlideType, got: {other:?}"),
         };
@@ -2888,8 +2903,10 @@ mod tests {
             "F-094-P4-005: rendered span must not contain '<unknown>'; got: {rendered}"
         );
 
-        // Also assert that the LayoutError message renders with real location.
-        let err_msg = err.to_string();
+        // Also assert that the individual E-LAY-008 error message renders with real location.
+        // Use `contentless.to_string()` to get the BulletsOnContentlessSlideType Display
+        // (not the Multiple wrapper Display which only shows the count + first error summary).
+        let err_msg = contentless.to_string();
         assert!(
             !err_msg.contains("<byte:"),
             "F-094-P4-005: E-LAY-008 message must not contain '<byte:'; got: {err_msg}"
