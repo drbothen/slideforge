@@ -552,8 +552,12 @@ required check.
 
 ### Cache configuration
 
-- **Action:** `Swatinem/rust-cache` with `cache-on-failure: "true"` on all build-heavy jobs
-  (test matrix, clippy, docs, snapshots, visual-regression, bench)
+- **Action:** `Swatinem/rust-cache` with `cache-on-failure: "true"` on all build-heavy jobs.
+  Per STORY-092, all 11 rust-cache call sites carry this flag: `clippy`, `test` (linux-x86_64),
+  `test-matrix-slow` (linux-arm64, macos-arm64, windows-x86_64 — 3 legs), `doctest`,
+  `supply-chain`, `msrv`, `docs`, `snapshots`, `bench`, `visual-regression`, `perf-smoke`.
+  Jobs without rust-cache (`fmt`, `check-panic-profile`, `check-pdf-deps`, `all-checks-pass`)
+  need no change. The jobs listed above cover every compilation step in the workflow.
 - **Shared keys:** one per job class (`test-linux-x86_64`, `test-linux-arm64`,
   `test-macos-arm64`, `test-windows-x86_64`, `clippy`, `docs`, etc.)
 - **Budget awareness:** approximately 13 distinct shared keys on a 20-crate workspace risks
