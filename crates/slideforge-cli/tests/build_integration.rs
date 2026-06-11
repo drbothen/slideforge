@@ -2144,3 +2144,129 @@ fn test_f094_p4_006_library_fallback_is_not_deck_sf() {
          source_name=None (fallback must be '<source>', not a file path); got:\n{rendered}"
     );
 }
+
+// ── F-094-P9-001 Prong 1: E-LAY-008-only strict deck exits 2 ─────────────────
+
+/// Write a `.sf` source with `bullets:` on a `title` slide type (E-LAY-008).
+///
+/// The `title` slide type has no Body or Generic Empty region. Adding `bullets:`
+/// triggers `LayoutError::BulletsOnContentlessSlideType` → E-LAY-008.
+///
+/// This fixture is valid DSL syntax (parses and evaluates without error) so that
+/// ONLY the layout error is present — isolating the exit-code test to E-LAY-008.
+fn write_lay_008_sf(path: &std::path::Path) {
+    // A `title` slide with a `bullets:` field → E-LAY-008 at layout time.
+    // The slide passes parse + eval; the layout stage rejects it.
+    let content = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide title:\n",
+        "  title \"Title slide\"\n",
+        "  bullets: [\"Item A\", \"Item B\"]\n",
+    );
+    std::fs::write(path, content).expect("write E-LAY-008 .sf fixture");
+}
+
+/// F-094-P9-001 Prong 1: E-LAY-008-only deck in strict mode must exit 2.
+///
+/// Error taxonomy v2.30 row E-LAY-008: `broken | 2`.
+/// When strict mode (default) encounters a layout-only E-LAY-008 error with no
+/// pre-layout validator errors, the exit code must be 2 (EXIT_VALIDATION_ERROR),
+/// not 1 (EXIT_PARSE_ERROR).
+///
+/// RED Gate: this test FAILS before the fix because `BuildError::Layout(_)` falls
+/// to the catch-all `EXIT_PARSE_ERROR` (exit 1) branch.
+#[test]
+fn test_BC_1_15_003_f094_p9_001_lay_008_strict_exits_2_not_1() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_strict.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    // Brand discovery: CLI looks for brand.toml next to the source file.
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path,
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    // strict = true (warn_only = false) is the default.
+    let global = GlobalFlags {
+        warn_only: false,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::from(2),
+        "F-094-P9-001 Prong 1: E-LAY-008-only build in strict mode must exit 2 \
+         (error-taxonomy v2.30: broken|2); got exit code {:?}",
+        code
+    );
+    // No output must be written (strict: broken → no partial output).
+    assert!(
+        !out_dir.exists()
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
+        "F-094-P9-001 Prong 1: no output files must be written on E-LAY-008 in strict mode"
+    );
+}
+
+// ── F-094-P9-001 Prong 2: E-LAY-008 warn-only → placeholder + exit 0 ─────────
+
+/// F-094-P9-001 Prong 2: E-LAY-008 deck with --warn-only must exit 0 and produce output.
+///
+/// Error taxonomy v2.30 prose §232: "In `--warn-only` mode: error-slide placeholder
+/// rendered at the affected slide position; build continues; exit 0 (unless other
+/// fatal errors are also present)."
+///
+/// RED Gate: this test FAILS before the fix because `BuildError::Layout(_)` is never
+/// demoted under --warn-only; currently exits 1 with no output.
+#[test]
+fn test_BC_1_15_003_f094_p9_001_lay_008_warn_only_exits_0_output_written() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_warn.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-094-P9-001 Prong 2: E-LAY-008 with --warn-only must exit 0 \
+         (error-slide placeholder substituted, build continues); got: {:?}",
+        code
+    );
+    // Output file must exist (error-slide placeholder at the affected slide position).
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    assert!(
+        out_dir.join(format!("{stem}.pptx")).exists(),
+        "F-094-P9-001 Prong 2: .pptx must be written even on E-LAY-008 when --warn-only is set"
+    );
+    // Non-empty output: at least minimal PPTX structure.
+    let file_size = std::fs::metadata(out_dir.join(format!("{stem}.pptx")))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    assert!(
+        file_size > 0,
+        "F-094-P9-001 Prong 2: .pptx output must be non-empty (error-slide placeholder content)"
+    );
+}

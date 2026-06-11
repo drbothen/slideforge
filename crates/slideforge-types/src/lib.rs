@@ -55,8 +55,8 @@ pub mod value;
 pub use block::{Block, BulletItem, ColorBarSpec, ContentBlock, TextBlock, TextTag};
 pub use brand::{Brand, BrandFonts, BrandPalette, LayoutDefinition};
 pub use deck::{
-    CANONICAL_MANUAL_SECTION_TYPES, Deck, DeckMetadata, PPTX_SLIDE_ID_START, SectionBlock,
-    SlideSectionEntry,
+    CANONICAL_MANUAL_SECTION_TYPES, Deck, DeckMetadata, ERROR_PLACEHOLDER_SLIDE_TYPE,
+    PPTX_SLIDE_ID_START, SectionBlock, SlideSectionEntry,
 };
 pub use emu::{CANVAS_HEIGHT, CANVAS_WIDTH, Emu, SLIDE_HEIGHT, SLIDE_WIDTH};
 pub use error::TypeError;

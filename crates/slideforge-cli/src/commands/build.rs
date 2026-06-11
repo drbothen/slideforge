@@ -219,6 +219,58 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Map a [`slideforge::LayoutError`] variant to the exit code it should produce.
+///
+/// Taxonomy (error-taxonomy.md v2.30) classification:
+///
+/// | `LayoutError` variant | Taxonomy code | Exit |
+/// |-----------------------|---------------|------|
+/// | `BulletsOnContentlessSlideType` | E-LAY-008 broken | 2 |
+/// | `EmptyDeck` | E-LAY-002 broken | 2 |
+/// | `UnknownSlideType` | user-authoring (unlisted) | 2 |
+/// | `UnknownSectionType` | user-authoring (unlisted) | 2 |
+/// | `MissingAlt` | E-LAY-004 broken | 2 |
+/// | `InlineDepthExceeded` | E-LAY-005 broken | 2 |
+/// | `BulletDepthExceeded` | E-LAY-007 broken | 2 |
+/// | `ArithmeticOverflow` | E-LAY-006 broken | 2 |
+/// | `MissingRiskCardField` | user-authoring (unlisted) | 2 |
+/// | `MalformedSeverityCards` | user-authoring (unlisted) | 2 |
+/// | `UnresolvedSeverityCards` | evaluator-bug (unlisted) | 2 |
+/// | `UnresolvedTakeaway` | evaluator-bug (unlisted) | 2 |
+/// | `Multiple` | max-severity of inner errors | — |
+/// | `InvalidBoundingBox` | internal invariant (not in taxonomy) | 1 |
+/// | `SlideCountMismatch` | internal invariant (not in taxonomy) | 1 |
+///
+/// `F-094-P9-001`: `InvalidBoundingBox` and `SlideCountMismatch` are internal
+/// engine bugs (not user-authoring errors) and are not listed in the taxonomy.
+/// They retain exit 1 (parse-category internal error) because they indicate a
+/// bug in the layout engine itself, not a user-correctable DSL problem. All
+/// other `LayoutError` variants correspond to user-authoring or evaluator-stage
+/// errors that the taxonomy classifies as `broken | 2`.
+fn exit_code_for_layout_error(layout_err: &slideforge::LayoutError) -> u8 {
+    use slideforge::LayoutError;
+    match layout_err {
+        // Internal invariant violations — engine bugs, not user-authoring errors.
+        // Not in the error taxonomy; retain exit 1 (internal error category).
+        LayoutError::InvalidBoundingBox { .. } | LayoutError::SlideCountMismatch { .. } => {
+            EXIT_PARSE_ERROR
+        },
+        // `Multiple` — recurse and take the max severity of the inner errors.
+        // If all inners are internal (exit 1), Multiple is also exit 1.
+        // If any inner is user-authoring (exit 2), Multiple is exit 2.
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .map(exit_code_for_layout_error)
+            .max()
+            .unwrap_or(EXIT_PARSE_ERROR),
+        // All other variants are user-authoring or evaluator errors.
+        // Taxonomy classifies them as `broken | 2`.
+        // This arm intentionally catches all non-exhaustive future variants
+        // conservatively as exit 2 (user-authoring class).
+        _ => EXIT_VALIDATION_ERROR,
+    }
+}
+
 /// Map a [`BuildError`] to the appropriate exit code as `u8`.
 ///
 /// Differentiates E-PAR (exit 1) from E-EXP (exit 3), both of which surface
@@ -231,8 +283,14 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 /// | `EvalFailed` (strict) | 2 |
 /// | `ValidationFailed` (strict) | 2 |
 /// | `MultistageFailed` (strict) | 2 |
+/// | `Layout` (user-authoring variants) | 2 |
+/// | `Layout` (internal invariant variants) | 1 |
 /// | `Export` | 3 |
-/// | Other (`Registry`, `Brand`, `Layout`, `Plugin`, `UnknownFormat`) | 1 |
+/// | Other (`Registry`, `Brand`, `Plugin`, `UnknownFormat`) | 1 |
+///
+/// `F-094-P9-001`: `BuildError::Layout` is now classified per
+/// `exit_code_for_layout_error` — user-authoring layout errors (E-LAY-008,
+/// E-LAY-004, etc.) produce exit 2; internal invariant violations produce exit 1.
 ///
 /// This function operates on `u8` directly (HIGH-004 fix: avoids the
 /// `exit_code_to_u8` guessing pattern that had a silent fallback to
@@ -243,7 +301,10 @@ fn exit_code_for_build_error_u8(err: &BuildError) -> u8 {
         | BuildError::ValidationFailed { .. }
         | BuildError::MultistageFailed { .. } => EXIT_VALIDATION_ERROR,
         BuildError::Export(_) => EXIT_EXPORT_ERROR,
-        // ParseFailed, Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
+        // F-094-P9-001: Layout errors are classified per the error taxonomy.
+        // User-authoring variants → exit 2; internal invariant violations → exit 1.
+        BuildError::Layout(layout_err) => exit_code_for_layout_error(layout_err),
+        // ParseFailed, Brand, Registry, Plugin, NoBrandSource, NoBrandProvider,
         // UnknownFormat — all treated as fatal parse-category errors (exit 1).
         _ => EXIT_PARSE_ERROR,
     }
@@ -1609,6 +1670,97 @@ mod tests {
             Some("other.sf"),
             "F-094-P7-001: bare diag span.file must be 'other.sf'; got: {}",
             bare_diags[0]["span"]["file"]
+        );
+    }
+
+    // ── F-094-P9-001 Prong 1+3: E-LAY-008 exit-code taxonomy mapping unit tests ─
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(BulletsOnContentlessSlideType)` → exit 2.
+    ///
+    /// Error taxonomy v2.30 row E-LAY-008: `broken | 2`.
+    /// The `exit_code_for_build_error` function must return exit 2 for layout errors
+    /// that are user-authoring errors (E-LAY-008 and all other taxonomy-classified variants).
+    ///
+    /// RED Gate: before the fix, `BuildError::Layout(_)` fell to the catch-all
+    /// `EXIT_PARSE_ERROR` (exit 1). After the fix, `exit_code_for_layout_error`
+    /// is called to classify per the taxonomy.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_lay_008_user_authoring_maps_to_2() {
+        use slideforge::LayoutError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let lay_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span: SourceSpan::default(),
+        };
+        let err = BuildError::Layout(lay_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(2),
+            "F-094-P9-001 Prong 1: BuildError::Layout(BulletsOnContentlessSlideType) must → exit 2 \
+             (taxonomy v2.30: broken|2)"
+        );
+    }
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(SlideCountMismatch)` → exit 1.
+    ///
+    /// `SlideCountMismatch` is an internal engine invariant violation (not in the
+    /// user-authoring taxonomy). It must retain exit 1 (parse-category internal error).
+    /// This test uses `SlideCountMismatch` instead of `InvalidBoundingBox` because
+    /// `BoundingBox`/`Emu` are in `slideforge-layout::types` (not a direct dependency
+    /// of `slideforge-cli`), while `SlideCountMismatch` fields are all primitive types.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_slide_count_mismatch_internal_maps_to_1() {
+        use slideforge::LayoutError;
+
+        let lay_err = LayoutError::SlideCountMismatch {
+            expected: 3,
+            actual: 2,
+            source_slide_index: 0,
+        };
+        let err = BuildError::Layout(lay_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(1),
+            "F-094-P9-001 Prong 1: BuildError::Layout(SlideCountMismatch) must → exit 1 \
+             (internal invariant violation, not in user-authoring taxonomy)"
+        );
+    }
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(Multiple { BulletsOnContentless, MissingAlt })` → exit 2.
+    ///
+    /// `Multiple` with all user-authoring inners must produce exit 2 (max-severity of inners).
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_multiple_user_authoring_maps_to_2() {
+        use slideforge::LayoutError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let inner = vec![
+            LayoutError::BulletsOnContentlessSlideType {
+                slide_type: Arc::from("title"),
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+            LayoutError::MissingAlt {
+                source_slide_index: 1,
+                span: SourceSpan::default(),
+            },
+        ];
+        let multi_err = LayoutError::multiple(inner);
+        let err = BuildError::Layout(multi_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(2),
+            "F-094-P9-001 Prong 1: Multiple with all user-authoring inners must → exit 2"
         );
     }
 }

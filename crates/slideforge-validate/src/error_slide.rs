@@ -25,10 +25,12 @@ use slideforge_types::{FieldValue, OrderedMap, Slide, SourceSpan, Value};
 
 /// The internal slide type identifier for error placeholder slides.
 ///
-/// This constant is intentionally not a real DSL slide type — users cannot
-/// create slides of this type directly. It is an IR-internal marker
-/// recognized by the layout engine and exporters.
-pub const ERROR_PLACEHOLDER_SLIDE_TYPE: &str = "__error_placeholder__";
+/// Re-exported from `slideforge_types::ERROR_PLACEHOLDER_SLIDE_TYPE`, which
+/// is the single authoritative source. Both `slideforge-layout` (region map)
+/// and `slideforge-validate` (placeholder constructor) depend on `slideforge-types`,
+/// so placing the constant there avoids a circular-dependency between the two crates
+/// (F-094-P9-001 / TD-VSDD-060).
+pub use slideforge_types::ERROR_PLACEHOLDER_SLIDE_TYPE;
 
 /// Construct an error-slide placeholder for the given diagnostic.
 ///

@@ -491,6 +491,35 @@ pub fn region_frames_for(
             },
         ],
 
+        // ── __error_placeholder__ ─────────────────────────────────────────
+        // Internal IR type used by the warn-only demotion path (F-094-P9-001).
+        //
+        // When `--warn-only` is active and a user-authoring layout error occurs
+        // (e.g., E-LAY-008: bullets on a content-less slide type), the pipeline
+        // substitutes the offending `Deck` slide with a `Slide` whose
+        // `slide_type` is `"__error_placeholder__"` and re-runs layout.
+        //
+        // This single full-page body region ensures the placeholder slide lays
+        // out successfully so the exporter can render the error card.  Exporters
+        // detect this type by matching on `slide_type_keyword` and render a
+        // human-readable error card (red border, error code, message).
+        //
+        // The region is intentionally full-page (0 margin, full width × height)
+        // to give the exporter the maximum canvas for the error card.
+        slideforge_types::ERROR_PLACEHOLDER_SLIDE_TYPE => {
+            vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: page_width,
+                    height: page_height,
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            }]
+        },
+
         // Unknown keyword — caller should return LayoutError::UnknownSlideType
         _ => return None,
     };

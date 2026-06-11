@@ -604,6 +604,44 @@ pub fn export_format(
     })
 }
 
+// ── F-094-P9-001 Prong 2: warn-only layout-error demotion helpers ─────────────
+
+/// Collect `source_slide_index` values from all `BulletsOnContentlessSlideType`
+/// entries in a `LayoutError` (including those nested in `Multiple`).
+///
+/// Returns an empty `Vec` if no `BulletsOnContentlessSlideType` entries are found.
+fn collect_bullets_on_contentless_indices(err: &slideforge_layout::LayoutError) -> Vec<usize> {
+    use slideforge_layout::LayoutError;
+    match err {
+        LayoutError::BulletsOnContentlessSlideType {
+            source_slide_index, ..
+        } => vec![*source_slide_index],
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .flat_map(collect_bullets_on_contentless_indices)
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// Return `true` if ALL leaf errors in `err` are user-authoring layout errors
+/// eligible for warn-only demotion to error-slide placeholders.
+///
+/// Returns `false` if any leaf error is an internal invariant violation
+/// (`InvalidBoundingBox` or `SlideCountMismatch`) — those are engine bugs, not
+/// user-authoring problems, and must never be silently demoted.
+fn all_are_demotion_eligible(err: &slideforge_layout::LayoutError) -> bool {
+    use slideforge_layout::LayoutError;
+    match err {
+        // Internal invariant violations — NOT eligible for demotion.
+        LayoutError::InvalidBoundingBox { .. } | LayoutError::SlideCountMismatch { .. } => false,
+        // Recurse into Multiple.
+        LayoutError::Multiple { inner } => inner.iter().all(all_are_demotion_eligible),
+        // All other variants are user-authoring or evaluator errors — eligible.
+        _ => true,
+    }
+}
+
 /// Core compile-phase implementation (parse → eval → brand → validate → layout).
 ///
 /// This is the **single canonical pipeline** shared by both [`compile`] (which
@@ -905,7 +943,72 @@ fn compile_inner(
                     });
                 }
             }
-            return Err(error::BuildError::Layout(layout_err));
+
+            // F-094-P9-001 Prong 2: warn-only demotion for user-authoring layout errors.
+            //
+            // Error taxonomy v2.30 §232: in `--warn-only` mode, `BulletsOnContentlessSlideType`
+            // (E-LAY-008) is demoted to an error-slide placeholder — build continues, exit 0.
+            //
+            // Implementation: collect all `BulletsOnContentlessSlideType` slide indices from
+            // the error (flat or nested in `Multiple`), substitute each affected `Deck` slide
+            // with an `error_slide_placeholder`, and re-run layout on the modified deck.
+            //
+            // This uses the established `error_slide_placeholder` mechanism from
+            // `slideforge-validate` — the same pattern used for eval-stage error demotion.
+            //
+            // Condition for demotion: ALL inner errors must be user-authoring layout errors
+            // (i.e., `BulletsOnContentlessSlideType`). If any inner error is an internal
+            // invariant violation (`InvalidBoundingBox`, `SlideCountMismatch`), demotion is
+            // NOT attempted and the original error is returned (internal bugs are never demoted).
+            if options.strict {
+                // Strict mode: layout errors are always fatal.
+                return Err(error::BuildError::Layout(layout_err));
+            }
+            // Warn-only mode: attempt demotion of user-authoring layout errors.
+            //
+            // Collect all BulletsOnContentlessSlideType source_slide_index values.
+            let affected_indices: Vec<usize> = collect_bullets_on_contentless_indices(&layout_err);
+
+            if affected_indices.is_empty() {
+                // No BulletsOnContentlessSlideType found — return original error.
+                return Err(error::BuildError::Layout(layout_err));
+            }
+            if !all_are_demotion_eligible(&layout_err) {
+                // Some inners are internal invariant violations — do not demote.
+                return Err(error::BuildError::Layout(layout_err));
+            }
+            tracing::warn!(
+                count = affected_indices.len(),
+                "compile_inner: warn-only mode — demoting E-LAY-008 \
+                 (BulletsOnContentlessSlideType) to error-slide placeholders \
+                 on slides {affected_indices:?}"
+            );
+            // Substitute each affected slide with an error-slide placeholder.
+            for &slide_idx in &affected_indices {
+                if slide_idx < deck.slides.len() {
+                    let placeholder = slideforge_validate::error_slide_placeholder(
+                        "E-LAY-008",
+                        &layout_err.to_string(),
+                        slide_idx + 1, // 1-based position per error_slide_placeholder API
+                    );
+                    deck.slides[slide_idx] = placeholder;
+                }
+            }
+            // Re-run layout on the modified deck (placeholders have a known
+            // region map via `__error_placeholder__` type).
+            match layout_run(&deck, &brand) {
+                Ok(lo) => lo,
+                Err(re_layout_err) => {
+                    // Re-layout failed — unexpected (placeholder type should always
+                    // lay out). Fall through to the hard-return.
+                    tracing::warn!(
+                        err = %re_layout_err,
+                        "compile_inner: re-layout after placeholder substitution \
+                         failed; returning original layout error"
+                    );
+                    return Err(error::BuildError::Layout(re_layout_err));
+                },
+            }
         },
     };
 
@@ -2939,7 +3042,8 @@ mod tests {
             "slideforge_version \"1\"\n", // line 1
             "lang \"en-US\"\n",           // line 2
             "slide title:\n",             // line 3
-            "  bullets: [\"item\"]\n",    // line 4 — bullets: invalid on content-less type
+            "  title \"Title slide\"\n",  // line 4 — required field present (avoids E-VAL-101)
+            "  bullets: [\"item\"]\n", // line 5 — bullets: invalid on content-less type → E-LAY-008
         );
 
         // Write a brand.toml to a temp dir alongside the source (same minimal pattern
@@ -2971,7 +3075,12 @@ mod tests {
             brand_source: Some(BrandSource::TomlFile(Arc::from(
                 brand_toml_path.to_string_lossy().as_ref(),
             ))),
-            strict: false, // non-strict so E-LAY-008 is returned in the error, not early-exit
+            // F-094-P9-001 Prong 3: use strict=true so E-LAY-008 surfaces as
+            // BuildError::Layout (exit 2 per taxonomy v2.30: broken|2).
+            // With strict=false (warn-only), E-LAY-008 is now demoted to an
+            // error-slide placeholder and compile() returns Ok(CompiledDeck),
+            // making the error path unreachable for this span-propagation test.
+            strict: true,
             active_variant: None,
             source_name: Some(Arc::from("quarterly-review.sf")),
         };
@@ -2980,32 +3089,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp_dir);
 
         // The build must fail (E-LAY-008: bullets on content-less type).
+        // In strict mode, E-LAY-008 returns BuildError::Layout (exit 2 per taxonomy v2.30).
         // Extract error via let-else rather than unwrap_err/expect_err, because
         // CompiledDeck doesn't implement Debug (it holds PluginRegistry).
         let Err(err) = result else {
             panic!(
-                "F-094-P4-006a: bullets on 'title' must fail with BuildError, but compile() returned Ok"
+                "F-094-P4-006a: bullets on 'title' with strict=true must fail with BuildError; \
+                 compile() returned Ok"
             )
         };
 
         // Extract the file field from the diagnostic.
-        // E-LAY-008 surfaces in two ways depending on whether strict mode is active:
-        //   - strict:true  → BuildError::ValidationFailed (pre-layout validator catches it)
-        //   - strict:false → BuildError::Layout (LayoutError passes through lib.rs:908 directly)
-        // Both arms are handled below.
+        // E-LAY-008 in strict mode surfaces as BuildError::Layout(BulletsOnContentlessSlideType).
+        // The LayoutError::to_string() includes the span file, which must contain the
+        // source_name we supplied ("quarterly-review.sf").
         let file_name = match &err {
-            crate::error::BuildError::ValidationFailed { diagnostics, .. } => {
-                diagnostics.first().map_or_else(
-                    || "<no diagnostics>".to_owned(),
-                    |d| d.span.file.as_ref().to_owned(),
-                )
-            },
             crate::error::BuildError::Layout(layout_err) => {
-                // Direct LayoutError — extract span from the error's Display or match fields.
+                // LayoutError::BulletsOnContentlessSlideType includes span.file in its Display.
                 layout_err.to_string()
             },
             other => panic!(
-                "F-094-P4-006a: unexpected error variant {other:?}; expected ValidationFailed or Layout"
+                "F-094-P4-006a: unexpected error variant {other:?}; expected BuildError::Layout \
+                 (E-LAY-008 in strict mode)"
             ),
         };
 
@@ -3038,11 +3143,16 @@ mod tests {
         use std::io::Write as _;
         use std::sync::Arc;
 
+        // F-094-P9-001 Prong 3 alignment: include title: field to avoid E-VAL-101
+        // and isolate the test to E-LAY-008 (BulletsOnContentlessSlideType).
+        // strict=true so the error surfaces as BuildError::Layout (exit 2).
+        // With strict=false + warn-only, E-LAY-008 is now demoted to placeholder.
         let source = concat!(
             "slideforge_version \"1\"\n",
             "lang \"en-US\"\n",
             "slide title:\n",
-            "  bullets: [\"item\"]\n",
+            "  title \"Title slide\"\n", // required field — avoids E-VAL-101
+            "  bullets: [\"item\"]\n",   // E-LAY-008: bullets on content-less type
         );
 
         let tmp_dir = std::env::temp_dir().join(format!(
@@ -3072,7 +3182,10 @@ mod tests {
             brand_source: Some(BrandSource::TomlFile(Arc::from(
                 brand_toml_path.to_string_lossy().as_ref(),
             ))),
-            strict: false,
+            // F-094-P9-001 Prong 3: strict=true so E-LAY-008 surfaces as BuildError::Layout.
+            // warn-only (strict=false) demotes E-LAY-008 to a placeholder → compile() returns Ok,
+            // making the error path unreachable for this span-propagation test.
+            strict: true,
             active_variant: None,
             source_name: None, // ← the case under test
         };
@@ -3084,20 +3197,18 @@ mod tests {
         // CompiledDeck doesn't implement Debug (it holds PluginRegistry).
         let Err(err) = result else {
             panic!(
-                "F-094-P4-006b: bullets on 'title' must fail with BuildError, but compile() returned Ok"
+                "F-094-P4-006b: bullets on 'title' with strict=true must fail with BuildError; \
+                 compile() returned Ok"
             )
         };
 
+        // E-LAY-008 in strict mode surfaces as BuildError::Layout(BulletsOnContentlessSlideType).
+        // The LayoutError::to_string() includes the span file (the "<source>" fallback).
         let file_name = match &err {
-            crate::error::BuildError::ValidationFailed { diagnostics, .. } => {
-                diagnostics.first().map_or_else(
-                    || "<no diagnostics>".to_owned(),
-                    |d| d.span.file.as_ref().to_owned(),
-                )
-            },
             crate::error::BuildError::Layout(layout_err) => layout_err.to_string(),
             other => panic!(
-                "F-094-P4-006b: unexpected error variant {other:?}; expected ValidationFailed or Layout"
+                "F-094-P4-006b: unexpected error variant {other:?}; expected BuildError::Layout \
+                 (E-LAY-008 in strict mode)"
             ),
         };
 

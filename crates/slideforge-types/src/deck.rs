@@ -44,6 +44,39 @@ pub const CANONICAL_MANUAL_SECTION_TYPES: &[&str] = &[
     "glossary",
 ];
 
+/// Internal slide type identifier for error-slide placeholder slides.
+///
+/// This constant is the single authoritative source for the internal slide type
+/// name used when the pipeline substitutes a problematic slide with a visible
+/// error card (e.g., in `--warn-only` mode for E-LAY-008).
+///
+/// ## Why in `slideforge-types`
+///
+/// `slideforge-types` is the lowest shared dependency in the crate graph. Both
+/// `slideforge-layout` (which needs to recognise the type in its region map) and
+/// `slideforge-validate` (which constructs the placeholder `Slide`) depend on it,
+/// so placing the constant here avoids a circular dependency that would arise if
+/// either crate depended on the other.
+///
+/// ## Invariants
+///
+/// - MUST match the string literal used by `error_slide_placeholder` in
+///   `slideforge-validate` to construct the placeholder `Slide`.
+/// - MUST be registered in `slideforge-layout::regions::region_frames_for` so
+///   that layout does not return `LayoutError::UnknownSlideType` for placeholder slides.
+/// - MUST NOT be a valid user-authored slide type (users cannot create slides of
+///   this type via the DSL — the `__` prefix and trailing `__` are reserved).
+///
+/// ## Users (F-094-P9-001)
+///
+/// - `slideforge-validate::error_slide::error_slide_placeholder` — constructs a
+///   `Slide` with this type when substituting a failed slide in warn-only mode.
+/// - `slideforge-layout::regions::region_frames_for` — returns a full-page body
+///   region so the placeholder slide lays out without error.
+/// - Exporters (PPTX, DOCX, PDF, HTML) — detect this type and render a human-readable
+///   error card (red border, error code, message) instead of normal slide content.
+pub const ERROR_PLACEHOLDER_SLIDE_TYPE: &str = "__error_placeholder__";
+
 use crate::block::Block;
 use crate::ordered_map::OrderedMap;
 use crate::register::Register;
