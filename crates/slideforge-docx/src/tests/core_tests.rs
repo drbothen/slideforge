@@ -1639,6 +1639,9 @@ fn make_progress_bar_deck_with_colorbar(percent_input: u8, total_width_emu: i64)
                 g: 112,
                 b: 192,
             },
+            // STORY-095: alt field added to FrameContent::ColorBar.
+            // DOCX exporter does not currently render /Figure tagging, so Unspecified.
+            alt: slideforge_types::AltText::Unspecified,
         },
         text_flow: None,
         region_role: None,

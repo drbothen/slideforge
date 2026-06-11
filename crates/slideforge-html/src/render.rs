@@ -729,6 +729,7 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                 total_width_emu: _,
                 percent,
                 color,
+                alt: _, // STORY-095: alt is used by PDF exporter only; HTML uses aria-label
             } => {
                 // OBS-2: "% complete" string is English-only. This is a KNOWN-LIMITATION:
                 // the aria-label for ColorBar uses hardcoded English ("% complete").

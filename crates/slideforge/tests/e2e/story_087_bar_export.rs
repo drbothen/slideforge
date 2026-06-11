@@ -147,6 +147,9 @@ fn progress_bar_laid_out_deck() -> LaidOutDeck {
                         g: 112,
                         b: 192,
                     }, // #0070C0 brand primary
+                    // STORY-095 AC-003: alt field added to FrameContent::ColorBar.
+                    // This test doesn't test PDF /Figure tagging, so Unspecified is correct.
+                    alt: slideforge_layout::types::AltText::Unspecified,
                 },
                 text_flow: None,
                 region_role: None,

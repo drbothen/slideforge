@@ -381,28 +381,48 @@ impl SlideTagEngine {
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
-                // ColorBar — marked as PDF Artifact (decorative shape).
+                // ColorBar — dispatch to /Figure or /Artifact based on alt field.
                 //
-                // The bar frame carries no text and no alt text; WCAG accessibility
-                // co-encoding is satisfied by the adjacent ColorLabel (Body-role) text
-                // frame which renders the percentage label. Marking the bar as an
-                // Artifact suppresses it from the PDF logical structure tree, avoiding
-                // a spurious unmarked-content finding without falsely claiming it as
-                // a tagged Figure.
+                // STORY-095 AC-003 / BC-4.03.001 / ISO 14289-1 §7.3:
+                // - AltText::Provided(label): emit /Figure with /Alt = label so
+                //   assistive technology can reach the progress_bar information.
+                // - AltText::Decorative or AltText::Unspecified: mark as /Artifact
+                //   (EC-003: decorative bars are intentionally excluded from structure tree).
                 //
-                // The draw pass in exporter.rs renders the bar as a filled rectangle
-                // wrapped in `/Artifact BMC … EMC` (BC-1.17.002 PC-9 / STORY-087).
-                // Upgrading to a full PDF/UA-1 Figure structure element with `/Alt`
-                // text (e.g., "75% filled bar") is a future enhancement; the current
-                // Artifact tagging satisfies PDF/UA-1 for decorative visual elements.
-                FrameContent::ColorBar { .. } => {
-                    tracing::debug!(
-                        frame_idx,
-                        "FrameContent::ColorBar marked as PDF Artifact; \
-                         filled rectangle drawn by exporter draw_color_bar_rect; \
-                         label text is in adjacent ColorLabel frame (BC-1.17.002 PC-9)"
-                    );
-                    decorative_frame_indices.push(frame_idx);
+                // WCAG co-encoding: when the bar is /Artifact, the adjacent ColorLabel
+                // (Body-role) text frame co-encodes the information in text. When the bar
+                // is /Figure, the /Alt attribute provides the accessible description.
+                //
+                // The draw pass in exporter.rs renders the bar as a filled rectangle;
+                // the tag here determines how it is wrapped in the content stream.
+                FrameContent::ColorBar { alt, .. } => {
+                    match alt {
+                        AltText::Provided(label) => {
+                            // Emit /Figure with /Alt = label (BC-4.03.001 AC-003 / EC-004).
+                            let fig_group =
+                                TagGroup::new(Tag::<krilla::tagging::kind::Figure>::Figure(Some(
+                                    label.as_ref().to_owned(),
+                                )));
+                            let child_idx = part_group.children.len();
+                            part_group.push(fig_group);
+                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                            tracing::debug!(
+                                frame_idx,
+                                label = label.as_ref(),
+                                "FrameContent::ColorBar tagged as /Figure with /Alt (STORY-095 AC-003)"
+                            );
+                        },
+                        AltText::Decorative | AltText::Unspecified => {
+                            // Mark as Artifact — no structure tree entry (EC-003).
+                            decorative_frame_indices.push(frame_idx);
+                            tracing::debug!(
+                                frame_idx,
+                                ?alt,
+                                "FrameContent::ColorBar marked as PDF Artifact \
+                                 (decorative or unspecified alt — EC-003)"
+                            );
+                        },
+                    }
                 },
             }
         }

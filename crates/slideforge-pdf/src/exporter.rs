@@ -75,7 +75,7 @@ use slideforge_types::{Brand, Deck, InlineNode};
 
 use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
-use crate::font::{ResolvedFontSet, measure_text_width_pt, resolve_font_set};
+use crate::font::{ResolvedFace, ResolvedFontSet, measure_text_width_pt, resolve_font_set};
 use crate::outline::{build_krilla_outline, build_outline_entries};
 use crate::slide_pdf::{FontFaceKind, KrillaTextSpan, slide_to_krilla_runs};
 use crate::svg_embed::embed_normalized_svg;
@@ -773,13 +773,17 @@ fn draw_frame(
                     draw_inline_spans(surface, &spans, bbox, font_set, 36.0);
                 }
             } else {
-                let regular_font = font_set.regular.as_ref().map(|f| &f.font);
-                draw_text_at_bbox(surface, text.as_ref(), bbox, 36.0, regular_font);
+                draw_text_at_bbox(
+                    surface,
+                    text.as_ref(),
+                    bbox,
+                    36.0,
+                    font_set.regular.as_ref(),
+                );
             }
         },
         FrameContent::Subtitle(text) => {
-            let regular_font = font_set.regular.as_ref().map(|f| &f.font);
-            draw_text_at_bbox(surface, text, bbox, 28.0, regular_font);
+            draw_text_at_bbox(surface, text, bbox, 28.0, font_set.regular.as_ref());
         },
         // STORY-081 AC-004: SubtitleInlines carries rich inline structure.
         // Render each span with font-face dispatch via slide_to_krilla_runs +
@@ -1111,9 +1115,19 @@ fn text_fill_black() -> Fill {
 
 /// Draw text at a bounding box position using krilla Surface (top-left, Y-down) coordinates.
 ///
-/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `font`
+/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `face`
 /// is `None`, logs a debug warning and skips drawing. This is the correct
 /// non-fatal behavior when a brand font is unavailable.
+///
+/// ## Word-wrap (STORY-095 T-006 / AC-001, AC-002)
+///
+/// When `face` is `Some`, the text is wrapped to lines that fit within the frame
+/// width using [`crate::text_layout::wrap_text`]. Each wrapped line is drawn at an
+/// incrementally advanced baseline, using `font_size * BODY_LINE_LEADING` as the
+/// line advance.
+///
+/// When `face` is `None`, the function returns without drawing — we cannot measure
+/// widths without font metrics, and non-fatal degradation is the correct behaviour.
 ///
 /// ## Paint-state determinism (OBS-044-22-01 fix)
 ///
@@ -1126,9 +1140,9 @@ fn draw_text_at_bbox(
     text: &str,
     bbox: &BoundingBox,
     font_size: f32,
-    font: Option<&krilla::text::Font>,
+    face: Option<&ResolvedFace>,
 ) {
-    let Some(font) = font else {
+    let Some(face) = face else {
         // Use char-safe truncation to avoid byte-boundary panics on multi-byte
         // UTF-8 text (F-044-001: `&text[..text.len().min(20)]` would panic when
         // the 20th byte is mid-codepoint; `chars().take(20)` is always safe).
@@ -1140,6 +1154,24 @@ fn draw_text_at_bbox(
         return;
     };
     if text.is_empty() {
+        return;
+    }
+
+    // STORY-095 T-006: wrap text to the frame width before drawing.
+    //
+    // Build FontMetrics from the resolved face so that wrap_text uses the SAME
+    // font file and face_index as the draw path. The mock_char_width_pts override
+    // is None in production (Some only in unit-test / Kani paths via text_layout tests).
+    let metrics = crate::text_layout::FontMetrics {
+        font_bytes: &face.raw,
+        face_index: face.face_index,
+        font_size_pts: f64::from(font_size),
+        mock_char_width_pts: None,
+    };
+    let max_width_pts = f64::from(emu_to_pt(bbox.width));
+    let lines = crate::text_layout::wrap_text(text, max_width_pts, &metrics);
+
+    if lines.is_empty() {
         return;
     }
 
@@ -1156,17 +1188,20 @@ fn draw_text_at_bbox(
 
     // Surface Y baseline: 80% of box height down from the box top edge.
     // No ir_y_to_pdf_y — krilla handles the PDF Y-flip internally (DIR-044-001).
-    let baseline_y = text_baseline_surface_y(bbox);
+    let mut baseline_y = text_baseline_surface_y(bbox);
 
-    let start = Point::from_xy(surface_x, baseline_y);
-    surface.draw_text(
-        start,
-        font.clone(),
-        font_size,
-        text,
-        false,
-        TextDirection::Auto,
-    );
+    for line in &lines {
+        let start = Point::from_xy(surface_x, baseline_y);
+        surface.draw_text(
+            start,
+            face.font.clone(),
+            font_size,
+            line,
+            false,
+            TextDirection::Auto,
+        );
+        baseline_y += font_size * BODY_LINE_LEADING;
+    }
 }
 
 /// Compute the effective (rendered) font size for a span.

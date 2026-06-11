@@ -39,13 +39,13 @@ use std::sync::Arc;
 use slideforge_layout::types::{
     BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
 };
+use slideforge_pdf::PdfExporter;
 use slideforge_pdf::font::{ResolvedFace, ResolvedFontSet};
 use slideforge_pdf::text_layout::{FontMetrics, measure_line_width, wrap_text};
-use slideforge_pdf::PdfExporter;
 use slideforge_plugin_api::{ExportOptions, Exporter};
 use slideforge_types::{
-    Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, Emu, InlineNode,
-    OrderedMap, Rgb, SourceSpan,
+    AltText, Brand, BrandFonts, BrandPalette, Deck, DeckMetadata, Emu, InlineNode, OrderedMap, Rgb,
+    SourceSpan,
 };
 
 // ─── Font fixture helpers ──────────────────────────────────────────────────────
@@ -58,9 +58,7 @@ fn lm_math_font_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
         .canonicalize()
-        .expect(
-            "Latin Modern Math OTF must be accessible — required for STORY-095 Red Gate tests",
-        )
+        .expect("Latin Modern Math OTF must be accessible — required for STORY-095 Red Gate tests")
 }
 
 /// Absolute path to the Tuffy TTF fixture (used as the "bold" face in AC-004
@@ -184,7 +182,7 @@ fn test_BC_4_03_002_text_wrap_word_boundary() {
     let max_width_pts = 50.0_f64;
 
     let metrics = FontMetrics {
-        font_bytes: &[],  // unused when mock_char_width_pts is Some
+        font_bytes: &[], // unused when mock_char_width_pts is Some
         face_index: 0,
         font_size_pts: 18.0,
         mock_char_width_pts: Some(mock_char_width),
@@ -218,8 +216,7 @@ fn test_BC_4_03_002_text_wrap_word_boundary() {
     let original_words: Vec<&str> = text.split_whitespace().collect();
     let result_words: Vec<&str> = lines.iter().flat_map(|l| l.split_whitespace()).collect();
     assert_eq!(
-        result_words,
-        original_words,
+        result_words, original_words,
         "T-001 FAIL (AC-001): word-boundary wrap must not drop or reorder words. \
          Original: {original_words:?}, Got: {result_words:?}"
     );
@@ -252,7 +249,11 @@ fn test_BC_4_03_002_text_wrap_word_boundary() {
 fn test_BC_4_03_002_text_wrap_char_fallback() {
     // 200-char word with no whitespace.
     let word_200: String = "a".repeat(200);
-    assert_eq!(word_200.len(), 200, "test setup: word must be exactly 200 chars");
+    assert_eq!(
+        word_200.len(),
+        200,
+        "test setup: word must be exactly 200 chars"
+    );
     assert!(
         !word_200.contains(' '),
         "test setup: input must be a single word (no spaces)"
@@ -294,8 +295,7 @@ fn test_BC_4_03_002_text_wrap_char_fallback() {
         lines.len(),
     );
     assert_eq!(
-        reconstructed,
-        word_200,
+        reconstructed, word_200,
         "T-002 FAIL (AC-002): character-wrap output must contain the exact same \
          characters as the input, in order."
     );
@@ -349,7 +349,11 @@ fn test_BC_4_03_002_text_wrap_char_fallback() {
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_001_progress_bar_figure_tag() {
     // The label that must become the /Alt text.
-    let bar_label = "Sprint 4 — 75% complete";
+    // IMPORTANT: must be ASCII-only. pdf-writer encodes TextStr values that contain
+    // non-ASCII bytes as UTF-16BE hex strings in the PDF byte stream. A raw UTF-8
+    // byte scan (used by the assertion below) would then fail to find the label.
+    // The em-dash variant "Sprint 4 — 75% complete" is intentionally avoided here.
+    let bar_label = "Sprint 4 - 75% complete";
 
     // Build a LaidOutDeck simulating a progress_bar slide.
     //
@@ -401,21 +405,23 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
             width: Emu(9_144_000),
             height: Emu(457_200),
         },
-        // Current: ColorBar without alt field — tagged as Artifact.
-        // After fix: ColorBar { alt: AltText::Provided(Arc::from(bar_label)), ... }.
-        //
-        // Using the existing ColorBar variant. The tag_engine marks this as Artifact.
-        // The test's /Figure assertion will FAIL (correct RED gate).
+        // STORY-095-T003-WORKAROUND RESOLVED: the `alt` field has been added to
+        // `FrameContent::ColorBar`. Setting `AltText::Provided(bar_label)` causes
+        // tag_engine.rs to emit `/Figure + /Alt` for this frame (STORY-095 T-007 GREEN).
         content: FrameContent::ColorBar {
             filled_width_emu: Emu(6_858_000), // 75% of 9_144_000
             total_width_emu: Emu(9_144_000),
             percent: 75,
-            color: Rgb { r: 0, g: 112, b: 192 },
+            color: Rgb {
+                r: 0,
+                g: 112,
+                b: 192,
+            },
+            alt: AltText::Provided(Arc::from(bar_label)),
         },
         text_flow: None,
         region_role: None,
     };
-    // --- STORY-095-T003-WORKAROUND END ---
 
     // Build the full slide with: Title + ColorBar.
     let laid_out = LaidOutDeck {
@@ -454,9 +460,7 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
     let pdf_bytes = exporter
         .export(&deck, &laid_out, &brand, &opts)
         .unwrap_or_else(|e| {
-            panic!(
-                "T-003 FAIL: PdfExporter::export must succeed for progress_bar slide: {e:?}"
-            )
+            panic!("T-003 FAIL: PdfExporter::export must succeed for progress_bar slide: {e:?}")
         });
 
     assert!(
@@ -492,7 +496,9 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
     // or as a hex string. We search for the raw label bytes as a substring which is
     // sufficient for ASCII-safe labels.
     let label_bytes = bar_label.as_bytes();
-    let has_alt_text = pdf_bytes.windows(label_bytes.len()).any(|w| w == label_bytes);
+    let has_alt_text = pdf_bytes
+        .windows(label_bytes.len())
+        .any(|w| w == label_bytes);
     assert!(
         has_alt_text,
         "T-003 FAIL (AC-003, EC-004): PDF must contain the label text {:?} as the /Alt \
@@ -559,7 +565,7 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
     let frame_width_pts = 50.0_f64;
 
     let wrap_metrics = FontMetrics {
-        font_bytes: &[],  // use mock so test is font-file-independent for wrap assertion
+        font_bytes: &[], // use mock so test is font-file-independent for wrap assertion
         face_index: 0,
         font_size_pts: 18.0,
         mock_char_width_pts: Some(mock_char_width),
@@ -591,12 +597,7 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
     let regular_face = load_resolved_face(&lm_path);
     let bold_face = load_resolved_face(&tuffy_path);
 
-    let font_set = ResolvedFontSet::from_faces(
-        Some(regular_face),
-        Some(bold_face),
-        None,
-        None,
-    );
+    let font_set = ResolvedFontSet::from_faces(Some(regular_face), Some(bold_face), None, None);
     let exporter = PdfExporter::with_resolved_font_set(font_set);
     let deck = minimal_deck();
     let brand = minimal_brand();
@@ -687,12 +688,8 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
     {
         let regular_face2 = load_resolved_face(&lm_path);
         let bold_face2 = load_resolved_face(&tuffy_path);
-        let font_set_ec001 = ResolvedFontSet::from_faces(
-            Some(regular_face2),
-            Some(bold_face2),
-            None,
-            None,
-        );
+        let font_set_ec001 =
+            ResolvedFontSet::from_faces(Some(regular_face2), Some(bold_face2), None, None);
         let exporter_ec001 = PdfExporter::with_resolved_font_set(font_set_ec001);
 
         let laid_out_plain = LaidOutDeck {
@@ -725,9 +722,7 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
         let ec001_bytes = exporter_ec001
             .export_uncompressed(&deck, &laid_out_plain, &brand, &opts)
             .unwrap_or_else(|e| {
-                panic!(
-                    "T-004/EC-001 FAIL: export must not crash for plain-text deck: {e:?}"
-                )
+                panic!("T-004/EC-001 FAIL: export must not crash for plain-text deck: {e:?}")
             });
 
         // EC-001: Tuffy (bold face) must NOT appear — only regular was used.
@@ -817,13 +812,17 @@ fn test_BC_4_03_002_ec003_decorative_bar_is_artifact() {
                         width: Emu(9_144_000),
                         height: Emu(457_200),
                     },
-                    // ColorBar: currently always tagged Artifact.
-                    // After T-007 with AltText::Decorative, stays Artifact (EC-003).
+                    // EC-003: ColorBar with AltText::Decorative stays /Artifact (not /Figure).
                     content: FrameContent::ColorBar {
                         filled_width_emu: Emu(4_572_000), // 50%
                         total_width_emu: Emu(9_144_000),
                         percent: 50,
-                        color: Rgb { r: 0, g: 112, b: 192 },
+                        color: Rgb {
+                            r: 0,
+                            g: 112,
+                            b: 192,
+                        },
+                        alt: AltText::Decorative, // explicit opt-out → /Artifact (EC-003)
                     },
                     text_flow: None,
                     region_role: None,

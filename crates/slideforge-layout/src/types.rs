@@ -577,6 +577,18 @@ pub enum FrameContent {
         /// The fill color derived from the brand's primary color, or a fixed
         /// default (`#0070C0`, blue) when brand colors are absent.
         color: Rgb,
+        /// Accessibility alt text for the bar element (STORY-095 / AC-003).
+        ///
+        /// - `AltText::Provided(label)`: the PDF exporter emits a `/Figure`
+        ///   structure element with `/Alt = label` (BC-4.03.001 / ISO 14289-1 §7.3).
+        /// - `AltText::Decorative`: the bar is intentionally decorative; the
+        ///   PDF exporter emits a `/Artifact` marker (EC-003).
+        /// - `AltText::Unspecified`: no label supplied by the author; the PDF
+        ///   exporter emits a `/Artifact` marker and logs a diagnostic.
+        ///
+        /// The layout engine sets this from `ContentBlock::ColorBar`'s `label`
+        /// field when present; falls back to `AltText::Unspecified`.
+        alt: AltText,
     },
     /// An empty placeholder (present in the layout but no content assigned).
     Empty,

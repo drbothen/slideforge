@@ -677,6 +677,13 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                         total_width_emu: total_width,
                         percent: spec.percent,
                         color,
+                        // STORY-095 AC-003: alt text for PDF /Figure tagging.
+                        // ColorBarSpec currently carries no label field;
+                        // the slide's label field is not threaded to the layout
+                        // engine in v1.0. AltText::Unspecified causes the PDF
+                        // exporter to emit /Artifact (safe fallback).
+                        // A future story can thread the slide label here.
+                        alt: crate::types::AltText::Unspecified,
                     };
                 }
                 // At most one ColorBar block per slide (progress_bar has one value field).

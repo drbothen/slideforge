@@ -100,22 +100,122 @@ pub struct FontMetrics<'a> {
 /// glyphs.
 ///
 /// [`VP-006`]: ../../.factory/specs/verification-properties/VP-006.md
-pub fn wrap_text(text: &str, _max_width_pts: f64, _metrics: &FontMetrics<'_>) -> Vec<String> {
-    // STORY-095 T-005 (GREEN phase): implement this function.
-    // For now this is a stub that returns the text as a single line
-    // (no wrapping), so that:
-    //   - The crate COMPILES (tests can compile and fail at assertion-time).
-    //   - AC-001 and AC-002 tests FAIL because the stub does not wrap long text.
-    //   - EC-002 and EC-005 edge-case tests may pass or fail.
-    //
-    // The implementer MUST replace this stub with the real algorithm described
-    // in the module-level doc comment above.
+pub fn wrap_text(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>) -> Vec<String> {
+    // EC-002: empty input returns empty Vec.
     if text.is_empty() {
         return vec![];
     }
-    // STUB: no wrapping — returns the whole text as a single line.
-    // Tests AC-001 and AC-002 will FAIL against this stub (correct RED behaviour).
-    vec![text.to_owned()]
+
+    // EC-005 / fast path: if the whole text fits on one line, return it immediately.
+    // Uses `<=` so text EXACTLY equal to the frame width is not wrapped (EC-005).
+    if measure_line_width(text, metrics) <= max_width_pts {
+        return vec![text.to_owned()];
+    }
+
+    // ── Phase 1: word-boundary greedy packing (AC-001) ──────────────────────────
+    //
+    // Split on whitespace tokens. Each "word" is tried with a space separator.
+    // When adding the next word would exceed max_width_pts, flush the current
+    // line and start a new one.  Single words wider than the frame fall through
+    // to the character-wrap fallback below (AC-002).
+    //
+    // Algorithm is provably terminating: the `words` iterator is strictly finite
+    // (bounded by `text.len()`), and the inner character-wrap loop over `word`
+    // is also strictly finite (bounded by `word.chars().count()`). VP-006.
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        // ── AC-002: character-wrap fallback for over-wide single words ──────────
+        //
+        // If this word alone does not fit within the frame, break it at the
+        // character boundary where it would overflow.  Repeat until the word's
+        // remaining chars fit on one line.  Each character-wrapped fragment is
+        // then appended to the current line via the normal word-packing logic.
+        let word_width = measure_line_width(word, metrics);
+        if word_width > max_width_pts {
+            // The word is too wide to fit on a line by itself.
+            // Break it into character-level fragments and treat each fragment
+            // like a mini-word (falls through to normal packing below).
+            let mut remaining: &str = word;
+            while !remaining.is_empty() {
+                // Find the longest character prefix of `remaining` that fits.
+                let mut fragment_end_byte = 0;
+                let mut frag_width = 0.0_f64;
+                for ch in remaining.chars() {
+                    let mut buf = [0u8; 4];
+                    let ch_str = ch.encode_utf8(&mut buf);
+                    let ch_width = measure_line_width(ch_str, metrics);
+                    if frag_width + ch_width > max_width_pts && fragment_end_byte > 0 {
+                        // Adding this character would overflow — stop here.
+                        break;
+                    }
+                    frag_width += ch_width;
+                    fragment_end_byte += ch.len_utf8();
+                }
+
+                // Safety: if even a single character does not fit (max_width_pts
+                // is smaller than one char), emit it anyway to avoid an infinite
+                // loop (no text silently dropped — AC-002 postcondition 2).
+                if fragment_end_byte == 0 {
+                    // Advance by exactly one character to guarantee termination.
+                    fragment_end_byte = remaining.chars().next().map_or(0, |c| c.len_utf8());
+                }
+
+                let (fragment, rest) = remaining.split_at(fragment_end_byte);
+                remaining = rest;
+
+                // Append fragment to current_line using the standard packing logic.
+                if current_line.is_empty() {
+                    current_line.push_str(fragment);
+                } else {
+                    // Try adding " fragment" to the current line.
+                    let candidate = {
+                        let mut s = current_line.clone();
+                        s.push(' ');
+                        s.push_str(fragment);
+                        s
+                    };
+                    if measure_line_width(&candidate, metrics) <= max_width_pts {
+                        current_line = candidate;
+                    } else {
+                        // Flush current line and start fresh with this fragment.
+                        lines.push(std::mem::take(&mut current_line));
+                        current_line.push_str(fragment);
+                    }
+                }
+            }
+            continue; // Move on to next word.
+        }
+
+        // ── Normal word packing (AC-001) ────────────────────────────────────────
+        if current_line.is_empty() {
+            current_line.push_str(word);
+        } else {
+            // Try appending " word" to the current line.
+            let candidate = {
+                let mut s = current_line.clone();
+                s.push(' ');
+                s.push_str(word);
+                s
+            };
+            if measure_line_width(&candidate, metrics) <= max_width_pts {
+                current_line = candidate;
+            } else {
+                // Flush and start a new line with this word.
+                lines.push(std::mem::take(&mut current_line));
+                current_line.push_str(word);
+            }
+        }
+    }
+
+    // Flush the final (non-empty) line.
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    lines
 }
 
 /// Measure the rendered width of `line` in PDF user-unit points.
