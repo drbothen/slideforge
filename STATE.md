@@ -30,9 +30,9 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "11 of 25 Wave-5 stories MERGED. 15 remain (12 feature + 3 CI initiative STORY-091/092/093). RESEQUENCED 2026-06-10: CI stabilization FIRST (091/092/093), THEN STORY-081 merge, THEN remaining feature stories. PARKED: STORY-081 PR #80 (OPEN, HEAD 5c665cd0, MERGEABLE — all reviews PASSED; waiting for CI stabilization). PR #81 MERGED 2026-06-11 (admin override, EXPLICIT per-request human authorization — resume gate selection 2026-06-10). develop -> 20a51e0c (80 merged PRs). Bench timeout 60m + cache-on-failure now live on develop. STORY-092 remains Step 1 (root-cause cache fix still required). ROOT CAUSE confirmed: 9.77 GB / 23 caches / 97.7% of ~10 GB limit — arm64 LRU-evicted."
-develop_sha: "20a51e0c"
-develop_pr_count: 80
+wave_5_status: "12 of 25 Wave-5 stories MERGED. 14 remain (12 feature + 2 CI initiative STORY-092/093). STORY-091 MERGED PR #82 2026-06-11 (develop f3502c50, 81 PRs); tiered CI live, fast tier 6m02s ACHIEVED. Branch protection on develop CREATED. Merge-queue UI toggle PENDING HUMAN ACTION. PARKED: STORY-081 PR #80 (OPEN, HEAD 5c665cd0 — all reviews PASSED; waiting for STORY-092 cache fix). STORY-092 is Step 1 (root-cause cache fix)."
+develop_sha: "f3502c50"
+develop_pr_count: 81
 open_prs: 1
 error_taxonomy_version: "v2.28"
 workspace_tests: "4083 pass / 20 skip / 0 fail (STORY-081 worktree HEAD 5c665cd0; post list-bullets x088 fix; includes STORY-072/082/088 tests)"
@@ -47,11 +47,11 @@ workspace_test_failures: 0
 **Repository:** https://github.com/drbothen/slideforge (public) | **Default branch:** `main` | **Dev branch:** `develop`
 **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `20a51e0c` (80 merged PRs, 1 open PR: #80).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `f3502c50` (81 merged PRs, 1 open PR: #80).
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 11 of 25 done (93 stories / 571 pts). 15 stories remain (12 feature + 3 CI initiative).
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 12 of 25 done (93 stories / 571 pts). 14 remain (12 feature + 2 CI initiative: STORY-092/093).
 
 **STANDING MERGE AUTH:** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking human.
 
@@ -62,24 +62,25 @@ workspace_test_failures: 0
 **Rationale:** Confirmed cache thrash (9.77 GB / 23 caches / arm64 LRU-evicted) is the root cause of STORY-081 bench flakiness. Fix CI first so STORY-081 and all future PRs merge cleanly.
 
 **Execute in this order:**
-1. CI stabilization: deliver STORY-092 first (cache/disk root-cause fix; bench-timeout already landed via PR #81) → then STORY-091 → STORY-093
-2. STORY-081: rebase PR #80 onto stabilized develop (≥ 20a51e0c) → merge
-3. Remaining Wave-5 feature stories
+1. ~~STORY-091~~ **DONE** (PR #82 merged 2026-06-11, develop `f3502c50`) — tiered CI live, fast tier ~6m02s
+2. CI stabilization: STORY-092 (cache/disk root-cause fix) → STORY-093
+3. STORY-081: rebase PR #80 onto stabilized develop (≥ `f3502c50`) → merge
+4. Remaining Wave-5 feature stories
 
 ---
 
-### Workstream A — CI Stabilization (DO FIRST)
+### Workstream A — CI Stabilization (STORY-091 DONE; STORY-092 IS NEXT)
 
-**STORY-081's PR #80 is PARKED here.** All reviews PASSED (PR-level adversary P31-P34 converged; security CLEAN; pr-reviewer APPROVE; workspace 4083 pass / 20 skip / 0 fail). Waiting only for CI to stabilize.
+**STORY-081's PR #80 is PARKED here.** All reviews PASSED (PR-level adversary P31-P34 converged; security CLEAN; pr-reviewer APPROVE; workspace 4083 pass / 20 skip / 0 fail). Waiting only for STORY-092 to land.
 
 **Step A0 — PR #81 MERGED 2026-06-11 (DONE):**
 `ci/bench-timeout-cache-on-failure` → develop `20a51e0c`: bench timeout 20→60 min + `cache-on-failure: "true"`. Admin-merged via `gh pr merge --admin` with EXPLICIT per-request human authorization (resume-gate selection 2026-06-10). The failing `test (linux-arm64)` check was a confirmed cache-thrash infra flake, not a code defect. Remote branch `ci/bench-timeout-cache-on-failure` deleted post-merge. STORY-092 scope is now purely the cache/disk structural fix (rust-cache v2.9.1 bump at all 11 ci.yml sites, cache-on-failure on build-heavy jobs, disk cleanup) — bench timeout is already live on develop.
 
-**Step A1 — STORY-092 (HIGHEST-LEVERAGE — deliver first):**
-Cache reliability + disk headroom. Fixes the CONFIRMED 9.77 GB/23-cache thrash. Brings arm64 cache under budget; eliminates cold-build LRU-eviction. Bumps rust-cache → v2.9.1 SHA `c19371144df3bb44fab255c43d04cbc2ab54d1c4` at all 11 ci.yml sites (grep-zero on old `42dc69e`); cache-on-failure on build-heavy jobs (bench timeout already landed via PR #81); disk cleanup (`jlumbroso/free-disk-space` SHA `54081f13...`). Story spec: `.factory/stories/stories/STORY-092-ci-cache-reliability-disk.md`. NOTE: the 091→092 ordering is soft (ci.yml-conflict-serialization only); 092 MAY ship first.
+**Step A1 — STORY-092 (HIGHEST-LEVERAGE — deliver NEXT):**
+Cache reliability + disk headroom. Fixes the CONFIRMED 9.77 GB/23-cache thrash. Brings arm64 cache under budget; eliminates cold-build LRU-eviction. Bumps rust-cache → v2.9.1 SHA `c19371144df3bb44fab255c43d04cbc2ab54d1c4` at all 11 ci.yml sites (grep-zero on old `42dc69e`); cache-on-failure on build-heavy jobs (bench timeout already landed via PR #81); disk cleanup (`jlumbroso/free-disk-space` SHA `54081f13...`). Story spec: `.factory/stories/stories/STORY-092-ci-cache-reliability-disk.md`. NOTE: also fold in FU-FACTORY-PLAYBOOK-COF-LIST (Appendix A ~line 555 overcounts cache-on-failure jobs) + FU-AGGREGATOR-TIMEOUT-COMMENT (one-line ci.yml comment for 5-min aggregator timeout).
 
-**Step A2 — STORY-091 (biggest per-PR wall-clock win):**
-Tiered CI triggers + GitHub merge queue. Gates slow legs (arm64/windows/macos/bench) off the per-PR path via `merge_group` + job-level `if:`; single required check = `all-checks-pass`. Verify at impl: enable merge queue on `develop` branch protection (non-default; default is `main`); `schedule:` nightly fires from `main` only. Story spec: `.factory/stories/stories/STORY-091-ci-tiered-triggers-merge-queue.md`. Playbook: `.factory/playbooks/tiered-ci-merge-queue.md`.
+**Step A2 — STORY-091 MERGED PR #82 2026-06-11 (DONE):**
+Tiered CI triggers + GitHub merge queue. develop `f3502c50` (81 PRs). Spec v1.4. LOCAL cascade: 10 passes, CONVERGED 3/3 strict-CLEAN (passes 8-9-10). Fast tier wall-clock: ~6m02s (TARGET ACHIEVED). Branch protection on `develop` CREATED (required check `all-checks-pass`, strict=true, approvals=0). Merge-queue UI toggle: **PENDING HUMAN ACTION** (Settings → Branches → edit develop rule → check "Require merge queue"). STORY-091 worktree removed; remote + local branch deleted. Demo evidence: `.factory/demos/STORY-091-demo-evidence.md`.
 
 **Step A3 — STORY-093 (arm64 build-time):**
 mold linker (arm64 only, `setup-mold` SHA `9c9c13bf...`) + `[profile.ci]` `debug = "line-tables-only"` via `--cargo-profile ci`. Story spec: `.factory/stories/stories/STORY-093-ci-arm64-build-time.md`.
@@ -99,8 +100,8 @@ PR #80 (`feature/STORY-081` HEAD `5c665cd0` → develop). PARKED pending CI stab
 
 **ROOT CAUSE of PR #80 bench failure:** cache thrash (STORY-092 fixes). Not a code defect.
 
-**After 091/092/093 land on develop:**
-1. Rebase `feature/STORY-081` onto stabilized develop → `git push --force-with-lease`
+**After 092/093 land on develop:**
+1. Rebase `feature/STORY-081` onto stabilized develop (≥ `f3502c50`) → `git push --force-with-lease`
 2. Re-run PR #80 CI (bench now passes with warm cache + 60-min budget)
 3. STANDING MERGE AUTH → squash-merge PR #80 → post-merge state burst → worktree cleanup (`.worktrees/STORY-081`)
 
@@ -120,9 +121,9 @@ All branches are on origin (durable, machine-independent):
 
 **Same-machine resume:**
 1. Run `vsdd-factory:factory-worktree-health`
-2. Read STATE.md NEXT ACTIONS — CI stabilization is the first task.
-3. Deliver STORY-092 first (cache/disk root-cause fix) → then STORY-091 → 093. PR #81 already merged (bench timeout live on develop).
-4. After CI stories land → rebase STORY-081 onto develop ≥ 20a51e0c → merge PR #80.
+2. Read STATE.md NEXT ACTIONS — deliver STORY-092 first (cache/disk root-cause fix), then STORY-093.
+3. STORY-091 DONE (PR #82 merged). **Human action required: enable merge queue UI toggle.**
+4. After 092/093 land → rebase STORY-081 onto develop ≥ `f3502c50` → merge PR #80.
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
@@ -130,9 +131,9 @@ git clone https://github.com/drbothen/slideforge.git && cd slideforge
 git fetch origin factory-artifacts feature/STORY-081
 git worktree add .factory factory-artifacts
 git worktree add .worktrees/STORY-081 feature/STORY-081
-git rev-parse develop   # must equal origin/develop == 20a51e0c
+git rev-parse develop   # must equal origin/develop == f3502c50
 ```
-Then read `.factory/STATE.md` → NEXT ACTIONS. CI stories first; STORY-081 is parked.
+Then read `.factory/STATE.md` → NEXT ACTIONS. STORY-092 is Step 1; STORY-081 is parked.
 
 **CI stories:** specs in `.factory/stories/stories/STORY-09{1,2,3}-*.md`; research in `.factory/planning/ci-speed-research.md`; playbook in `.factory/playbooks/tiered-ci-merge-queue.md`.
 
@@ -140,25 +141,25 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. CI stories first; STORY-081 is p
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**1 active worktree. 1 open PR. NEW ORDER: CI stabilization before STORY-081 merge.**
+**1 active worktree. 1 open PR. STORY-091 MERGED, STORY-092 is NEXT.**
 
 ### STORY-081 — Slide-Level Inline Markup (EPIC-18, BC-3.05.001, 13 pts) — PR #80 — PARKED
-- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `5c665cd0`. PR #80 OPEN → develop, MERGEABLE, **PARKED pending CI stabilization.**
+- **Worktree:** `.worktrees/STORY-081` | **Branch:** `feature/STORY-081` | **HEAD:** `5c665cd0`. PR #80 OPEN → develop, MERGEABLE, **PARKED pending STORY-092 cache fix.**
 - **All reviews DONE:** LOCAL 3/3 CONVERGED (passes 28-29-30 strict-CLEAN). PR-level CONVERGED (passes P31-P34, all CRIT/HIGH/MED resolved). Security CLEAN. pr-reviewer APPROVE. Workspace 4083 pass / 20 skip / 0 fail.
 - **Bench failure cause:** CI cache thrash (9.77 GB/23 caches, arm64 LRU-evicted). STORY-092 fixes this. Not a code defect.
-- **Merge sequence (after CI stabilized):** rebase onto develop ≥ 20a51e0c → force-push → re-run PR #80 CI → squash-merge → post-merge state burst → worktree cleanup.
+- **Merge sequence (after CI stabilized):** rebase onto develop ≥ `f3502c50` → force-push → re-run PR #80 CI → squash-merge → post-merge state burst → worktree cleanup.
 
-### CI-FIX — PR #81 MERGED 2026-06-11 (DONE)
-- bench timeout 20→60 min + `cache-on-failure: "true"` — squash-merged via `gh pr merge --admin`.
-- EXPLICIT per-request human authorization: resume-gate selection 2026-06-10.
-- Failing `test (linux-arm64)` confirmed infra flake (cache-thrash cold-build); not a code defect.
-- develop → `20a51e0c` (80 merged PRs). Remote branch `ci/bench-timeout-cache-on-failure` deleted.
+### STORY-091 — Tiered CI + Merge Queue — PR #82 MERGED 2026-06-11 (DONE)
+- Squash-merged → develop `f3502c50` (81 PRs). Spec v1.4. LOCAL cascade: 10 passes, CONVERGED 3/3 strict-CLEAN (passes 8-9-10). Fast tier ~6m02s ACHIEVED.
+- Branch protection on `develop` CREATED (required check `all-checks-pass`, strict=true).
+- **HUMAN ACTION REQUIRED:** enable merge queue UI toggle — Settings → Branches → edit develop rule → check "Require merge queue".
+- Worktree `.worktrees/STORY-091` removed. Remote + local branch deleted. Demo evidence: `.factory/demos/STORY-091-demo-evidence.md`.
 
 ---
 
 ## WAVE 5 DELIVERY SUMMARY
 
-**11 of 25 done (develop 20a51e0c, 80 PRs). +3 CI initiative stories (STORY-091/092/093) added 2026-06-10.**
+**12 of 25 done (develop f3502c50, 81 PRs). +3 CI initiative stories (STORY-091/092/093) added 2026-06-10; STORY-091 MERGED.**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation. FieldSchemaValidator live. error-taxonomy v2.24. ADR-020.
 - **STORY-046 MERGED** PR #70 (fa85d113): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. BC-4.03.003 v1.4. STORY-047 + STORY-081 UNLOCKED.
@@ -173,8 +174,9 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. CI stories first; STORY-081 is p
 - **DEP-PREP MERGED** PR #69 (3e3a978f): [workspace.dependencies] centralized + ADR-022 migrations done.
 - **CI-FIX MERGED** PR #79: ci.yml test-matrix `timeout-minutes` 30→75 + `cache-on-failure: "true"` (Swatinem/rust-cache).
 - **CI-FIX MERGED** PR #81 (20a51e0c, ADMIN OVERRIDE — EXPLICIT per-request human auth 2026-06-10): bench timeout 20→60 min + `cache-on-failure: "true"` for bench jobs. Failing arm64 check confirmed infra flake. Remote branch deleted.
+- **STORY-091 MERGED** PR #82 (f3502c50): tiered CI triggers + merge queue. CONVERGED 3/3 strict-CLEAN (passes 8-9-10). Fast tier ~6m02s ACHIEVED. Branch protection on `develop` CREATED. Merge-queue UI toggle PENDING HUMAN ACTION.
 
-**15 stories remain (12 feature + 3 CI initiative). NEW ORDER: STORY-092 first (cache/disk root-cause), then STORY-091, then STORY-093, then STORY-081, then feature stories.**
+**14 stories remain (12 feature + 2 CI initiative: STORY-092/093). NEW ORDER: STORY-092 (cache/disk root-cause, also folds FU-FACTORY-PLAYBOOK-COF-LIST + FU-AGGREGATOR-TIMEOUT-COMMENT) → STORY-093 → STORY-081 → feature stories.**
 
 **HELD (after CI initiative + STORY-081 land):**
 - STORY-057/058/064 (slideforge-cli same-crate conflict — serialize after in-flight batch)
@@ -182,6 +184,11 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. CI stories first; STORY-081 is p
 - STORY-060/061 (FU-SEC-001-GIT2-OPENSSL must resolve FIRST)
 
 **OPEN FOLLOW-UPS:**
+- **FU-NFR027-CROSS-STORY-RECONCILE** [next wave gate]: nfr-catalog.md, cicd-setup.md, STORY-051, STORY-092, dependency-graph.md still reference removed macos-13/macos-x86_64 ci.yml leg. Sweep at next wave gate. Source: STORY-091 F-091-P5-001.
+- **FU-CI-BENCH-POSITIVE-COVERAGE** [process-gap]: bench job's no-fixture path lacks a runtime positive-coverage assertion; "perf-smoke gate" comment is mislabeled (pre-existing). Needs CI-hardening story or explicit deferral. Source: STORY-091 F-091-P5-OBS-2.
+- **FU-FACTORY-PLAYBOOK-COF-LIST** [fold into STORY-092]: `.factory/playbooks/tiered-ci-merge-queue.md` Appendix A (~line 555) overcounts cache-on-failure job set vs actual ci.yml. Fix during STORY-092 delivery. Source: STORY-091 adversary pass 9.
+- **FU-AGGREGATOR-TIMEOUT-COMMENT** [fold into STORY-092 or 093]: add one-line ci.yml comment clarifying aggregator's 5-min timeout doesn't cap upstream `needs` jobs. Source: STORY-091 pr-reviewer non-blocking #3.
+- **FU-MERGE-QUEUE-UI-TOGGLE** [HUMAN ACTION REQUIRED]: Enable merge queue on develop branch protection — Settings → Branches → edit develop rule → check "Require merge queue". Cannot be set via API. Source: STORY-091 PR #82 merge decision.
 - **FU-DIAGNOSTIC-FIELD-PINNING** [process-gap]: Diagnostic tests must assert rendered message and distinguishing struct field values, not just error code. AC-006 test asserted presence-by-code only; let F-P27-MED-001 survive 26 passes. Source: OBS-P27-001.
 - **FU-BC-ACCURACY-AUDIT** [process-gap]: BC postconditions must describe ACTUAL current behavior + explicit deferral citations. Scope: all variant clauses, diagnostic-type liveness, title-constraint section, STORY-SPEC propagation. Source: F-P17-002 + F-P24-MED-001 + OBS-P25-004/005 + demo-surfaced story-spec drift.
 - **FU-LINK-SCHEME-CONSISTENCY** [human/architect adjudication]: Cross-surface unsafe-scheme policy — DOCX hard-errors; PPTX/HTML silently degrade. Security policy decision. Do NOT resolve in a BC fix burst. Source: F-P25-LOW-001.
@@ -201,11 +208,11 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. CI stories first; STORY-081 is p
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `20a51e0c`, 80 merged PRs). 11 of 25 done. 15 stories remain (12 feature + 3 CI initiative STORY-091/092/093).
+Phase 3, **Wave 5 IN PROGRESS** (develop `f3502c50`, 81 merged PRs). 12 of 25 done. 14 remain (12 feature + 2 CI initiative STORY-092/093).
 
-- **NEW ORDER (human re-sequenced 2026-06-10):** CI stabilization (STORY-092 first, then 091, 093) FIRST → STORY-081 merge → remaining wave-5 feature stories. PR #81 MERGED 2026-06-11 (bench timeout live).
-- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c665cd0`. PR #80 OPEN (PARKED — all reviews PASSED, waiting for CI stabilization). Open PRs: 1 (#80 parked).
-- Workspace: 4083 pass / 20 skip / 0 fail (FU-CI-ARM64-TEST-FAILURE CONFIRMED RESOLVED; cargo deny PASS).
+- **NEW ORDER:** CI stabilization (STORY-092 NEXT, then 093) FIRST → STORY-081 merge → remaining wave-5 feature stories. STORY-091 DONE PR #82 2026-06-11; tiered CI live.
+- Active worktrees: 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c665cd0`. PR #80 OPEN (PARKED — all reviews PASSED, waiting for STORY-092 cache fix). Open PRs: 1 (#80 parked).
+- Workspace: 4083 pass / 20 skip / 0 fail (FU-CI-ARM64-TEST-FAILURE CONFIRMED RESOLVED; cargo deny PASS). First full-matrix develop run IN PROGRESS (run 27317895683 — arm64 may flake until STORY-092; known-cause, does not block delivery).
 
 ---
 
@@ -213,37 +220,39 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `20a51e0c`, 80 merged PRs). 11 of 25 do
 
 **EXACT ORDERED TASK LIST (CI stabilization first — human-directed 2026-06-10):**
 
-### Step 1 — STORY-092 (HIGHEST-LEVERAGE CI fix — deliver first)
+### ~~Step 1 — STORY-091~~ DONE (PR #82 merged 2026-06-11, develop `f3502c50`)
+
+Tiered CI triggers + GitHub merge queue. Fast tier ~6m02s ACHIEVED. Branch protection on `develop` CREATED. **Human action required: enable merge queue UI toggle** (Settings → Branches → develop → "Require merge queue"). Also fold in FU-FACTORY-PLAYBOOK-COF-LIST + FU-AGGREGATOR-TIMEOUT-COMMENT during STORY-092.
+
+### Step 1 — STORY-092 (HIGHEST-LEVERAGE CI fix — deliver NEXT)
 
 Cache reliability + disk headroom. Stops the 9.77 GB/23-cache thrash. STORY-081 bench will pass once arm64 cache survives LRU. Dispatch devops-engineer + ci-workflow-analyzer. Spec: `.factory/stories/stories/STORY-092-ci-cache-reliability-disk.md`. Research: `.factory/planning/ci-speed-research.md`.
 
-**PR #81 status (MERGED 2026-06-11):** Bench timeout 60m + `cache-on-failure` already live on develop `20a51e0c`. STORY-092 scope is purely the structural cache/disk fix — rust-cache v2.9.1 bump at all 11 ci.yml sites + disk cleanup. Do NOT re-add bench timeout changes already shipped by PR #81.
+**Scope:** rust-cache v2.9.1 bump at all 11 ci.yml sites + disk cleanup + FU-FACTORY-PLAYBOOK-COF-LIST (playbook Appendix A correction) + FU-AGGREGATOR-TIMEOUT-COMMENT (one-line comment). Do NOT re-add bench timeout (already live via PR #81).
 
-### Step 2 — STORY-091 (tiered triggers + merge queue)
+**Rebase note for STORY-081 (after STORY-092 lands):** rebase onto develop ≥ `f3502c50` (not `20a51e0c`).
 
-Biggest per-PR wall-clock win (~6-8 min feedback loop). Spec: `.factory/stories/stories/STORY-091-ci-tiered-triggers-merge-queue.md`. Playbook: `.factory/playbooks/tiered-ci-merge-queue.md`. Verify at impl: enable merge queue on `develop` branch protection; `schedule:` nightly from `main` only.
-
-### Step 3 — STORY-093 (arm64 build-time)
+### Step 2 — STORY-093 (arm64 build-time)
 
 mold linker (arm64 only, `setup-mold` SHA `9c9c13bf...`) + `[profile.ci]` via `--cargo-profile ci`. Spec: `.factory/stories/stories/STORY-093-ci-arm64-build-time.md`.
 
-### Step 4 — STORY-081 merge (AFTER CI stabilized)
+### Step 3 — STORY-081 merge (AFTER CI stabilized)
 
 All reviews already DONE. PR #80 OPEN, HEAD `5c665cd0`, PARKED.
-1. Rebase `feature/STORY-081` onto stabilized develop (≥ `20a51e0c`): `git -C .worktrees/STORY-081 rebase origin/develop` → resolve mechanical conflicts → `git push --force-with-lease origin feature/STORY-081`.
+1. Rebase `feature/STORY-081` onto stabilized develop (≥ `f3502c50`): `git -C .worktrees/STORY-081 rebase origin/develop` → resolve mechanical conflicts → `git push --force-with-lease origin feature/STORY-081`.
 2. Re-run PR #80 CI (bench now warm + 60-min budget; arm64 cache survives → passes).
 3. STANDING MERGE AUTH → squash-merge PR #80 → develop.
 4. Post-merge state burst: STORY-INDEX / dependency-graph / STATE.md → MERGED; record new develop SHA. LESSON-18: `git fetch && git merge --ff-only origin/develop` in any active worktrees.
 5. Worktree cleanup: remove `.worktrees/STORY-081`; prune `feature/STORY-081`.
 
-### Step 5 — Remaining Wave-5 feature stories
+### Step 4 — Remaining Wave-5 feature stories
 
 STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU-SEC-001-GIT2-OPENSSL first).
 
 **Diagnostic commands:** `gh pr checks 80` / `gh run rerun --failed <run-id>`
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
-adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto develop `20a51e0c` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
+adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto develop `f3502c50` → push → pr-manager 9-step (orchestrator dispatches security-reviewer + pr-reviewer per LESSON-5) → STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge → state-manager post-merge burst → worktree cleanup → LESSON-18 sync check.
 
 **APPLY LESSON-21 to EVERY story exit gate:** nextest + `cargo test --workspace --all-features` (shared-process) + `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` + cross-platform filesystem test discipline.
 
@@ -266,27 +275,27 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts (baseline). Now 93 stories / 571 pts after CI initiative +3. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **11/25 done**. 15 remain (12 feature + 3 CI: STORY-092 NEXT). PR #81 MERGED 2026-06-11 (bench timeout live). STORY-081 PARKED (all reviews done; awaiting CI stabilization). | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **12/25 done**. 14 remain (12 feature + 2 CI: STORY-092/093). STORY-091 MERGED PR #82 2026-06-11 (tiered CI live, 6m02s fast tier; branch protection created). STORY-081 PARKED (awaiting STORY-092). | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ---
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. develop 20a51e0c (80 merged PRs, 1 open PR). PR #81 MERGED. RESEQUENCED: CI stabilization (STORY-092 first) FIRST, then STORY-081. STANDING MERGE AUTH active.**
+**Wave 5 IN PROGRESS. STORY-091 MERGED PR #82 (develop f3502c50, 81 PRs). Tiered CI live, fast tier 6m02s. Branch protection on develop CREATED. Merge-queue UI toggle PENDING HUMAN ACTION. STORY-092 is NEXT (cache/disk root-cause). STANDING MERGE AUTH active.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-11 |
-| **develop SHA** | `20a51e0c` (80 merged PRs; origin/develop confirmed; 1 open PR: #80 parked) |
-| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c665cd0`. **PARKED pending CI stabilization.** |
-| **PR #81 state** | MERGED 2026-06-11 → develop `20a51e0c`. Admin override with EXPLICIT per-request human authorization (resume-gate selection 2026-06-10). Bench timeout 60m + cache-on-failure live on develop. Remote branch deleted. |
+| **develop SHA** | `f3502c50` (81 merged PRs; origin/develop confirmed; 1 open PR: #80 parked) |
+| **Active worktrees** | 1 — STORY-081 in `.worktrees/STORY-081` on `feature/STORY-081` HEAD `5c665cd0`. **PARKED pending STORY-092 cache fix.** |
+| **PR #82 / STORY-091 state** | MERGED 2026-06-11 → develop `f3502c50`. Tiered CI live. Fast tier ~6m02s ACHIEVED. Branch protection on `develop` CREATED. **HUMAN ACTION REQUIRED: merge-queue UI toggle** (Settings → Branches → develop → "Require merge queue"). Worktree + branches deleted. |
+| **PR #81 state** | MERGED 2026-06-11 → develop `20a51e0c`. Bench timeout 60m + cache-on-failure live. Remote branch deleted. |
 | **PR #80 / STORY-081 state** | OPEN (PARKED). HEAD `5c665cd0`. All reviews DONE (LOCAL 3/3, PR-level P31-P34 converged, security CLEAN, pr-reviewer APPROVE). Bench failed: cache thrash (STORY-092 fixes). |
-| **Workspace tests** | 4083 pass / 20 skip / 0 fail (HEAD 5c665cd0; cargo deny PASS; FU-CI-ARM64-TEST-FAILURE CONFIRMED RESOLVED) |
-| **Cache situation** | CONFIRMED ROOT CAUSE: 9.77 GB / 23 active caches / 97.7% of ~10 GB limit. arm64 LRU-evicted. STORY-092 is the structural fix. |
-| **CI initiative** | STORY-091/092/093 (EPIC-19, NEXT). Specs written; uncertainty resolved; playbook + research sidecar ready. Deliver NOW (before STORY-081 merge). STORY-092 first (highest-leverage — cache/disk root cause). |
+| **Workspace tests** | 4083 pass / 20 skip / 0 fail (HEAD 5c665cd0; cargo deny PASS) |
+| **Cache situation** | CONFIRMED ROOT CAUSE: 9.77 GB / 23 active caches / 97.7% of ~10 GB limit. arm64 LRU-evicted. STORY-092 is the structural fix. First full-matrix develop run IN PROGRESS (run 27317895683 — arm64 may still flake; known-cause, does not block delivery). |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts feature/STORY-081` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **STEP 1:** Deliver STORY-092 (cache+disk). **STEP 2:** Deliver STORY-091 (tiered triggers). **STEP 3:** Deliver STORY-093 (arm64 build-time). **STEP 4:** Rebase STORY-081 onto stabilized develop (≥ 20a51e0c) → merge PR #80 → post-merge burst + worktree cleanup. **STEP 5:** Remaining wave-5 feature stories. STORY-081 PR #80 is PARKED — do NOT merge before CI stories land. |
+| **RESUME INSTRUCTION** | **STEP 1:** Human enables merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 2:** Deliver STORY-092 (cache+disk; also folds FU-FACTORY-PLAYBOOK-COF-LIST + FU-AGGREGATOR-TIMEOUT-COMMENT). **STEP 3:** Deliver STORY-093 (arm64 build-time). **STEP 4:** Rebase STORY-081 onto develop ≥ `f3502c50` → merge PR #80. **STEP 5:** Remaining wave-5 feature stories. |
 
 ---
 
@@ -339,6 +348,7 @@ _Wave-5 per-story pass logs archived to `.factory/cycles/wave-5-merges-archive.m
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-11 | STORY-091-MERGE | PR #82 squash-merged → develop `f3502c50` (81 PRs). STORY-091 tiered CI triggers + merge queue. Spec v1.4. LOCAL cascade: 10 passes, CONVERGED 3/3 strict-CLEAN (passes 8-9-10); 4 MED findings + 1 LOW finding closed (F-091-P1-001, F-091-P4-001, F-091-P5-001, F-091-P7-001). ci-workflow-analyzer pre-review: 12 findings fixed (incl. CRIT wrong required-check context name). Security CLEAN (SEC-001/002/003 closed; re-reviewed CLEAN per LESSON-9). pr-reviewer APPROVE. Fast tier wall-clock: ~6m02s ACHIEVED (target 6-8 min). Branch protection on `develop` CREATED (required check `all-checks-pass`, strict=true, approvals=0). Merge-queue UI toggle PENDING HUMAN ACTION. Worktree `.worktrees/STORY-091` removed; remote + local branch deleted. Demo evidence: `.factory/demos/STORY-091-demo-evidence.md`. |
 | 2026-06-11 | PR81-ADMIN-MERGE | PR #81 (`ci/bench-timeout-cache-on-failure`) admin-merged → develop `20a51e0c` (80 PRs). EXPLICIT per-request human authorization: resume-gate selection 2026-06-10 ("Admin-merge PR #81 first"). Supersedes the "fold into STORY-092" recommendation from decision STORY-081-PR81-FOLD. Failing `test (linux-arm64)` check confirmed infra flake (cache-thrash cold-build), not a code defect. Bench timeout 60m + cache-on-failure now live on develop. Remote branch `ci/bench-timeout-cache-on-failure` deleted. STORY-092 remains Step 1 (root-cause structural cache/disk fix still required). |
 | 2026-06-10 | STORY-081-PR81-FOLD | Admin-merge of PR #81 (`ci/bench-timeout-cache-on-failure`) CORRECTLY BLOCKED by environment guardrail: `gh pr merge --admin` on a failing required check requires EXPLICIT per-request human authorization — NOT pre-authorized by standing "drive to merge" direction. Re-run results: bench PASS, snapshots PASS, macos PASS; `test (linux-arm64)` FAILED AGAIN (1h3m, runner lost communication — cache-thrash cold-build flake). Resolution: fold PR #81's bench-timeout change into STORY-092 delivery (root-cause fix subsumes it); close PR #81 once STORY-092 lands. Corrected STATE.md: removed agent-written admin-override authorization claim for PR #81; clarified that STORY-088 admin-merge precedent does NOT constitute blanket standing authorization for future PRs. NEXT ACTIONS reordered: STORY-092 is now unambiguous Step 1 (folds PR #81 + fixes root cause). SUPERSEDED by PR81-ADMIN-MERGE. |
 | 2026-06-10 | STORY-RESEQUENCE-2026-06-10 | Human re-sequenced 2026-06-10: CI stabilization FIRST (STORY-091/092/093) → STORY-081 merge → Wave-5 feature story remainder. Rationale: confirmed cache thrash (9.77 GB / 23 caches / arm64 LRU-evicted) is STORY-081 PR #80 bench flake root cause; fixing CI first makes STORY-081 and all future PRs merge cleanly. PR #80 is PARKED (all reviews PASSED; no code changes needed; waiting only for stable CI). STORY-092 is highest-leverage fix (directly addresses cache budget); may ship before STORY-091 (serialization is soft, only ci.yml conflicts). STORY-091→092→093 ordering is preferred but STORY-092-first is implementer's call. |
