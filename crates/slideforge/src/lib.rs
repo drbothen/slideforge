@@ -850,13 +850,10 @@ fn compile_inner(
         // SourceMap and potentially emitted to the terminal by miette's
         // GraphicalReportHandler. Replacement char: U+FFFD. Normal Unicode filenames
         // (including non-ASCII letters and spaces) pass through unchanged.
-        let registered_name: std::sync::Arc<str> = options
-            .source_name
-            .as_deref()
-            .map_or_else(
-                || std::sync::Arc::from("<source>"),
-                |n| std::sync::Arc::from(sanitize_source_name(n).as_str()),
-            );
+        let registered_name: std::sync::Arc<str> = options.source_name.as_deref().map_or_else(
+            || std::sync::Arc::from("<source>"),
+            |n| std::sync::Arc::from(sanitize_source_name(n).as_str()),
+        );
         let file_id = source_map.add_file(registered_name, std::sync::Arc::from(source));
         let mut sink = DiagnosticSink::new();
         parse_checked(source, file_id, &source_map, &mut sink).ok_or_else(|| {
