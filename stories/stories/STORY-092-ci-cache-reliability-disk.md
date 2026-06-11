@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI caching configuration.
 # Anchors to NFR-026 through NFR-030 (multi-platform matrix reliability) and the
@@ -88,23 +88,38 @@ the confirmed root cause of the arm64 cold-build flake.
 
 Contributing factors that explain how the budget reached 97.7%:
 - Multiple lockfile-hash versions per shared-key (e.g., two clippy caches, multiple
-  `target/` variants per key) consuming duplicate budget.
-- The currently-pinned rust-cache SHA (`42dc69e1aa15d09112580998cf2ef0119e2e91ae`)
-  is an older release predating v2.9.1's hash-calculation regression fix. This means
-  warm caches may be IGNORED and new cache entries written unnecessarily, accelerating
-  budget exhaustion.
+  `target/` variants per key) consuming duplicate budget. NOTE: these duplicate entries
+  are NORMAL lockfile-hash rotation and will persist post-fix; they are not eliminated
+  by the SHA bump.
+- The previously-pinned rust-cache SHA (`42dc69e1aa15d09112580998cf2ef0119e2e91ae`)
+  is the annotated TAG OBJECT for the floating `v2` tag, not a peeled commit SHA. Tag
+  objects become unreachable and GC-eligible when upstream re-points the floating tag,
+  causing a repo-wide `uses:` resolution failure. The bump to v2.9.1's peeled commit
+  SHA (`c19371144df3bb44fab255c43d04cbc2ab54d1c4`) eliminates this fragility. NOTE: the
+  old SHA already ran v2.9.1 code (the tag object peeled to `e18b4977` carrying
+  package.json 2.9.1); the bump has ZERO behavioral delta (no key-format change, no
+  orphaned caches, no cold rebuild caused by the SHA change itself).
 - `cache-on-failure: "true"` is NOT present on several heavy compile jobs (`clippy`,
   `msrv`, `docs`, `snapshots`, `supply-chain`, `doctest`, `visual-regression`, `perf-smoke`).
   When these jobs time out or fail, the cache is not saved, breaking the warm path.
 
-**Fix:** Bump rust-cache from `42dc69e1aa15d09112580998cf2ef0119e2e91ae` to v2.9.1
-(`c19371144df3bb44fab255c43d04cbc2ab54d1c4`); add `cache-on-failure: "true"` to all
-build-heavy jobs; consolidate shared-keys to bring total active cache under ~8 GB;
-verify arm64 cache survives across consecutive runs.
+**Fix:** Bump rust-cache from the tag-object SHA `42dc69e1aa15d09112580998cf2ef0119e2e91ae`
+to the peeled commit SHA `c19371144df3bb44fab255c43d04cbc2ab54d1c4` (v2.9.1). This
+eliminates tag-object GC fragility (the primary value of the bump). Add
+`cache-on-failure: "true"` to all build-heavy jobs; consolidate shared-keys to bring
+total active cache under ~8 GB; verify arm64 cache survives across consecutive runs.
 
-**TD-VSDD-060 note:** rust-cache v2.9.1 SHA replacement must update ALL 11 call-sites
-in `ci.yml` where `Swatinem/rust-cache@<old-sha>` appears. A grep-zero check that no
-`42dc69e1` remains in `ci.yml` is a REQUIRED post-implementation step.
+**TD-VSDD-060 note:** rust-cache SHA replacement must update ALL call-sites in `ci.yml`
+where `Swatinem/rust-cache@<old-sha>` appears. A grep-zero check that no `42dc69e1`
+remains in `ci.yml` is a REQUIRED post-implementation step.
+
+**Implementation note (2026-06-11):** The actual implementation (feature/STORY-092 @
+c264910a) updated 11 call-sites in `ci.yml` plus 8 call-sites across companion
+workflows (security.yml, pdf-ua1.yml, html-wcag.yml, release.yml) — 19 total bumps.
+The `codeql-action` pin in `security.yml` had the same tag-object fragility and was
+re-pinned to peeled commit `03e4368a...`. These companion-workflow changes are
+implementation-level details; they do not add new ACs (companion workflows were not
+in-scope when the story was authored).
 
 ### Connection to STORY-080
 
@@ -148,22 +163,30 @@ Every job that compiles Rust code MUST have `cache-on-failure: "true"` set on it
 `perf-smoke`. The value MUST be the string `"true"` (not the boolean `true`) per the
 rust-cache action's expected type.
 
-### AC-003: rust-cache bumped to v2.9.1 at ALL 11 call-sites (traces to NFR-029)
+### AC-003: rust-cache bumped to peeled commit SHA at ALL call-sites in ci.yml (traces to NFR-029)
 
 All `Swatinem/rust-cache` uses in `ci.yml` MUST reference SHA
 `c19371144df3bb44fab255c43d04cbc2ab54d1c4` (v2.9.1, confirmed via `git ls-remote`
-2026-06-10 — annotated-tag deref). This release includes the hash-calculation regression
-fix that caused warm caches to be ignored on certain dependency graph shapes.
+2026-06-10 — annotated-tag deref to peeled commit). The value of this bump is
+**tag-object GC fragility elimination**: the old SHA `42dc69e1aa15d09112580998cf2ef0119e2e91ae`
+is an annotated tag-object SHA, not a peeled commit SHA. Annotated tag-object SHAs
+become unreachable and GC-eligible when upstream re-points the floating `v2` tag,
+causing repo-wide `uses:` resolution failures. The peeled commit SHA is stable regardless
+of tag movement. There is NO behavioral delta in this bump (the old tag-object already
+peeled to `e18b4977` carrying package.json v2.9.1 — the same code runs before and after).
+Duplicate per-shared-key cache entries (multiple lockfile-hash versions) are NORMAL
+rotation and will NOT be eliminated by this bump; budget reduction comes from key
+consolidation (AC-004) and cache-on-failure (AC-002).
 
-**The old SHA (`42dc69e1aa15d09112580998cf2ef0119e2e91ae`) MUST NOT remain in ANY job.**
-There are 11 call-sites in `ci.yml`. After implementation, run:
+**The old SHA (`42dc69e1aa15d09112580998cf2ef0119e2e91ae`) MUST NOT remain in ANY job
+in `ci.yml`.** After implementation, run:
 
 ```bash
 grep -c "42dc69e1" .github/workflows/ci.yml
 ```
 
 This MUST return `0`. If it returns any non-zero value, the implementation is incomplete
-(TD-VSDD-060 sibling-site sweep — all 11 call-sites must be updated).
+(TD-VSDD-060 sibling-site sweep — all call-sites must be updated).
 
 ### AC-004: Cache budget documented and within ~10 GB limit with headroom (traces to NFR-029)
 
@@ -272,7 +295,8 @@ Architecture section files: N/A — no source crate changes.
 - [ ] Replace ALL occurrences of `Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae`
       (and any other `Swatinem/rust-cache@<old-sha>` variant) in `ci.yml` with
       `Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4`
-      (v2.9.1, confirmed via `git ls-remote` 2026-06-10)
+      (v2.9.1 peeled commit SHA, confirmed via `git ls-remote` 2026-06-10 — eliminates
+      tag-object GC fragility; no behavioral delta in this bump)
 - [ ] After replacement, run the grep-zero check:
       `grep -c "42dc69e1" .github/workflows/ci.yml` → MUST return `0`
       (TD-VSDD-060: all 11 call-sites must be updated; zero old-SHA residue allowed)
@@ -332,15 +356,19 @@ is in the CI configuration, not in production code. This story follows that prin
 5. **visual-regression job special case.** Do not strip Python or apt packages that
    LibreOffice depends on. The disk-cleanup step for this job must be scoped more
    narrowly than for pure-Rust jobs.
-6. **TD-VSDD-060 sibling-site sweep.** All 11 `Swatinem/rust-cache` call-sites in
-   `ci.yml` must be updated atomically. The grep-zero check (`grep -c "42dc69e1"`) is
-   a required post-implementation verification step, not optional.
+6. **TD-VSDD-060 sibling-site sweep.** All `Swatinem/rust-cache` call-sites in
+   `ci.yml` must be updated atomically (11 sites confirmed at authoring time; verify
+   count at implementation). The grep-zero check (`grep -c "42dc69e1" .github/workflows/ci.yml`)
+   is a required post-implementation verification step, not optional. Companion workflow
+   call-sites (security.yml, pdf-ua1.yml, html-wcag.yml, release.yml) should also be
+   swept for the same tag-object fragility; they are outside AC-003's scope but their
+   update is tracked as an implementation note (see Class B Fix paragraph).
 
 ## Library and Framework Requirements
 
 | Dependency | Version/SHA | Status | Notes |
 |------------|-------------|--------|-------|
-| `Swatinem/rust-cache` | v2.9.1 = `c19371144df3bb44fab255c43d04cbc2ab54d1c4` | CONFIRMED via `git ls-remote` 2026-06-10 (annotated-tag deref) | Replace old SHA `42dc69e1aa...` at ALL 11 call-sites |
+| `Swatinem/rust-cache` | v2.9.1 = `c19371144df3bb44fab255c43d04cbc2ab54d1c4` | CONFIRMED via `git ls-remote` 2026-06-10 (annotated-tag deref to peeled commit) | Replace old tag-object SHA `42dc69e1aa...` at ALL call-sites in ci.yml; eliminates tag-object GC fragility (no behavioral delta) |
 | Manual `rm -rf` disk cleanup | stdlib bash | N/A | Preferred; no new action dependency; guard each path with `|| true` |
 | `jlumbroso/free-disk-space` | v1.3.1 = `54081f138730dfa15788a46383842cd2f914a1be` | CONFIRMED via `git ls-remote` 2026-06-10 (lightweight tag, direct SHA); date discrepancy RESOLVED | ESCALATION ONLY if manual cleanup insufficient |
 | `taiki-e/install-action` | v2.81.9 = `fd2f5e3d644b484055ebf4268f474c565f148f25` | SHA confirmed (deferred — only relevant if nextest archiving is adopted); current pin `d9be7d8c` stays | DEFERRED; nextest archiving not adopted in this story |
@@ -351,7 +379,7 @@ All SHAs have been confirmed or deferred as of 2026-06-10. No open uncertainty f
 
 | Action | SHA | Status | Notes |
 |--------|-----|--------|-------|
-| `Swatinem/rust-cache` v2.9.1 | `c19371144df3bb44fab255c43d04cbc2ab54d1c4` | CONFIRMED 2026-06-10 via `git ls-remote --tags https://github.com/Swatinem/rust-cache` (annotated-tag deref) | Replaces old SHA `42dc69e1aa...`; all 11 call-sites must be updated |
+| `Swatinem/rust-cache` v2.9.1 | `c19371144df3bb44fab255c43d04cbc2ab54d1c4` | CONFIRMED 2026-06-10 via `git ls-remote --tags https://github.com/Swatinem/rust-cache` (annotated-tag deref to peeled commit) | Replaces tag-object SHA `42dc69e1aa...`; eliminates GC fragility (no behavioral delta — old SHA already ran v2.9.1 code); all call-sites in ci.yml must be updated |
 | `jlumbroso/free-disk-space` v1.3.1 | `54081f138730dfa15788a46383842cd2f914a1be` | CONFIRMED 2026-06-10 via `git ls-remote` (lightweight tag, direct SHA); date discrepancy resolved | ESCALATION ONLY — use only if manual rm -rf insufficient |
 | `taiki-e/install-action` v2.81.9 | `fd2f5e3d644b484055ebf4268f474c565f148f25` | SHA noted; DEFERRED — only relevant if nextest archiving adopted; current pin `d9be7d8c` stays | Not required in this story |
 
@@ -418,7 +446,7 @@ Estimated 1 day including CI verification.
 
 | Item | Resolution |
 |------|-----------|
-| `Swatinem/rust-cache` v2.9.1 SHA | **CONFIRMED** `c19371144df3bb44fab255c43d04cbc2ab54d1c4` via `git ls-remote --tags https://github.com/Swatinem/rust-cache` 2026-06-10 (annotated-tag deref). Remove uncertainty flag. |
+| `Swatinem/rust-cache` v2.9.1 SHA | **CONFIRMED** `c19371144df3bb44fab255c43d04cbc2ab54d1c4` via `git ls-remote --tags https://github.com/Swatinem/rust-cache` 2026-06-10 (annotated-tag deref to peeled commit). The old SHA `42dc69e1aa...` is the annotated tag-object for the floating `v2` tag, which already peeled to `e18b4977` carrying v2.9.1. The bump has zero behavioral delta; its value is tag-object GC fragility elimination. Remove uncertainty flag. |
 | `jlumbroso/free-disk-space` v1.3.1 SHA | **CONFIRMED** `54081f138730dfa15788a46383842cd2f914a1be` via `git ls-remote` 2026-06-10 (lightweight tag, direct SHA). Date discrepancy from research is RESOLVED (the SHA is correct; v1.3.1 is current latest). Escalation-only usage retained. Remove uncertainty flag. |
 | `taiki-e/install-action` v2.81.9 SHA | SHA `fd2f5e3d644b484055ebf4268f474c565f148f25` noted. DEFERRED — only relevant if nextest archiving is adopted; current pin `d9be7d8c` stays. Uncertainty flag changed from "re-confirm required" to "deferred-not-applicable." |
 | Cache budget hypothesis | **CONFIRMED DATA-BACKED.** `gh api repos/drbothen/slideforge/actions/cache/usage` (2026-06-10) = 9.77 GB / 23 active caches = 97.7% of limit. `v0-rust-test-linux-arm64-*` cache ABSENT (LRU-evicted). Root cause confirmed. AC-005 reframed from "verify hypothesis" to "measure fix effectiveness against confirmed 9.77 GB baseline." |
@@ -439,3 +467,4 @@ Estimated 1 day including CI verification.
 |---------|------|--------|---------|
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q2 + Q3. Fixes root cause of arm64 cold-build flakiness and `No space left` class. Depends on STORY-091 (tiered trigger must be live first). |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: confirmed rust-cache v2.9.1 SHA `c19371144...` and free-disk-space v1.3.1 SHA `54081f13...` via `git ls-remote` 2026-06-10; promoted cache-budget finding from hypothesis to DATA-BACKED (9.77 GB/23 caches/arm64-evicted confirmed); reframed AC-005 from "verify hypothesis" to "measure fix against confirmed baseline"; reframed AC-006 wall-clock from fixed <12 min to measure-and-record; added grep-zero check requirement for 11-site rust-cache SHA sweep (TD-VSDD-060); added arm64 disk-path verify-at-impl marker with `|| true` guards; resolved `<owner>` placeholder as `drbothen/slideforge`; noted `taiki-e/install-action` SHA as deferred; added Uncertainty Resolution Log. |
+| 1.2 | 2026-06-11 | story-writer | Spec amendment: ci-workflow-analyzer MED findings 1-2 on feature/STORY-092 @ c264910a (VERIFIED via GitHub API). Replaced false Class B contributing-factor claim ("hash-calculation regression fix") with accurate tag-object-fragility rationale: old SHA `42dc69e1aa...` is the annotated tag-object for floating `v2` — already running v2.9.1 code (`e18b4977`), zero behavioral delta from bump; value is GC fragility elimination. Updated AC-003, Fix paragraph, Task B, Library Requirements table, Pinned Versions table, Architecture Compliance Rule 6, and Uncertainty Resolution Log entry accordingly. Added note that duplicate per-shared-key cache entries are normal lockfile-hash rotation and will persist post-fix. Reconciled implementation site counts: 11 in ci.yml + 8 in companion workflows (security.yml codeql-action had same tag-object defect, re-pinned to `03e4368a...`) = 19 total bumps — recorded as implementation note in Class B Fix paragraph; no new ACs added. |
