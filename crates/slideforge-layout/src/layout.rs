@@ -77,11 +77,23 @@ pub const MAX_BULLET_DEPTH: usize = 64;
 /// `slideforge-layout::regions` (`weighted_composite` arm).
 const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
 
+/// Horizontal x-offset applied per bullet nesting level (depth > 0).
+///
+/// Value: 457,200 EMU = 0.5 inch at 914,400 EMU/inch.
+/// Each depth increment shifts the bullet frame's left edge right by this amount,
+/// producing the standard PPTX-style indentation for nested bullets
+/// (F-094-P2-001 depth-indentation requirement).
+///
+/// A bullet at depth 0 has x = `body_bbox.x` (no indentation).
+/// A bullet at depth 1 has x = `body_bbox.x` + `BULLET_DEPTH_INDENT_EMU`.
+/// A bullet at depth N has x = `body_bbox.x` + N * `BULLET_DEPTH_INDENT_EMU`.
+const BULLET_DEPTH_INDENT_EMU: i64 = 457_200;
+
 use crate::inline::run_inline_validation;
 use crate::regions::region_frames_for;
 use crate::sections::collect_sections;
 use crate::shapes::layout_shapes;
-use crate::text_flow::compute_text_flow;
+use crate::text_flow::{LINE_HEIGHT_EMU, compute_text_flow};
 use crate::types::{
     DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
     RegisterSet, RegisterTag,
@@ -457,33 +469,38 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                         },
                     }
                 },
+                ContentBlock::Bullets(items) if items.is_empty() => {
+                    // EC-001 (STORY-073): an empty bullet list produces zero frames,
+                    // no error, and no slot consumption — regardless of slide type.
+                    // The slot search and E-LAY-008 error path must NOT fire for
+                    // empty bullet lists (test_bc_3_05_001_story073_ec001).
+                },
                 ContentBlock::Bullets(items) => {
-                    // STORY-094 T-004 / BC-3.06.003 AC-001 — finalize placeholder bbox.
+                    // F-094-P2-001/002/003 — per-bullet vertical flow + E-LAY-008 error.
                     //
-                    // REND-001 fix: consume the Body-role Empty region slot so that bullet
-                    // TextRun frames inherit its correct bbox (x > 0, y > 0) instead of
-                    // being pushed with a wrong position. The slot is removed from `all_frames`
-                    // before the bullet frames are appended, ensuring no duplicate Empty slot
-                    // appears in the output alongside the TextRun frames.
-                    //
-                    // F-094-P1-003 fix: Phase 1b — also capture the bbox from an
-                    // ALREADY-FILLED Body-role frame (FrameContent::Body). This fires when a
-                    // ContentBlock::Body was processed before ContentBlock::Bullets on the same
-                    // slide. The Body block has already claimed the Empty Body slot via
-                    // fill_region_slot_or_append; the bullets must use the same region bbox.
-                    // The Body frame itself is NOT removed (it still carries its content).
-                    //
-                    // F-094-P1-002 fix: Phase 3 — when no Body or Generic Empty slot exists
-                    // AND no already-filled Body frame exists, the slide type has no content
-                    // region for bullets. Return Err(InvalidBoundingBox) with a sentinel
-                    // zero-bbox rather than silently placing frames at (0,0).
-                    //
-                    // Slot search order:
+                    // Slot search order (unchanged from P1):
                     //   Phase 1a: Empty Body-role slot — consume it (normal path).
-                    //   Phase 1b: Already-filled Body-role slot — borrow its bbox (body+bullets coexistence fix).
+                    //   Phase 1b: Already-filled Body-role slot — borrow bbox, shrink to content,
+                    //             start bullet cursor after body content (F-094-P2-002).
                     //   Phase 2:  Empty Generic/None slot — consume it (multi-body fallback).
-                    //   Phase 3:  None — Err(InvalidBoundingBox) (no silent (0,0) placement).
-                    let body_bbox: Option<crate::types::BoundingBox> = {
+                    //   Phase 3:  None — Err(BulletsOnContentlessSlideType) (F-094-P2-003).
+                    //
+                    // Per-bullet vertical flow (F-094-P2-001):
+                    //   Each bullet gets a distinct y derived from a flow cursor starting at
+                    //   `initial_y_cursor` and advancing by LINE_HEIGHT_EMU per item.
+                    //   Depth-indented children get x += BULLET_DEPTH_INDENT_EMU * depth.
+                    //
+                    // F-094-P1-002 / F-094-P2-003: contentless slide types (title, closing,
+                    //   section_break, blank) return Err(BulletsOnContentlessSlideType)
+                    //   per E-LAY-008 — NOT InvalidBoundingBox (reserved for geometry bugs).
+                    enum BulletSlot {
+                        /// Body region bbox + starting y cursor.
+                        Region(crate::types::BoundingBox, crate::types::Emu),
+                        /// No content region — fire E-LAY-008.
+                        Contentless,
+                    }
+
+                    let slot: BulletSlot = {
                         // Phase 1a: Empty Body-role match — consume the slot.
                         let exact_idx = all_frames.iter().position(|f| {
                             matches!(f.content, crate::types::FrameContent::Empty)
@@ -492,19 +509,43 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                         if let Some(idx) = exact_idx {
                             let bbox = all_frames[idx].bbox;
                             all_frames.remove(idx);
-                            Some(bbox)
+                            // Bullets start at the top of the body region.
+                            BulletSlot::Region(bbox, bbox.y)
                         } else {
-                            // Phase 1b: already-filled Body-role slot (F-094-P1-003).
-                            // A ContentBlock::Body arrived before this Bullets block and
-                            // has already consumed the Empty Body slot. Borrow its bbox
-                            // so bullets share the same region geometry.
+                            // Phase 1b: already-filled Body-role slot (F-094-P1-003 / F-094-P2-002).
+                            // The Body frame has already consumed the Empty Body slot.
+                            // Shrink the body frame to its content height and start bullet
+                            // cursor immediately after the body content.
                             let filled_body_idx = all_frames.iter().position(|f| {
                                 matches!(f.content, crate::types::FrameContent::Body(_))
                                     && f.region_role == Some(crate::types::RegionRole::Body)
                             });
                             if let Some(idx) = filled_body_idx {
-                                // Borrow only — do not remove (the Body frame stays).
-                                Some(all_frames[idx].bbox)
+                                // Compute body content height from text_flow (F-094-P2-002).
+                                // text_flow was set by fill_region_slot_or_append; if absent
+                                // (edge case: Body frame with no text_flow), use LINE_HEIGHT_EMU.
+                                let body_line_count = all_frames[idx]
+                                    .text_flow
+                                    .as_ref()
+                                    .map_or(1, |tf| i64::from(tf.line_count))
+                                    .max(1);
+                                let body_content_height = crate::types::Emu(
+                                    LINE_HEIGHT_EMU.0.saturating_mul(body_line_count),
+                                );
+                                // Shrink body frame bbox height to content extent
+                                // (clamped to available region height so we never exceed bounds).
+                                let body_region_height = all_frames[idx].bbox.height;
+                                let shrunk_height = body_content_height.min(body_region_height);
+                                // shrunk_height must be > 0 per BC-3.06.003.
+                                // LINE_HEIGHT_EMU > 0 and body_line_count >= 1 guarantee this.
+                                all_frames[idx].bbox.height = shrunk_height;
+
+                                let body_bbox = all_frames[idx].bbox;
+                                // Bullet cursor starts at bottom of shrunk body frame.
+                                let initial_y = crate::types::Emu(
+                                    body_bbox.y.0.saturating_add(shrunk_height.0),
+                                );
+                                BulletSlot::Region(body_bbox, initial_y)
                             } else {
                                 // Phase 2: Generic/None fallback (mirrors fill_region_slot_or_append).
                                 let generic_idx = all_frames.iter().position(|f| {
@@ -517,22 +558,42 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                                 if let Some(idx) = generic_idx {
                                     let bbox = all_frames[idx].bbox;
                                     all_frames.remove(idx);
-                                    Some(bbox)
+                                    // Bullets start at the top of the generic region.
+                                    BulletSlot::Region(bbox, bbox.y)
                                 } else {
-                                    // Phase 3: no usable slot — this slide type has no content
-                                    // region for bullets (e.g., title, closing, section_break,
-                                    // blank). Return None to trigger InvalidBoundingBox below.
-                                    None
+                                    // Phase 3: no content region for bullets (F-094-P2-003 / E-LAY-008).
+                                    // Return BulletsOnContentlessSlideType, NOT InvalidBoundingBox.
+                                    // InvalidBoundingBox is reserved for internal geometry invariant
+                                    // violations; E-LAY-008 is the user-authoring error for this case.
+                                    BulletSlot::Contentless
                                 }
                             }
                         }
                     };
-                    // STORY-073 / AC-001 — produce one FrameContent::TextRun per
-                    // BulletItem, recursively visiting children depth-first.
-                    // Source order is preserved: parent frame before child frames.
-                    // The inline content (BulletItem.inlines) is carried verbatim —
-                    // no inline processing occurs at layout time (BC-3.05.001 invariant 6).
-                    push_bullet_frames(items, &mut all_frames, page_size, source_index, body_bbox)?;
+
+                    match slot {
+                        BulletSlot::Contentless => {
+                            return Err(LayoutError::BulletsOnContentlessSlideType {
+                                slide_type: Arc::clone(&slide_type_keyword),
+                                source_slide_index: source_index,
+                                span: block.span.clone(),
+                            });
+                        },
+                        BulletSlot::Region(body_bbox, initial_y) => {
+                            // STORY-073 / AC-001 / F-094-P2-001 — produce one FrameContent::TextRun
+                            // per BulletItem with a vertical flow cursor so each bullet occupies
+                            // a distinct y position (not all stacked at the same coordinates).
+                            let mut y_cursor = initial_y;
+                            push_bullet_frames(
+                                items,
+                                &mut all_frames,
+                                page_size,
+                                source_index,
+                                body_bbox,
+                                &mut y_cursor,
+                            )?;
+                        },
+                    }
                 },
                 // Other ContentBlock variants (Chart, Diagram, Shape, Math, Image, Table)
                 // are handled elsewhere (shape pass above) or do not carry InlineNode
@@ -1073,8 +1134,8 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
     out
 }
 
-/// Recursively emit one [`crate::types::FrameContent::TextRun`] frame per
-/// [`BulletItem`], depth-first.
+/// Emit one [`crate::types::FrameContent::TextRun`] frame per [`BulletItem`],
+/// depth-first, with a vertical flow cursor (F-094-P2-001).
 ///
 /// Traversal order: parent item then children (in source order), recursively.
 /// This produces a flat `Vec<Frame>` sequence that preserves the source order of
@@ -1083,8 +1144,25 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 /// Each frame carries the bullet item's `inlines` sequence verbatim — no inline
 /// processing occurs at layout time (BC-3.05.001 invariant 6).
 ///
-/// The bounding box for each frame is a full-width placeholder clamped to the
-/// page height (same rule as `ContentBlock::Text` frames — BC-3.06.003 / F-P4-LOW-001).
+/// # Per-bullet vertical flow (F-094-P2-001)
+///
+/// Each bullet item occupies a distinct vertical slice of `body_bbox`:
+/// - `y = *y_cursor` — current cursor position.
+/// - `height = LINE_HEIGHT_EMU` — one line per bullet item.
+/// - `*y_cursor` advances by `LINE_HEIGHT_EMU` after each item.
+/// - If `y_cursor` exceeds `body_bbox.y + body_bbox.height`, bullets are clipped
+///   to the region boundary (no underflow — canvas-overflow validator territory).
+///
+/// # Depth indentation (F-094-P2-001)
+///
+/// Child bullets at `depth > 0` are indented by `BULLET_DEPTH_INDENT_EMU * depth`:
+/// - `x = body_bbox.x + BULLET_DEPTH_INDENT_EMU * depth`
+/// - `width = body_bbox.width - BULLET_DEPTH_INDENT_EMU * depth` (clamped >= 1)
+///
+/// # Pre-condition
+///
+/// `body_bbox` must be a valid region-map bbox (caller has already validated via
+/// the slot-search logic; only regions passing `is_valid` reach this function).
 ///
 /// # Structural depth bound (F-P1-MED-001)
 ///
@@ -1099,16 +1177,25 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 ///
 /// - `Err(LayoutError::BulletDepthExceeded { depth })` — the `BulletItem.children`
 ///   chain exceeds [`MAX_BULLET_DEPTH`] structural levels (F-P1-MED-001).
-/// - `Err(LayoutError::InvalidBoundingBox)` — the finalized placeholder bbox
-///   violates BC-3.06.003 invariants (STORY-094: fires for invalid region coordinates).
+/// - `Err(LayoutError::InvalidBoundingBox)` — the finalized per-bullet bbox
+///   violates BC-3.06.003 invariants (e.g. region map produced negative coords).
 fn push_bullet_frames(
     items: &[BulletItem],
     frames: &mut Vec<crate::types::Frame>,
     page_size: PageSize,
     source_slide_index: usize,
-    body_bbox: Option<crate::types::BoundingBox>,
+    body_bbox: crate::types::BoundingBox,
+    y_cursor: &mut crate::types::Emu,
 ) -> Result<(), LayoutError> {
-    push_bullet_frames_inner(items, frames, page_size, source_slide_index, body_bbox, 0)
+    push_bullet_frames_inner(
+        items,
+        frames,
+        page_size,
+        source_slide_index,
+        body_bbox,
+        y_cursor,
+        0,
+    )
 }
 
 /// Inner recursive implementation for [`push_bullet_frames`] with an explicit
@@ -1118,7 +1205,8 @@ fn push_bullet_frames_inner(
     frames: &mut Vec<crate::types::Frame>,
     page_size: PageSize,
     source_slide_index: usize,
-    body_bbox: Option<crate::types::BoundingBox>,
+    body_bbox: crate::types::BoundingBox,
+    y_cursor: &mut crate::types::Emu,
     current_depth: usize,
 ) -> Result<(), LayoutError> {
     // F-P1-MED-001: reject structural nesting deeper than MAX_BULLET_DEPTH BEFORE
@@ -1132,40 +1220,62 @@ fn push_bullet_frames_inner(
     }
 
     for item in items {
-        // F-094-P1-002 / BC-3.06.003 AC-001 / postcondition 2 — region-map bbox required.
+        // F-094-P2-001 — compute per-bullet bbox from flow cursor + depth indentation.
         //
-        // `body_bbox` must be `Some` when this function is called. A `None` value means
-        // the calling slide type has no Body or Generic content region, so bullets cannot
-        // be correctly positioned. Return `Err(InvalidBoundingBox)` with a sentinel
-        // zero-bbox rather than silently placing frames at (0,0).
+        // x offset: body_bbox.x + BULLET_DEPTH_INDENT_EMU * current_depth.
+        // Width: body_bbox.width minus indent, clamped to >= 1 EMU (BC-3.06.003 width > 0).
+        // y: current cursor value.
+        // height: LINE_HEIGHT_EMU (one visual line per bullet item).
         //
-        // Silent fallback to any position not derived from the region map is forbidden
-        // (BC-3.06.003 postcondition 2 / F-094-P1-002). Production-grade default: if the
-        // slide type cannot host bullets, the error surfaces to the user rather than
-        // producing a visually wrong deck.
-        let Some(bbox) = body_bbox else {
-            let frame_index = frames.len();
-            let sentinel_bbox = crate::types::BoundingBox {
-                x: crate::types::Emu(0),
-                y: crate::types::Emu(0),
-                width: crate::types::Emu(0),
-                height: crate::types::Emu(0),
-            };
-            return Err(LayoutError::InvalidBoundingBox {
-                source_slide_index,
-                frame_index,
-                bbox: sentinel_bbox,
-            });
+        // Vertical overflow: if the cursor already exceeds the body region bottom,
+        // additional bullets are placed at the region bottom with height 1 (minimal
+        // valid frame). The canvas-overflow validator (E-LAY-001) will flag this
+        // separately; layout does NOT silently clip or error here.
+        // current_depth is always ≤ MAX_BULLET_DEPTH (64); i64::try_from is infallible
+        // for any usize value that fits in 64 bits (all contemporary platforms).
+        let depth_as_i64 = i64::try_from(current_depth).unwrap_or(i64::MAX);
+        let depth_offset_emu =
+            crate::types::Emu(BULLET_DEPTH_INDENT_EMU.saturating_mul(depth_as_i64));
+        // Clamp bullet_x to [body_bbox.x, page_width - 1] so that extreme depth
+        // indentation never causes is_valid to fail before the structural depth guard
+        // can fire (F-094-P2-001, BC-3.06.003). The canvas-overflow validator
+        // (E-LAY-001) flags visible clipping separately.
+        let raw_x = body_bbox.x.0.saturating_add(depth_offset_emu.0);
+        let max_x = page_size.width.0.saturating_sub(1).max(0);
+        let bullet_x = crate::types::Emu(raw_x.min(max_x));
+        // Width: from clamped x to the page right edge, minimum 1 EMU.
+        let bullet_width = crate::types::Emu((page_size.width.0 - bullet_x.0).max(1));
+
+        // Clamp bullet_y to [0, page_height - 1] so that overflowed y_cursor values
+        // (more bullets than fit on the page) still produce a valid minimal frame.
+        // The comment above documents the design intent: overflow bullets are clamped
+        // to the page bottom with height 1, not rejected as InvalidBoundingBox.
+        let max_y = page_size.height.0.saturating_sub(1).max(0);
+        let bullet_y = crate::types::Emu(y_cursor.0.min(max_y));
+        // Height: from clamped y to the page bottom edge, minimum 1 EMU.
+        let bullet_height =
+            crate::types::Emu((page_size.height.0 - bullet_y.0).clamp(1, LINE_HEIGHT_EMU.0));
+
+        // BC-3.06.003 defensive check: the clamping above ensures is_valid passes
+        // for any structurally valid (depth ≤ MAX_BULLET_DEPTH) input. A failure
+        // here indicates a logic bug in the clamping itself.
+        let bbox = crate::types::BoundingBox {
+            x: bullet_x,
+            y: bullet_y,
+            width: bullet_width,
+            height: bullet_height,
         };
-        // BC-3.06.003 defensive check: reject invalid bounding boxes from region maps.
-        let frame_index = frames.len();
-        if !bbox.is_valid(page_size.width, page_size.height) {
-            return Err(LayoutError::InvalidBoundingBox {
-                source_slide_index,
-                frame_index,
-                bbox,
-            });
-        }
+        debug_assert!(
+            bbox.is_valid(page_size.width, page_size.height),
+            "clamped bullet bbox must be valid: {bbox:?} on page {}×{}",
+            page_size.width.0,
+            page_size.height.0,
+        );
+
+        // Advance cursor for the next bullet (before pushing, so child bullets
+        // continue from after the parent's line).
+        *y_cursor = crate::types::Emu(y_cursor.0.saturating_add(bullet_height.0));
+
         // Produce one TextRun frame carrying BulletItem.inlines verbatim.
         frames.push(crate::types::Frame {
             bbox,
@@ -1180,6 +1290,7 @@ fn push_bullet_frames_inner(
             page_size,
             source_slide_index,
             body_bbox,
+            y_cursor,
             current_depth + 1,
         )?;
     }

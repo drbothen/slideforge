@@ -911,14 +911,14 @@ fn test_f094_p1_002_bullets_on_title_slide_returns_invalid_bbox_error() {
 
     assert!(
         result.is_err(),
-        "F-094-P1-002 Red Gate: bullets on a 'title' slide (no Body slot) must return \
-         Err(LayoutError::InvalidBoundingBox); layout::run returned Ok(..)"
+        "F-094-P1-002 / F-094-P2-003: bullets on a 'title' slide (no Body region) must return \
+         Err(LayoutError::BulletsOnContentlessSlideType); layout::run returned Ok(..)"
     );
     let err = result.unwrap_err();
     assert!(
-        matches!(err, LayoutError::InvalidBoundingBox { .. }),
-        "F-094-P1-002 Red Gate: error must be LayoutError::InvalidBoundingBox; \
-         got: {err:?}"
+        matches!(err, LayoutError::BulletsOnContentlessSlideType { .. }),
+        "F-094-P2-003 Red Gate: error must be LayoutError::BulletsOnContentlessSlideType \
+         (E-LAY-008); got: {err:?}"
     );
 }
 
@@ -934,12 +934,15 @@ fn test_f094_p1_002_bullets_on_closing_slide_returns_invalid_bbox_error() {
 
     assert!(
         result.is_err(),
-        "F-094-P1-002 Red Gate: bullets on a 'closing' slide (no Body slot) must return \
-         Err(LayoutError::InvalidBoundingBox); layout::run returned Ok(..)"
+        "F-094-P1-002 / F-094-P2-003: bullets on a 'closing' slide (no Body region) must return \
+         Err(LayoutError::BulletsOnContentlessSlideType); layout::run returned Ok(..)"
     );
     assert!(
-        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
-        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+        matches!(
+            result.unwrap_err(),
+            LayoutError::BulletsOnContentlessSlideType { .. }
+        ),
+        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -955,11 +958,14 @@ fn test_f094_p1_002_bullets_on_section_break_returns_invalid_bbox_error() {
 
     assert!(
         result.is_err(),
-        "F-094-P1-002 Red Gate: bullets on 'section_break' (no Body slot) must error"
+        "F-094-P1-002 / F-094-P2-003: bullets on 'section_break' (no Body region) must error"
     );
     assert!(
-        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
-        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+        matches!(
+            result.unwrap_err(),
+            LayoutError::BulletsOnContentlessSlideType { .. }
+        ),
+        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -975,11 +981,14 @@ fn test_f094_p1_002_bullets_on_blank_slide_returns_invalid_bbox_error() {
 
     assert!(
         result.is_err(),
-        "F-094-P1-002 Red Gate: bullets on 'blank' (no slots at all) must error"
+        "F-094-P1-002 / F-094-P2-003: bullets on 'blank' (no slots at all) must error"
     );
     assert!(
-        matches!(result.unwrap_err(), LayoutError::InvalidBoundingBox { .. }),
-        "F-094-P1-002: error must be LayoutError::InvalidBoundingBox"
+        matches!(
+            result.unwrap_err(),
+            LayoutError::BulletsOnContentlessSlideType { .. }
+        ),
+        "F-094-P2-003: error must be LayoutError::BulletsOnContentlessSlideType (E-LAY-008)"
     );
 }
 
@@ -1071,4 +1080,339 @@ fn test_f094_p1_003_body_text_plus_bullets_bullets_get_body_region_bbox() {
             frame.bbox.y.0
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P2-001 (CRITICAL): N bullets must yield N distinct, strictly-increasing
+// bbox.y values — not N overlapping frames at the same y.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P2-001 (CRITICAL) / BC-3.06.003 postcondition 1:
+/// Three bullets on a `content` slide must produce three `TextRun` frames whose
+/// `bbox.y` values are STRICTLY INCREASING and NON-OVERLAPPING.
+///
+/// DEFECT: `push_bullet_frames_inner` currently assigns the same `body_bbox`
+/// to every bullet item — N bullets produce N frames all at identical y.
+/// REND-001 intent is un-stacked, legible bullets (not N identical positions).
+///
+/// RED GATE: this test must fail until per-bullet vertical flow is implemented.
+/// Each bullet must advance a cursor: y[i+1] >= y[i] + height[i].
+///
+/// FU-DIAGNOSTIC-FIELD-PINNING: all y values are pinned (not just `y[0] != y[1]`).
+#[test]
+fn test_f094_p2_001_bullets_have_distinct_increasing_y_values() {
+    // Three-item bullet list on a `content` slide.
+    let items = vec![
+        flat_bullet(vec![InlineNode::Plain(Arc::from("Bullet One"))]),
+        flat_bullet(vec![InlineNode::Plain(Arc::from("Bullet Two"))]),
+        flat_bullet(vec![InlineNode::Plain(Arc::from("Bullet Three"))]),
+    ];
+    let slide = bullets_slide("content", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("F-094-P2-001: layout::run must succeed for content slide with 3 bullets");
+
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert_eq!(
+        text_run_frames.len(),
+        3,
+        "F-094-P2-001: 3-item bullet list must produce exactly 3 TextRun frames; \
+         got {} frames (total slide frames: {})",
+        text_run_frames.len(),
+        result.slides[0].frames.len()
+    );
+
+    // F-094-P2-001 load-bearing: y values must be strictly increasing and non-overlapping.
+    // Defective code: all bullets get the SAME body_bbox → all have identical y.
+    for i in 0..text_run_frames.len() - 1 {
+        let curr = &text_run_frames[i];
+        let next = &text_run_frames[i + 1];
+        // Non-overlapping: next frame must start at or after current frame's bottom edge.
+        let curr_bottom = curr.bbox.y.0.saturating_add(curr.bbox.height.0);
+        assert!(
+            next.bbox.y.0 >= curr_bottom,
+            "F-094-P2-001 Red Gate: TextRun frame {i} and frame {} overlap — \
+             frame {i} y={} height={} (bottom={curr_bottom}), frame {} y={} \
+             (expected y >= {curr_bottom}). Defect: all bullets share the same bbox.",
+            i + 1,
+            curr.bbox.y.0,
+            curr.bbox.height.0,
+            i + 1,
+            next.bbox.y.0
+        );
+        // Strictly increasing: consecutive y values must differ (no zero-height stacking).
+        assert!(
+            next.bbox.y.0 > curr.bbox.y.0,
+            "F-094-P2-001 Red Gate: TextRun frame {} y ({}) must be strictly greater than \
+             frame {i} y ({}) — all bullets must have distinct y positions",
+            i + 1,
+            next.bbox.y.0,
+            curr.bbox.y.0
+        );
+    }
+
+    // All frames must remain within page bounds.
+    let page_h = result.page_size.height;
+    for (idx, frame) in text_run_frames.iter().enumerate() {
+        let bottom = frame.bbox.y.0.saturating_add(frame.bbox.height.0);
+        assert!(
+            bottom <= page_h.0,
+            "F-094-P2-001: TextRun frame {idx} extends below page_height \
+             (y={} + height={} = {bottom} > page_h={})",
+            frame.bbox.y.0,
+            frame.bbox.height.0,
+            page_h.0
+        );
+    }
+}
+
+/// F-094-P2-001 — Depth-indented child bullet must have x > parent bullet x.
+///
+/// A bullet with a child (one nesting level) must produce:
+///   - Parent frame at some `x_parent`
+///   - Child frame at `x_child` > `x_parent` (horizontal indentation)
+///
+/// DEFECT: all frames currently get the same `body_bbox.x` — no indentation.
+/// RED GATE: this test must fail until depth-x-offset is implemented.
+#[test]
+fn test_f094_p2_001_child_bullet_x_greater_than_parent_x() {
+    use slideforge_types::BulletItem;
+
+    let child = BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("child item"))],
+        children: vec![],
+        span: SourceSpan::default(),
+    };
+    let parent = BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("parent item"))],
+        children: vec![child],
+        span: SourceSpan::default(),
+    };
+    let block = slideforge_types::Block {
+        content: ContentBlock::Bullets(vec![parent]),
+        label: None,
+        span: SourceSpan::default(),
+    };
+    let slide = Slide {
+        slide_type: Arc::from("content"),
+        fields: OrderedMap::new(),
+        blocks: vec![block],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+    };
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("F-094-P2-001: layout::run must succeed for content slide with nested bullets");
+
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert_eq!(
+        text_run_frames.len(),
+        2,
+        "F-094-P2-001: parent+child bullet must produce exactly 2 TextRun frames; \
+         got {} (total frames: {})",
+        text_run_frames.len(),
+        result.slides[0].frames.len()
+    );
+
+    let parent_x = text_run_frames[0].bbox.x;
+    let child_x = text_run_frames[1].bbox.x;
+    assert!(
+        child_x > parent_x,
+        "F-094-P2-001 Red Gate: child bullet x ({child_x:?}) must be strictly greater than \
+         parent bullet x ({parent_x:?}) — depth indentation not applied. \
+         Defect: all bullets share the same body_bbox.x."
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P2-002 (HIGH): body text + bullets coexistence — no overlapping frames.
+// Body frame bbox must be shrunk to its content extent; bullets flow below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P2-002 (HIGH) / BC-3.06.003 postcondition 1:
+/// A `content` slide with BOTH a Body text block AND a Bullets block must produce
+/// non-overlapping frames: the Body frame and every bullet `TextRun` frame must have
+/// pairwise non-overlapping, orderly-stacked bboxes.
+///
+/// DEFECT: Phase 1b borrows the filled Body frame's `bbox` wholesale → Body and
+/// every bullet frame have the SAME identical `bbox` (same `y`, same `height`).
+///
+/// RED GATE: this test must fail until the flow-cursor mechanism is applied.
+/// Body frame covers `[y_body, y_body+h_body)`; bullets start at `y_body+h_body` or later.
+///
+/// FU-DIAGNOSTIC-FIELD-PINNING: all frame `bbox` values pinned.
+#[test]
+fn test_f094_p2_002_body_and_bullets_frames_non_overlapping() {
+    use slideforge_types::{Block, TextBlock, TextTag};
+
+    let body_block = Block {
+        content: ContentBlock::Text(TextBlock {
+            tag: TextTag::Body,
+            inlines: vec![InlineNode::Plain(Arc::from("Body paragraph content"))],
+            span: SourceSpan::default(),
+        }),
+        label: None,
+        span: SourceSpan::default(),
+    };
+    let bullet_items = vec![
+        flat_bullet(vec![InlineNode::Plain(Arc::from("Bullet A"))]),
+        flat_bullet(vec![InlineNode::Plain(Arc::from("Bullet B"))]),
+    ];
+    let bullet_block = slideforge_types::Block {
+        content: ContentBlock::Bullets(bullet_items),
+        label: None,
+        span: SourceSpan::default(),
+    };
+    let slide = Slide {
+        slide_type: Arc::from("content"),
+        fields: OrderedMap::new(),
+        blocks: vec![body_block, bullet_block],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+    };
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("F-094-P2-002: layout::run must succeed for content slide with body+bullets");
+
+    let slide_out = &result.slides[0];
+
+    // Collect the Body frame and TextRun frames.
+    let body_frames: Vec<_> = slide_out
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::Body(_)))
+        .collect();
+    let text_run_frames: Vec<_> = slide_out
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert!(
+        !body_frames.is_empty(),
+        "F-094-P2-002: content slide with Body block must produce a Body frame"
+    );
+    assert_eq!(
+        text_run_frames.len(),
+        2,
+        "F-094-P2-002: 2-item bullet list must produce exactly 2 TextRun frames; \
+         got {} (total frames: {})",
+        text_run_frames.len(),
+        slide_out.frames.len()
+    );
+
+    // All frames (Body + TextRuns) must be pairwise non-overlapping.
+    // Overlap criterion: two frames [y1, y1+h1) and [y2, y2+h2) overlap iff
+    //   y1 < y2+h2 AND y2 < y1+h1 (intervals on the y-axis, ignoring x for this check).
+    let all_frames: Vec<_> = body_frames.iter().chain(text_run_frames.iter()).collect();
+
+    for i in 0..all_frames.len() {
+        for j in i + 1..all_frames.len() {
+            let a = &all_frames[i];
+            let b = &all_frames[j];
+            let a_top = a.bbox.y.0;
+            let a_bot = a.bbox.y.0.saturating_add(a.bbox.height.0);
+            let b_top = b.bbox.y.0;
+            let b_bot = b.bbox.y.0.saturating_add(b.bbox.height.0);
+            let overlaps = a_top < b_bot && b_top < a_bot;
+            assert!(
+                !overlaps,
+                "F-094-P2-002 Red Gate: frame {i} [y={a_top}, y+h={a_bot}) overlaps frame {j} \
+                 [y={b_top}, y+h={b_bot}) — Body and bullet frames must be non-overlapping. \
+                 Defect: Phase 1b borrows body_bbox unchanged for all bullet frames.",
+            );
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P2-003 (MED): E-LAY-008 error variant + message fields
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P2-003 (MED) / E-LAY-008 / error taxonomy v2.30:
+/// When bullets appear on a contentless slide type (no Body or Generic Empty region),
+/// `layout::run` must return `Err(LayoutError::BulletsOnContentlessSlideType { .. })`
+/// whose Display message contains:
+///   - `"[E-LAY-008]"` code prefix
+///   - the slide type name (e.g. `"title"`)
+///   - a correction hint mentioning `"bullets_only"`
+///
+/// RED GATE: currently returns `Err(InvalidBoundingBox)` — must fail until the
+/// Phase-3 fallback is replaced with `BulletsOnContentlessSlideType`.
+///
+/// FU-DIAGNOSTIC-FIELD-PINNING: pins the code prefix, slide type, and hint
+/// distinguishing field VALUES (not just `is_err()`).
+#[test]
+fn test_f094_p2_003_bullets_on_contentless_returns_e_lay_008_variant_and_message() {
+    let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
+    let slide = bullets_slide("title", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand);
+
+    assert!(
+        result.is_err(),
+        "F-094-P2-003: bullets on 'title' (no body region) must return Err; got Ok"
+    );
+    let err = result.unwrap_err();
+
+    // Must be the E-LAY-008 variant (not InvalidBoundingBox).
+    let (variant_slide_type, variant_slide_index) = match &err {
+        LayoutError::BulletsOnContentlessSlideType {
+            slide_type,
+            source_slide_index,
+            ..
+        } => (slide_type.clone(), *source_slide_index),
+        other => panic!(
+            "F-094-P2-003 Red Gate: expected LayoutError::BulletsOnContentlessSlideType, \
+             got: {other:?}"
+        ),
+    };
+    assert_eq!(
+        variant_slide_type.as_ref(),
+        "title",
+        "F-094-P2-003: BulletsOnContentlessSlideType.slide_type must be 'title'; got '{variant_slide_type}'"
+    );
+    assert_eq!(
+        variant_slide_index, 0,
+        "F-094-P2-003: source_slide_index must be 0; got {variant_slide_index}"
+    );
+
+    // E-LAY-008 message must contain code prefix, slide type, and hint.
+    let msg = err.to_string();
+    assert!(
+        msg.contains("[E-LAY-008]"),
+        "F-094-P2-003: error message must contain '[E-LAY-008]' code prefix; got: {msg}"
+    );
+    assert!(
+        msg.contains("title"),
+        "F-094-P2-003: error message must contain the slide type 'title'; got: {msg}"
+    );
+    assert!(
+        msg.contains("bullets_only"),
+        "F-094-P2-003: error message must contain 'bullets_only' in the hint; got: {msg}"
+    );
 }
