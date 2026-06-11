@@ -629,6 +629,79 @@ fn render_validation_diagnostic_to_string(
     buf
 }
 
+/// Serialize a single flat (non-`Multiple`) [`slideforge::LayoutError`] to a JSON
+/// diagnostic object matching the schema used by `ValidationFailed` entries:
+///
+/// ```json
+/// { "code": "E-LAY-008", "message": "…", "severity": "error", "span": { "file": "…", "line": N, "col": N } }
+/// ```
+///
+/// `span` is included when the variant carries a [`slideforge_types::SourceSpan`].
+/// `severity` is always `"error"` — layout errors are fatal by definition.
+///
+/// ## Code extraction
+///
+/// Layout error codes are embedded in the `thiserror` `#[error("...")]` strings as
+/// `[E-LAY-NNN]` prefixes (e.g. `BulletsOnContentlessSlideType` embeds `[E-LAY-008]`).
+/// For variants that carry a code prefix the code is extracted from the Display string;
+/// for variants without a code prefix the code field is left empty (`""`).
+///
+/// ## Non-exhaustive guard
+///
+/// `LayoutError` is `#[non_exhaustive]`. All unrecognised variants fall through to the
+/// `_ =>` arm, which emits an empty code + the Display string as the message.
+///
+/// ## Traceability
+///
+/// - F-094-P7-001: JSON render path for accumulated E-LAY-008 instances
+/// - error-taxonomy v2.30 §E-LAY-008 accumulation on the machine-consumable surface
+fn layout_error_to_json_diag(err: &slideforge::LayoutError) -> serde_json::Value {
+    use slideforge::LayoutError;
+
+    // Extract (code, span) by matching known variants that carry structured fields.
+    // All layout errors are severity "error".
+    //
+    // `code` is `String` throughout to avoid lifetime issues in the fall-through
+    // arm where the code is extracted from a temporary `to_string()` allocation.
+    //
+    // Future span-carrying variants: add `if let` branches here to avoid falling to the
+    // display-parse path. For now, all other variants lack a machine-readable code
+    // (they have no [E-LAY-NNN] prefix in their error strings), so we extract
+    // whatever prefix is present from the Display string.
+    let (code, span_opt) = if let LayoutError::BulletsOnContentlessSlideType { span, .. } = err {
+        ("E-LAY-008".to_owned(), Some(span.clone()))
+    } else {
+        // Attempt to parse `[E-LAY-NNN]` from the Display string.
+        // The extracted slice is turned into an owned String before `msg` is dropped.
+        let msg = err.to_string();
+        let code = if msg.starts_with('[') {
+            msg.find(']')
+                .and_then(|end| msg.get(1..end))
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            String::new()
+        };
+        // Cannot recover a structured span from unknown variants.
+        (code, None)
+    };
+
+    let message = err.to_string();
+    let mut obj = serde_json::json!({
+        "code": code,
+        "message": message,
+        "severity": "error",
+    });
+    if let Some(span) = span_opt {
+        obj["span"] = serde_json::json!({
+            "file": span.file.as_ref(),
+            "line": span.line,
+            "col": span.col,
+        });
+    }
+    obj
+}
+
 /// Render a [`BuildError`] to a [`serde_json::Value`] (pure, side-effect-free).
 ///
 /// OBS-P4-004 fix: extracted from `render_build_error_json` so that the JSON
@@ -793,6 +866,20 @@ pub fn render_build_error_to_json_value(err: &BuildError) -> serde_json::Value {
                     },
                 })
                 .collect()
+        },
+        // F-094-P7-001 / error-taxonomy v2.30 §E-LAY-008: Layout errors MUST appear
+        // on the machine-consumable JSON surface with full code + span, not collapsed
+        // into the catch-all Display string.
+        //
+        // `Multiple { inner }` is the E-LAY-008 accumulation wrapper: each inner error
+        // becomes one JSON diagnostic object (same count as the text path).
+        //
+        // A bare (non-Multiple) LayoutError maps to one object.
+        BuildError::Layout(layout_err) => match layout_err {
+            slideforge::LayoutError::Multiple { inner } => {
+                inner.iter().map(layout_error_to_json_diag).collect()
+            },
+            single => vec![layout_error_to_json_diag(single)],
         },
         other => {
             vec![serde_json::json!({"message": other.to_string()})]
@@ -1364,6 +1451,164 @@ mod tests {
         assert!(
             rendered.contains("deck.sf"),
             "F-094-P4-004: rendered Layout error must contain file name 'deck.sf'; got: {rendered}"
+        );
+    }
+
+    // ── F-094-P7-001 — JSON render path reports all accumulated E-LAY-008 instances ──
+
+    /// F-094-P7-001: `render_build_error_to_json_value` for `BuildError::Layout`
+    /// wrapping `LayoutError::Multiple { inner }` with 2 `BulletsOnContentlessSlideType`
+    /// instances MUST emit `total == 2` and each diagnostic object MUST carry the
+    /// `"code"` field with value `"E-LAY-008"`, a `"message"` field, and a `"span"`
+    /// object with `"file"`, `"line"`, and `"col"` keys.
+    ///
+    /// Before fix: `BuildError::Layout` falls to `other =>` catch-all which produces
+    /// ONE entry whose `"message"` is the `Multiple` Display string
+    /// `"layout error: 2 accumulated errors; first: ..."`, so `total == 1`,
+    /// `code` is `""`, and both span and the second instance are dropped.
+    ///
+    /// After fix: iterates `Multiple { inner }`, emitting one JSON object per inner
+    /// error with `code`, `message`, and `span` fields.
+    ///
+    /// JSON shape mirrors the `ValidationFailed` arm (code/message/severity/span:
+    /// {file/line/col}) with `severity` hardcoded to `"error"` for layout errors.
+    #[test]
+    fn test_f094_p7_001_json_render_layout_multiple_reports_all_instances() {
+        use super::render_build_error_to_json_value;
+        use slideforge::LayoutError;
+        use slideforge::error::BuildError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        // Two slides, each with bullets on a contentless 'title' slide type.
+        let span0 = SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42);
+        let span1 = SourceSpan::new(Arc::from("deck.sf"), 8, 3, 99);
+
+        let err0 = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span: span0,
+        };
+        let err1 = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("closing"),
+            source_slide_index: 2,
+            span: span1,
+        };
+        let multiple = LayoutError::Multiple {
+            inner: vec![err0, err1],
+        };
+        let build_err = BuildError::Layout(multiple);
+
+        let json = render_build_error_to_json_value(&build_err);
+
+        // total MUST be 2 — not 1 (the old catch-all collapsed everything).
+        assert_eq!(
+            json["total"].as_u64(),
+            Some(2),
+            "F-094-P7-001: total must be 2 for Multiple with 2 inner errors; got: {}",
+            json["total"]
+        );
+
+        let diags = json["diagnostics"]
+            .as_array()
+            .expect("F-094-P7-001: 'diagnostics' must be an array");
+        assert_eq!(
+            diags.len(),
+            2,
+            "F-094-P7-001: diagnostics array must have 2 entries; got {}",
+            diags.len()
+        );
+
+        // First diagnostic.
+        let d0 = &diags[0];
+        assert_eq!(
+            d0["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: diag[0] 'code' must be 'E-LAY-008'; got: {}",
+            d0["code"]
+        );
+        assert!(
+            d0["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("E-LAY-008")),
+            "F-094-P7-001: diag[0] 'message' must contain 'E-LAY-008'; got: {}",
+            d0["message"]
+        );
+        assert_eq!(
+            d0["span"]["file"].as_str(),
+            Some("deck.sf"),
+            "F-094-P7-001: diag[0] span.file must be 'deck.sf'; got: {}",
+            d0["span"]["file"]
+        );
+        assert_eq!(
+            d0["span"]["line"].as_u64(),
+            Some(4),
+            "F-094-P7-001: diag[0] span.line must be 4; got: {}",
+            d0["span"]["line"]
+        );
+        assert_eq!(
+            d0["span"]["col"].as_u64(),
+            Some(3),
+            "F-094-P7-001: diag[0] span.col must be 3; got: {}",
+            d0["span"]["col"]
+        );
+
+        // Second diagnostic — must NOT be dropped.
+        let d1 = &diags[1];
+        assert_eq!(
+            d1["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: diag[1] 'code' must be 'E-LAY-008'; got: {}",
+            d1["code"]
+        );
+        assert_eq!(
+            d1["span"]["file"].as_str(),
+            Some("deck.sf"),
+            "F-094-P7-001: diag[1] span.file must be 'deck.sf'; got: {}",
+            d1["span"]["file"]
+        );
+        assert_eq!(
+            d1["span"]["line"].as_u64(),
+            Some(8),
+            "F-094-P7-001: diag[1] span.line must be 8; got: {}",
+            d1["span"]["line"]
+        );
+        assert_eq!(
+            d1["span"]["col"].as_u64(),
+            Some(3),
+            "F-094-P7-001: diag[1] span.col must be 3; got: {}",
+            d1["span"]["col"]
+        );
+
+        // A bare (non-Multiple) LayoutError must also produce code + span (regression guard).
+        let span2 = SourceSpan::new(Arc::from("other.sf"), 2, 1, 10);
+        let bare_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 1,
+            span: span2,
+        };
+        let bare_build_err = BuildError::Layout(bare_err);
+        let bare_json = render_build_error_to_json_value(&bare_build_err);
+        assert_eq!(
+            bare_json["total"].as_u64(),
+            Some(1),
+            "F-094-P7-001: bare Layout error total must be 1; got: {}",
+            bare_json["total"]
+        );
+        let bare_diags = bare_json["diagnostics"]
+            .as_array()
+            .expect("F-094-P7-001: bare diagnostics must be an array");
+        assert_eq!(
+            bare_diags[0]["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: bare diag 'code' must be 'E-LAY-008'; got: {}",
+            bare_diags[0]["code"]
+        );
+        assert_eq!(
+            bare_diags[0]["span"]["file"].as_str(),
+            Some("other.sf"),
+            "F-094-P7-001: bare diag span.file must be 'other.sf'; got: {}",
+            bare_diags[0]["span"]["file"]
         );
     }
 }
