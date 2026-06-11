@@ -31,7 +31,7 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "16 of 34 Wave-5 stories MERGED. 18 remain (8 rendering-fix [STORY-095..102, P0] + 10 feature [P1/P2]). STORY-094 MERGED PR #85 c72bd2f6. Next: STORY-095 (CRIT: PDF line-wrap + /Figure + bold subset, 8 pts)."
+wave_5_status: "16 of 34 Wave-5 stories MERGED. 18 remain (8 rendering-fix [STORY-095..102, P0] + 10 feature [P1/P2]). STORY-094 MERGED PR #85 c72bd2f6. STORY-095 IN PROGRESS (LOCAL cascade P13, streak 0/3, 2 open findings, worktree HEAD 73a753ee not pushed)."
 develop_sha: "c72bd2f6"
 develop_pr_count: 85
 open_prs: 0
@@ -52,38 +52,66 @@ workspace_test_failures: 0
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 16 of 34 done (102 stories / 642 pts). 18 remain (8 rendering-fix P0 + 10 feature). **STORY-094 MERGED PR #85 → `c72bd2f6` (REND-001+REND-003 CLOSED). CI INITIATIVE COMPLETE. STORY-081 MERGED.** Workstream B CLOSED.
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 16 of 34 done (102 stories / 642 pts). 18 remain (8 rendering-fix P0 + 10 feature). **STORY-094 MERGED PR #85 → `c72bd2f6` (REND-001+REND-003 CLOSED). CI INITIATIVE COMPLETE. STORY-081 MERGED.** Workstream B CLOSED. **STORY-095 IN PROGRESS** — LOCAL cascade P13, streak 0/3, 2 open findings, worktree HEAD `73a753ee` NOT pushed.
 
 **STANDING MERGE AUTH:** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking human.
 
 ---
 
-### STORY-095 KICKOFF RUNBOOK (zero-context orchestrator: execute in order, no skips)
+### STORY-095 — IN-FLIGHT PAUSE CHECKPOINT (cascade mid-flight, streak 0/3)
 
-**Pre-flight (do these first, block on any failure):**
-```bash
-# 1. Verify develop is fully synced — both must print c72bd2f61cd84e71977b1766bccc204a705288de
-git rev-parse develop
-git rev-parse origin/develop
-# If they differ: git fetch && git merge --ff-only origin/develop (no force-push)
-```
+**STORY-095 IS IN PROGRESS — LOCAL adversary cascade pass 13 done, 2 open findings, NOT YET PUSHED.**
 
-**Step 1 — Worktree creation (devops-engineer):**
-```bash
-git worktree add /Users/jmagady/Dev/slideforge/.worktrees/STORY-095 -b feature/STORY-095 develop
-```
+**Worktree:** `/Users/jmagady/Dev/slideforge/.worktrees/STORY-095` on branch `feature/STORY-095`
+**HEAD:** `73a753ee` (NOT pushed to origin). Branch base: develop `c72bd2f6`.
 
-**Step 2 — Per-story delivery (BC-5.39.001), in strict sequence:**
-1. **test-writer** — Red Gate: write failing tests, confirm they fail (no stubs that pass vacuously, per SID-1)
-2. **implementer** — TDD green: minimum code to pass tests; exit gate MUST include: `cargo fmt --all -- --check` + pedantic clippy (LESSON-2) + `cargo nextest run --workspace --no-fail-fast` + `cargo test --workspace --all-features` + `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` (LESSON-21). NOTE: verify fmt-clean ON the commit, not just the tree (SEC-001 commit failed CI fmt despite clean exit-gate claim).
-3. **LOCAL adversary** — 3-CLEAN sequential (BC-5.39.001, LESSON-7): pass 1 → fix-burst → pass 2 → fix-burst → pass 3. STRICT CLEAN = ZERO findings any severity. Three consecutive strict-CLEAN passes required. Never parallelize passes of same story.
-4. **demo-recorder** — per-AC evidence (one demo per acceptance criterion)
-5. **push + pr-manager** — PR prep only; pr-manager MUST NOT open the PR (orchestrator does via gh pr create); pr-manager MUST NOT push to develop
-6. **orchestrator dispatches** (LESSON-5): security-reviewer independently, then pr-reviewer independently
-7. **LESSON-9**: if any post-convergence fixes land after security/pr-reviewer pass, RE-RUN both reviewers before merge
-8. **CI green** → **STANDING MERGE AUTH** squash-merge
-9. **devops-engineer** — worktree cleanup: `git worktree remove --force .worktrees/STORY-095 && git branch -d feature/STORY-095`
-10. **state-manager** — post-merge burst (TD-VSDD-053: single commit on factory-artifacts)
+**Commit chain (oldest→newest):**
+- `1a8d5efb` — red gate tests
+- `4d291fbe` — feat: line-wrap + /Figure + bold
+- `a404b9f4` — P1 fix-burst (9 findings)
+- `def91e66` — P2: char-split inline + docstring
+- `57ddf666` — P4: SpanWord.is_continuation
+- `8c7956c4` — P5: space_before_word shared helper
+- `959e5d3c` — P7: veraPDF fixture /Figure
+- `db89a374` — P9: frag0 boundary space + mock_space_width_pts
+- `4674ae69` — P10: only-spaces test load-bearing
+- `4d7003a7` — P11: doc alloc clause
+- `73a753ee` — P12: ColorBar tagging doc class-kill (5 sites)
+
+**Workspace tests at HEAD:** 4180 pass / 20 skip / 0 fail (worktree HEAD `73a753ee`; one known infra flake: slideforge-diagrams cold_budget, timing-sensitive, passes standalone). Develop value: 4142 pass / 20 skip / 0 fail (`c72bd2f6`).
+
+**LOCAL adversary cascade — 13 passes done. Streak: 0/3.**
+
+| Pass | Findings | Notes |
+|------|----------|-------|
+| P1 | 9 (3C/3H/2L/1O) | fix-burst committed `a404b9f4` |
+| P2 | 3 | fix-burst committed `def91e66` |
+| P3 | 0 | strict-CLEAN |
+| P4 | 1 MED | fix-burst committed `57ddf666` |
+| P5 | 2 MED | fix-burst committed `8c7956c4` |
+| P6 | 0 | strict-CLEAN |
+| P7 | 1 HIGH | fix-burst committed `959e5d3c` |
+| P8 | 0 | strict-CLEAN |
+| P9 | 1 MED | fix-burst committed `db89a374` |
+| P10 | 1 MED | fix-burst committed `4674ae69` |
+| P11 | 1 OBS | streak reset (orchestrator strict rule: OBS counts); fix-burst committed `4d7003a7` |
+| P12 | 1 MED | fix-burst committed `73a753ee` |
+| P13 | 2 NEW | **OPEN — NOT YET FIXED** |
+
+**P13 OPEN FINDINGS (must fix before P14):**
+- **F-095-P13-001 MED** — stale present-tense RED-gate prose in `tests/story_095_red_gate.rs` at lines 163, 250-251, 328-340, 350-353, 393-405, 482-494, 510-512, 527-537, 545-550, 583-590, 754-755, 779-789, 887-891. Reword to historical/past-tense framing. Test bodies are functionally correct — prose change only, no behavior changes.
+- **F-095-P13-002 LOW** — `exporter.rs:932-934` `draw_color_bar_rect` "No-op on empty bar" doc says `== 0` but guard at line 942 is `<= 0`. Fix doc to say zero-or-negative.
+
+**Standing adjudications (carry verbatim into every future pass dispatch):** F-095-P1-001..009, P2-001..003, P4-001, P5-001/002, P7-001, P9-001, P10-001, P11-001, P12-001+class-kill all VERIFIED CLOSED. ColorBar Provided→/Figure MCID linkage verified. Adjudicated-no-action set: tracing::warn precedent, zero-width termination, snapshot hygiene, SpanWord completeness incl. split_whitespace normalization, super/subscript advance, draw_packed_line guard-test proxy limitation, f32/f64 post-EMU acceptability, plain-path verbatim fast-path multi-space preservation divergence, known infra flake cold_budget.
+
+**Factory-artifacts spec commits this session (already on factory-artifacts branch):**
+- `90e90439` — VP-054 allocated
+- `eff655d3` — story v1.1 repoint VP-006→VP-054 + STATE runbook line
+- `8ad8080d` — VP-054 v1.1.0 3-arg signature
+- `cb847593` — VP-054 v1.2.0 mock_space_width_pts
+- `cf964874` — VP-054 v1.2.1 only-spaces row
+
+VP-054 file: `.factory/specs/verification-properties/vp-054-wrap-text-termination.md`. Story spec_version: 1.1.
 
 **Story spec:** `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-095-rend-pdf-line-wrap-a11y.md`
 **Traced BCs (pass ABSOLUTE paths in every dispatch per LESSON-20):**
@@ -92,7 +120,12 @@ git worktree add /Users/jmagady/Dev/slideforge/.worktrees/STORY-095 -b feature/S
 **Traced VP:** `/Users/jmagady/Dev/slideforge/.factory/specs/verification-properties/vp-054-wrap-text-termination.md` (VP-054: wrap_text termination/lossless/max-width; BC-4.03.002)
 **Target crate:** `slideforge-pdf` (SS-07). Depends on STORY-043/044/045.
 
-**Delivery order after STORY-095:** 098 → 096 → 099 → 100 → 101 → 097 → 102 (rate-limit: serialize, one at a time).
+**RESUME INSTRUCTION (execute in order):**
+1. Dispatch **implementer** fix-burst for F-095-P13-001 (reword stale test prose in `tests/story_095_red_gate.rs` to past-tense/historical framing — NO behavior changes to test logic) + F-095-P13-002 (fix doc comment in `exporter.rs:932-934` to say `<= 0` instead of `== 0`). Run full exit gate after fix.
+2. Dispatch **LOCAL adversary pass 14** (fresh context; pass ABSOLUTE spec paths; carry ALL standing adjudications above verbatim; strict criterion: ANY finding incl. OBS resets streak; require 3 consecutive strict-CLEAN for convergence).
+3. Need **3 consecutive strict-CLEAN** passes to converge.
+4. After convergence: **demo-recorder** per-AC → push → PR per the established per-story flow. STANDING MERGE AUTH active.
+5. **Delivery order after STORY-095:** 098→096→099→100→101→097→102.
 
 ---
 
@@ -173,14 +206,14 @@ PR #80 squash-merged → develop `433b3c01` (84 PRs; 64 files, +12,672/−880). 
 
 All branches are on origin (durable, machine-independent):
 
-- `origin/factory-artifacts` — all `.factory/` state; ADR-023/024; BC-3.05.001 v1.4.3; BC-3.02.002 v1.5.1; BC-5.02.002 v1.5; 34-pass STORY-081 adversary reports; STORY-091/092/093/094 demo evidence; STORY-094 cascade-summary. (Run `git -C .factory log -1` for current HEAD.)
-- All feature branches DELETED. `.worktrees/` EMPTY. develop `c72bd2f6` (85 merged PRs, 0 open PRs).
+- `origin/factory-artifacts` — all `.factory/` state; ADR-023/024; BC-3.05.001 v1.4.3; BC-3.02.002 v1.5.1; BC-5.02.002 v1.5; VP-054 v1.2.1; 34-pass STORY-081 adversary reports; STORY-091/092/093/094 demo evidence; STORY-094 cascade-summary. (Run `git -C .factory log -1` for current HEAD.)
+- Feature branch `feature/STORY-095` EXISTS (local only, HEAD `73a753ee`, NOT pushed). `.worktrees/STORY-095` active. develop `c72bd2f6` (85 merged PRs, 0 open PRs).
 
 **Same-machine resume:**
 1. Run `vsdd-factory:factory-worktree-health`
-2. Read STATE.md NEXT ACTIONS — STORY-095 (CRIT: PDF line-wrap + /Figure + bold subset, 8 pts) is next.
+2. Read STATE.md — STORY-095 IN PROGRESS. Worktree `.worktrees/STORY-095` at HEAD `73a753ee`. LOCAL cascade P13 done, streak 0/3, 2 open findings. See STORY-095 IN-FLIGHT PAUSE CHECKPOINT section above for exact resume instructions.
 3. CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 MERGED. **Human action required: enable merge queue UI toggle.**
-4. After rendering-fix wave → remaining Wave-5 feature stories.
+4. After STORY-095 converges: 098→096→099→100→101→097→102 → remaining Wave-5 feature stories.
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
@@ -189,7 +222,7 @@ git fetch origin factory-artifacts
 git worktree add .factory factory-artifacts
 git rev-parse develop   # must equal origin/develop == c72bd2f6
 ```
-Then read `.factory/STATE.md` → NEXT ACTIONS. STORY-095 is next (no active worktrees, 0 open PRs).
+Then read `.factory/STATE.md` → Session Resume Checkpoint. STORY-095 is in progress (1 active worktree, 0 open PRs). NOTE: feature/STORY-095 branch and worktree HEAD `73a753ee` are local-only — not pushed. On a different machine, worktree content must be reconstructed from the commit chain described in the STORY-095 IN-FLIGHT PAUSE CHECKPOINT section (or the work continued from the paused machine).
 
 **CI stories:** specs in `.factory/stories/stories/STORY-09{1,2,3}-*.md`; research in `.factory/planning/ci-speed-research.md`; playbook in `.factory/playbooks/tiered-ci-merge-queue.md`.
 
@@ -197,7 +230,14 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. STORY-095 is next (no active wor
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**0 active worktrees. 0 open PRs. `.worktrees/` EMPTY.**
+**1 active worktree. 0 open PRs. `.worktrees/STORY-095` exists (NOT pushed).**
+
+### STORY-095 — PDF line-wrap + /Figure + bold — IN PROGRESS (LOCAL cascade P13 done, streak 0/3)
+
+- Worktree: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-095` on `feature/STORY-095`
+- HEAD: `73a753ee` (NOT pushed to origin). Branch base: develop `c72bd2f6`.
+- Workspace tests at HEAD: 4180 pass / 20 skip / 0 fail (develop value: 4142).
+- LOCAL adversary cascade: 13 passes done, streak 0/3. 2 open findings (F-095-P13-001 MED, F-095-P13-002 LOW). See STORY-095 IN-FLIGHT PAUSE CHECKPOINT section above for full detail.
 
 ### STORY-094 — REND-001/003 fix — MERGED PR #85 → develop `c72bd2f6` 2026-06-11
 
@@ -284,9 +324,9 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. STORY-095 is next (no active wor
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `c72bd2f6`, 85 merged PRs). 16 of 34 done. 18 remain (8 rendering-fix P0 + 10 feature). **STORY-094 MERGED. CI INITIATIVE COMPLETE. STORY-081 MERGED. Workstream B CLOSED.**
 
-- **NEXT:** Per-story delivery of STORY-095 (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts). Delivery order: 095→098→096/099/100/101→097→102.
-- Active worktrees: 0. Open PRs: 0. `.worktrees/` EMPTY.
-- Workspace: 4142 pass / 20 skip / 0 fail (develop `c72bd2f6`). CI STABILIZATION CONFIRMED.
+- **IN PROGRESS:** STORY-095 (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts) — LOCAL adversary cascade P13 done, streak 0/3, 2 open findings. Worktree `73a753ee` NOT pushed.
+- Active worktrees: 1 (STORY-095). Open PRs: 0.
+- Workspace (develop `c72bd2f6`): 4142 pass / 20 skip / 0 fail. Workspace (STORY-095 worktree `73a753ee`): 4180 pass / 20 skip / 0 fail. CI STABILIZATION CONFIRMED.
 
 ---
 
@@ -313,7 +353,7 @@ Rebase `5c665cd0`→`78b4d692` onto `1ea6409d` was zero-conflict/zero-new-code. 
 ### Step 1 — RENDERING-FIX WAVE — IN PROGRESS (1/9 done)
 
 **STORY-094 MERGED** PR #85 → develop `c72bd2f6`. REND-001 + REND-003 CLOSED.
-**NEXT: STORY-095** (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts). Delivery order: 095→098→096/099/100/101→097→102.
+**IN PROGRESS: STORY-095** (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts) — LOCAL adversary cascade P13 done, streak 0/3. Worktree HEAD `73a753ee` NOT pushed. 2 open findings (F-095-P13-001 MED + F-095-P13-002 LOW). See STORY-095 IN-FLIGHT PAUSE CHECKPOINT above. Delivery order after 095: 098→096→099→100→101→097→102.
 
 **Background:** Demo deep review on develop `f3502c50` found 10 product defects (3 CRIT/4 HIGH/3 MED). Full findings: `.factory/reviews/demo-deep-review-2026-06-11.md`. Wave prep COMPLETE (2026-06-11): STORY-094..102 created + indexed (9 stories, 71 pts). BC-3.07.001/002/003 + BC-3.03.002 v1.2 + BC-1.15.001 v1.2 authored; error-taxonomy v2.29.
 
@@ -344,7 +384,7 @@ STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU
 | T2 | Deliver STORY-092 — CI cache reliability + disk headroom | DONE | PR #83 merged 2026-06-11 |
 | T3 | Deliver STORY-093 — CI arm64 build-time (mold + profile.ci) | DONE | PR #84 merged 2026-06-11 |
 | T4 | Merge STORY-081 PR #80 | DONE | merged 2026-06-11, develop 433b3c01 |
-| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — STORY-094 DONE (PR #85, c72bd2f6); next: STORY-095 | see checklist below |
+| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — STORY-094 DONE (PR #85, c72bd2f6); STORY-095 IN PROGRESS (cascade P13, streak 0/3, 2 open findings) | see checklist below |
 
 T5 delivery checklist (per-story, full BC-5.39.001 flow each: worktree → implement → ci-workflow-analyzer where CI-relevant → LOCAL adversary 3-CLEAN sequential → demo evidence → push → PR → security-reviewer + pr-reviewer (orchestrator-dispatched, LESSON-5) → CI green → STANDING MERGE AUTH squash-merge → post-merge state burst → worktree cleanup):
 - [x] STORY-094 — DONE (PR #85, c72bd2f6) — REND-001+REND-003 CLOSED; 20-pass cascade 3/3 CONVERGED; SEC-001 in-scope
@@ -391,26 +431,27 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts (baseline). Now 102 stories / 642 pts after CI initiative +3 + rendering-fix wave +9. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **16/34 done**. 18 remain (8 rendering-fix P0 + 10 feature). CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 MERGED (PR #85 → `c72bd2f6`; REND-001+REND-003 CLOSED). **Next: STORY-095.** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **16/34 done**. 18 remain (8 rendering-fix P0 + 10 feature). CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 MERGED (PR #85 → `c72bd2f6`; REND-001+REND-003 CLOSED). **STORY-095 IN PROGRESS** (LOCAL cascade P13, streak 0/3, 2 open findings, HEAD `73a753ee` not pushed). | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ---
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. STORY-094 MERGED PR #85 → develop `c72bd2f6`. REND-001+REND-003 CLOSED. 0 active worktrees, 0 open PRs. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION. Next: STORY-095.**
+**Wave 5 IN PROGRESS. STORY-095 LOCAL adversary cascade P13 done — streak 0/3 — 2 open findings (F-095-P13-001 MED + F-095-P13-002 LOW). 1 active worktree (STORY-095 HEAD `73a753ee`, NOT pushed). 0 open PRs. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-11 |
 | **develop SHA** | `c72bd2f6` (85 merged PRs; origin/develop; 0 open PRs) |
-| **Active worktrees** | 0 — `.worktrees/` EMPTY |
-| **STORY-094 state** | MERGED PR #85 → `c72bd2f6`. 20-pass cascade CONVERGED 3/3 strict-CLEAN (passes 18-19-20). REND-001+REND-003 CLOSED. SEC-001 in-scope. Cascade archived to `.factory/cycles/STORY-094/cascade-summary.md`. |
+| **Active worktrees** | 1 — `.worktrees/STORY-095` (HEAD `73a753ee`, NOT pushed) |
+| **STORY-095 state** | LOCAL adversary cascade: 13 passes done, streak 0/3. 2 open findings. Worktree HEAD `73a753ee` NOT pushed. See STORY-095 IN-FLIGHT PAUSE CHECKPOINT section for full commit chain, standing adjudications, and open findings. |
+| **STORY-094 state** | MERGED PR #85 → `c72bd2f6`. 20-pass cascade CONVERGED 3/3 strict-CLEAN (passes 18-19-20). REND-001+REND-003 CLOSED. Cascade archived to `.factory/cycles/STORY-094/cascade-summary.md`. |
 | **CI initiative** | COMPLETE. Run `27323925653` SUCCESS — arm64 13m32s; full matrix ~17 min; per-PR fast tier ~6-10 min. CI STABILIZATION CONFIRMED. FU-093-BASELINE-REMOVAL still open. |
 | **STORY-081 state** | MERGED PR #80 2026-06-11 → develop `433b3c01`. LOCAL 3/3 (passes 28-29-30). PR-level P31-P34 CONVERGED. Open follow-ups: FU-S1-FONTDB-COUNT-VISIBILITY, FU-S3-CAPTION-FIXTURE, FU-TD1-DEAD-FONT-COUNTER. |
-| **Workspace tests** | 4142 pass / 20 skip / 0 fail (develop `c72bd2f6`) |
+| **Workspace tests** | develop `c72bd2f6`: 4142 pass / 20 skip / 0 fail. STORY-095 worktree `73a753ee`: 4180 pass / 20 skip / 0 fail. |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Begin STORY-095 per-story delivery (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts, SS-07, BC-4.03.001+BC-4.03.002). Run `vsdd-factory:factory-worktree-health` first. Then follow the STORY-095 KICKOFF RUNBOOK in the ZERO-CONTEXT RESUME section above — it contains exact git commands, exact BC absolute paths, mandatory dispatch preambles, and step-by-step sequence with all LESSON refs. Delivery order after 095: 098→096→099→100→101→097→102. |
+| **RESUME INSTRUCTION** | (1) Dispatch implementer fix-burst for F-095-P13-001 (reword stale test prose in `tests/story_095_red_gate.rs` to past-tense framing — no behavior changes) + F-095-P13-002 (fix doc comment `== 0` → `<= 0` in `exporter.rs:932-934`); run full exit gate. (2) Dispatch LOCAL adversary pass 14 (fresh context; carry ALL standing adjudications from STORY-095 section verbatim; strict: any finding incl. OBS resets streak). (3) Need 3 consecutive strict-CLEAN to converge. (4) Then demo-recorder per-AC → push → PR → security+pr-reviewer → CI green → STANDING MERGE AUTH squash-merge. Delivery order after 095: 098→096→099→100→101→097→102. |
 
 ---
 
