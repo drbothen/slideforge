@@ -22,6 +22,7 @@
 //! | E-EVL-012 | `FigrefInvalidArg`   |
 //! | E-EVL-013 | `InlineXrefEmptyId`  |
 //! | E-EVL-014 | `FootnoteInvalidArg` |
+//! | E-EVL-015 | `InlineMarkupInTitle` |
 
 use std::sync::Arc;
 
@@ -355,6 +356,33 @@ pub enum EvalError {
     )]
     FootnoteInvalidArg {
         /// Source location of the `footnote()` call expression.
+        span: SourceSpan,
+    },
+
+    /// E-EVL-015: A `title` field contained inline markup (STORY-081 AC-006 /
+    /// BC-3.05.001 Slide-Level Title Constraint / EC-011).
+    ///
+    /// PPTX title placeholders require plain-text single-run content for
+    /// cross-renderer compatibility. The eval stage detects inline markup in
+    /// `title` fields, strips the markup for the PPTX path, and emits this
+    /// warning. In strict mode (default) it is promoted to a fatal error.
+    #[error(
+        "Inline markup in title field: '{slide_title}' — PPTX requires plain-text titles. \
+         Stripped to: '{stripped_text}'"
+    )]
+    #[diagnostic(
+        code("E-EVL-015"),
+        help(
+            "Remove inline markup (**, _, etc.) from the title field, or use --warn-only to \
+             produce output with the title stripped to plain text"
+        )
+    )]
+    InlineMarkupInTitle {
+        /// The slide title text as it appeared (may include partial markup).
+        slide_title: Arc<str>,
+        /// The plain-text title after markup stripping (used for PPTX output).
+        stripped_text: Arc<str>,
+        /// Source location of the title field.
         span: SourceSpan,
     },
 

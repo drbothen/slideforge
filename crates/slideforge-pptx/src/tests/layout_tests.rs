@@ -1255,7 +1255,7 @@ fn test_BC_4_01_005_ac011_valid_ph_idx_emits_ph_element() {
     // Call with_layout so the serializer can perform idx-chain verification.
     let serializer = SlideSerializer::new(false, 1).with_layout(&layout_with_body);
     let (slide_xml_bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("serializer must succeed");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
@@ -1347,7 +1347,7 @@ fn test_BC_4_01_005_ac011_missing_ph_idx_omits_ph_element() {
     // return BodyNoPlaceholder, no <p:ph idx="1"> must appear, AND the warn must fire.
     let serializer = SlideSerializer::new(false, 0).with_layout(&layout_title_only);
     let (slide_xml_bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("serializer must succeed");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
@@ -1432,7 +1432,7 @@ fn test_BC_4_01_005_ac011_textrun_missing_ph_idx_omits_ph_and_warns() {
 
     let serializer = SlideSerializer::new(false, 0).with_layout(&layout_title_only);
     let (slide_xml_bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("serializer must succeed");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
@@ -1542,7 +1542,7 @@ fn test_BC_4_01_005_s1_validate_emu_negative_width_returns_err() {
     };
 
     let serializer = SlideSerializer::new(false, 0);
-    let result = serializer.build(&slide, 0, "rId1", &[]);
+    let result = serializer.build(&slide, 0, "rId1", &[], &[]);
 
     assert!(
         result.is_err(),
@@ -1591,7 +1591,7 @@ fn test_BC_4_01_005_s1_validate_emu_negative_height_returns_err() {
     };
 
     let serializer = SlideSerializer::new(false, 0);
-    let result = serializer.build(&slide, 0, "rId1", &[]);
+    let result = serializer.build(&slide, 0, "rId1", &[], &[]);
 
     assert!(
         result.is_err(),
@@ -1645,7 +1645,7 @@ fn test_sec001_validate_emu_i32_overflow_width_returns_invalid_emu() {
     };
 
     let serializer = SlideSerializer::new(false, 0);
-    let result = serializer.build(&slide, 0, "rId1", &[]);
+    let result = serializer.build(&slide, 0, "rId1", &[], &[]);
 
     assert!(
         result.is_err(),
@@ -1704,7 +1704,7 @@ fn test_sec001_validate_emu_i32_overflow_x_returns_invalid_emu() {
     };
 
     let serializer = SlideSerializer::new(false, 0);
-    let result = serializer.build(&slide, 0, "rId1", &[]);
+    let result = serializer.build(&slide, 0, "rId1", &[], &[]);
 
     assert!(
         result.is_err(),
@@ -1761,7 +1761,7 @@ fn test_BC_4_01_005_s3_subtitle_frame_emits_subtitle_placeholder() {
 
     let serializer = SlideSerializer::new(false, 0);
     let (slide_xml_bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("SlideSerializer::build must succeed for subtitle frame");
     let slide_xml = String::from_utf8(slide_xml_bytes).expect("slide XML must be valid UTF-8");
 
@@ -1847,7 +1847,7 @@ fn test_BC_4_01_005_f038_p2_m1_title_with_layout_having_idx0_emits_ph() {
 
     let serializer = SlideSerializer::new(false, 0).with_layout(&layout_with_title);
     let (bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 
@@ -1905,7 +1905,7 @@ fn test_BC_4_01_005_f038_p2_m1_title_on_blank_layout_omits_ph() {
 
     let serializer = SlideSerializer::new(false, 6).with_layout(&blank_layout);
     let (bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 
@@ -1991,7 +1991,7 @@ fn test_BC_4_01_005_f038_p2_m1_subtitle_with_layout_having_idx1_emits_ph() {
 
     let serializer = SlideSerializer::new(false, 0).with_layout(&layout_with_subtitle);
     let (bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 
@@ -2049,7 +2049,7 @@ fn test_BC_4_01_005_f038_p2_m1_subtitle_on_blank_layout_omits_ph() {
 
     let serializer = SlideSerializer::new(false, 6).with_layout(&blank_layout);
     let (bytes, _) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("build must succeed");
     let xml = String::from_utf8(bytes).expect("valid UTF-8");
 

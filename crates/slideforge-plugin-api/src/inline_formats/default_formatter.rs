@@ -18,7 +18,7 @@
 //! | `Superscript` | `baseline="30000"` | `<sup>{content}</sup>` | `^{content}^` |
 //! | `Subscript` | `baseline="-25000"` | `<sub>{content}</sub>` | `~{content}~` |
 //! | `Strikethrough` | `strike="sngStrike"` | `<del>{content}</del>` | `~~{content}~~` |
-//! | `Highlight` | `highlight="yellow"` | `<mark>{content}</mark>` | `=={content}==` |
+//! | `Highlight` | `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child in `<a:rPr>` (ADV-P11-HIGH-001) | `<mark>{content}</mark>` | `=={content}==` |
 //!
 //! ## Link OOXML limitation (EC-002 / v1.0)
 //!
@@ -94,28 +94,49 @@ impl InlineFormat for DefaultInlineFormat {
         format: InlineOutputFormat,
         context: &InlineRenderContext<'_>,
     ) -> Result<String, InlineError> {
-        // Only the Link + Ooxml combination with a provided rId is handled here.
-        // All other cases delegate to the standard render path.
-        if let (InlineNode::Link { text, .. }, InlineOutputFormat::Ooxml, Some(rid)) =
-            (node, format, context.hyperlink_rid)
-        {
-            // Extract display text from the link children (flatten to plain text,
-            // same as the EC-002 fallback path but here we have a valid rId).
-            // Use the depth-limited extractor (EC-004 guard) to prevent stack overflow
-            // on pathological deeply-nested Link display text (F-008-OBS).
-            let display_text = extract_plain_text_depth_limited(text, 0)?;
-            if display_text.is_empty() {
-                return Ok(String::new());
+        // Handle OOXML + provided rId. Two cases:
+        //
+        // (a) Top-level Link + rId (existing EC-004 path): emit a single plain
+        //     hlinkClick run. Handled first to preserve byte-identical output for
+        //     the pre-existing test vectors.
+        //
+        // (b) Formatting wrapper (Bold, Italic, …) + rId (ADV-P14-MED-001): the
+        //     wrapper contains a nested Link. Thread the rId through the RunProps
+        //     accumulator so the leaf emit_run call can produce BOTH the formatting
+        //     properties (e.g. `b="1"`) AND `<a:hlinkClick>`.
+        if let (InlineOutputFormat::Ooxml, Some(rid)) = (format, context.hyperlink_rid) {
+            match node {
+                InlineNode::Link { text, .. } => {
+                    // (a) Top-level Link path — preserved byte-for-byte for existing snapshots.
+                    let display_text = extract_plain_text_depth_limited(text, 0)?;
+                    if display_text.is_empty() {
+                        return Ok(String::new());
+                    }
+                    // Emit: <a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{text}</a:t></a:r>
+                    // Both rid and text are XML-escaped (CWE-116 defense).
+                    let mut out = String::new();
+                    out.push_str("<a:r><a:rPr><a:hlinkClick r:id=\"");
+                    out.push_str(&xml_escape(rid));
+                    out.push_str("\"/></a:rPr><a:t>");
+                    out.push_str(&xml_escape(&display_text));
+                    out.push_str("</a:t></a:r>");
+                    return Ok(out);
+                },
+                InlineNode::Bold(_)
+                | InlineNode::Italic(_)
+                | InlineNode::Strikethrough(_)
+                | InlineNode::Superscript(_)
+                | InlineNode::Subscript(_)
+                | InlineNode::Highlight(_)
+                | InlineNode::Footnote(_) => {
+                    // (b) Formatting wrapper containing a nested Link.
+                    // Thread the rId through RunProps so the Link arm in
+                    // render_ooxml_accumulate emits hlinkClick with inherited formatting.
+                    return render_ooxml_accumulate(node, RunProps::with_hyperlink(rid), 0);
+                },
+                // Plain / Code / Xref / Math / missing-rId: fall through to standard render.
+                _ => {},
             }
-            // Emit: <a:r><a:rPr><a:hlinkClick r:id="{rid}"/></a:rPr><a:t>{text}</a:t></a:r>
-            // Both rid and text are XML-escaped (CWE-116 defense — attribute + text content).
-            let mut out = String::new();
-            out.push_str("<a:r><a:rPr><a:hlinkClick r:id=\"");
-            out.push_str(&xml_escape(rid));
-            out.push_str("\"/></a:rPr><a:t>");
-            out.push_str(&xml_escape(&display_text));
-            out.push_str("</a:t></a:r>");
-            return Ok(out);
         }
         // All other cases: delegate to the standard render path.
         self.render(node, format)
@@ -162,8 +183,8 @@ fn render_node(
 /// ## Attribute order (must match existing snapshots byte-for-byte)
 ///
 /// `<a:rPr>` attributes are emitted in this order by [`RunProps::emit_run`]:
-/// `b`, `i`, `baseline`, `strike`, `highlight`.  The `<a:latin>` child element
-/// (Code nodes) follows any attributes, before the closing `>`.
+/// `b`, `i`, `baseline`, `strike`.  Child elements follow: `<a:highlight>` (Highlight,
+/// ADV-P11-HIGH-001 schema-correct form) then `<a:latin>` (Code nodes), inside `<a:rPr>…</a:rPr>`.
 ///
 /// This ordering is stable across all single-property cases that have accepted
 /// snapshots.  Combined-property cases produce attributes in the same order.
@@ -179,7 +200,7 @@ fn render_node(
 /// suppressed here because the alternative (a state machine) does not model this
 /// domain correctly.
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RunProps {
     /// `b="1"` — from a `Bold` ancestor.
     bold: bool,
@@ -192,16 +213,28 @@ struct RunProps {
     baseline: Option<i32>,
     /// `strike="sngStrike"` — from a `Strikethrough` ancestor.
     strike: bool,
-    /// `highlight="yellow"` — from a `Highlight` ancestor.
+    /// Triggers `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>` child element
+    /// inside `<a:rPr>` — from a `Highlight` ancestor.
+    ///
+    /// ADV-P11-HIGH-001: `DrawingML` `CT_TextCharacterProperties` (`<a:rPr>`) has NO
+    /// `highlight` attribute. The schema-correct form is the `<a:highlight>` child element.
     highlight: bool,
     /// Triggers `<a:latin typeface="Courier New"/>` child element — set by `Code` leaf.
     code_font: bool,
+    /// Relationship ID for `<a:hlinkClick r:id="..."/>` child element of `<a:rPr>`.
+    ///
+    /// ADV-P14-MED-001: When a `Link` is nested inside a formatting wrapper
+    /// (e.g. `Bold([Link{...}])`), the rId is threaded through the `RunProps`
+    /// accumulator so that the leaf `emit_run` call can emit `<a:hlinkClick>` on a
+    /// run that ALSO carries the inherited formatting properties (`b="1"`, `i="1"`,
+    /// etc.). `None` for all non-hyperlink contexts.
+    hyperlink_rid: Option<String>,
 }
 
 impl RunProps {
     /// Construct a [`RunProps`] with all properties unset (the default for a
     /// top-level node with no inherited formatting context).
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             bold: false,
             italic: false,
@@ -209,6 +242,19 @@ impl RunProps {
             strike: false,
             highlight: false,
             code_font: false,
+            hyperlink_rid: None,
+        }
+    }
+
+    /// Construct a [`RunProps`] with `hyperlink_rid` pre-set.
+    ///
+    /// Used by [`render_with_context`] when `context.hyperlink_rid` is `Some` so
+    /// the rId is threaded through the recursive OOXML accumulation into the `Link`
+    /// arm — enabling `Bold([Link{...}])` to emit BOTH `b="1"` AND `<a:hlinkClick>`.
+    fn with_hyperlink(rid: &str) -> Self {
+        Self {
+            hyperlink_rid: Some(rid.to_owned()),
+            ..Self::new()
         }
     }
 
@@ -218,14 +264,19 @@ impl RunProps {
     ///
     /// # Attribute / child-element order
     ///
-    /// `<a:rPr {b} {i} {baseline} {strike} {highlight}>{latin-child}</a:rPr>`
+    /// `<a:rPr {b} {i} {baseline} {strike}>{highlight-child}{latin-child}{hlinkClick-child}</a:rPr>`
+    ///
+    /// Attributes first, then child elements in `CT_TextCharacterProperties` order:
+    /// `<a:highlight>` (when set) before `<a:latin>` (when `code_font` set) before
+    /// `<a:hlinkClick>` (when `hyperlink_rid` set). `<a:hlinkClick>` is the last
+    /// child element per the `DrawingML` schema (`CT_TextCharacterProperties`).
     ///
     /// This order preserves byte-identity with all previously accepted snapshots:
     /// - `Bold` snapshots: `b="1"` first ✓
     /// - `Italic` snapshots: `i="1"` only ✓
     /// - `Superscript`/`Subscript` snapshots: `baseline` only ✓
     /// - `Strikethrough` snapshots: `strike` only ✓
-    /// - `Highlight` snapshots: `highlight` only ✓
+    /// - `Highlight` snapshots: `<a:highlight>` child inside `<a:rPr>` ✓ (ADV-P11-HIGH-001)
     /// - `Code` snapshot: no attributes, `<a:latin>` child inside `<a:rPr>` ✓
     fn emit_run(&self, text: &str) -> String {
         if text.is_empty() {
@@ -236,12 +287,20 @@ impl RunProps {
             || self.baseline.is_some()
             || self.strike
             || self.highlight
-            || self.code_font;
+            || self.code_font
+            || self.hyperlink_rid.is_some();
 
         let mut out = String::new();
         out.push_str("<a:r>");
         if needs_rpr {
+            // Determine whether any child elements are needed.
+            // Child elements must be emitted inside `<a:rPr>…</a:rPr>` (not self-closing).
+            // CT_TextCharacterProperties child order: <a:highlight> before <a:latin>
+            // before <a:hlinkClick>.
+            let has_children = self.highlight || self.code_font || self.hyperlink_rid.is_some();
+
             out.push_str("<a:rPr");
+            // Attributes first (b, i, baseline, strike — all are XML attributes on <a:rPr>).
             if self.bold {
                 out.push_str(" b=\"1\"");
             }
@@ -256,13 +315,33 @@ impl RunProps {
             if self.strike {
                 out.push_str(" strike=\"sngStrike\"");
             }
-            if self.highlight {
-                out.push_str(" highlight=\"yellow\"");
-            }
-            if self.code_font {
-                // `<a:latin>` is a child element — must be inside `<a:rPr>…</a:rPr>`
-                out.push_str("><a:latin typeface=\"Courier New\"/></a:rPr>");
+            // NOTE: `highlight` is NOT an attribute on <a:rPr> — it is a child element.
+            // ADV-P11-HIGH-001: `CT_TextCharacterProperties` has no `highlight` attribute.
+
+            if has_children {
+                // Close the opening tag (not self-closing) — child elements follow.
+                out.push('>');
+                if self.highlight {
+                    // ADV-P11-HIGH-001: schema-correct background highlight child element.
+                    // `<a:highlight>` with `<a:srgbClr val="FFFF00"/>` = yellow background.
+                    // This is CT_Color via the <a:highlight> child of CT_TextCharacterProperties.
+                    out.push_str("<a:highlight><a:srgbClr val=\"FFFF00\"/></a:highlight>");
+                }
+                if self.code_font {
+                    // `<a:latin>` is a child element of <a:rPr> for monospace font.
+                    out.push_str("<a:latin typeface=\"Courier New\"/>");
+                }
+                if let Some(rid) = &self.hyperlink_rid {
+                    // ADV-P14-MED-001: emit <a:hlinkClick> so the run is clickable.
+                    // `<a:hlinkClick>` is the last child element of `<a:rPr>` per the
+                    // DrawingML CT_TextCharacterProperties schema ordering.
+                    out.push_str("<a:hlinkClick r:id=\"");
+                    out.push_str(&xml_escape(rid));
+                    out.push_str("\"/>");
+                }
+                out.push_str("</a:rPr>");
             } else {
+                // No child elements — self-close.
                 out.push_str("/>");
             }
         }
@@ -317,56 +396,80 @@ fn render_ooxml_accumulate(
 
         // ── Formatting: set property and recurse into children ───────────────
         InlineNode::Bold(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.bold = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
         InlineNode::Italic(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.italic = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
         InlineNode::Strikethrough(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.strike = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
         InlineNode::Superscript(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.baseline = Some(30_000);
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
         InlineNode::Subscript(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.baseline = Some(-25_000);
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
         InlineNode::Highlight(children) => {
-            let mut child_props = props;
+            let mut child_props = props.clone();
             child_props.highlight = true;
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, child_props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(
+                    child,
+                    child_props.clone(),
+                    depth + 1,
+                )?);
             }
             Ok(out)
         },
@@ -378,18 +481,24 @@ fn render_ooxml_accumulate(
             tracing::debug!("Footnote marker numbering deferred");
             let mut out = String::new();
             for child in children {
-                out.push_str(&render_ooxml_accumulate(child, props, depth + 1)?);
+                out.push_str(&render_ooxml_accumulate(child, props.clone(), depth + 1)?);
             }
             Ok(out)
         },
 
-        // ── Link: EC-002 fallback — emit display text with warn ──────────────
+        // ── Link: emit display text. If hyperlink_rid is set, emit <a:hlinkClick>. ──
         InlineNode::Link { text, url } => {
-            tracing::warn!(
-                url = %url,
-                "Hyperlink relationship not registered for OOXML link to {url}; \
-                 emitting display text as plain run (EC-002 / v1.0 limitation)"
-            );
+            if props.hyperlink_rid.is_none() {
+                // EC-002 fallback — no rId available.
+                tracing::warn!(
+                    url = %url,
+                    "Hyperlink relationship not registered for OOXML link to {url}; \
+                     emitting display text as plain run (EC-002 / v1.0 limitation)"
+                );
+            }
+            // ADV-P14-MED-001: when `props.hyperlink_rid` is Some, emit_run will include
+            // `<a:hlinkClick>` alongside any inherited formatting (e.g. `b="1"` from Bold).
+            // When None, emit_run emits a plain text run (EC-002 fallback above).
             let display_text = extract_plain_text_depth_limited(text, depth + 1)?;
             if display_text.is_empty() {
                 Ok(String::new())
@@ -859,15 +968,34 @@ mod tests {
         );
     }
 
-    /// AC-001: Highlight OOXML contains highlight="yellow"
+    /// ADV-P11-HIGH-001 / AC-001: Highlight OOXML must emit `<a:highlight>` child
+    /// element (`CT_Color` / schema-correct), NOT the invalid `highlight="yellow"` attribute.
+    ///
+    /// `DrawingML` `CT_TextCharacterProperties` (`<a:rPr>`) has NO `highlight` ATTRIBUTE.
+    /// The only valid highlight representation is the `<a:highlight><a:srgbClr val="FFFF00"/></a:highlight>`
+    /// CHILD element. PowerPoint/Keynote/Google Slides silently ignore the invalid attribute.
+    ///
+    /// Red Gate: FAILS before fix because `emit_run` emits ` highlight="yellow"` attribute.
     #[test]
-    fn test_bc_5_02_001_ooxml_highlight_yellow() {
+    fn test_bc_5_02_001_ooxml_highlight_child_element_not_attribute() {
         let result = fmt()
             .render(&highlight(vec![plain("marked")]), InlineOutputFormat::Ooxml)
             .unwrap();
+        // Must contain the schema-correct <a:highlight> child element.
         assert!(
-            result.contains("highlight=\"yellow\""),
-            "Highlight must use highlight=\"yellow\", got: {result}"
+            result.contains("<a:highlight>"),
+            "ADV-P11-HIGH-001: Highlight must emit <a:highlight> child element, got: {result}"
+        );
+        // Must contain yellow sRGB value inside the highlight element.
+        assert!(
+            result.contains("FFFF00"),
+            "ADV-P11-HIGH-001: Highlight must contain FFFF00 color value, got: {result}"
+        );
+        // Must NOT emit the invalid highlight attribute.
+        assert!(
+            !result.contains("highlight=\"yellow\""),
+            "ADV-P11-HIGH-001: highlight=\"yellow\" is NOT a valid DrawingML attribute — \
+             it must NOT appear in the output. Got: {result}"
         );
     }
 

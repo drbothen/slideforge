@@ -1,5 +1,6 @@
 ---
 source: crates/slideforge-pptx/src/tests/notes_tests.rs
+assertion_line: 2316
 expression: extract_paragraph_content(&notes_xml)
 ---
-<a:p><a:r><a:rPr highlight="yellow"/><a:t>important</a:t></a:r></a:p>
+<a:p><a:r><a:rPr><a:highlight><a:srgbClr val="FFFF00"/></a:highlight></a:rPr><a:t>important</a:t></a:r></a:p>

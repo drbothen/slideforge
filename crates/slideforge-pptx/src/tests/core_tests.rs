@@ -1275,7 +1275,7 @@ fn test_BC_4_01_001_ec005_dark_layout_has_clr_map_ovr() {
     let slide = make_title_slide(0, "Dark Layout Slide");
     let serializer = SlideSerializer::new(true, 0);
     let (xml_bytes, _warnings) = serializer
-        .build(&slide, 0, "rId1", &[])
+        .build(&slide, 0, "rId1", &[], &[])
         .expect("SlideSerializer::build must succeed for dark layout (EC-005)");
 
     let xml = String::from_utf8(xml_bytes).expect("slide XML must be valid UTF-8");

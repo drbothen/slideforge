@@ -280,6 +280,13 @@ pub enum LayoutWarning {
         /// Canonical field name per interface-definitions.md §8 (F-HIGH-001).
         source_slide_index: usize,
     },
+    // NOTE: InlineMarkupInTitle was previously defined here but was DEAD CODE.
+    // The live diagnostic is EvalError::InlineMarkupInTitle (E-EVL-015) in
+    // slideforge-eval (crates/slideforge-eval/src/error.rs). That variant is
+    // emitted by eval_slide_node in for_eval.rs and surfaces through the strict
+    // gate in slideforge::compile_inner as BuildError::EvalFailed. No production
+    // code ever constructed LayoutWarning::InlineMarkupInTitle; the variant was
+    // removed by F-P25-MED-001. (STORY-081 Pass-25 adversary finding.)
 }
 
 #[cfg(test)]

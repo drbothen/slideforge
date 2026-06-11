@@ -165,7 +165,13 @@ pub(crate) fn render_inline_node(node: &InlineNode) -> String {
             format!("<mark>{}</mark>", render_inline_nodes(children))
         },
         InlineNode::Footnote(children) => {
-            format!("<small>{}</small>", render_inline_nodes(children))
+            // BC-3.05.001 PC-4: Footnote → <span role="note"> (not <small>).
+            // role="note" conveys note semantics to assistive technology;
+            // <small> is a generic presentational element with no semantic role.
+            format!(
+                r#"<span role="note">{}</span>"#,
+                render_inline_nodes(children)
+            )
         },
         InlineNode::Math(math_node) => {
             // Render math as a <code> element (full MathML is STORY-045 scope).
@@ -440,6 +446,21 @@ pub fn render_text_frame(
                 r#"<p class="sf-text" style="{position_style}">{text_html}</p>"#
             ))
         },
+        // STORY-081 C3: SubtitleInlines carries rich inline structure.
+        // Render like Subtitle but using render_inline_nodes for the content.
+        FrameContent::SubtitleInlines(nodes) => {
+            let inline_html = render_inline_nodes(nodes);
+            if has_title_frame {
+                let sub_level = (heading_level.as_u8() + 1).min(6);
+                Some(format!(
+                    r#"<h{sub_level} class="sf-subtitle" style="{position_style}">{inline_html}</h{sub_level}>"#
+                ))
+            } else {
+                Some(format!(
+                    r#"<p class="sf-subtitle" style="{position_style}">{inline_html}</p>"#
+                ))
+            }
+        },
         // Graphical frames go to the SVG layer — not rendered here.
         FrameContent::Image { .. }
         | FrameContent::Chart { .. }
@@ -555,6 +576,10 @@ fn render_shape_svg(
 /// `frame_idx` is the 0-based index of graphical frames within the slide.
 ///
 /// Returns an empty string if there are no graphical frames to render.
+// STORY-081 C3 added SubtitleInlines arm (3 lines) pushing past the 150-line threshold.
+// The function body is a single exhaustive match over FrameContent variants with no
+// hidden complexity — extracting sub-functions would scatter the variant logic.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageSize) -> String {
     use std::fmt::Write as _;
@@ -732,9 +757,11 @@ pub fn render_graphics_layer(frames: &[Frame], slide_id: &str, page_size: &PageS
                     r#"<g transform="translate({x} {y})">{chart_g}</g>"#
                 );
             },
-            // Text frames (Title, Subtitle, Body, TextRun) go to the HTML text layer.
+            // Text frames (Title, Subtitle, SubtitleInlines, Body, TextRun) go to the HTML text layer.
             FrameContent::Title(_)
             | FrameContent::Subtitle(_)
+            // STORY-081 C3: SubtitleInlines is a text frame — goes to the text layer.
+            | FrameContent::SubtitleInlines(_)
             | FrameContent::Body(_)
             | FrameContent::TextRun(_)
             | FrameContent::Empty => {},
@@ -843,6 +870,53 @@ fn promote_body_blocks_to_phrasing(blocks: &[ContentBlock]) -> String {
 /// threaded through from the exporter (future story), this MUST be sourced from
 /// a locale map keyed on deck.lang rather than emitting hardcoded English text
 /// for non-English decks.
+/// Render a single slide to HTML with an optional title inline override.
+///
+/// When `title_inlines_override` is `Some(nodes)`, the `FrameContent::Title`
+/// arm renders via `render_inline_nodes` instead of plain escaped text.
+/// This is used by the HTML exporter (STORY-081 I2) to wire the `title_inlines`
+/// shadow field from the semantic deck for DOCX/HTML/PDF rich-title rendering.
+///
+/// When `title_inlines_override` is `None`, rendering is identical to
+/// [`render_slide_to_html`] (plain-text title).
+#[must_use]
+pub(crate) fn render_slide_to_html_with_title_override(
+    slide: &LaidOutSlide,
+    brand: &Brand,
+    heading_level: HeadingLevel,
+    page_size: &PageSize,
+    title_inlines_override: Option<&[InlineNode]>,
+) -> String {
+    let _ = brand; // Brand used by future template-driven color/font injection.
+
+    // MED-3: derive slide container dimensions from page_size (not hardcoded consts).
+    let container_w = emu_to_css_px(page_size.width);
+    let container_h = emu_to_css_px(page_size.height);
+
+    // Slide ID for ARIA cross-references (1-based from source_index).
+    // OBS-2: "Slide N" is English-only; see doc comment above.
+    let slide_number = slide.source_index + 1;
+    let slide_id = format!("slide-{slide_number}");
+
+    // STORY-081 I2: if title_inlines_override is Some, intercept Title frame rendering
+    // inside render_slide_to_html_inner.
+    render_slide_to_html_inner(
+        slide,
+        heading_level,
+        page_size,
+        &slide_id,
+        slide_number,
+        &container_w,
+        &container_h,
+        title_inlines_override,
+    )
+}
+
+/// Render a single laid-out slide to an HTML fragment.
+///
+/// Uses `render_slide_to_html_inner` with no title-inlines override.
+/// For rich title rendering (STORY-081 I2), the HTML exporter uses an
+/// internal variant that accepts a `title_inlines_override` parameter.
 #[must_use]
 pub fn render_slide_to_html(
     slide: &LaidOutSlide,
@@ -860,6 +934,33 @@ pub fn render_slide_to_html(
     // OBS-2: "Slide N" is English-only; see doc comment above.
     let slide_number = slide.source_index + 1;
     let slide_id = format!("slide-{slide_number}");
+
+    render_slide_to_html_inner(
+        slide,
+        heading_level,
+        page_size,
+        &slide_id,
+        slide_number,
+        &container_w,
+        &container_h,
+        None, // no title_inlines override for backward-compat callers
+    )
+}
+
+/// Inner implementation for slide rendering, shared by `render_slide_to_html`
+/// and `render_slide_to_html_with_title_override`.
+#[allow(clippy::too_many_arguments)]
+fn render_slide_to_html_inner(
+    slide: &LaidOutSlide,
+    heading_level: HeadingLevel,
+    page_size: &PageSize,
+    slide_id: &str,
+    slide_number: usize,
+    container_w: &str,
+    container_h: &str,
+    title_inlines_override: Option<&[InlineNode]>,
+) -> String {
+    use std::fmt::Write as _;
 
     // Build the HTML text layer (all text frames in reading order).
     // heading_level is pre-computed by the exporter pre-pass — NOT derived here.
@@ -944,6 +1045,30 @@ pub fn render_slide_to_html(
             // Non-promotable frame: fall through to normal rendering below.
         }
 
+        // STORY-081 I2: if this is a Title frame AND title_inlines_override is Some,
+        // render with rich inline content instead of plain escaped text.
+        if matches!(frame.content, FrameContent::Title(_))
+            && is_non_degenerate_bbox(&frame.bbox)
+            && let Some(inlines) = title_inlines_override
+            && !inlines.is_empty()
+        {
+            let x = emu_to_css_px(frame.bbox.x);
+            let y = emu_to_css_px(frame.bbox.y);
+            let w = emu_to_css_px(frame.bbox.width);
+            let h = emu_to_css_px(frame.bbox.height);
+            let position_style = format!(
+                "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; overflow:hidden;"
+            );
+            let hl = heading_level.as_u8();
+            let inline_html = render_inline_nodes(inlines);
+            let _ = write!(
+                text_layer,
+                r#"<h{hl} class="sf-title" style="{position_style}">{inline_html}</h{hl}>"#
+            );
+            text_layer.push('\n');
+            continue;
+        }
+
         if let Some(html) = render_text_frame(frame, heading_level, has_title_frame) {
             text_layer.push_str(&html);
             text_layer.push('\n');
@@ -951,7 +1076,7 @@ pub fn render_slide_to_html(
     }
 
     // Build the SVG graphics layer (graphical frames only).
-    let svg_layer = render_graphics_layer(&slide.frames, &slide_id, page_size);
+    let svg_layer = render_graphics_layer(&slide.frames, slide_id, page_size);
 
     format!(
         r#"<article id="{slide_id}" class="sf-slide" aria-label="Slide {slide_number}" style="position:relative; width:{container_w}px; height:{container_h}px; overflow:hidden;">
@@ -4547,6 +4672,234 @@ mod tests {
             h1_text.trim(),
             paragraph_text,
             "F-P9-001: <h1> text must equal first text block's text; got: {h1_text:?}"
+        );
+    }
+
+    // ─── STORY-081 C3: SubtitleInlines HTML rendering ────────────────────────
+
+    /// STORY-081 C3 — HTML: `FrameContent::SubtitleInlines` renders inline markup
+    /// richly (e.g., `<strong>` for Bold) rather than flattening to plain text.
+    ///
+    /// ## RED GATE (pre-C3 fix)
+    ///
+    /// Before fix: `FrameContent::SubtitleInlines` variant did not exist;
+    /// subtitle inline structure was dropped at layout seam → rendered as plain text.
+    ///
+    /// After fix: `SubtitleInlines` renders via `render_inline_nodes` →
+    /// Bold nodes produce `<strong>`, Italic → `<em>`, etc.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    #[test]
+    fn test_story_081_c3_subtitle_inlines_renders_strong_in_html() {
+        use slideforge_types::InlineNode;
+
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(914_400),
+        };
+
+        let frame = Frame {
+            bbox,
+            content: FrameContent::SubtitleInlines(vec![
+                InlineNode::Bold(vec![InlineNode::Plain(Arc::from("Bold Subtitle"))]),
+                InlineNode::Plain(Arc::from(" — rest")),
+            ]),
+            text_flow: None,
+            region_role: None,
+        };
+
+        // With a title frame present: SubtitleInlines renders as <h{level+1}>
+        let result = render_text_frame(&frame, HeadingLevel::H1, true)
+            .expect("SubtitleInlines with title must render");
+
+        assert!(
+            result.contains("<strong>"),
+            "STORY-081 C3 RED GATE: SubtitleInlines must render Bold node as <strong>.\n\
+             Before C3 fix: SubtitleInlines variant didn't exist → rendered as plain text.\n\
+             After C3 fix: render_inline_nodes called → Bold → <strong>.\n\
+             Got: {result}"
+        );
+        assert!(
+            result.contains("Bold Subtitle"),
+            "SubtitleInlines must include 'Bold Subtitle' text content. Got: {result}"
+        );
+        assert!(
+            result.contains("sf-subtitle"),
+            "SubtitleInlines must have sf-subtitle class. Got: {result}"
+        );
+
+        // Without title: renders as <p class="sf-subtitle">
+        let result_no_title = render_text_frame(&frame, HeadingLevel::H1, false)
+            .expect("SubtitleInlines without title must render");
+        assert!(
+            result_no_title.contains("<p"),
+            "SubtitleInlines without title must render as <p>. Got: {result_no_title}"
+        );
+        assert!(
+            result_no_title.contains("<strong>"),
+            "SubtitleInlines without title must still render Bold as <strong>. Got: {result_no_title}"
+        );
+    }
+
+    // ─── STORY-081 I2: HTML/PDF rich title via title_inlines override ─────────
+
+    /// STORY-081 I2 — HTML: `render_slide_to_html_with_title_override` renders
+    /// the title frame with inline markup when `title_inlines_override` is Some.
+    ///
+    /// ## RED GATE (pre-I2 fix)
+    ///
+    /// Before fix: HTML exporter called `render_slide_to_html` without title_inlines.
+    /// `FrameContent::Title(plain_text)` arm only rendered escaped plain text.
+    /// After fix: `render_slide_to_html_with_title_override` intercepts Title frames
+    /// and renders inline content via `render_inline_nodes` when override is present.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    #[test]
+    fn test_story_081_i2_html_rich_title_with_title_inlines_override() {
+        use slideforge_types::InlineNode;
+
+        let bbox = BoundingBox {
+            x: Emu(0),
+            y: Emu(0),
+            width: Emu(9_144_000),
+            height: Emu(914_400),
+        };
+
+        let slide = LaidOutSlide {
+            source_index: 0,
+            slide_type_keyword: Arc::from("title"),
+            frames: vec![Frame {
+                bbox,
+                content: FrameContent::Title(Arc::from("Plain Title")),
+                text_flow: None,
+                region_role: None,
+            }],
+            speaker_notes: None,
+            register_tags: vec![],
+            register_content: vec![],
+        };
+
+        let brand = Brand {
+            name: Arc::from("test"),
+            palette: slideforge_types::BrandPalette {
+                primary: Arc::from("#000"),
+                secondary: Arc::from("#fff"),
+                accent: Arc::from("#f00"),
+                neutral: Arc::from("#eee"),
+            },
+            fonts: slideforge_types::BrandFonts {
+                heading: Arc::from("Helvetica"),
+                body: Arc::from("Helvetica"),
+                mono: Arc::from("Courier"),
+                font_size_emu: 457_200,
+            },
+            layouts: vec![],
+            span: slideforge_types::SourceSpan::default(),
+        };
+        let page_size = PageSize::default();
+
+        // Without title_inlines override: renders plain title text.
+        let plain_result = render_slide_to_html(&slide, &brand, HeadingLevel::H1, &page_size);
+        assert!(
+            plain_result.contains("Plain Title"),
+            "Without override: plain title text must appear. Got: {plain_result:.500}"
+        );
+        assert!(
+            !plain_result.contains("<strong>"),
+            "Without override: no <strong> in title. Got: {plain_result:.500}"
+        );
+
+        // With title_inlines override: renders rich inline content.
+        let title_inlines = vec![InlineNode::Bold(vec![InlineNode::Plain(Arc::from(
+            "Rich Title",
+        ))])];
+        let rich_result = super::render_slide_to_html_with_title_override(
+            &slide,
+            &brand,
+            HeadingLevel::H1,
+            &page_size,
+            Some(&title_inlines),
+        );
+
+        assert!(
+            rich_result.contains("<strong>"),
+            "STORY-081 I2 RED GATE: With title_inlines override, <strong> must appear in title.\n\
+             Before I2 fix: render_slide_to_html always used plain text for FrameContent::Title.\n\
+             After I2 fix: render_slide_to_html_with_title_override intercepts Title frames.\n\
+             Got: {rich_result:.500}"
+        );
+        assert!(
+            rich_result.contains("Rich Title"),
+            "Title text content 'Rich Title' must be present. Got: {rich_result:.500}"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F-P17-002a: HTML Footnote must render as <span role="note">
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// F-P17-002a / BC-3.05.001 PC-4:
+    /// `InlineNode::Footnote(children)` must render as `<span role="note">…</span>`.
+    ///
+    /// ## Red Gate
+    ///
+    /// FAILS against the current implementation (render.rs line ~168) which
+    /// emits `<small>…</small>` — a generic presentational element that does
+    /// not convey note semantics to assistive technology.
+    ///
+    /// PASSES after the Footnote arm is changed to emit
+    /// `<span role="note">…</span>`, recursing children for inner formatting.
+    #[test]
+    fn test_f_p17_002a_footnote_renders_as_span_role_note_not_small() {
+        use slideforge_types::InlineNode;
+
+        // Footnote with plain text child.
+        let footnote =
+            InlineNode::Footnote(vec![InlineNode::Plain(Arc::from("This is a footnote."))]);
+
+        let rendered = super::render_inline_node(&footnote);
+
+        // Must use <span role="note">, not <small>.
+        assert!(
+            rendered.contains(r#"<span role="note">"#),
+            "F-P17-002a RED GATE: InlineNode::Footnote must render as \
+             <span role=\"note\"> (BC-3.05.001 PC-4). \
+             Before fix: emits <small>. \
+             After fix: emits <span role=\"note\">. \
+             Got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("<small>"),
+            "F-P17-002a: <small> must NOT be emitted for Footnote after the fix. \
+             Got: {rendered}"
+        );
+        // Display text must still be present.
+        assert!(
+            rendered.contains("This is a footnote."),
+            "F-P17-002a: footnote text must appear inside <span role=\"note\">. \
+             Got: {rendered}"
+        );
+    }
+
+    /// F-P17-002a — Inner formatting inside Footnote must be preserved.
+    /// `Footnote([Bold([Plain("note")])])` → `<span role="note"><strong>note</strong></span>`.
+    #[test]
+    fn test_f_p17_002a_footnote_inner_formatting_preserved() {
+        use slideforge_types::InlineNode;
+
+        let footnote = InlineNode::Footnote(vec![InlineNode::Bold(vec![InlineNode::Plain(
+            Arc::from("note"),
+        )])]);
+
+        let rendered = super::render_inline_node(&footnote);
+
+        assert!(
+            rendered.contains(r#"<span role="note">"#),
+            "F-P17-002a (formatting): must use <span role=\"note\">. Got: {rendered}"
+        );
+        assert!(
+            rendered.contains("<strong>note</strong>"),
+            "F-P17-002a (formatting): inner Bold must render as <strong>. Got: {rendered}"
         );
     }
 }

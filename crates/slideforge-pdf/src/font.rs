@@ -1,4 +1,4 @@
-//! Font file loading helpers for `slideforge-pdf`.
+//! Font file loading helpers and styled face resolution for `slideforge-pdf`.
 //!
 //! Font subsetting for text drawn via krilla's `Surface`/text API is handled
 //! **internally** by krilla — no `subsetter::subset(...)` call is needed for
@@ -9,6 +9,13 @@
 //! internal subsetting mechanism; only the glyphs actually used by the deck are
 //! embedded in the output PDF.
 //!
+//! ## ADR-023 — fontdb-backed styled face resolution
+//!
+//! [`ResolvedFontSet`] and [`resolve_font_set`] implement the ADR-023-approved
+//! mechanism for resolving Bold/Italic/Mono faces via `fontdb` OS/2-table metadata
+//! (weight class + fsSelection bits), NOT filename heuristics. This ensures
+//! reliable cross-platform font resolution without silent fallback to the wrong face.
+//!
 //! ## Direct `subsetter` usage
 //!
 //! If a concrete gap in krilla's text API is discovered during the TDD green
@@ -17,7 +24,551 @@
 //! krilla, no direct Cargo dep needed) may be used. See tech-validation RISK-2
 //! before adding that path.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use slideforge_types::BrandFonts;
+
 use crate::error::PdfExportError;
+
+// ─── Font-load instrumentation ────────────────────────────────────────────────
+
+/// Process-global count of [`load_system_fonts_counted`] invocations.
+///
+/// This counter is incremented **structurally** — only via
+/// [`load_system_fonts_counted`], the sole wrapper that calls
+/// `fontdb::Database::load_system_fonts()` in this crate. Calling
+/// `db.load_system_fonts()` directly anywhere else in this crate is
+/// prohibited; always use [`load_system_fonts_counted`] instead.
+///
+/// Used by observability metrics. Not conditionally compiled — zero overhead
+/// in release builds (one `fetch_add(Relaxed)` per export call).
+#[allow(dead_code)]
+static LOAD_SYSTEM_FONTS_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+// Per-thread count of `load_system_fonts_counted` invocations.
+// Each thread starts at 0. Unlike `LOAD_SYSTEM_FONTS_COUNT`, this counter is
+// isolated per test thread, making it safe to use in parallel unit tests.
+// Used by `test_obs_p09_001` to assert the single-load invariant without
+// interference from other tests running concurrently on different threads.
+#[cfg(test)]
+thread_local! {
+    static LOAD_SYSTEM_FONTS_THREAD_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+/// Load system fonts into `db` and increment both instrumentation counters.
+///
+/// This is the **only** function in this crate that calls
+/// `fontdb::Database::load_system_fonts()`. All call sites must use this
+/// wrapper — never call `db.load_system_fonts()` directly — so the counter
+/// invariant is structural, not a documentation promise.
+///
+/// ADV-P11-LOW-001 structural fix: wrapping the call here makes the
+/// counter invariants true by construction.
+fn load_system_fonts_counted(db: &mut fontdb::Database) {
+    db.load_system_fonts();
+    LOAD_SYSTEM_FONTS_COUNT.fetch_add(1, Ordering::Relaxed);
+    #[cfg(test)]
+    LOAD_SYSTEM_FONTS_THREAD_COUNT.with(|c| c.set(c.get() + 1));
+}
+
+/// Return the number of times [`load_system_fonts_counted`] has been invoked
+/// on the **current thread** since the thread started.
+///
+/// Thread-isolated: parallel tests on other threads do not affect this count.
+/// Use this in unit tests instead of the process-global counter to avoid
+/// false positives from concurrent test execution (OBS-P09-001 fix).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn load_system_fonts_thread_call_count() -> usize {
+    LOAD_SYSTEM_FONTS_THREAD_COUNT.with(std::cell::Cell::get)
+}
+
+// `ttf-parser` is used by `measure_text_width_pt` to compute per-glyph
+// horizontal advances (cmap → glyph_id → hmtx) for the horizontal cursor in
+// `draw_inline_spans_at_y` (ADV-P04-CRIT-001 fix).
+// Import is at the use-site via the crate name (no re-export needed).
+extern crate ttf_parser;
+
+// ─── ResolvedFace ─────────────────────────────────────────────────────────────
+
+/// A single resolved font face — binds the drawable `krilla::text::Font`, the
+/// raw font bytes for glyph-metric measurement, and the `face_index` into the
+/// font collection together as an inseparable unit.
+///
+/// ## Why one struct (ADV-P05-MED-001 + OBS-P05-001 unifying fix)
+///
+/// The previous design stored `font: Option<krilla::text::Font>` and
+/// `raw: Option<Arc<[u8]>>` as independent `Option`s, which allowed:
+///
+/// 1. **`face_index` discard (MED-001):** fontdb's `with_face_data` callback
+///    provided the `face_index` for `.ttc` collections, but it was never stored
+///    — the measurement path hardcoded `face_index=0`, yielding wrong advances
+///    for any face in a collection other than the first.
+///
+/// 2. **`Some(font) + None raw` divergence (OBS-P05-001):** the public
+///    `with_resolved_font_set` seam allowed a slot where the font was drawable
+///    but the raw bytes were absent, producing silent zero-width cursor advance
+///    and visual overprint.
+///
+/// `ResolvedFace` makes BOTH of these invalid states UNREPRESENTABLE:
+/// - If the slot is `Some(ResolvedFace)`, all three fields are present.
+/// - If resolution fails, the slot is `None` — the whole face is absent.
+///
+/// ## Measurement
+///
+/// Pass `raw.as_ref()` and `face_index` to [`measure_text_width_pt`] for
+/// cursor width computation; the SAME `face_index` that was used to construct
+/// the `Font` via `krilla::text::Font::new(data, face_index)`.
+#[derive(Clone)]
+pub struct ResolvedFace {
+    /// The drawable krilla font for this face.
+    ///
+    /// Constructed via `krilla::text::Font::new(data, face_index)` at the
+    /// fontdb-resolved or override `face_index`.
+    pub font: krilla::text::Font,
+    /// Raw font bytes for this face — for glyph-metric width measurement.
+    ///
+    /// Used by [`measure_text_width_pt`] to compute per-span horizontal
+    /// advances (cmap → glyph ID → hmtx advance) via `ttf-parser`.
+    ///
+    /// These bytes are the same source that krilla consumed when constructing
+    /// [`font`](Self::font); they represent the entire collection file, not
+    /// just this face's bytes. [`face_index`](Self::face_index) selects the
+    /// correct face within them.
+    pub raw: Arc<[u8]>,
+    /// Face index within the font collection file.
+    ///
+    /// For single-face `.otf`/`.ttf` files this is always `0`. For `.ttc`
+    /// collection files this is the fontdb-resolved index of this face —
+    /// may be non-zero (e.g., `1` for Helvetica-Bold in a
+    /// `HelveticaNeueDeskInterface.ttc` collection on macOS).
+    ///
+    /// MUST be passed to `measure_text_width_pt` instead of a hardcoded `0`.
+    pub face_index: u32,
+}
+
+// ─── ResolvedFontSet ──────────────────────────────────────────────────────────
+
+/// A set of resolved font faces — one per style — for use in the PDF draw path.
+///
+/// Populated by [`resolve_font_set`] using `fontdb` OS/2-table metadata
+/// (ADR-023). Each field carries a [`ResolvedFace`] for a specific style, or
+/// `None` if the face could not be resolved on the current system.
+///
+/// ## Invariant (ADV-P05-MED-001 + OBS-P05-001 + ADV-P06-MED-001 unifying fixes)
+///
+/// Every `Some(ResolvedFace)` slot binds `font`, `raw`, and `face_index`
+/// together, making font/raw/index divergence UNREPRESENTABLE. If a slot is
+/// `Some`, the draw path can measure width and draw glyphs from the SAME
+/// `ResolvedFace` without risking a mismatch between the drawn face index and
+/// the measured face index (ADV-P05-MED-001).
+///
+/// Additionally, both the measurement path
+/// (`exporter::compute_multi_span_x_positions`) and the draw path
+/// (`exporter::font_for_span`) delegate slot selection to the SAME private
+/// `exporter::face_for_span_kind` helper — making it **structurally impossible**
+/// for the two paths to select different slots for the same `FontFaceKind`
+/// (ADV-P06-MED-001).
+///
+/// ## Fallback semantics (non-silent degradation)
+///
+/// When a styled face is unavailable, [`resolve_font_set`] falls back to the
+/// `regular` face AND emits `tracing::warn!` — never a silent wrong-face or
+/// silent drop. Slot selection for each `FontFaceKind` is performed by
+/// `exporter::face_for_span_kind` (see its dispatch table for per-variant chains).
+///
+/// ## Test seam
+///
+/// Tests may construct a `ResolvedFontSet` directly from known fixture font
+/// bytes via [`ResolvedFontSet::from_faces`] to obtain a deterministic,
+/// system-font-free fixture. See
+/// [`crate::exporter::PdfExporter::with_resolved_font_set`] for the injection
+/// point.
+#[derive(Clone)]
+pub struct ResolvedFontSet {
+    /// Regular (weight-400) font face — the base face.
+    ///
+    /// `None` if no body font could be resolved (brand family not found on
+    /// this system AND no override path was provided).
+    pub regular: Option<ResolvedFace>,
+    /// Bold (weight-700) font face.
+    ///
+    /// Falls back to [`regular`](Self::regular) at draw time if `None`.
+    pub bold: Option<ResolvedFace>,
+    /// Italic (oblique) font face.
+    ///
+    /// Falls back to [`regular`](Self::regular) at draw time if `None`.
+    pub italic: Option<ResolvedFace>,
+    /// Monospace font face — used for `InlineNode::Code`.
+    ///
+    /// Falls back to [`regular`](Self::regular) at draw time if `None`.
+    pub mono: Option<ResolvedFace>,
+}
+
+impl ResolvedFontSet {
+    /// Construct a `ResolvedFontSet` from individual [`ResolvedFace`] slots.
+    ///
+    /// Use this constructor in tests (and production callers with pre-resolved
+    /// faces) to build a `ResolvedFontSet` without going through the fontdb
+    /// system-font scan. Each slot is either `Some(ResolvedFace)` or `None`.
+    ///
+    /// This replaces the old struct-literal construction that exposed separate
+    /// `raw_*` and `font` fields — those are now co-located in [`ResolvedFace`].
+    #[must_use]
+    pub fn from_faces(
+        regular: Option<ResolvedFace>,
+        bold: Option<ResolvedFace>,
+        italic: Option<ResolvedFace>,
+        mono: Option<ResolvedFace>,
+    ) -> Self {
+        Self {
+            regular,
+            bold,
+            italic,
+            mono,
+        }
+    }
+}
+
+/// Compute the total horizontal advance of `text` rendered in the given font
+/// at `font_size` points, using real font metrics (`ttf-parser` cmap + hmtx).
+///
+/// ## Measurement algorithm
+///
+/// For each character `ch` in `text`:
+/// 1. Look up the glyph ID via `ttf_parser::Face::glyph_index(ch)`.
+/// 2. Retrieve the horizontal advance via `Face::glyph_hor_advance(glyph_id)`.
+/// 3. Scale: `advance_pt = (advance_units as f32 / units_per_em as f32) * font_size`.
+///
+/// Characters whose glyph is not found in the cmap contribute zero advance
+/// (graceful — should not occur for ASCII text with typical fonts).
+///
+/// ## Why real metrics, not an estimate
+///
+/// Using a fixed per-character width estimate (e.g., `font_size * 0.6 * text.len()`)
+/// would produce incorrect cursor positions for proportional fonts (kerned, variable
+/// advance width). Real glyph advances are the only production-grade approach.
+///
+/// ## Why `ttf-parser` and not krilla
+///
+/// `krilla::text::Font` exposes `units_per_em()` but NOT raw glyph-advance
+/// queries — the raw bytes are `pub(crate)` inside krilla's `Data` struct.
+/// `ttf-parser` parses the same font bytes independently, exposing
+/// `Face::glyph_index` (cmap) and `Face::glyph_hor_advance` (hmtx).
+///
+/// `ttf-parser =0.25.1` is already in `Cargo.lock` as a transitive dep of
+/// `fontdb =0.23.0` (which is itself a transitive dep of `usvg =0.47.0`).
+/// Adding it as a direct pinned dep does NOT expand the supply chain.
+#[must_use]
+pub fn measure_text_width_pt(
+    font_bytes: &[u8],
+    face_index: u32,
+    font_size: f32,
+    text: &str,
+) -> f32 {
+    let Ok(face_index_u16) = u16::try_from(face_index) else {
+        tracing::debug!(
+            face_index,
+            "face_index exceeds u16::MAX — cannot parse with ttf-parser"
+        );
+        return 0.0;
+    };
+    let face = match ttf_parser::Face::parse(font_bytes, face_index_u16.into()) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::debug!(error = ?e, "ttf-parser: failed to parse font for width measurement");
+            return 0.0;
+        },
+    };
+
+    let upem = face.units_per_em();
+    if upem == 0 {
+        return 0.0;
+    }
+
+    let mut total: f32 = 0.0;
+    for ch in text.chars() {
+        let Some(glyph_id) = face.glyph_index(ch) else {
+            // Character not in cmap — skip (zero advance contribution).
+            continue;
+        };
+        let Some(advance_units) = face.glyph_hor_advance(glyph_id) else {
+            continue;
+        };
+        // Scale from font design units to points:
+        //   advance_pt = (advance_units / units_per_em) * font_size
+        // Use f64 intermediate to avoid f32 precision loss from the integer casts.
+        #[allow(clippy::cast_precision_loss)]
+        let advance_pt = (f64::from(advance_units) / f64::from(upem)) * f64::from(font_size);
+        #[allow(clippy::cast_possible_truncation)]
+        let advance_pt_f32 = advance_pt as f32;
+        total += advance_pt_f32;
+    }
+    total
+}
+
+// ─── resolve_font_set ─────────────────────────────────────────────────────────
+
+/// Resolve a [`ResolvedFontSet`] from the brand font configuration using
+/// `fontdb` OS/2-table metadata lookup (ADR-023).
+///
+/// ## Resolution priority per face
+///
+/// For each styled face (bold, italic, mono):
+///
+/// 1. If `font_override_path` is `Some` and the file loads successfully, use
+///    that as the `regular` face (override path replaces brand family lookup for
+///    the regular slot; styled faces still come from fontdb against the brand
+///    family). This maintains the test seam from `PdfExporter::with_font_path`
+///    while adding per-style fontdb resolution on top.
+/// 2. Query a `fontdb::Database` (populated via `load_system_fonts()`) by
+///    family name + weight/style metadata:
+///    - **Bold**: `brand.fonts.body` at `Weight::BOLD`, `Style::Normal`.
+///    - **Italic**: `brand.fonts.body` at `Weight::NORMAL`, `Style::Italic`.
+///    - **Mono**: `brand.fonts.mono` at `Weight::NORMAL`, `Style::Normal`.
+///    - **Regular**: `brand.fonts.body` (heading fallback) at `Weight::NORMAL`,
+///      `Style::Normal`. OR the explicit `font_override_path` if provided.
+/// 3. If fontdb finds no match for a styled face, fall back to `regular` at
+///    draw time AND emit `tracing::warn!` here (non-silent degradation).
+/// 4. If `regular` is also absent, draw functions skip that span entirely
+///    (existing graceful-degradation behavior, already tested).
+///
+/// ## Supply chain
+///
+/// `fontdb = "=0.23.0"` is already in `Cargo.lock` as a transitive dep of
+/// `usvg = "=0.47.0"`. Adding it as a direct pinned dep to `slideforge-pdf`
+/// does NOT expand the supply chain (ADR-023).
+///
+/// ## Graceful degradation (no silent drop)
+///
+/// Every resolution failure emits a structured `tracing::warn!` before
+/// returning `None` for the affected field. The draw path uses
+/// `.bold.as_ref().or(regular.as_ref())` so a missing bold face falls back
+/// visually to regular, but the user sees the warning in logs.
+///
+/// ## `face_index` preservation (ADV-P05-MED-001 fix)
+///
+/// Each resolved [`ResolvedFace`] carries the `face_index` reported by
+/// fontdb's `with_face_data` callback. For `.ttc` collection files this may
+/// be non-zero. The same index is used by both the draw path (via
+/// `krilla::text::Font::new(data, face_index)`) and the measurement path
+/// (via `measure_text_width_pt(raw, face_index, ...)`) — the divergence is
+/// UNREPRESENTABLE because both are co-located in the same [`ResolvedFace`].
+pub fn resolve_font_set(
+    brand: &BrandFonts,
+    font_override_path: Option<&std::path::Path>,
+) -> ResolvedFontSet {
+    // Populate a fontdb database for ALL face queries (regular, bold, italic, mono).
+    //
+    // ADR-023: fontdb reads OS/2 table usWeightClass (400=regular, 700=bold) and
+    // fsSelection bits (bit 0=italic, bit 5=bold) — NOT filenames.
+    // load_system_fonts() cold cost: ~50–300ms Linux, ~10–50ms macOS.
+    //
+    // OBS-P09-001 / OBS-P10-001 fix: a SINGLE fontdb::Database is created here
+    // and passed to BOTH `resolve_regular_face` (regular slot) AND the styled-face
+    // queries below.  The previous code created TWO databases — one inside
+    // `resolve_regular_face` and one here — doubling the cold-path I/O cost
+    // (~50–300ms wasted on every PDF export call).
+    let mut db = fontdb::Database::new();
+    // ADV-P11-LOW-001: use the counted wrapper — never call db.load_system_fonts() directly.
+    load_system_fonts_counted(&mut db);
+
+    // Resolve the regular face — passes the shared db to avoid a second load.
+    let regular = resolve_regular_face(brand, font_override_path, &db);
+
+    let bold = resolve_styled_face_via_fontdb(
+        &db,
+        brand.body.as_ref(),
+        fontdb::Weight::BOLD,
+        fontdb::Style::Normal,
+        "bold",
+    );
+    if bold.is_none() {
+        tracing::warn!(
+            family = %brand.body,
+            style = "bold",
+            "styled font face not found on this system; \
+             falling back to regular face — PDF bold text will render without correct weight"
+        );
+    }
+
+    let italic = resolve_styled_face_via_fontdb(
+        &db,
+        brand.body.as_ref(),
+        fontdb::Weight::NORMAL,
+        fontdb::Style::Italic,
+        "italic",
+    );
+    if italic.is_none() {
+        tracing::warn!(
+            family = %brand.body,
+            style = "italic",
+            "styled font face not found on this system; \
+             falling back to regular face — PDF italic text will render without correct style"
+        );
+    }
+
+    let mono = resolve_styled_face_via_fontdb(
+        &db,
+        brand.mono.as_ref(),
+        fontdb::Weight::NORMAL,
+        fontdb::Style::Normal,
+        "mono",
+    );
+    if mono.is_none() {
+        tracing::warn!(
+            family = %brand.mono,
+            style = "mono",
+            "monospace font face not found on this system; \
+             falling back to regular face — PDF code spans will render in body font"
+        );
+    }
+
+    ResolvedFontSet {
+        regular,
+        bold,
+        italic,
+        mono,
+    }
+}
+
+/// Resolve the regular (body/heading) font face.
+///
+/// Resolution order:
+/// 1. `font_override_path` if provided (test seam / production override).
+/// 2. `brand.heading` via the provided `db`.
+/// 3. `brand.body` via the provided `db`.
+///
+/// ## OBS-P09-001 / OBS-P10-001 fix
+///
+/// The `db` parameter is the caller-owned `fontdb::Database` (already populated
+/// by `load_system_fonts()` in [`resolve_font_set`]).  Accepting it by reference
+/// eliminates the second redundant `load_system_fonts()` call that the previous
+/// implementation performed here, halving the cold-path I/O cost.
+///
+/// Returns `None` if no font can be resolved; callers emit a warn before
+/// returning the overall `ResolvedFontSet`.
+///
+/// Returns a [`ResolvedFace`] that bundles the krilla `Font`, raw bytes, and
+/// `face_index` together (ADV-P05-MED-001 fix — `face_index` is always `0` for
+/// the override-path case; fontdb-resolved faces carry the actual face index).
+fn resolve_regular_face(
+    brand: &BrandFonts,
+    font_override_path: Option<&std::path::Path>,
+    db: &fontdb::Database,
+) -> Option<ResolvedFace> {
+    // Step 1: explicit override path (test seam + production).
+    // Override paths are always single-face files → face_index = 0.
+    if let Some(path) = font_override_path {
+        match load_font_data(path) {
+            Ok(bytes) => {
+                let raw: Arc<[u8]> = bytes.into();
+                let data: krilla::Data = raw.to_vec().into();
+                if let Some(font) = krilla::text::Font::new(data, 0) {
+                    return Some(ResolvedFace {
+                        font,
+                        raw,
+                        face_index: 0,
+                    });
+                }
+                tracing::debug!(
+                    path = %path.display(),
+                    "krilla::text::Font::new returned None for override path; \
+                     falling back to brand family resolution"
+                );
+            },
+            Err(e) => {
+                tracing::debug!(
+                    path = %path.display(),
+                    error = %e,
+                    "font override path load failed; falling back to brand family resolution"
+                );
+            },
+        }
+    }
+
+    // Step 2/3: fontdb metadata lookup for heading or body family.
+    // fontdb reports the actual face_index (may be non-zero for .ttc collections).
+    // `db` was loaded once by the caller — no additional I/O here.
+    for family in [brand.heading.as_ref(), brand.body.as_ref()] {
+        if let Some(face) = resolve_styled_face_via_fontdb(
+            db,
+            family,
+            fontdb::Weight::NORMAL,
+            fontdb::Style::Normal,
+            "regular",
+        ) {
+            return Some(face);
+        }
+    }
+
+    tracing::warn!(
+        heading = %brand.heading,
+        body = %brand.body,
+        "brand font families not found on this system — text drawing will be skipped; \
+         PDF will contain structural content but no visible text"
+    );
+    None
+}
+
+/// Query `fontdb` for a face matching the given family + weight + style,
+/// then load its bytes and construct a [`ResolvedFace`].
+///
+/// Returns `None` on any failure (family not found, file unreadable, invalid
+/// font data). The `style_label` parameter is used only in diagnostic traces.
+///
+/// The returned [`ResolvedFace`] carries the krilla `Font`, raw bytes for
+/// glyph-metric width measurement (ADV-P04-CRIT-001 fix), AND the resolved
+/// `face_index` from fontdb's `with_face_data` callback (ADV-P05-MED-001 fix).
+///
+/// For `.ttc` collection files the `face_index` may be non-zero — it is
+/// stored in the [`ResolvedFace`] and must be passed (not `0`) to
+/// [`measure_text_width_pt`].
+fn resolve_styled_face_via_fontdb(
+    db: &fontdb::Database,
+    family: &str,
+    weight: fontdb::Weight,
+    style: fontdb::Style,
+    style_label: &str,
+) -> Option<ResolvedFace> {
+    let query = fontdb::Query {
+        families: &[fontdb::Family::Name(family)],
+        weight,
+        stretch: fontdb::Stretch::Normal,
+        style,
+    };
+    let face_id = db.query(&query)?;
+
+    // Use fontdb's `with_face_data` to get raw font bytes + face index in one call.
+    // This handles Binary / File / SharedFile source variants transparently,
+    // including memory-mapped files (the fontdb default on most platforms).
+    //
+    // ADV-P05-MED-001 fix: capture `face_index` from the callback and store it
+    // in `ResolvedFace` instead of discarding it. The same face_index is used
+    // both to construct the krilla Font (draw path) and to call
+    // `measure_text_width_pt` (measurement path) — making the draw/measure
+    // pairing structurally guaranteed.
+    db.with_face_data(face_id, |bytes, face_index| {
+        let raw: Arc<[u8]> = bytes.into();
+        let data: krilla::Data = raw.to_vec().into();
+        let font_opt = krilla::text::Font::new(data, face_index);
+        if font_opt.is_none() {
+            tracing::debug!(
+                family,
+                style_label,
+                face_index,
+                "krilla::text::Font::new returned None for fontdb-resolved face"
+            );
+        }
+        font_opt.map(|font| ResolvedFace {
+            font,
+            raw,
+            face_index,
+        })
+    })?
+}
 
 /// Raw font bytes ready for use with krilla's font API.
 ///
@@ -521,6 +1072,46 @@ mod tests {
             Some(match_in_a),
             "search_font_dir must return the lexicographically-first path \
              when multiple files share the same normalized stem"
+        );
+    }
+
+    /// OBS-P09-001 / OBS-P10-001: `resolve_font_set` must call
+    /// `load_system_fonts()` EXACTLY ONCE per invocation, not twice.
+    ///
+    /// The previous implementation created two independent `fontdb::Database`
+    /// instances — one inside `resolve_regular_face` and one in
+    /// `resolve_font_set` for styled faces — each calling `load_system_fonts()`.
+    /// That doubled the cold-path I/O cost (~50–300ms wasted per export call).
+    ///
+    /// This test asserts the single-load invariant via the per-thread counter:
+    /// one `resolve_font_set` call must produce exactly one `load_system_fonts`
+    /// invocation on the calling thread.
+    ///
+    /// Note: uses [`load_system_fonts_thread_call_count`] (thread-local) rather
+    /// than the process-global counter so parallel tests on other threads do not
+    /// pollute the delta measurement.  The delta approach tolerates this test
+    /// running on a thread that has already made prior `resolve_font_set` calls
+    /// (e.g. in the same binary's setup code).
+    #[test]
+    fn test_obs_p09_001_resolve_font_set_loads_system_fonts_exactly_once() {
+        use slideforge_types::BrandFonts;
+        use std::sync::Arc;
+
+        let brand = BrandFonts {
+            heading: Arc::from("Helvetica"),
+            body: Arc::from("Helvetica"),
+            mono: Arc::from("Courier"),
+            font_size_emu: 457_200,
+        };
+        let count_before = load_system_fonts_thread_call_count();
+        let _font_set = resolve_font_set(&brand, None);
+        let count_after = load_system_fonts_thread_call_count();
+        let delta = count_after - count_before;
+        assert_eq!(
+            delta, 1,
+            "resolve_font_set must call load_system_fonts() exactly once; \
+             got {delta} calls (OBS-P09-001 / OBS-P10-001). \
+             Check for multiple fontdb::Database::new() + load_system_fonts() in the call path."
         );
     }
 }

@@ -21,5 +21,7 @@
 //! compile time.
 
 pub mod default_formatter;
+pub mod ooxml_runs;
 
 pub use default_formatter::DefaultInlineFormat;
+pub use ooxml_runs::{OoxmlRun, render_inline_nodes_to_runs, serialize_ooxml_run};

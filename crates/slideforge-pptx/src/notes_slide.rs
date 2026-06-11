@@ -12,23 +12,29 @@
 //!   and `notesMaster1.xml`.
 //! - Slides WITHOUT notes get no `notesSlide` part (BC-4.01.003 postcondition 2).
 //!
-//! ## Rich Inline Formatting (F-040-P1-003)
+//! ## Rich Inline Formatting (ADR-024 / F-P16-M1 fix)
 //!
 //! Notes content is sourced from ALL `Register::Notes` entries in
 //! `register_content` (not just the first). Each `RegisteredContent` entry
 //! becomes one or more `<a:p>` paragraphs. Inline formatting is preserved via
-//! dispatch through the [`InlineFormat`] plugin (BC-5.02.002 dog-fooding guarantee):
-//! - `InlineNode::Bold` → `<a:rPr b="1"/>` (via [`InlineFormat::render_with_context`])
-//! - `InlineNode::Italic` → `<a:rPr i="1"/>` (via [`InlineFormat::render_with_context`])
+//! the unified [`render_inline_nodes_to_runs`] engine (ADR-024):
+//!
+//! - `InlineNode::Bold` → `<a:rPr b="1"/>` run
+//! - `InlineNode::Italic` → `<a:rPr i="1"/>` run
 //! - `InlineNode::Link` → hyperlink relationship + `<a:rPr>` with `r:id`
-//!   (rId pre-registered by exporter, passed via `InlineRenderContext::hyperlink_rid`)
-//! - All other nodes → via [`InlineFormat::render_with_context`] at the single
-//!   `AC-005-DISPATCH-SITE`. Registry routing: the formatter is resolved by the caller
-//!   (F-006). Currently `DefaultInlineFormat` is passed directly; future: registry lookup.
+//! - `InlineNode::Bold([Link{...}])` → run with BOTH `b="1"` AND `<a:hlinkClick>`
+//!   (F-P16-M1 fix: formatting inside link display text is now preserved)
+//! - All other nodes → via [`render_inline_nodes_to_runs`] single engine
+//!
+//! ## Architecture (ADR-024)
+//!
+//! The notes path NO LONGER uses `dispatch_inline_nodes_to_ooxml` or
+//! `DefaultInlineFormat::render_with_context`. Both body and notes paths now
+//! call `render_inline_nodes_to_runs` with a per-consumer resolver closure.
+//! The resolver closure carries the `notesSlide{N}.xml.rels`-scoped rId namespace;
+//! no cross-part leakage is possible by construction (ADR-024 INV-10).
 
-use slideforge_plugin_api::traits::inline_format::{
-    InlineFormat, InlineOutputFormat, InlineRenderContext,
-};
+use slideforge_plugin_api::inline_formats::{render_inline_nodes_to_runs, serialize_ooxml_run};
 use slideforge_types::register::RegisteredContent;
 use slideforge_types::{InlineNode, Register, display_text_is_empty};
 
@@ -69,14 +75,15 @@ impl NotesSlideSerializer {
     /// (F-040-P1-003: multi-entry, rich-formatting fix). Each entry is
     /// emitted as one `<a:p>` paragraph with inline formatting preserved.
     ///
-    /// `inline_format` is the registry-resolved `InlineFormat` plugin (F-006).
-    /// The caller (typically `PptxExporter::export_inner`) resolves this from
-    /// the `PluginRegistry` by looking up id `"default"`. All OOXML run emission
-    /// is dispatched through this reference — zero hardcoding inside the serializer.
+    /// Inline formatting is rendered by the unified [`render_inline_nodes_to_runs`]
+    /// engine (ADR-024). The notes-slide resolver closure maps URLs to
+    /// `notesSlide{N}.xml.rels`-scoped rIds (rId3, rId4, …) computed from
+    /// `unique_hlinks` (ADR-024 INV-10 — no cross-part leakage).
     ///
     /// The `.rels` file references:
     /// - `rId1` → the owning slide (`../slides/slide{N}.xml`)
     /// - `rId2` → the notes master (`../notesMasters/notesMaster1.xml`)
+    /// - `rId3..` → external hyperlinks (one per unique safe-scheme URL)
     ///
     /// # Errors
     ///
@@ -84,7 +91,6 @@ impl NotesSlideSerializer {
     pub fn build(
         slide_index: usize,
         register_content: &[RegisteredContent],
-        inline_format: &dyn InlineFormat,
     ) -> Result<NotesSlideOutput, PptxError> {
         // Filter to Notes-register entries; collect inline content per entry.
         let notes_entries: Vec<&[InlineNode]> = register_content
@@ -96,6 +102,13 @@ impl NotesSlideSerializer {
         // Collect hyperlink targets for relationship registration.
         // Each hyperlink URL gets a unique rId starting from rId3
         // (rId1 = slide, rId2 = notesMaster).
+        //
+        // ADR-024 Risk 4 (strongest anti-orphan): `collect_hyperlink_urls` visits
+        // the SAME URL set that `render_inline_nodes_to_runs` will query via the
+        // resolver closure — top-level Links + Links inside formatting wrappers,
+        // but NOT Links inside another Link's display text (INV-5 / F-040-P3-001).
+        // The collector and the engine share the same traversal rule, so registration
+        // and emission are symmetric by construction: no orphan rel, no dangling rId.
         let mut hlink_urls: Vec<String> = Vec::new();
         for entry in &notes_entries {
             collect_hyperlink_urls(entry, &mut hlink_urls);
@@ -103,7 +116,7 @@ impl NotesSlideSerializer {
         // Deduplicate while preserving order (URL order → rId order).
         let unique_hlinks: Vec<String> = deduplicate_preserve_order(hlink_urls);
 
-        let xml_bytes = Self::build_xml(&notes_entries, &unique_hlinks, inline_format);
+        let xml_bytes = Self::build_xml(&notes_entries, &unique_hlinks);
         let rels_bytes = Self::build_rels(slide_index, &unique_hlinks)?;
         Ok(NotesSlideOutput {
             xml_bytes,
@@ -139,11 +152,7 @@ impl NotesSlideSerializer {
     ///   </p:txBody>
     /// </p:sp>
     /// ```
-    fn build_xml(
-        notes_entries: &[&[InlineNode]],
-        hlink_urls: &[String],
-        inline_format: &dyn InlineFormat,
-    ) -> Vec<u8> {
+    fn build_xml(notes_entries: &[&[InlineNode]], hlink_urls: &[String]) -> Vec<u8> {
         let mut xml = String::new();
 
         xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
@@ -168,12 +177,6 @@ impl NotesSlideSerializer {
         // Slide image placeholder — ph is self-closing inside nvPr (no txBody).
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
-        // cNvPr @name is free-text / non-schema-significant.  Use a fixed role
-        // name ("Slide Image Placeholder 1") that matches the notesMaster template
-        // rather than varying it by slide index — a slide-index-derived name would
-        // differ across slides without adding semantic value and would cause rId
-        // count mismatches to appear larger than they are in diff output.
-        // (F-040-P3-001 tidy — confirmed cosmetic-only, no schema impact.)
         xml.push_str("          <p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/>\n");
         xml.push_str("          <p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>\n");
         xml.push_str("          <p:nvPr><p:ph type=\"sldImg\"/></p:nvPr>\n");
@@ -184,9 +187,6 @@ impl NotesSlideSerializer {
         // Notes body placeholder — ph is self-closing inside nvPr;
         // txBody is a SIBLING of nvSpPr under p:sp (CT_Shape ordering:
         // nvSpPr → spPr → txBody).
-        // cNvPr @name is fixed ("Notes Placeholder 2") matching the notesMaster
-        // template — slide-index variation is non-schema-significant and confusing.
-        // (F-040-P3-001 tidy — cosmetic, no schema impact.)
         xml.push_str("      <p:sp>\n");
         xml.push_str("        <p:nvSpPr>\n");
         xml.push_str("          <p:cNvPr id=\"3\" name=\"Notes Placeholder 2\"/>\n");
@@ -202,13 +202,38 @@ impl NotesSlideSerializer {
             // Ensure at least one paragraph so txBody is schema-valid.
             xml.push_str("          <a:p/>\n");
         } else {
+            // Build the notes-slide resolver closure (ADR-024 INV-10).
+            // Maps a URL to its rId in notesSlide{N}.xml.rels namespace:
+            //   rId3 = index 0, rId4 = index 1, ...
+            // Only URLs that were registered in unique_hlinks get an rId;
+            // all others (unsafe-scheme, empty-display-text) return None.
+            let resolver = |url: &str| -> Option<String> {
+                hlink_urls
+                    .iter()
+                    .position(|u| u == url)
+                    .map(|idx| format!("rId{}", idx + 3))
+            };
+
             for entry in notes_entries {
                 xml.push_str("          <a:p>");
-                // Assign rIds to hyperlinks: rId3, rId4, ...
-                // We need to find which rId each URL maps to.
-                // Dispatch through DefaultInlineFormat for all non-Link nodes
-                // (BC-5.02.002 dog-fooding guarantee).
-                dispatch_inline_nodes_to_ooxml(entry, hlink_urls, inline_format, &mut xml);
+
+                // ADR-024: use the unified engine for inline run generation.
+                // This is the single call site that replaces dispatch_inline_nodes_to_ooxml.
+                match render_inline_nodes_to_runs(entry, &resolver) {
+                    Ok(runs) => {
+                        for run in &runs {
+                            xml.push_str(&serialize_ooxml_run(run));
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "render_inline_nodes_to_runs failed for notes OOXML; \
+                             emitting empty paragraph"
+                        );
+                    },
+                }
+
                 xml.push_str("</a:p>\n");
             }
         }
@@ -248,159 +273,72 @@ impl NotesSlideSerializer {
     }
 }
 
-/// Dispatch a flat sequence of `InlineNode`s to OOXML run strings.
+/// Collect all **safe-scheme** hyperlink URLs from inline nodes, descending through
+/// formatting wrappers to reach nested `Link` nodes (ADV-P14-MED-001 fix).
 ///
-/// All nodes — including [`InlineNode::Link`] — are dispatched through
-/// [`DefaultInlineFormat::render_with_context`] (BC-5.02.002 dog-fooding /
-/// AC-005). For `Link` nodes with a safe URL scheme, the pre-registered
-/// relationship ID is passed via [`InlineRenderContext::hyperlink_rid`] so
-/// `DefaultInlineFormat` can emit the full OOXML hyperlink run. For unsafe-scheme
-/// URLs, `hyperlink_rid` is `None` and the formatter falls back to the
-/// display-text-plus-warn behavior.
+/// ## Registration scope (ADR-024 Risk 4 — anti-orphan by construction)
 ///
-/// This is the SINGLE dispatch call site in `slideforge-pptx/src/` for inline
-/// OOXML construction (AC-005 / BC-5.02.002 postcondition 5). The call site
-/// is marked with `// AC-005-DISPATCH-SITE` so the AC-005 audit test can
-/// exempt it while flagging any other hand-constructed run markup.
-fn dispatch_inline_nodes_to_ooxml(
-    nodes: &[InlineNode],
-    hlink_urls: &[String],
-    inline_format: &dyn InlineFormat,
-    out: &mut String,
-) {
-    let formatter = inline_format;
-    for node in nodes {
-        // Build the render context for this node.
-        // For Link nodes with a safe scheme: supply the pre-registered rId.
-        // For all other nodes (and unsafe-scheme Links): supply no rId.
-        let hyperlink_rid: Option<String> = if let InlineNode::Link { url, .. } = node {
-            if is_safe_link_scheme(url.as_ref()) {
-                // F-040-P2-001 (CWE-601): only safe-scheme URLs are in hlink_urls.
-                // rId3 = index 0, rId4 = index 1, ...
-                hlink_urls
-                    .iter()
-                    .position(|u| u == url.as_ref())
-                    .map(|idx| format!("rId{}", idx + 3))
-            } else {
-                // Unsafe scheme: warn and let render_with_context fall back to plain text.
-                let scheme_end = url.find(':').unwrap_or(0);
-                let scheme = if scheme_end > 0 {
-                    &url[..scheme_end]
-                } else {
-                    "(none)"
-                };
-                tracing::warn!(
-                    url_scheme = scheme,
-                    "notes link has disallowed URL scheme; \
-                     embedding as plain text run (no External rel emitted). \
-                     SEC-037-001 / CWE-601 / F-040-P2-001"
-                );
-                None
-            }
-        } else {
-            None
-        };
-
-        let ctx = InlineRenderContext {
-            hyperlink_rid: hyperlink_rid.as_deref(),
-        };
-
-        // AC-005-DISPATCH-SITE: single InlineFormat dispatch call in slideforge-pptx/src/.
-        match formatter.render_with_context(node, InlineOutputFormat::Ooxml, &ctx) {
-            Ok(rendered) => out.push_str(&rendered),
-            Err(e) => {
-                tracing::warn!(
-                    node_kind = node.kind_name(),
-                    error = %e,
-                    "DefaultInlineFormat::render_with_context failed for notes OOXML; skipping node"
-                );
-            },
-        }
-    }
-}
-
-/// Collect all **safe-scheme** hyperlink URLs from the **top-level** nodes only.
+/// This function visits the SAME URL set that [`render_inline_nodes_to_runs`] will
+/// query via its resolver closure:
+/// - Top-level `Link` nodes (existing EC-004 path).
+/// - `Link` nodes nested inside formatting wrappers (`Bold`, `Italic`, etc.).
+/// - NOT Links inside another Link's display text (INV-5 / F-040-P3-001).
 ///
-/// ## Registration scope: top-level Links only (F-085-P6-001)
+/// By keeping the collector and the engine's traversal rule identical, registration
+/// and emission are symmetric by construction: every registered URL gets at least one
+/// `<a:hlinkClick>`, and every `<a:hlinkClick>` references a registered URL.
 ///
-/// `dispatch_inline_nodes_to_ooxml` iterates the entry slice and emits
-/// `<a:hlinkClick>` ONLY for `InlineNode::Link` nodes it encounters directly
-/// at the top level of that slice.  A `Link` nested inside a formatting wrapper
-/// (`Bold`, `Italic`, `Strikethrough`, `Superscript`, `Subscript`, `Highlight`,
-/// `Footnote`) gets `hyperlink_rid = None` in the dispatcher — the formatter
-/// falls back to the plain-text-plus-warn path and emits NO `<a:hlinkClick>`.
+/// ## Orphan-rel invariant preserved (F-085-P6-001)
 ///
-/// Consequence: this function must NOT recurse into formatting wrappers.
-/// Recursing would register a URL (allocating an rId + writing a
-/// `TargetMode="External"` rel) for a Link that the dispatcher will NOT emit
-/// as `<a:hlinkClick>` — producing an orphan External relationship
-/// (`external_rel_count > hlinkclick_count`).  OOXML linters flag this; some
-/// consumers (`PowerPoint`, `LibreOffice`) warn or refuse to open the file.
-///
-/// The fix (F-085-P6-001 / Option A — align registration to emission):
-/// iterate only the top-level nodes, register only top-level `Link` nodes.
-/// Formatting-wrapper variants are no-ops here (same as `Plain`/`Code`).
-/// Links nested inside wrappers render as plain text + `tracing::warn!` at
-/// the dispatch site — consistent behavior, zero orphan rels.
-///
-/// ## rId↔hlinkClick count invariant
-///
-/// Because registration and emission are now both top-level-only, no inline
-/// tree shape can produce an orphan rel:
-///
-/// ```text
-/// external_rel_count == <a:hlinkClick_count  ∀ inline entry slices
-/// ```
+/// When a `Link` is found, its own display `text` children are NOT recursed into.
+/// A Link inside another Link's display text would create an orphan rel (the
+/// engine only emits `<a:hlinkClick>` inherited from the outer rId, not a second one).
+/// The F-040-P3-001 case (outer Link + nested Link in display text) still produces
+/// exactly 1 rel and N `<a:hlinkClick>` runs (all backed by the same rel) — reference-set
+/// invariant holds.
 ///
 /// ## Unsafe-scheme filtering (F-040-P2-001 / CWE-601)
 ///
 /// URLs whose scheme is not in [`crate::link_safety::ALLOWED_LINK_SCHEMES`] are
-/// silently skipped here.  The dispatcher also emits a `tracing::warn!` for
-/// unsafe-scheme top-level Links.  The parser already enforces `E-PAR-022`;
-/// this guard catches programmatically-constructed IR that bypasses the parser.
+/// skipped here and produce a `tracing::warn!` in the engine.
 ///
 /// ## Display-text emptiness guard (F-P5-001)
 ///
-/// A `Link` whose display text flattens to `""` emits no `<a:hlinkClick>` run
-/// in `DefaultInlineFormat::render_with_context`.  We apply the same predicate
-/// here (`display_text_is_empty`) so registration and emission stay in sync.
+/// A `Link` whose display text is empty produces no run and no rel.
 fn collect_hyperlink_urls(nodes: &[InlineNode], urls: &mut Vec<String>) {
     for node in nodes {
-        match node {
-            InlineNode::Link { url, text } => {
-                // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
-                // Unsafe-scheme URLs are NOT added to the hlink_urls list; the Link
-                // arm in dispatch_inline_nodes_to_ooxml routes through
-                // DefaultInlineFormat::render_with_context, which falls back to a plain
-                // text run when no rId is available.
-                //
-                // F-P5-001: guard that the Link's display text is non-empty BY THE
-                // FLATTEN DEFINITION, not Vec-length.  `display_text_is_empty(text)`
-                // uses the same recursive flatten-to-plain-text semantics as
-                // `extract_plain_text_depth_limited` inside render_with_context.
-                if is_safe_link_scheme(url.as_ref()) && !display_text_is_empty(text) {
-                    urls.push(url.as_ref().to_owned());
-                }
-                // F-040-P3-001 + F-085-P6-001: do NOT recurse into `text` children here.
-                // Nested Link nodes (in display text or inside a wrapper) produce no
-                // hlinkClick; collecting their URLs would create orphan External rels.
-            },
-            // F-085-P6-001: formatting wrappers are no-ops for URL registration.
-            // The dispatcher only emits <a:hlinkClick> for top-level Link nodes;
-            // a Link inside a wrapper is rendered as plain text + warn at the
-            // dispatch site, so no External rel must be registered for it.
-            InlineNode::Bold(_)
-            | InlineNode::Italic(_)
-            | InlineNode::Footnote(_)
-            | InlineNode::Superscript(_)
-            | InlineNode::Subscript(_)
-            | InlineNode::Strikethrough(_)
-            | InlineNode::Highlight(_)
-            | InlineNode::Plain(_)
-            | InlineNode::Code(_)
-            | InlineNode::Xref(_)
-            | InlineNode::Math(_) => {},
-        }
+        collect_hyperlink_urls_from_node(node, urls);
+    }
+}
+
+/// Collect safe-scheme, non-empty-display-text hyperlink URLs from a single
+/// [`InlineNode`], descending through formatting wrappers to reach nested `Link` nodes.
+fn collect_hyperlink_urls_from_node(node: &InlineNode, urls: &mut Vec<String>) {
+    match node {
+        InlineNode::Link { url, text } => {
+            // F-040-P2-001 defense-in-depth: only register URLs with safe schemes.
+            // F-P5-001: guard that the Link's display text is non-empty.
+            if is_safe_link_scheme(url.as_ref()) && !display_text_is_empty(text) {
+                urls.push(url.as_ref().to_owned());
+            }
+            // F-040-P3-001 + F-085-P6-001: do NOT recurse into `text` children here.
+            // A Link inside a Link's display text would be an orphan rel.
+        },
+        // ADV-P14-MED-001: descend through formatting wrappers to reach nested Links.
+        InlineNode::Bold(children)
+        | InlineNode::Italic(children)
+        | InlineNode::Footnote(children)
+        | InlineNode::Superscript(children)
+        | InlineNode::Subscript(children)
+        | InlineNode::Strikethrough(children)
+        | InlineNode::Highlight(children) => {
+            for child in children {
+                collect_hyperlink_urls_from_node(child, urls);
+            }
+        },
+        // Leaf nodes with no Link potential: no registration.
+        InlineNode::Plain(_) | InlineNode::Code(_) | InlineNode::Xref(_) | InlineNode::Math(_) => {
+        },
     }
 }
 

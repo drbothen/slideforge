@@ -24,15 +24,15 @@
 
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    Body, BodyChoice, Bold, Document, Hyperlink, HyperlinkChoice, Italic, Paragraph,
-    ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice, RunFonts,
-    RunProperties, Shading, ShadingPatternValues, Strike, Text, VerticalPositionValues,
+    Body, BodyChoice, Bold, Document, Highlight, HighlightColorValues, Hyperlink, HyperlinkChoice,
+    Italic, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
+    RunFonts, RunProperties, Shading, ShadingPatternValues, Strike, Text, VerticalPositionValues,
     VerticalTextAlignment,
 };
 use ooxmlsdk::sdk::SdkType;
 use slideforge_layout::LaidOutDeck;
-use slideforge_types::InlineNode;
 use slideforge_types::register::Register;
+use slideforge_types::{Deck, FieldValue, InlineNode};
 
 use crate::auto_sections::AutoSectionSerializer;
 use crate::error::ExportError;
@@ -114,22 +114,33 @@ impl DocumentBodySerializer {
     /// After calling this method, [`Self::relationships`] contains all
     /// hyperlink relationships discovered during serialization.
     ///
+    /// `semantic_deck` is the original semantic IR ([`slideforge_types::Deck`])
+    /// used for STORY-081 I2 dual-title: when a slide title carries inline markup
+    /// (e.g., `**Bold Title**`), the `title_inlines` shadow field in the semantic
+    /// slide is used to emit a rich Heading1 paragraph instead of plain text.
+    /// The PPTX exporter ignores this shadow field (PPTX single-run constraint).
+    ///
     /// # Register routing
     ///
-    /// - Per slide: emits `<w:p style="Heading1">` from the slide title
-    ///   (taken from the first `FrameContent::Title` frame), then
-    ///   `<w:p style="Normal">` for each `Register::Report` entry in
-    ///   `slide.register_content`. If there are no Report entries, emits
-    ///   an empty `<w:p/>` (AC-009).
+    /// - Per slide: emits `<w:p style="Heading1">` from the slide title, then
+    ///   `<w:p style="Normal">` for each `Register::Report` entry.
+    ///   If there are no Report entries, emits an empty `<w:p/>` (AC-009).
     /// - After all slides: emits `<w:p style="Heading2">` + body paragraphs
     ///   for each `Register::Detail` entry across all slides.
-    /// - `Register::Notes` entries are silently skipped (BC-4.02.001
-    ///   invariant 1).
+    /// - `Register::Notes` entries are silently skipped (BC-4.02.001 invariant 1).
     ///
     /// # Errors
     ///
     /// Returns [`ExportError::OoxmlError`] if the XML cannot be constructed.
-    pub fn serialize(&mut self, deck: &LaidOutDeck) -> Result<Vec<u8>, ExportError> {
+    // `serialize` is a single-pass accumulator over slides; splitting it would
+    // obscure the sequential semantics of the body/detail paragraph routing
+    // (BC-4.02.001 invariant 1) without improving readability.
+    #[allow(clippy::too_many_lines)]
+    pub fn serialize(
+        &mut self,
+        deck: &LaidOutDeck,
+        semantic_deck: &Deck,
+    ) -> Result<Vec<u8>, ExportError> {
         // Reset state for a fresh serialization.
         self.relationships.clear();
         // rId1..=rId3 are reserved for styles/numbering/settings (see build_document_rels).
@@ -144,6 +155,14 @@ impl DocumentBodySerializer {
             // Decision 3 / BC-4.02.001 v1.2 postcondition 8). No positional TextRun fallback —
             // after Stage 2b, the title field always produces TextTag::Title → FrameContent::Title.
             // AC-023: routing is tag-driven, NOT position-driven.
+            //
+            // STORY-081 I2 (dual-title): check for preserved inline title structure.
+            // If the semantic slide has a "title_inlines" shadow field (set by eval_slide_node
+            // when the title contains inline markup), use it for the Heading1 paragraph so
+            // DOCX renders **Bold Title** as bold rather than plain text.
+            // The PPTX exporter ignores this shadow field (PPTX single-run constraint).
+            // Extract plain-text title (used for both the Heading1 paragraph fallback
+            // and for the "Appendix: {title}" detail section heading below).
             let title: &str = slide
                 .frames
                 .iter()
@@ -156,20 +175,56 @@ impl DocumentBodySerializer {
                 })
                 .unwrap_or("");
 
-            // Emit Heading1 paragraph for the slide title.
-            body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                "Heading1", title,
-            ))));
+            // STORY-081 I2 (dual-title): check for preserved inline title structure.
+            // If the semantic slide has a "title_inlines" shadow field (set by eval_slide_node
+            // when the title contains inline markup), use it for the Heading1 paragraph so
+            // DOCX renders **Bold Title** as bold rather than plain text.
+            // The PPTX exporter ignores this shadow field (PPTX single-run constraint).
+            let title_inlines_opt: Option<&[slideforge_types::InlineNode]> =
+                semantic_deck.slides.get(slide.source_index).and_then(|s| {
+                    if let Some(FieldValue::Inlines(nodes)) = s.fields.get("title_inlines") {
+                        Some(nodes.as_slice())
+                    } else {
+                        None
+                    }
+                });
 
-            // ── Subtitle (FrameContent::Subtitle → Heading2) ─────────────────
-            // BC-4.02.001 v1.2 postcondition 9: subtitle field → FrameContent::Subtitle →
-            // <w:pStyle w:val="Heading2"/> paragraph.
+            if let Some(inlines) = title_inlines_opt {
+                // Title has inline markup: emit Heading1 with rich inline runs.
+                let para = self
+                    .make_inline_paragraph("Heading1", inlines)
+                    .map_err(|e| ExportError::OoxmlError {
+                        message: format!("Heading1 inline title paragraph: {e}"),
+                    })?;
+                body_paragraphs.push(BodyChoice::WP(Box::new(para)));
+            } else {
+                // Plain title path (no inline markup, or no shadow field).
+                body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                    "Heading1", title,
+                ))));
+            }
+
+            // ── Subtitle (FrameContent::Subtitle / SubtitleInlines → Heading2) ───
+            // BC-4.02.001 v1.2 postcondition 9: subtitle field → Heading2 paragraph.
+            // STORY-081 C3: SubtitleInlines carries rich inline structure;
+            // render it with make_inline_paragraph so Bold/Italic/Code are preserved.
             for frame in &slide.frames {
-                if let slideforge_layout::types::FrameContent::Subtitle(t) = &frame.content {
-                    body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                        "Heading2",
-                        t.as_ref(),
-                    ))));
+                match &frame.content {
+                    slideforge_layout::types::FrameContent::Subtitle(t) => {
+                        body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
+                            "Heading2",
+                            t.as_ref(),
+                        ))));
+                    },
+                    slideforge_layout::types::FrameContent::SubtitleInlines(nodes) => {
+                        let para = self.make_inline_paragraph("Heading2", nodes).map_err(|e| {
+                            ExportError::OoxmlError {
+                                message: format!("Heading2 inline subtitle paragraph: {e}"),
+                            }
+                        })?;
+                        body_paragraphs.push(BodyChoice::WP(Box::new(para)));
+                    },
+                    _ => {},
                 }
             }
 
@@ -177,28 +232,46 @@ impl DocumentBodySerializer {
             // BC-4.02.001 v1.2 postcondition 10: body field → FrameContent::Body →
             // Normal-styled paragraphs (no Heading style). Body text MUST NOT appear
             // in a Heading1 paragraph (AC-020: tag-driven routing invariant).
+            //
+            // STORY-081 AC-003: use make_inline_paragraph to preserve inline markup
+            // (Bold, Italic, Highlight, etc.) instead of discarding non-Plain nodes.
             for frame in &slide.frames {
                 if let slideforge_layout::types::FrameContent::Body(blocks) = &frame.content {
                     for content_block in blocks {
-                        if let slideforge_types::ContentBlock::Text(text_block) = content_block {
-                            let text: String = text_block
-                                .inlines
-                                .iter()
-                                .filter_map(|node| {
-                                    if let slideforge_types::InlineNode::Plain(s) = node {
-                                        Some(s.as_ref())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if !text.is_empty() {
-                                body_paragraphs.push(BodyChoice::WP(Box::new(
-                                    make_styled_paragraph("Normal", &text),
-                                )));
-                            }
+                        if let slideforge_types::ContentBlock::Text(text_block) = content_block
+                            && !text_block.inlines.is_empty()
+                        {
+                            let para = self
+                                .make_inline_paragraph("Normal", &text_block.inlines)
+                                .map_err(|e| ExportError::OoxmlError {
+                                    message: format!("Body frame inline paragraph: {e}"),
+                                })?;
+                            body_paragraphs.push(BodyChoice::WP(Box::new(para)));
                         }
                     }
+                }
+            }
+
+            // ── TextRun (FrameContent::TextRun → Normal paragraphs for bullets) ──
+            // BC-4.02.001 v1.2: STORY-073 — the layout stage converts each
+            // BulletItem in ContentBlock::Bullets to a FrameContent::TextRun frame
+            // (one per bullet item). The DOCX exporter must render each TextRun as
+            // a Normal-styled paragraph so that bullet items are visible in DOCX.
+            //
+            // STORY-081×STORY-088: TextRun frames from markup-bearing list-literal
+            // bullets carry InlineNode::Bold / Italic etc. — render with
+            // make_inline_paragraph so markup is preserved (not stripped to plain
+            // text). This is the DOCX half of the list-form bullets fix.
+            for frame in &slide.frames {
+                if let slideforge_layout::types::FrameContent::TextRun(inlines) = &frame.content
+                    && !inlines.is_empty()
+                {
+                    let para = self.make_inline_paragraph("Normal", inlines).map_err(|e| {
+                        ExportError::OoxmlError {
+                            message: format!("TextRun frame inline paragraph: {e}"),
+                        }
+                    })?;
+                    body_paragraphs.push(BodyChoice::WP(Box::new(para)));
                 }
             }
 
@@ -495,37 +568,43 @@ impl DocumentBodySerializer {
                     target: url.to_string(),
                 });
 
-                // Emit the link text as a run with the Hyperlink character style,
-                // wrapped in a <w:hyperlink r:id="..."> element so the link is
-                // clickable in Word and LibreOffice (EC-003 requirement).
-                let link_run = Run {
-                    run_properties: Some(Box::new(RunProperties {
-                        run_style: Some(
-                            ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::RunStyle {
-                                val: "Hyperlink".to_owned(),
-                            },
-                        ),
-                        ..RunProperties::default()
-                    })),
-                    run_choice: vec![RunChoice::WT(Box::new(make_text(&collect_plain_text(text))))],
-                    ..Run::default()
-                };
+                // Build the hyperlink choices by recursing display-text children
+                // through the structured run builder (F-P17-001 / BC-3.05.001 PC-3).
+                let hyperlink_choices = self.build_hyperlink_display_runs(text)?;
 
                 let hyperlink = Hyperlink {
                     id: Some(r_id),
-                    hyperlink_choice: vec![HyperlinkChoice::WR(Box::new(link_run))],
+                    hyperlink_choice: hyperlink_choices,
                     ..Hyperlink::default()
                 };
 
                 Ok(vec![ParagraphChoice::WHyperlink(Box::new(hyperlink))])
             },
 
-            // For unsupported inline variants (Math, Footnote, Xref, Highlight),
+            // AC-003 STORY-081: Highlight → `<w:highlight w:val="yellow"/>` using
+            // ooxmlsdk typed builders (NOT a plain text fallback).
+            InlineNode::Highlight(children) => {
+                let mut choices = Vec::new();
+                for child in children {
+                    let child_choices = self.inline_node_to_paragraph_choices(child)?;
+                    for choice in child_choices {
+                        // Apply highlight to each WR run produced by children.
+                        let highlighted = apply_run_property(choice, |rpr| {
+                            rpr.highlight = Some(Highlight {
+                                val: HighlightColorValues::Yellow,
+                            });
+                        });
+                        choices.push(highlighted);
+                    }
+                }
+                Ok(choices)
+            },
+            // For unsupported inline variants (Math, Footnote, Xref),
             // fall back to plain text extraction.
             InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(
                 math_node.latex.as_ref(),
             )))]),
-            InlineNode::Footnote(children) | InlineNode::Highlight(children) => {
+            InlineNode::Footnote(children) => {
                 let text = collect_plain_text(children);
                 Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(&text)))])
             },
@@ -533,6 +612,87 @@ impl DocumentBodySerializer {
                 target.as_ref(),
             )))]),
         }
+    }
+
+    /// Build `HyperlinkChoice` entries for the display-text children of a
+    /// [`InlineNode::Link`] node.
+    ///
+    /// Recurses each child through [`Self::inline_node_to_paragraph_choices`] so
+    /// that formatting INSIDE the link display text (e.g. `[**here**](url)`)
+    /// produces structured runs with run-properties (`<w:b/>`, `<w:i/>`, …) rather
+    /// than being silently dropped by a plain-text flatten.
+    ///
+    /// - `WR` run results: receive the Hyperlink character style (if not already
+    ///   styled) and become `HyperlinkChoice::WR`.
+    /// - `WHyperlink` results: flattened into individual `WR` runs to avoid
+    ///   nested `<w:hyperlink>` (invalid OOXML).
+    /// - Empty display text: a single empty run with the Hyperlink style is
+    ///   emitted to keep the element structurally valid.
+    ///
+    /// This is extracted from the `Link` arm of `inline_node_to_paragraph_choices`
+    /// purely to keep that function under the `clippy::too_many_lines` limit.
+    fn build_hyperlink_display_runs(
+        &mut self,
+        display_text: &[InlineNode],
+    ) -> Result<Vec<HyperlinkChoice>, ExportError> {
+        // F-P17-001 / BC-3.05.001 PC-3: formatting-inside-link-display-text must
+        // not be silently dropped. Recurse through `inline_node_to_paragraph_choices`
+        // and wrap the resulting WR runs inside `<w:hyperlink>` as HyperlinkChoice::WR.
+        // Each run also gets the Hyperlink character style injected so the link text
+        // appears blue+underlined even when inner nodes have their own formatting.
+        let mut choices: Vec<HyperlinkChoice> = Vec::new();
+        for child in display_text {
+            let child_choices = self.inline_node_to_paragraph_choices(child)?;
+            for choice in child_choices {
+                match choice {
+                    ParagraphChoice::WR(mut run) => {
+                        let rpr = run
+                            .run_properties
+                            .get_or_insert_with(|| Box::new(RunProperties::default()));
+                        if rpr.run_style.is_none() {
+                            rpr.run_style = Some(
+                                ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::RunStyle {
+                                    val: "Hyperlink".to_owned(),
+                                },
+                            );
+                        }
+                        choices.push(HyperlinkChoice::WR(run));
+                    },
+                    ParagraphChoice::WHyperlink(inner_hl) => {
+                        // Nested hyperlink (Link inside link display text): flatten WR
+                        // runs to avoid invalid nested <w:hyperlink> elements.
+                        for inner_choice in inner_hl.hyperlink_choice {
+                            if let HyperlinkChoice::WR(run) = inner_choice {
+                                choices.push(HyperlinkChoice::WR(run));
+                            }
+                        }
+                    },
+                    // Other ParagraphChoice variants are not produced by
+                    // inline_node_to_paragraph_choices for any current InlineNode
+                    // variant — drop defensively.
+                    _ => {},
+                }
+            }
+        }
+
+        // If empty display text, emit a single empty run to keep the element valid.
+        if choices.is_empty() {
+            let empty_run = Run {
+                run_properties: Some(Box::new(RunProperties {
+                    run_style: Some(
+                        ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::RunStyle {
+                            val: "Hyperlink".to_owned(),
+                        },
+                    ),
+                    ..RunProperties::default()
+                })),
+                run_choice: vec![RunChoice::WT(Box::new(make_text("")))],
+                ..Run::default()
+            };
+            choices.push(HyperlinkChoice::WR(Box::new(empty_run)));
+        }
+
+        Ok(choices)
     }
 }
 
@@ -544,13 +704,18 @@ impl Default for DocumentBodySerializer {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/// Apply a run-property mutation to a [`ParagraphChoice`] if it is a `WR` variant.
+/// Apply a run-property mutation to a [`ParagraphChoice`].
 ///
-/// For non-`WR` choices (e.g., `WHyperlink`), the choice passes through
-/// unchanged — caller is responsible for handling those cases if needed.
+/// - For `WR` variants: mutates the run's `<w:rPr>` directly.
+/// - For `WHyperlink` variants: applies the property to every `WR` run INSIDE
+///   the hyperlink's `hyperlink_choice` list. This preserves clickability (the
+///   `r:id` relationship wiring on the `<w:hyperlink>` element stays intact)
+///   while ensuring that formatting applied to the hyperlink wrapper — e.g.
+///   `Bold([Link{...}])` → `<w:b/>` inside `<w:hyperlink>` — is not silently
+///   discarded. (F-P13-001 fix.)
 fn apply_run_property<F>(choice: ParagraphChoice, f: F) -> ParagraphChoice
 where
-    F: FnOnce(&mut RunProperties),
+    F: Fn(&mut RunProperties),
 {
     match choice {
         ParagraphChoice::WR(mut run) => {
@@ -560,6 +725,23 @@ where
             f(rpr);
             ParagraphChoice::WR(run)
         },
+        ParagraphChoice::WHyperlink(mut hyperlink) => {
+            // Apply the property to every WR run inside the hyperlink so that
+            // formatting wrappers (Bold, Italic, etc.) are not silently dropped
+            // when they wrap a Link node. The hyperlink's r:id (clickability)
+            // remains on the <w:hyperlink> element and is unaffected.
+            for hc in &mut hyperlink.hyperlink_choice {
+                if let HyperlinkChoice::WR(run) = hc {
+                    let rpr = run
+                        .run_properties
+                        .get_or_insert_with(|| Box::new(RunProperties::default()));
+                    f(rpr);
+                }
+            }
+            ParagraphChoice::WHyperlink(hyperlink)
+        },
+        // Other ParagraphChoice variants (WBookmarkStart, WBookmarkEnd, etc.) are
+        // not produced by inline_node_to_paragraph_choices and pass through unchanged.
         other => other,
     }
 }

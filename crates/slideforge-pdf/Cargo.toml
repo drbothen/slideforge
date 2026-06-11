@@ -19,6 +19,20 @@ name = "slideforge_pdf"
 # do NOT add them as direct deps (RISK-1 / RISK-2 per tech-validation.md).
 krilla = "=0.6.0"
 
+# Metadata-aware font face resolution — ADR-023 (STORY-081 AC-004).
+# Already in Cargo.lock as a transitive dep of usvg =0.47.0; promoting to a
+# direct pinned dep does NOT expand the supply chain (same version, already compiled).
+# Queries OS/2 table usWeightClass + fsSelection bits — NOT filename heuristics.
+# Supply-chain policy NFR-025: exact pin satisfied by "=0.23.0".
+fontdb = "=0.23.0"
+
+# Real glyph-metrics width measurement — ADV-P04-CRIT-001 (STORY-081 Pass-4 fix).
+# Required to compute per-span horizontal advance (cmap→glyph_id→hmtx advance)
+# so that multi-span inline lines have a correct horizontal cursor, preventing
+# span overprinting.  Version 0.25.1 is already in Cargo.lock as a transitive dep
+# of fontdb; exact-pin per supply-chain policy NFR-025.
+ttf-parser = "=0.25.1"
+
 # Structured logging — no println! in library crates (code conventions).
 tracing = { workspace = true }
 

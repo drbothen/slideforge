@@ -193,6 +193,10 @@ pub fn run_inline_validation(
                 // Bullet-list inline scanning is owned by STORY-073.
                 crate::types::FrameContent::Title(_)
                 | crate::types::FrameContent::Subtitle(_)
+                // STORY-081 C3: SubtitleInlines carries InlineNodes but inline xref
+                // validation is not yet wired for subtitle content — deferred to the
+                // same future story that extends Body validation (per comment above).
+                | crate::types::FrameContent::SubtitleInlines(_)
                 | crate::types::FrameContent::Body(_)
                 | crate::types::FrameContent::Image { .. }
                 | crate::types::FrameContent::Chart { .. }

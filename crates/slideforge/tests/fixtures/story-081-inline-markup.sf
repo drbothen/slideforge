@@ -1,0 +1,34 @@
+# STORY-081 inline markup fixture: a content slide with bold, italic,
+# code, strikethrough, highlight, superscript, subscript, link, bold-wrapped
+# link, and nested combined form (bold+italic) in the body.
+#
+# Used by the inline_markup_e2e.rs end-to-end test (C4 keystone).
+#
+# Design constraints:
+# - slideforge_version "1" required by parser
+# - lang "en-US" satisfies LangValidator (prevents E-A11-003)
+# - body field uses inline markup so the e2e test can assert format-native tags
+# - No chart/image/shape to avoid AltTextValidator E-A11-001 errors
+# - strict: false for body inline markup (title is plain to avoid E-EVL-015)
+#
+# F-P13 additions (adversary Pass-13 findings):
+# - slide content2 adds **[click](https://example.com)** (bold-wrapped link)
+# - slide content3 adds **_nested_** (nested bold+italic combined form)
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Inline Markup Test Deck"
+
+slide content:
+  title "Inline Markup Test Slide"
+  body "See **bold text** and _italic text_ and `code span` and ~~strikethrough~~ and ==highlight== and ^sup^ and ~sub~ for details."
+
+slide content:
+  title "Bold Link Slide"
+  body "Visit **[click](https://example.com)** for more."
+
+slide content:
+  title "Nested Combined Form Slide"
+  body "This is **_bold and italic_** text."

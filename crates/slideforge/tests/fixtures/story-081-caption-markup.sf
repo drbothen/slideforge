@@ -1,0 +1,25 @@
+# STORY-081 P31-MED-001 fixture: caption field with inline markup.
+#
+# Uses slide image: type, where 'caption' is a defined known field
+# (known_fields.rs — image/screenshot/blank). Tests that caption
+# FieldValue::Inlines threads through field_to_block.rs → layout →
+# exporters without being silently dropped.
+#
+# Design constraints:
+# - slideforge_version "1" required by parser
+# - lang "en-US" satisfies LangValidator (prevents E-A11-003)
+# - slide image: uses src (non-existent path is OK — only XML output is checked)
+# - alt satisfies AltTextValidator
+# - caption uses **bold** inline markup for P31-MED-001 assertion
+
+slideforge_version "1"
+lang "en-US"
+
+slide title:
+  title "Caption Markup Test Deck"
+
+slide image:
+  title "Caption Markup Slide"
+  src "test-image.png"
+  alt "Test image for caption markup verification"
+  caption "See **bold caption** for details."

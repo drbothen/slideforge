@@ -3713,6 +3713,7 @@ dependencies = [
 name = "slideforge-pdf"
 version = "0.1.0"
 dependencies = [
+ "fontdb",
  "krilla",
  "proptest",
  "slideforge-layout",
@@ -3721,6 +3722,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "ttf-parser",
  "usvg",
 ]
 

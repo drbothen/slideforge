@@ -108,3 +108,11 @@ mod e2e_story_089_field_schema;
 // RED GATE: value_parser() has no [...]  arm → build() returns Err(ParseFailed).
 #[path = "e2e/story_088_bullets_list_literal.rs"]
 mod e2e_story_088_bullets_list_literal;
+
+// STORY-081 — Slide-level inline markup end-to-end keystone test (C4 adversary finding).
+// Builds a deck from DSL source with **bold**, _italic_, `code`, ~~del~~, ==highlight==,
+// ^sup^, ~sub~ in the body field. Asserts FORMAT-NATIVE markup in each output (PPTX b="1",
+// DOCX <w:b/>, HTML <strong>, PDF "bold text" in bytes) and absence of literal ** characters.
+// RED GATE: C2 (body Inlines dropped) + C3 (PPTX Body flattens) block ALL format assertions.
+#[path = "e2e/story_081_inline_markup_e2e.rs"]
+mod e2e_story_081_inline_markup;

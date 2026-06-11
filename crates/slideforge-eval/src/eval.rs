@@ -126,10 +126,15 @@ fn brand_ref_field(expr: &Expr) -> Option<&str> {
 /// `eval_slide_node` in `for_eval`) to handle the inline-markup chunk
 /// variants introduced in STORY-077.
 ///
-/// Per DIR-077-002 §4 and EC-013, slide-level fields evaluate inline markup
-/// to `Value::Str` by **flattening to the inner text** — structural `InlineNode`
-/// representation is deferred to STORY-081.  The delimiters (`**`, `_`, etc.)
-/// are NOT re-synthesized; only the content is appended.
+/// Per DIR-077-002 §4 and EC-013, this flat-text path is used for:
+/// - Set-rule values (`eval_set_rule_value`): always flatten to `Value::Str`
+/// - Non-inline slide fields: plain-text extraction from `TemplateChunk` sequences
+///
+/// For slide-level `INLINE_CONTENT_FIELDS` (body, bullets, subtitle, etc.),
+/// `eval_slide_node` in `for_eval.rs` calls `chunks_to_inline_nodes` instead
+/// (STORY-081 AC-001). This function is NOT used for those fields when they
+/// contain markup. The delimiters (`**`, `_`, etc.) are NOT re-synthesized;
+/// only the content is appended.
 ///
 /// # `preserve_brand_ref` flag
 ///
@@ -189,8 +194,9 @@ pub(crate) fn flatten_chunks_to_string(
                 }
             },
             // Inline markup variants (STORY-077): flatten to inner text content.
-            // The structural InlineNode upgrade is deferred to STORY-081; at this
-            // eval layer, slide-level fields produce Value::Str with markup stripped.
+            // This path is used for set-rule values and non-inline fields (see
+            // flatten_chunks_to_string doc comment). Slide-level INLINE_CONTENT_FIELDS
+            // use chunks_to_inline_nodes in eval_slide_node instead (STORY-081 AC-001).
             // preserve_brand_ref is threaded down so brand refs at ANY markup depth
             // in a set-rule produce the correct placeholder (F-077-P18-001).
             TemplateChunk::Bold(inner)
@@ -2695,10 +2701,15 @@ mod tests {
         );
     }
 
-    /// Site 3 (@for body): eval_slide_node in a @for body — slide field with
-    /// inline markup must preserve the inner text.
-    /// A slide with `title "**Loop title**"` evaluated in a @for context
-    /// must produce a `Slide` whose `title` field is `Value::Str("Loop title")`.
+    /// Site 3 (@for body): eval_slide_node in a @for body — slide `title` field with
+    /// inline markup must preserve the inner text AS A PLAIN STRING for PPTX
+    /// compatibility AND emit an `E-EVL-015 InlineMarkupInTitle` warning
+    /// (STORY-081 AC-006 / BC-3.05.001 Slide-Level Title Constraint / EC-011).
+    ///
+    /// Before STORY-081 this test asserted `sink.is_empty()` because the old
+    /// flatten path produced no warning. STORY-081 changes the title-field behavior:
+    /// bold/italic markup in a title MUST emit a warning (the PPTX single-run
+    /// title constraint). Updated to match the new AC-006 contract.
     #[test]
     fn test_f077_p17_001_for_body_slide_field_bold_preserved_as_flat_text() {
         use crate::for_eval::eval_slide_node;
@@ -2727,17 +2738,51 @@ mod tests {
 
         let slide = eval_slide_node(&env, &slide_node, &defaults, &mut sink);
 
+        // STORY-081 AC-006 / F-P25-HIGH-001: a bold title MUST emit an
+        // InlineMarkupInTitle diagnostic (E-EVL-015). The sink must NOT be empty.
         assert!(
-            sink.is_empty(),
-            "no diagnostics expected for valid @for-body slide with bold title; got: {:?}",
+            !sink.is_empty(),
+            "STORY-081 AC-006: InlineMarkupInTitle diagnostic must be emitted for a bold title; \
+             sink was empty"
+        );
+        // The diagnostic MUST be Error severity (not Warning, not Fatal).
+        // - Error (not Fatal): evaluation continues and returns a valid Slide (eval
+        //   only skips slides on Fatal errors, not Error-severity diagnostics).
+        // - Error (not Warning): the strict gate in slideforge::compile_inner fires on
+        //   error_and_fatal_count() > 0, satisfying AC-006 strict-mode fatal semantics.
+        //   F-P25-HIGH-001: before this fix it was Warning, which silently bypassed the
+        //   strict gate.
+        assert!(
+            !sink.has_fatal(),
+            "InlineMarkupInTitle must be Error severity, not Fatal; \
+             eval_slide_node must still return Some (evaluation continues)"
+        );
+        assert!(
+            sink.error_and_fatal_count() > 0,
+            "InlineMarkupInTitle must be Error severity (not Warning); \
+             error_and_fatal_count() must be > 0 so the strict gate fires. \
+             F-P25-HIGH-001: was Warning before this fix. got sink: {:?}",
             sink.errors()
         );
+        // Check the error code E-EVL-015 is present.
+        let has_title_error = sink.errors().iter().any(|diag| {
+            diag.code()
+                .is_some_and(|c| c.to_string().contains("E-EVL-015"))
+        });
+        assert!(
+            has_title_error,
+            "InlineMarkupInTitle error (E-EVL-015) must be in the sink; got: {:?}",
+            sink.errors()
+        );
+
         let slide = slide.expect("eval_slide_node must return Some for valid slide");
         let title_val = slide
             .fields
             .get("title")
             .expect("slide must have a 'title' field");
 
+        // The title value must still be stripped to plain text "Loop title"
+        // (PPTX path: no inline markup in the title FieldValue).
         assert_eq!(
             *title_val,
             slideforge_types::FieldValue::Literal(Value::Str(Arc::from("Loop title"))),

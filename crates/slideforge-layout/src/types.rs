@@ -429,9 +429,31 @@ pub struct ShapeFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FrameContent {
     /// A primary slide title.
+    ///
+    /// Carries plain text for the PPTX single-run constraint (no inline formatting
+    /// in PPTX title placeholders). For DOCX/HTML/PDF with inline title markup,
+    /// the `title_inlines` shadow field in the semantic slide is used by exporters
+    /// that support rich title rendering.
+    ///
+    /// For subtitles with inline markup, see [`FrameContent::SubtitleInlines`]
+    /// (STORY-081 C3).
     Title(Arc<str>),
     /// A subtitle or secondary heading (e.g., on `TitleSlide`).
+    ///
+    /// Carries plain text content (no inline markup). Produced when the subtitle
+    /// field contains no inline markup variants, or as a fallback.
+    ///
+    /// For subtitles containing inline markup (Bold, Italic, Code, etc.),
+    /// [`FrameContent::SubtitleInlines`] is produced instead (STORY-081 C3).
     Subtitle(Arc<str>),
+    /// A subtitle with rich inline structure (STORY-081 C3 fix).
+    ///
+    /// Produced by layout when the `subtitle` field carries `FieldValue::Inlines`
+    /// (i.e., the subtitle contains inline markup). All four exporters (PPTX, DOCX,
+    /// PDF, HTML) must render this variant richly — NOT flatten to plain text.
+    ///
+    /// For plain-text subtitles, [`FrameContent::Subtitle`] is still produced.
+    SubtitleInlines(Vec<InlineNode>),
     /// Structured body content (bullet list, numbered list, etc.).
     Body(Vec<ContentBlock>),
     /// An image placeholder with required alt text.
@@ -892,6 +914,11 @@ mod tests {
         // BC-3.05.001 / STORY-028: TextRun carries a Vec<InlineNode>.
         let text_run = FrameContent::TextRun(vec![]);
         let empty = FrameContent::Empty;
+        // STORY-081 C3: SubtitleInlines carries rich inline structure.
+        let subtitle_inlines =
+            FrameContent::SubtitleInlines(vec![InlineNode::Bold(vec![InlineNode::Plain(
+                Arc::from("Bold Subtitle"),
+            )])]);
 
         assert!(matches!(title, FrameContent::Title(_)));
         assert!(matches!(subtitle, FrameContent::Subtitle(_)));
@@ -902,6 +929,7 @@ mod tests {
         assert!(matches!(shape, FrameContent::Shape(_)));
         assert!(matches!(text_run, FrameContent::TextRun(_)));
         assert!(matches!(empty, FrameContent::Empty));
+        assert!(matches!(subtitle_inlines, FrameContent::SubtitleInlines(_)));
     }
 
     /// BC-1.11.002 AC-004 / STORY-032 — `FrameContent::ErrorSlidePlaceholder` variant exists

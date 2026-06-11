@@ -1,0 +1,5 @@
+---
+source: crates/slideforge-html/tests/inline_markup_html_snapshot.rs
+expression: html
+---
+<strong>bold</strong> <em>italic</em> <code>code</code> <a href="https://example.com">link</a> <sup>sup</sup> <sub>sub</sub> <del>del</del> <mark>highlight</mark>

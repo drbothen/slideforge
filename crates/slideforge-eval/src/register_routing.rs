@@ -813,6 +813,25 @@ fn field_value_to_inlines(fv: &FieldValue) -> Option<Vec<InlineNode>> {
             );
             None
         },
+
+        // InlinesList — produced by eval_slide_node for list-literal bullets/body fields
+        // containing inline markup (STORY-081×STORY-088 fix).
+        //
+        // Register fields (notes/report/detail) are text-only by design (BC-1.14.001/002/003).
+        // An InlinesList represents per-bullet structured content that has no meaningful
+        // register rendering — treat the same as List/Map: emit an observable warning and
+        // return None. This is NOT a silent drop: the tracing::warn! is observable in
+        // structured logs, and the behaviour is tested (if a register field somehow evaluates
+        // to InlinesList, the register entry is absent rather than vacuously empty).
+        FieldValue::InlinesList(items) => {
+            tracing::warn!(
+                item_count = items.len(),
+                "extract_register_content: register field resolved to InlinesList — \
+                 register fields are text-only (BC-1.14.001/002/003); \
+                 no register entry produced (STORY-081×STORY-088 fix)"
+            );
+            None
+        },
     }
 }
 

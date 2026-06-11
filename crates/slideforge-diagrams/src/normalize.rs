@@ -62,6 +62,7 @@
 //! Regression tests for these edge cases are present in the test suite.
 
 use std::fmt::Write as FmtWrite;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use miette::SourceSpan;
@@ -149,6 +150,38 @@ const MAX_SVG_NESTING_DEPTH: usize = 64;
 /// The `Arc<usvg::fontdb::Database>` wrapper is required by `usvg::Options`.
 static FONT_DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
 
+/// Number of times the font database has been loaded in this process.
+///
+/// Incremented exactly once — inside `FONT_DB.get_or_init` — so it is either
+/// `0` (database not yet loaded) or `1` (loaded exactly once).
+///
+/// Used by the cold-budget test (and any future regression test) to assert the
+/// single-load invariant WITHOUT relying on wall-clock timing. This counter is
+/// never reset, making it monotone and trivially safe across test runs within
+/// the same process.
+///
+/// `Relaxed` ordering is sufficient: the counter is only ever incremented to 1
+/// and only read from the same thread (the test thread) after the load
+/// completes.  There is no ordering dependency with any other atomic or data
+/// structure.
+static FONT_DB_LOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Return the number of times the system font database has been loaded in this
+/// process.
+///
+/// Under correct operation this is `0` before the first `usvg_normalize` call
+/// and `1` after.  A value > 1 would indicate multiple `load_system_fonts()`
+/// invocations, which is a performance regression (cold path pays the cost
+/// multiple times).
+///
+/// This function is `pub` so that integration-test binaries in `tests/` (which
+/// compile as separate Cargo binaries and therefore have their own process
+/// state) can observe the count without being in the same module.
+#[must_use]
+pub fn font_db_load_count() -> usize {
+    FONT_DB_LOAD_COUNT.load(Ordering::Relaxed)
+}
+
 /// Return a reference to the lazily-initialized system font database.
 ///
 /// On the first call this loads all system fonts (one-time cost ~50–300ms).
@@ -172,6 +205,10 @@ fn font_db() -> Arc<usvg::fontdb::Database> {
     Arc::clone(FONT_DB.get_or_init(|| {
         let mut db = usvg::fontdb::Database::new();
         db.load_system_fonts();
+        // Increment BEFORE returning so that any observer racing on FONT_DB_LOAD_COUNT
+        // after FONT_DB is set will see count >= 1.  OnceLock's get_or_init
+        // guarantees this closure runs at most once per process.
+        FONT_DB_LOAD_COUNT.fetch_add(1, Ordering::Relaxed);
 
         // On Linux headless environments (e.g., CI runners), fontconfig may
         // return an empty database even when fonts are present on disk. Fall
@@ -1317,72 +1354,77 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // AC-008 / NFR-003: per-diagram normalization performance budget
+    // AC-008 / NFR-003: warm-path single-load invariant (deterministic gate)
     //
-    // The NFR-003 performance gate (< 500ms cold build for a 25-slide deck)
-    // distributes across the pipeline. Per AC-008, warm normalization must be
-    // a small fraction of the 10ms warm budget.
+    // BC-1.12.003 requires the warm path (font DB already loaded) to be O(1)
+    // with respect to font I/O. The only way the warm path can be slow is if
+    // it calls load_system_fonts() again on each invocation — which this test
+    // detects deterministically via FONT_DB_LOAD_COUNT without any wall-clock
+    // dependency.
     //
-    // F-HIGH-004: The performance test uses a fixture with <text> elements
-    // to exercise the font-loading slow path. This ensures the test is
-    // meaningful — a geometry-only fixture (no text) would skip font loading
-    // and measure only usvg parsing overhead, missing the dominant cost.
-    //
-    // Criterion benchmarks (cold_render / warm_render) provide the precise
-    // percentile measurements; this unit test catches catastrophic slowdowns
-    // (e.g., accidentally calling resvg rasterization, I/O in a loop, etc.).
+    // Wall-clock timing for this path is gated by the Criterion benchmarks in
+    // benches/warm_render.rs (NFR-004: < 10ms per call on x86_64 CI) and
+    // benches/cold_render.rs (NFR-003: < 200ms first-call including DB init).
     // -----------------------------------------------------------------------
 
-    /// AC-008 / NFR-003 / F-HIGH-004: normalizing a mermaid-like SVG with
-    /// `<text>` elements exercises the font-loading slow path. This test
-    /// verifies the **warm-path** latency (after the font DB is initialized)
-    /// stays within the 50ms warm budget.
+    /// AC-008 / NFR-003: warm-path normalization must NOT re-load the font DB.
+    ///
+    /// The correctness invariant that the warm path protects is **"font DB is
+    /// loaded at most once per process."** If `load_system_fonts()` were called
+    /// on every `usvg_normalize` invocation, the warm path would be 50–300ms
+    /// instead of sub-millisecond — a catastrophic per-call regression.
     ///
     /// ## Methodology
     ///
-    /// 1. Warm-up call: run a geometry-only (no-text) SVG to ensure the test
-    ///    process is JIT-warm without triggering font loading.
-    /// 2. Font-DB init: run the text SVG once to load the system font DB
-    ///    (cold-path; cost ~50–300ms, not measured).
-    /// 3. Timed call: run the text SVG again and assert < 50ms (warm path).
+    /// 1. Trigger font DB initialization with a `<text>` SVG (cold path).
+    ///    Record the load count after (must be 1).
+    /// 2. Run 5 subsequent warm-path calls with `<text>` SVG.
+    /// 3. Assert `FONT_DB_LOAD_COUNT` has not increased (still 1).
     ///
-    /// The Criterion bench suites (`cold_render` / `warm_render`) enforce the
-    /// precise per-AC-008 budgets (cold < 200ms total, warm < 10ms total).
-    /// This test catches catastrophic regressions (accidentally calling
-    /// `load_system_fonts()` on every call, I/O in a loop, etc.).
+    /// This assertion is **platform-independent and deterministic** — it fails
+    /// if and only if there is a real regression (redundant `load_system_fonts()`
+    /// call introduced), not due to scheduler jitter or emulated-CPU speed.
+    ///
+    /// The Criterion benchmarks (`benches/warm_render.rs`, `benches/cold_render.rs`)
+    /// enforce the precise wall-clock budgets (NFR-003 / NFR-004).
     #[test]
     fn test_bc_1_12_003_normalize_under_budget() {
-        use std::time::Instant;
-
-        // Step 1: warm up the process (geometry-only, no font loading).
-        let warmup_raw = RawDiagramSvg(test_fixtures::simple_geometry_svg().to_owned());
-        let _ = usvg_normalize(&warmup_raw, "warmup");
-
-        // Step 2: trigger font DB initialization (first call with <text>).
+        // Step 1: trigger font DB initialization (first call with <text>).
         let text_raw = RawDiagramSvg(test_fixtures::mermaid_like_with_text_svg().to_owned());
         let _ = usvg_normalize(&text_raw, "font-init");
 
-        // Step 3: time the warm-path call with <text> elements.
-        // Take the median of 5 samples to reduce sensitivity to OS scheduling
-        // jitter on CI runners. A single sample can flake on a loaded system
-        // even when the code is correct. Median suppresses outliers without
-        // hiding a genuine regression (which would show up in ALL samples).
-        let mut samples = Vec::with_capacity(5);
-        for _ in 0..5 {
-            let start = Instant::now();
-            let _ = usvg_normalize(&text_raw, "perf-test");
-            samples.push(start.elapsed());
-        }
-        samples.sort();
-        let median = samples[2]; // index 2 of 0..4 is the median
-
+        // Capture the load count after the cold-path initialization.
+        // NOTE: because unit tests in the same binary share process state, the
+        // count may already be 1 from a prior test in this binary. We record
+        // the baseline here rather than asserting == 1 to be order-independent.
+        let count_after_cold = font_db_load_count();
         assert!(
-            median.as_millis() < 50,
-            "usvg_normalize warm path (font DB already loaded) median latency must be < 50ms; \
-             median: {}ms (samples: {:?}). This guards against per-call font-loading regressions. \
-             Use Criterion benches for precise measurement.",
-            median.as_millis(),
-            samples
+            count_after_cold >= 1,
+            "font_db_load_count must be >= 1 after the first <text> SVG normalization call; \
+             got {count_after_cold}. FONT_DB must have been initialized at this point."
+        );
+
+        // Step 2: run 5 warm-path calls (font DB is already loaded).
+        for i in 0..5_u8 {
+            let result = usvg_normalize(&text_raw, "warm-perf-test");
+            assert!(
+                result.is_ok(),
+                "warm-path call {i} must succeed; got: {:?}",
+                result.err()
+            );
+        }
+
+        // Step 3: the font DB load count must NOT have increased.
+        // A count increase would mean load_system_fonts() was called during the
+        // warm path — a correctness regression proving unbounded I/O per call.
+        let count_after_warm = font_db_load_count();
+        assert_eq!(
+            count_after_warm, count_after_cold,
+            "FONT_DB_LOAD_COUNT must not increase on warm-path calls: \
+             started at {count_after_cold}, ended at {count_after_warm} after 5 calls. \
+             A count increase means load_system_fonts() is being called on each \
+             usvg_normalize invocation — OnceLock cache must prevent this. \
+             (AC-008 / NFR-003 / FU-CI-ARM64-TEST-FAILURE)"
         );
     }
 

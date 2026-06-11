@@ -49,8 +49,8 @@ use tracing::instrument;
 
 use crate::types::{DiagramError, DiagramLang, NormalizedDiagramSvg, RawDiagramSvg};
 
-// Re-export primary types for crate consumers.
-pub use crate::normalize::usvg_normalize;
+// Re-export primary types and test-instrumentation hooks for crate consumers.
+pub use crate::normalize::{font_db_load_count, usvg_normalize};
 pub use crate::types::{
     DiagramError as SfDiagramError, DiagramLang as SfDiagramLang,
     NormalizedDiagramSvg as SfNormalizedDiagramSvg, RawDiagramSvg as SfRawDiagramSvg,

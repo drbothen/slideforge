@@ -72,6 +72,7 @@ pub mod zip_assembler;
 mod tests {
     mod a11y_tests;
     mod core_tests;
+    mod inline_markup_tests;
     mod layout_tests;
     mod notes_tests;
     mod sections_tests;
@@ -87,7 +88,7 @@ use slide_serializer::SlideSerializer;
 use slideforge_brand::BrandTemplate;
 use slideforge_brand::layout_xml::{serialize_master_to_xml, serialize_theme_to_xml};
 use slideforge_layout::{FrameContent, LaidOutDeck, LaidOutSlide};
-use slideforge_plugin_api::{DefaultInlineFormat, ExportError, ExportOptions, Exporter};
+use slideforge_plugin_api::{ExportError, ExportOptions, Exporter};
 use slideforge_types::{Brand, Deck, Register};
 use zip_assembler::{ZipAssembler, ZipPart};
 
@@ -292,6 +293,19 @@ fn build_slide_parts(
             }
         }
 
+        // EC-004: collect body-path hyperlink URLs and register External rels BEFORE
+        // building the slide XML. The rIds returned by add_external_hyperlink are
+        // sequential (rId{N+1}, rId{N+2}, ...) and passed to SlideSerializer::build
+        // via hlink_map so the serializer can wire <a:hlinkClick r:id="..."/>.
+        let hlink_urls = slide_serializer::collect_hyperlink_urls_from_slide(slide);
+        let hlink_map: Vec<(String, String)> = hlink_urls
+            .into_iter()
+            .map(|url| {
+                let rid = slide_rels.add_external_hyperlink(url.as_str());
+                (url, rid)
+            })
+            .collect();
+
         // Build the slide XML. SlideSerializer handles text frames AND diagram
         // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
         // AC-011: thread the resolved layout's placeholder info into the serializer
@@ -302,7 +316,7 @@ fn build_slide_parts(
             SlideSerializer::new(is_dark_layout, layout_index)
         };
         let (slide_xml_bytes, _warnings) =
-            serializer.build(slide, i, &layout_rel_id, &diagram_rids)?;
+            serializer.build(slide, i, &layout_rel_id, &diagram_rids, &hlink_map)?;
 
         parts.push(ZipPart {
             path: slide_path,
@@ -690,18 +704,15 @@ fn build_notes_slide_parts(
             "building notesSlide part"
         );
 
-        // STORY-049 wires the assembled PluginRegistry here; until then the
-        // bundled DefaultInlineFormat ("default") is passed directly. The
-        // serializer is already registry-ready (&dyn InlineFormat).
-        let output = NotesSlideSerializer::build(
-            slide_num,
-            &slide.register_content,
-            &DefaultInlineFormat, // STORY-049: replace with registry.lookup_inline_format("default")
-        )
-        .map_err(|e| PptxError::OoxmlElement {
-            part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
-            detail: format!("NotesSlideSerializer::build failed: {e}"),
-        })?;
+        // ADR-024: NotesSlideSerializer::build uses the unified
+        // render_inline_nodes_to_runs engine internally (no InlineFormat parameter).
+        let output =
+            NotesSlideSerializer::build(slide_num, &slide.register_content).map_err(|e| {
+                PptxError::OoxmlElement {
+                    part: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+                    detail: format!("NotesSlideSerializer::build failed: {e}"),
+                }
+            })?;
 
         parts.push(ZipPart {
             path: format!("ppt/notesSlides/notesSlide{slide_num}.xml"),

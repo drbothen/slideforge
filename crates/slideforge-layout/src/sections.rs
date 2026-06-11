@@ -591,12 +591,13 @@ pub(crate) fn collect_executive_summary(
                 items.push(SectionItem::TakeawayBullet(Arc::clone(s)));
             },
             // Field is present but not a Literal(Str): unresolved Expr/Interpolated/
-            // Inlines variants (evaluator bug) or a non-string Literal (type error).
-            // In all cases return an error (HIGH-002).
+            // Inlines/InlinesList variants (evaluator bug) or a non-string Literal
+            // (type error). In all cases return an error (HIGH-002).
             Some(
                 FieldValue::Expr(_)
                 | FieldValue::Interpolated(_)
                 | FieldValue::Inlines(_)
+                | FieldValue::InlinesList(_)
                 | FieldValue::Literal(_),
             ) => {
                 return Err(LayoutError::UnresolvedTakeaway {
