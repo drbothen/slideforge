@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI workflow restructuring.
 # These stories anchor to NFRs (NFR-026 through NFR-030 multi-platform gates) and the
@@ -54,18 +54,21 @@ are drawn from the devops CLAUDE.md quality bar and the ci-speed-research sideca
 
 ## Summary
 
-Every PR push currently triggers the full 5-platform matrix including the 22-minute
-native arm64 leg, 15-minute+ macOS legs, and 20-minute Windows leg. The per-PR
-feedback wall-clock is dominated by these slow legs even though the linux-x86_64 fast
-leg typically completes in 6-8 minutes.
+Every PR push currently triggers the full 4-platform matrix (1 fast leg + 3 slow legs)
+including the 22-minute native arm64 leg, 15-minute+ macOS arm64 leg, and 20-minute
+Windows leg. The per-PR feedback wall-clock is dominated by these slow legs even though
+the linux-x86_64 fast leg typically completes in 6-8 minutes.
 
 This story restructures `ci.yml` to implement tiered triggers:
 
 1. **Fast tier (every PR push):** `fmt` + `clippy` + `test (linux-x86_64)` + `doctest` +
    `check-panic-profile` + `check-pdf-deps` + `supply-chain`. These complete in ~6-8 min.
 2. **Full tier (merge-queue + develop push + main push + manual dispatch + nightly + `full-ci` label):** the complete
-   5-platform matrix including `test (linux-arm64)`, `test (macos-arm64)`, `test (macos-x86_64)`,
+   4-platform matrix including `test (linux-arm64)`, `test (macos-arm64)`,
    `test (windows-x86_64)`, `snapshots`, `visual-regression`, `bench`, `perf-smoke`, `msrv`, `docs`.
+   Note: `test (macos-x86_64)` (macos-13 Intel runner) is NOT part of ci.yml's test matrix
+   — that leg was removed before this story due to chronic runner availability issues. Intel
+   macOS binary coverage is handled in release.yml via a native macos-13 build job instead.
 3. **Aggregator stays:** the existing `CI / all-checks-pass` synthetic job is made the
    SINGLE required status check. It handles the skipped-slow-legs case correctly by
    treating `skipped` as pass (only fires failure on a leg that actually ran and failed,
@@ -108,7 +111,7 @@ No product BCs govern CI workflow design. This story anchors to NFRs:
 | NFR | Title | Covered ACs |
 |-----|-------|-------------|
 | NFR-026 | macOS arm64 binary builds and passes tests | AC-003 (full tier gate) |
-| NFR-027 | macOS x86_64 binary builds and passes tests | AC-003 (full tier gate) |
+| NFR-027 | macOS x86_64 binary builds and passes tests | NOT covered by ci.yml test matrix — `test (macos-x86_64)` leg was removed pre-story (chronic runner availability issues); Intel macOS binary coverage is provided by release.yml's native macos-13 build job, not by this story's ci.yml restructuring |
 | NFR-028 | Linux x86_64 binary builds and passes tests | AC-001, AC-003 (fast tier) |
 | NFR-029 | Linux arm64 binary builds and passes tests | AC-003 (full tier gate) |
 | NFR-030 | Windows x86_64 binary builds and passes tests | AC-003 (full tier gate) |
@@ -116,7 +119,8 @@ No product BCs govern CI workflow design. This story anchors to NFRs:
 Note: STORY-051 through STORY-054 (CI matrix stories, EPIC-19 Wave 1) are the primary
 NFR-026 through NFR-030 anchors. This story is a CI OPTIMIZATION that maintains those
 guarantees while restructuring when they are verified. The NFR-028 (Linux x86_64) gate
-is preserved on every PR; NFR-026/027/029/030 are preserved in merge_group/nightly/develop.
+is preserved on every PR; NFR-026/029/030 are preserved in merge_group/nightly/develop.
+NFR-027 (macOS x86_64) is NOT covered by ci.yml — see note above.
 
 ## Acceptance Criteria
 
@@ -142,7 +146,9 @@ Branch protection configured to require only `CI / all-checks-pass` MUST allow t
 become mergeable. A PR with a FAILING fast leg MUST block the merge (all-checks-pass
 reports `failure`). This confirms there is no deadlock: the aggregator always reports.
 
-### AC-003: merge_group runs the full matrix (traces to NFR-026, NFR-027, NFR-029, NFR-030)
+### AC-003: merge_group runs the full matrix (traces to NFR-026, NFR-029, NFR-030)
+<!-- NFR-027 (macOS x86_64) removed: test (macos-x86_64) leg absent from ci.yml pre-story;
+     Intel macOS binary coverage is release.yml's responsibility, not this story's. -->
 
 When `github.event_name == 'merge_group'`, ALL jobs in the matrix MUST execute (no
 `skipped` slow legs). The full-tier condition MUST cover these event/ref combinations:
@@ -213,8 +219,9 @@ Architecture section files: N/A — no source crate changes.
 
 - [ ] Read `.github/workflows/ci.yml` in full to understand the current job structure,
       especially the `all-checks-pass` aggregator logic (ci.yml:447-489 per research)
-- [ ] Identify all "slow" jobs: `test (linux-arm64)`, `test (macos-arm64)`, `test (macos-x86_64)`,
+- [ ] Identify all "slow" jobs: `test (linux-arm64)`, `test (macos-arm64)`,
       `test (windows-x86_64)`, `bench`, `snapshots`, `visual-regression`, `msrv`, `docs`, `perf-smoke`
+      (Note: `test (macos-x86_64)` / macos-13 leg does NOT exist in ci.yml — removed pre-story)
 - [ ] Add `merge_group:` to the `on:` block in `ci.yml`
 - [ ] Add `schedule:` nightly cron if not already present (target: `0 6 * * *` UTC);
       note in playbook that this only fires from `main` (default branch), not `develop`
@@ -422,3 +429,4 @@ configuration.
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: pinned repo as `drbothen/slideforge` PUBLIC (free merge queue confirmed); reframed AC-001 wall-clock from fixed ≤8min gate to measure-to-confirm; added `schedule:` default-branch constraint to AC-005 and playbook task; added verify-at-impl markers for merge-queue-on-develop config and required-check skip semantics; added Uncertainty Resolution Log. |
 | 1.2 | 2026-06-10 | story-writer | EC-002 corrected (source: ci-workflow-analyzer review finding #2, 2026-06-10; fixed at implementation a0388bd4). Previous text claimed "the NEXT push or re-run triggers full matrix" — both claims were wrong. Correct behavior: (1) `on.pull_request.types` MUST include `labeled`; the `labeled` event itself fires a fresh full-tier run immediately when the label is applied. (2) Re-running an existing run via GitHub's "Re-run jobs" button reuses the original event payload, which does NOT contain the label if it was added after the run started — re-run does NOT pick up newly added labels and MUST NOT be relied on. Companion playbook (`tiered-ci-merge-queue.md`) corrected identically in Steps 7 and 9. |
 | 1.3 | 2026-06-10 | story-writer | AC-003 and Tasks `if:` expression aligned to 6-combo full-tier gate (F-091-P4-001). Two combos added: (1) `workflow_dispatch` — closes ci-workflow-analyzer finding #3; required so `gh workflow run` does not leave all slow legs skipped. (2) `push` to `refs/heads/main` — closes ci-workflow-analyzer finding #5; ensures release merges to main receive full matrix validation. Summary prose (§ Summary, item 2) updated to name all 6 triggers. Canonical expression is byte-identical to ci.yml HEAD a0388bd4 lines 294-300, applied at 7 job sites. |
+| 1.4 | 2026-06-10 | story-writer | Reconciled to actual 4-platform ci.yml test matrix (F-091-P5-001). `test (macos-x86_64)` / macos-13 leg was removed from ci.yml before this story (chronic runner availability issues); Intel macOS binary coverage is release.yml's responsibility. Changed: (1) Summary §1 "5-platform" → "4-platform (1 fast + 3 slow legs)"; (2) Summary §2 full-tier list removed `test (macos-x86_64)`, added clarifying note; (3) NFR table NFR-027 row corrected — AC-003 coverage claim removed, binary coverage path documented as release.yml; (4) AC-003 header trace removed NFR-027 with inline comment; (5) Tasks slow-job list removed `test (macos-x86_64)` with note. |
