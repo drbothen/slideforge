@@ -2003,6 +2003,7 @@ mod tests {
         let config = EvalConfig {
             large_deck_warn_threshold: 500,
             max_total_slides: Some(3),
+            source_map: None,
         };
         let mut sink = DiagnosticSink::new();
 
@@ -2736,7 +2737,7 @@ mod tests {
             inline_items: vec![],
         };
 
-        let slide = eval_slide_node(&env, &slide_node, &defaults, &mut sink);
+        let slide = eval_slide_node(&env, &slide_node, &defaults, &mut sink, None);
 
         // STORY-081 AC-006 / F-P25-HIGH-001: a bold title MUST emit an
         // InlineMarkupInTitle diagnostic (E-EVL-015). The sink must NOT be empty.

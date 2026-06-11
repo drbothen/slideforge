@@ -6,6 +6,10 @@
 //! without changing observable correctness — only performance and
 //! diagnostic verbosity are affected.
 
+use std::sync::Arc;
+
+use slideforge_syntax::span::SourceMap;
+
 // ─── EvalConfig ──────────────────────────────────────────────────────────────
 
 /// Configuration for the slideforge evaluator.
@@ -44,6 +48,25 @@ pub struct EvalConfig {
     ///
     /// Default: `None`.
     pub max_total_slides: Option<usize>,
+
+    /// Optional source map for byte-offset → `file:line:col` span resolution.
+    ///
+    /// When `Some`, `span_to_source_span` uses this map to resolve byte-offset
+    /// syntax spans to their real file name, line number, and column number —
+    /// satisfying the E-LAY-008 requirement that errors carry `file:line:col`
+    /// (error taxonomy v2.30, BC-1.15.001 "all errors carry `file:line:col` span").
+    ///
+    /// When `None` (the default), `span_to_source_span` produces `SourceSpan::default()`
+    /// for unknown spans, avoiding the `<byte:N>:0:0` synthetic sentinel.
+    ///
+    /// `compile_inner` in `slideforge` sets this field after the parse stage so
+    /// all eval-time span threading produces real locations in user-facing errors.
+    ///
+    /// Test code that constructs `EvalConfig::default()` receives `None` — tests
+    /// that need real span resolution should set this field explicitly.
+    ///
+    /// Default: `None`.
+    pub source_map: Option<Arc<SourceMap>>,
 }
 
 impl Default for EvalConfig {
@@ -51,6 +74,7 @@ impl Default for EvalConfig {
         Self {
             large_deck_warn_threshold: 500,
             max_total_slides: None,
+            source_map: None,
         }
     }
 }
@@ -89,6 +113,7 @@ mod tests {
         let cfg = EvalConfig {
             large_deck_warn_threshold: 100,
             max_total_slides: Some(50),
+            source_map: None,
         };
         let cfg2 = cfg.clone();
         assert_eq!(cfg2.large_deck_warn_threshold, 100);
@@ -102,6 +127,7 @@ mod tests {
         let cfg = EvalConfig {
             large_deck_warn_threshold: 1000,
             max_total_slides: Some(200),
+            source_map: None,
         };
         assert_eq!(cfg.large_deck_warn_threshold, 1000);
         assert_eq!(cfg.max_total_slides, Some(200));

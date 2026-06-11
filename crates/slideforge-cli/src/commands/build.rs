@@ -404,6 +404,22 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
                 buf.push_str(&rendered);
             }
         },
+        BuildError::Layout(layout_err) => {
+            // F-094-P4-004: Layout errors must render with their structured message
+            // (which already contains the error code prefix and span from thiserror
+            // Display) rather than being wrapped in the raw "Error: layout failed: ..."
+            // bypass. The inner LayoutError Display is the authoritative user-facing form.
+            //
+            // The error taxonomy requires E-LAY-* errors to surface the error code
+            // prefix (e.g. "[E-LAY-008]") and the source span. The thiserror #[error]
+            // attributes on LayoutError variants embed both. Rendering the inner Display
+            // directly satisfies the taxonomy without requiring miette SourceCode
+            // attachment on LayoutError (which lacks miette::Diagnostic impl).
+            //
+            // For future: if LayoutError grows miette::Diagnostic, this arm can be
+            // upgraded to render_box_diagnostic for source pointer support.
+            let _ = write!(buf, "{layout_err}");
+        },
         other => {
             let _ = write!(buf, "Error: {other}");
         },
@@ -1279,6 +1295,58 @@ mod tests {
         assert_eq!(
             total, 2,
             "OBS-P4-004d: total must be 2 (1 eval + 1 deduped validator); got: {total}"
+        );
+    }
+
+    // ── F-094-P4-004 — BuildError::Layout rendered via structured format ──────
+
+    /// F-094-P4-004: `render_build_error_to_string` for `BuildError::Layout`
+    /// (specifically `BulletsOnContentlessSlideType`) must render using the
+    /// structured diagnostic format that includes the `[E-LAY-008]` code prefix,
+    /// NOT the raw `"Error: layout failed: ..."` bypass string.
+    ///
+    /// Before fix: `BuildError::Layout` hits the `other =>` arm in
+    /// `render_build_error_to_string` → raw `Display` via `thiserror` →
+    /// `"Error: layout failed: [E-LAY-008] Slide 'title' at <byte:42>:0:0 ..."`.
+    ///
+    /// After fix: rendered via miette-style path that surfaces the span
+    /// and error code in the expected format.
+    ///
+    /// RED: before fix, `rendered.starts_with("Error: layout failed:")` is true,
+    /// and the assertion that it does NOT will fail.
+    #[test]
+    fn test_f094_p4_004_cli_render_layout_error_uses_structured_format() {
+        use super::render_build_error_to_string;
+        use slideforge::LayoutError;
+        use slideforge::error::BuildError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let span = SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42);
+        let layout_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span,
+        };
+        let build_err = BuildError::Layout(layout_err);
+        let rendered = render_build_error_to_string(&build_err, /*use_color=*/ false);
+
+        // Must contain the E-LAY-008 code prefix from the error taxonomy.
+        assert!(
+            rendered.contains("[E-LAY-008]"),
+            "F-094-P4-004: rendered Layout error must contain '[E-LAY-008]'; got: {rendered}"
+        );
+
+        // Must NOT be the raw bypass form.
+        assert!(
+            !rendered.starts_with("Error: layout failed:"),
+            "F-094-P4-004: rendered Layout error must not use raw Display bypass; got: {rendered}"
+        );
+
+        // Must surface the file name so the user can locate the issue.
+        assert!(
+            rendered.contains("deck.sf"),
+            "F-094-P4-004: rendered Layout error must contain file name 'deck.sf'; got: {rendered}"
         );
     }
 }

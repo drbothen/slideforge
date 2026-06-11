@@ -347,6 +347,12 @@ pub use slideforge_plugin_api::Diagnostic as ValidationDiagnostic;
 /// [`ValidationDiagnostic::span`].
 pub use slideforge_types::SourceSpan;
 
+/// Re-export of [`slideforge_layout::LayoutError`].
+///
+/// The CLI uses this type when rendering `BuildError::Layout` diagnostics
+/// via the structured layout-error rendering path.
+pub use slideforge_layout::LayoutError;
+
 // ── Sort-key utilities for cross-stage source-order rendering ─────────────────
 
 /// Extract the source sort key `(file, line, col)` from a
@@ -633,13 +639,17 @@ fn compile_inner(
     //
     // M1 fix: on parse failure, carry the full structured DiagnosticSink
     // diagnostics (not just a count) so callers retain file:line:col + hints.
+    //
+    // F-094-P4-004 fix: source_map is declared at this outer scope so it can be
+    // threaded into EvalConfig for the evaluate stage. The source map is built
+    // during parse and must outlive the `deck_node` block.
+    let mut source_map = SourceMap::new();
     let deck_node = {
         let _span =
             tracing::info_span!("parse", stage = "parse", source_len = source.len()).entered();
         tracing::info!("pipeline stage: parse");
-        let mut source_map = SourceMap::new();
         let file_id = source_map.add_file(
-            std::sync::Arc::from("<build>"),
+            std::sync::Arc::from("deck.sf"),
             std::sync::Arc::from(source),
         );
         let mut sink = DiagnosticSink::new();
@@ -682,7 +692,12 @@ fn compile_inner(
     ) = {
         let _span = tracing::info_span!("evaluate", stage = "evaluate").entered();
         tracing::info!("pipeline stage: evaluate");
-        let eval_config = EvalConfig::default();
+        // F-094-P4-004: thread the source map into EvalConfig so span_to_source_span
+        // can resolve byte offsets to real file:line:col during field evaluation.
+        let eval_config = EvalConfig {
+            source_map: Some(std::sync::Arc::new(source_map)),
+            ..EvalConfig::default()
+        };
         let mut eval_sink = DiagnosticSink::new();
         let maybe_deck = eval_deck_with_variant(
             &deck_node,
@@ -2697,6 +2712,151 @@ mod tests {
         assert!(
             result.is_ok(),
             "C-2 warn-only: compile() with undefined-variable in strict=false must return Ok"
+        );
+    }
+
+    // ── F-094-P4-005 — E2E span resolution: E-LAY-008 carries real file:line:col ──
+
+    /// F-094-P4-005 (load-bearing E2E test):
+    ///
+    /// Full pipeline: parse(".sf source") → eval → thread_fields → layout.
+    /// A `bullets:` field on a `title` slide at a KNOWN position (line 3, col 3)
+    /// must produce `LayoutError::BulletsOnContentlessSlideType` whose `span`
+    /// carries:
+    ///   - `span.file == "deck.sf"` (the registered file name, not `<byte:N>` or `<unknown>`)
+    ///   - `span.line == 3`  (1-based line of the `bullets:` keyword)
+    ///   - `span.col`  is a positive number (1-based column)
+    ///   - `span.to_string()` does NOT contain `"<byte:"` or `"<unknown>"`
+    ///
+    /// RED: before the fix `span_to_source_span` produces `<byte:N>:0:0` — the file
+    /// is a synthetic sentinel, not the real file name, and line/col are both 0.
+    ///
+    /// This test MUST fail before the fix and pass after.
+    #[test]
+    fn test_f094_p4_005_e2e_e_lay_008_span_carries_real_file_line_col() {
+        use crate::LayoutError;
+        use slideforge_eval::{EvalConfig, eval_deck_with_variant, thread_fields_to_blocks};
+        use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
+
+        // .sf source with `bullets:` on a `title` slide (content-less type).
+        // Line 1: slideforge_version
+        // Line 2: lang
+        // Line 3: slide title:
+        // Line 4:   bullets: ["item"]
+        //
+        // After parsing, `bullets:` keyword spans line 4.
+        // The exact col depends on the parser but must be >= 1 (1-based).
+        let source = concat!(
+            "slideforge_version \"1\"\n", // line 1
+            "lang \"en-US\"\n",           // line 2
+            "slide title:\n",             // line 3
+            "  bullets: [\"item\"]\n",    // line 4 — bullets: keyword at col 3
+        );
+        let file_name: Arc<str> = Arc::from("deck.sf");
+
+        // Stage 1: parse.
+        let mut source_map = SourceMap::new();
+        let file_id = source_map.add_file(Arc::clone(&file_name), Arc::from(source));
+        let mut parse_sink = DiagnosticSink::new();
+        let deck_node = parse_checked(source, file_id, &source_map, &mut parse_sink)
+            .expect("F-094-P4-005: source must parse successfully");
+        assert!(
+            parse_sink.errors().is_empty(),
+            "F-094-P4-005: no parse errors expected; got: {:?}",
+            parse_sink.errors()
+        );
+
+        // Stage 2a: evaluate with source map threaded into EvalConfig so that
+        // span_to_source_span resolves byte offsets to real file:line:col.
+        // F-094-P4-004 / F-094-P4-005: EvalConfig::default() has source_map = None
+        // and produces SourceSpan::default(); we must supply the real map here.
+        let eval_config = EvalConfig {
+            source_map: Some(std::sync::Arc::new(source_map)),
+            ..EvalConfig::default()
+        };
+        let mut eval_sink = DiagnosticSink::new();
+        let mut deck = eval_deck_with_variant(&deck_node, &eval_config, None, &mut eval_sink)
+            .expect("F-094-P4-005: source must eval successfully");
+        assert!(
+            eval_sink.errors().is_empty(),
+            "F-094-P4-005: no eval errors expected; got: {:?}",
+            eval_sink.errors()
+        );
+
+        // Stage 2b: field-to-block threading.
+        thread_fields_to_blocks(&mut deck);
+
+        // Stage 3: layout — must fail with BulletsOnContentlessSlideType
+        // because `title` has no content region.
+        let brand = Brand {
+            name: Arc::from("test"),
+            palette: slideforge_types::BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+                font_size_emu: 457_200,
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        };
+        let result = slideforge_layout::run(&deck, &brand);
+        let err =
+            result.expect_err("F-094-P4-005: bullets on 'title' must return Err(LayoutError)");
+
+        // Unwrap to BulletsOnContentlessSlideType.
+        let span = match &err {
+            LayoutError::BulletsOnContentlessSlideType { span, .. } => span.clone(),
+            other => panic!("F-094-P4-005: expected BulletsOnContentlessSlideType, got: {other:?}"),
+        };
+
+        // Assert real file name — NOT synthetic sentinel or unknown.
+        assert_eq!(
+            span.file.as_ref(),
+            "deck.sf",
+            "F-094-P4-005: span.file must be 'deck.sf' (real file name), got: {:?}",
+            span.file
+        );
+
+        // Assert real line number — `bullets:` is on line 4 in our source.
+        assert_eq!(
+            span.line, 4,
+            "F-094-P4-005: span.line must be 4 (line of 'bullets:' keyword), got: {}",
+            span.line
+        );
+
+        // Assert real col — `bullets:` is at col 3 (2-space indent + first char).
+        assert!(
+            span.col >= 1,
+            "F-094-P4-005: span.col must be >= 1 (1-based column), got: {}",
+            span.col
+        );
+
+        // Assert rendered span does NOT contain synthetic sentinels.
+        let rendered = span.to_string();
+        assert!(
+            !rendered.contains("<byte:"),
+            "F-094-P4-005: rendered span must not contain '<byte:'; got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("<unknown>"),
+            "F-094-P4-005: rendered span must not contain '<unknown>'; got: {rendered}"
+        );
+
+        // Also assert that the LayoutError message renders with real location.
+        let err_msg = err.to_string();
+        assert!(
+            !err_msg.contains("<byte:"),
+            "F-094-P4-005: E-LAY-008 message must not contain '<byte:'; got: {err_msg}"
+        );
+        assert!(
+            !err_msg.contains(":0:0"),
+            "F-094-P4-005: E-LAY-008 message must not contain ':0:0' (unresolved span); got: {err_msg}"
         );
     }
 }
