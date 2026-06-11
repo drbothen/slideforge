@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.2"
+spec_version: "1.3"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI caching configuration.
 # Anchors to NFR-026 through NFR-030 (multi-platform matrix reliability) and the
@@ -61,7 +61,9 @@ The `ubuntu-24.04-arm` standard runner has a 14 GB SSD. After preinstalled tooli
 the effective free space is well below 14 GB. A full-workspace `--all-features` build
 with debug info can exceed the available space, causing the job to fail mid-compile.
 Each failure costs a full re-run (~22 minutes arm64 cold build). The same issue occurs
-on `ubuntu-latest` and `macos-*` runners for snapshot and visual-regression jobs.
+on the `ubuntu-latest` snapshot and visual-regression jobs and the `ubuntu-24.04-arm`
+test leg; macOS runner legs are guarded by `runner.os` checks and are no-ops for the
+Linux-image-specific cleanup paths.
 
 **Fix:** Add a disk-space reclamation step to all build-heavy jobs. The preferred
 approach is a manual `rm -rf` of known large preinstalled toolchain directories (no
@@ -262,8 +264,8 @@ Architecture section files: N/A — no source crate changes.
 ### A: Disk-space reclamation
 
 - [ ] Read `.github/workflows/ci.yml` fully; identify all build-heavy jobs
-- [ ] Add the following step as the FIRST step in each build-heavy job
-      (test matrix, clippy, snapshots, visual-regression, bench):
+- [ ] Add the following step immediately after `actions/checkout` (before toolchain/cache/cargo steps)
+      in each build-heavy job (test matrix, clippy, snapshots, visual-regression, bench):
       ```yaml
       - name: Free disk space
         run: |
@@ -468,3 +470,4 @@ Estimated 1 day including CI verification.
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q2 + Q3. Fixes root cause of arm64 cold-build flakiness and `No space left` class. Depends on STORY-091 (tiered trigger must be live first). |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: confirmed rust-cache v2.9.1 SHA `c19371144...` and free-disk-space v1.3.1 SHA `54081f13...` via `git ls-remote` 2026-06-10; promoted cache-budget finding from hypothesis to DATA-BACKED (9.77 GB/23 caches/arm64-evicted confirmed); reframed AC-005 from "verify hypothesis" to "measure fix against confirmed baseline"; reframed AC-006 wall-clock from fixed <12 min to measure-and-record; added grep-zero check requirement for 11-site rust-cache SHA sweep (TD-VSDD-060); added arm64 disk-path verify-at-impl marker with `|| true` guards; resolved `<owner>` placeholder as `drbothen/slideforge`; noted `taiki-e/install-action` SHA as deferred; added Uncertainty Resolution Log. |
 | 1.2 | 2026-06-11 | story-writer | Spec amendment: ci-workflow-analyzer MED findings 1-2 on feature/STORY-092 @ c264910a (VERIFIED via GitHub API). Replaced false Class B contributing-factor claim ("hash-calculation regression fix") with accurate tag-object-fragility rationale: old SHA `42dc69e1aa...` is the annotated tag-object for floating `v2` — already running v2.9.1 code (`e18b4977`), zero behavioral delta from bump; value is GC fragility elimination. Updated AC-003, Fix paragraph, Task B, Library Requirements table, Pinned Versions table, Architecture Compliance Rule 6, and Uncertainty Resolution Log entry accordingly. Added note that duplicate per-shared-key cache entries are normal lockfile-hash rotation and will persist post-fix. Reconciled implementation site counts: 11 in ci.yml + 8 in companion workflows (security.yml codeql-action had same tag-object defect, re-pinned to `03e4368a...`) = 19 total bumps — recorded as implementation note in Class B Fix paragraph; no new ACs added. |
+| 1.3 | 2026-06-11 | story-writer | Prose corrections (OBS-092-P2-001/002, zero behavioral change). OBS-092-P2-001: narrowed Class A over-claim — "ubuntu-latest and macos-*" replaced with "ubuntu-latest snapshot/visual-regression jobs and ubuntu-24.04-arm test leg; macOS legs are runner.os-guarded no-ops for Linux-specific cleanup paths." OBS-092-P2-002: aligned Task A placement wording from "FIRST step" to "immediately after actions/checkout (before toolchain/cache/cargo steps)" to match AC-001 binding language. LESSON-19 sweep: no other macOS-ENOSPC or FIRST-step phrasing found in the file. |
