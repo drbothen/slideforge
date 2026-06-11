@@ -1202,11 +1202,16 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 /// - `y = *y_cursor` — current cursor position.
 /// - `height = LINE_HEIGHT_EMU` — one line per bullet item.
 /// - `*y_cursor` advances by `LINE_HEIGHT_EMU` after each item.
-/// - If `y_cursor` exceeds `body_bbox.y + body_bbox.height`, bullets are clamped
-///   to `y = page_height − 1, height = 1`; multiple overflow bullets land at the
-///   same position (identical bboxes). The post-layout geometric validator detects
-///   these via the identical-bbox stacking check (`validate_post_layout`,
-///   F-094-P3-002).
+/// - If `y_cursor` exceeds `page_height − 1`, the bullet is clamped to
+///   `y = page_height − 1, height = 1`. The post-layout geometric validator
+///   detects these via two complementary checks:
+///   - **Identical-bbox stacking** (`validate_post_layout`, F-094-P3-002): fires
+///     when multiple overflow bullets share the same clamped position (many bullets).
+///   - **Degenerate-height floor** (`validate_post_layout`, F-094-P17-001): fires
+///     when even ONE bullet is clamped to height=1, including the differing-depth
+///     case where parent+child overflow at distinct x values (distinct bboxes —
+///     the stacking check does NOT catch this). The identical-bbox stacking check
+///     does NOT cover single-bullet or differing-depth overflow cases.
 ///
 /// # Depth indentation (F-094-P2-001)
 ///
@@ -1288,13 +1293,17 @@ fn push_bullet_frames_inner(
         // y: current cursor value.
         // height: LINE_HEIGHT_EMU (one visual line per bullet item).
         //
-        // Vertical overflow: if the cursor already exceeds the body region bottom,
-        // additional bullets are placed at the region bottom with height 1 (minimal
-        // valid frame). The post-layout geometric validator detects these via the
-        // identical-bbox stacking check in `validate_post_layout` (F-094-P3-002):
-        // overflow bullets share the same y = page_height−1, height=1 position,
-        // producing duplicate bboxes that the stacking detector catches.
-        // Layout does NOT silently clip or error here.
+        // Vertical overflow: if the y-cursor exceeds page_height−1, the bullet is
+        // clamped to y = page_height−1, height = 1 (minimal valid frame). Layout
+        // does NOT silently clip or error here. The post-layout geometric validator
+        // detects these via two complementary checks in `validate_post_layout`:
+        //   - Identical-bbox stacking (F-094-P3-002): fires when many overflow bullets
+        //     share the same clamped y=page_height−1, height=1 position (duplicate bboxes).
+        //   - Degenerate-height floor (F-094-P17-001): fires when even ONE bullet is
+        //     clamped to height=1, including the single-overflow case and the
+        //     differing-depth case (parent+child at distinct x values → distinct bboxes
+        //     that the stacking check does NOT catch). The identical-bbox stacking check
+        //     does NOT cover single-bullet or differing-depth overflow cases.
         // current_depth is always ≤ MAX_BULLET_DEPTH (64); i64::try_from is infallible
         // for any usize value that fits in 64 bits (all contemporary platforms).
         let depth_as_i64 = i64::try_from(current_depth).unwrap_or(i64::MAX);
