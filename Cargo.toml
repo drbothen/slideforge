@@ -168,3 +168,36 @@ incremental = true
 # Bench profile inherits release for accurate benchmarks.
 [profile.bench]
 inherits = "release"
+
+# CI build profile — faster test compilation with usable backtraces.
+#
+# STORY-093: This profile is a CARGO BUILD PROFILE (invoked with --cargo-profile ci
+# in the cargo nextest run command). It is DISTINCT from the nextest execution profile
+# (--profile ci), which is defined in .config/nextest.toml. Both flags must be present
+# in the nextest invocation for this profile to take effect.
+#
+# Changes from inherited test profile:
+#   debug = "line-tables-only": retains file:line backtrace info while cutting
+#     debug-section size substantially. Reduces target/ci/ size vs target/debug/
+#     and reduces link time (fewer bytes in the debug section for the linker to
+#     process). Per Architecture Compliance Rule 4: "line-tables-only must produce
+#     usable backtraces." If test failures show no file:line info, escalate to
+#     debug = 1; never use debug = 0 (no info, useless backtraces).
+#
+# Deliberately omitted (do not add):
+#   codegen-units: leave at default (256 for dev/test profile) for maximum
+#     parallelism; lowering to 1 or 16 maximizes compile time — the opposite of
+#     what we want.
+#   incremental: leave unset; enforced via CARGO_INCREMENTAL=0 env var in ci.yml.
+#     Setting it here would duplicate the env var and invite confusion.
+#   strip: leave unset (defaults to "none" for test profile); stripping test
+#     binaries costs time and is not needed for CI artifacts.
+#
+# Target directory: --cargo-profile ci causes Cargo to build into target/ci/
+# instead of target/debug/ or target/test/. The first CI run after this change
+# is a cold build for target/ci/; subsequent runs use the cached warm state.
+# Total cache budget temporarily increases during one LRU cycle (old target/debug/
+# and new target/ci/ both present) before the old entries age out.
+[profile.ci]
+inherits = "test"
+debug = "line-tables-only"

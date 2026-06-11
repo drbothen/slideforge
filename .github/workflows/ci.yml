@@ -71,9 +71,11 @@ env:
 # To update: resolve the new tag to its commit SHA and replace below.
 #
 #   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   actions/upload-artifact   v4  → ea165f8d65b6e75b540449e92b4886f43607fa02
 #   Swatinem/rust-cache     v2.9.1  → c19371144df3bb44fab255c43d04cbc2ab54d1c4
 #   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
 #   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+#   rui314/setup-mold         v1  → 9c9c13bf4c3f1adef0cc596abc155580bcb04444
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── FULL-TIER CONDITION ─────────────────────────────────────────────────────
@@ -240,6 +242,7 @@ jobs:
           --all-features
           --no-fail-fast
           --profile ci
+          --cargo-profile ci
 
   # ─── Doctests (fast tier) ──────────────────────────────────────────────────
   # cargo-nextest does not execute doctests (by design). This job closes DI-5
@@ -377,17 +380,68 @@ jobs:
           sudo apt-get update -y -q
           sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
           fc-cache -f
+      - name: Install mold linker (linux-arm64 ONLY)
+        # STORY-093 AC-002: mold installed on the linux-arm64 leg only.
+        # aarch64-unknown-linux-gnu still uses GNU ld as the default linker as of
+        # Rust 1.95.0 stable (the Rust 1.90 lld-default change covered x86_64-linux
+        # only; arm64-linux was NOT included). mold's 3-10x link speedup over GNU ld
+        # is therefore available in full on this leg.
+        #
+        # x86_64-linux: already uses rust-lld by default since Rust 1.90 — only the
+        # lld→mold delta (~2-4x on link) would apply; marginal vs arm64 win.
+        # macOS: Apple ld64 is fast and parallel; mold gain is marginal.
+        # Windows: lld-link; mold not supported.
+        #
+        # SHA confirmed 2026-06-10 via `git ls-remote https://github.com/rui314/setup-mold refs/tags/v1`.
+        # 9c9c13bf4c3f1adef0cc596abc155580bcb04444 is a peeled commit SHA (not a tag
+        # object — verified via gh api). v1 is a moving major tag; re-confirm SHA
+        # if bumping the mold version.
+        if: matrix.target.name == 'linux-arm64'
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
       - name: Install cargo-nextest
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
         with:
           tool: cargo-nextest
+      - name: Capture build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        # STORY-093 AC-001: capture link/codegen split before mold takes effect.
+        # This step runs BEFORE mold is active for the cargo invocation (setup-mold
+        # installs mold on PATH but mold only activates via
+        # CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS set on the nextest step
+        # below — this step does not set that env var). The --timings output shows
+        # the GNU-ld baseline link phase duration. Upload it as a GHA artifact so
+        # the before state is inspectable for one run.
+        #
+        # REMOVE THIS STEP after the baseline has been captured and recorded in the
+        # PR description. It exists solely to satisfy AC-001's one-off profiling
+        # requirement. Keep the artifact upload step below paired with it.
+        if: matrix.target.name == 'linux-arm64'
+        run: cargo build --workspace --all-features --timings
+      - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        if: matrix.target.name == 'linux-arm64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cargo-timings-arm64-baseline
+          path: target/cargo-timings/
+        # Upload on failure/cancellation too so we always get the artifact even if
+        # the subsequent nextest run fails. This is a one-off diagnostic step.
       - name: cargo nextest run
+        # STORY-093 AC-002: set CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS on
+        # the arm64 leg to activate mold without clobbering the global
+        # RUSTFLAGS=-D warnings. Global RUSTFLAGS overrides (does NOT merge with)
+        # [target.<triple>].rustflags in .cargo/config.toml (Architecture Compliance
+        # Rule 7). Using the target-specific env var is additive with the global
+        # RUSTFLAGS — both -D warnings (from env.RUSTFLAGS) and -C link-arg=-fuse-ld=mold
+        # (from CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS) are active simultaneously.
+        # This var is ignored by the macOS and Windows legs (different target triples).
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: >
           cargo nextest run
           --workspace
           --all-features
           --no-fail-fast
           --profile ci
+          --cargo-profile ci
 
   # ─── MSRV check (slow tier) ────────────────────────────────────────────────
   # Validates the declared rust-version = "1.88" in Cargo.toml.
