@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.2"
+spec_version: "1.3"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI build toolchain tuning.
 # Anchors to NFR-029 (Linux arm64 matrix reliability) and NFR-001 (cold build < 500ms
@@ -225,7 +225,8 @@ or a test binary) contains the string `mold`. Example step:
 If `readelf` confirms mold, the AC passes. If it does not, the step fails loudly — do NOT
 treat the absence of the check as a passing state.
 
-All test suites and clippy checks on the arm64 leg MUST still pass after mold is activated.
+All test suites on the arm64 leg MUST still pass after mold is activated (clippy runs on the
+x86_64 fast leg and is platform-independent lint analysis; no arm64 clippy job exists).
 
 ### AC-003: arm64 link phase faster after mold (traces to NFR-029)
 
@@ -236,6 +237,38 @@ on the result of the aarch64 default-linker pre-check. Document the after state 
 description: "arm64 timings after mold: total=Xs, link=Ys (Z%); link reduction vs
 baseline: W%." The story is DONE even if the reduction is modest (< 10%) because direction
 is confirmed and the change is low-risk.
+
+**Flag-identical and forced-relink requirement (F-093-P2-001):** The after-mold
+`--timings` capture MUST be invoked with flags identical to the baseline capture:
+
+```bash
+cargo build --workspace --all-features --tests --profile ci --timings
+```
+
+(If `--cargo-profile ci` is used in the nextest invocation, substitute `--cargo-profile ci`
+for `--profile ci` above; the point is that baseline and after-mold invocations MUST use
+the same flags so the timing delta is attributable to the linker change alone.)
+
+Additionally, the after-mold `--timings` run MUST be preceded by a forced relink to
+ensure Cargo actually invokes the new linker. Cargo's build fingerprints do NOT track
+linker identity — if the linked products in `target/ci/deps/` already exist from a prior
+build with the old linker, Cargo will skip relinking entirely (the `.d` dependency files
+show no change), producing a build that measures zero link time and gives a misleading
+"no improvement" signal.
+
+Forced-relink procedure (run this BEFORE the after-mold `--timings` capture):
+
+```bash
+# Delete existing linked products so Cargo is forced to relink with mold
+find target/ci/deps -name '*.so' -o -name '*.rlib' -o -name 'lib*.a' | xargs rm -f 2>/dev/null || true
+# Or for a clean slate on the profiling run:
+rm -rf target/ci/deps target/ci/.fingerprint
+```
+
+Without this step, the `--timings` output will show near-zero link time (no relinking
+occurred), making the before/after comparison meaningless. The readelf `.comment`
+verification (AC-002) confirms mold IS the active linker; this forced-relink step
+confirms mold ACTUALLY ran and did work during the profiling capture.
 
 ### AC-004: `[profile.ci]` in Cargo.toml + `--cargo-profile ci` in ci.yml; x86_64 NFR-001 benchmark unaffected (traces to NFR-001, NFR-029)
 
@@ -400,7 +433,11 @@ Architecture section files: N/A — no source crate logic changes.
       This step MUST fail loudly if mold is not confirmed. Do NOT skip it.
 - [ ] Run full arm64 test suite (via develop push or `full-ci` label) to confirm all
       tests pass with mold active
-- [ ] Capture `cargo build --timings` AFTER mold to get the after state; document in PR
+- [ ] Capture `cargo build --timings` AFTER mold to get the after state; document in PR.
+      IMPORTANT: use flag-identical invocation to the baseline (AC-003) AND perform a
+      forced relink first (`rm -rf target/ci/deps target/ci/.fingerprint`) — Cargo
+      fingerprints do NOT track linker identity; without forced relink, no relinking
+      occurs and the timings measure nothing (see AC-003 for the full procedure).
 
 ### C: CI profile tuning
 
@@ -624,3 +661,4 @@ RUSTFLAGS to arm64-only, (c) the aarch64 default-linker gating pre-check. Estima
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q6 + Q7. mold arm64-only (x86_64 already lld since Rust 1.90). debug=line-tables-only for profile tuning. Speedup magnitudes are directional — AC-001 requires profiling before commit. Depends on STORY-091 + STORY-092. |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: confirmed rui314/setup-mold SHA `9c9c13bf...` via `git ls-remote` 2026-06-10 (re-confirm at impl since v1 is moving tag); CORRECTNESS FIX to AC-004 — removed false parenthetical "confirm --profile ci is already the case"; rewrote AC-004 to require BOTH `[profile.ci]` in Cargo.toml AND `--cargo-profile ci` in nextest invocation (they are distinct flags — nextest `--profile ci` does NOT invoke a Cargo build profile); added `target/ci/` directory implication and cache interaction note; added RUSTFLAGS override correctness finding (global RUSTFLAGS overrides config.toml target rustflags — use CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS); added aarch64 default-linker gating pre-check as verify-at-impl; added EC-008 and EC-009; updated Architecture Compliance Rules 6 and 7; resolved `<owner>` placeholder; added Uncertainty Resolution Log. |
 | 1.2 | 2026-06-11 | story-writer | AC-002 corrected: CARGO_TARGET_*_RUSTFLAGS env-var mechanism REMOVED — empirically verified (cargo 1.95.0, feature/STORY-093 @ 22f57a53) that rustflags sources are MUTUALLY EXCLUSIVE and the target-specific env var is ENTIRELY IGNORED when global RUSTFLAGS is set; chosen mechanism changed to setup-mold `make-default: true` (ld-symlink activation via /usr/bin/ld → mold; cc driver picks up automatically); readelf .comment active-verification step added as required pass evidence for AC-002; LESSON-19 sweep: Architecture Compliance Rules 1 and 7 rewritten; Tasks B updated (removed env-var step, added readelf step); EC-009 updated (resolved by design); Rejected Alternatives updated; File Structure Requirements updated; Forbidden Dependencies updated; Test Strategy updated. Source: ci-workflow-analyzer empirical findings on feature/STORY-093. |
+| 1.3 | 2026-06-11 | story-writer | F-093-P2-003: AC-002 arm64-clippy clause dropped — unsatisfiable (clippy runs only on x86_64 fast leg; platform-independent lint; no arm64 clippy job exists); rewording clarifies arm64 tests-only pass requirement. F-093-P2-001: AC-003 extended with forced-relink requirement and flag-identical invocation rule — Cargo fingerprints do NOT track linker identity; without deleting target/ci/deps + .fingerprint, no relinking occurs and --timings measures nothing; baseline and after-mold captures must use identical flags for a valid delta. F-093-P2-004 (LESSON-19 sweep): no additional arm64-clippy or relink-blind statements found in the story body beyond the two corrected sites. Task B timings note updated with forced-relink procedure. |
