@@ -380,6 +380,46 @@ jobs:
           sudo apt-get update -y -q
           sudo apt-get install -y -q fonts-dejavu-core fonts-noto-core fonts-liberation fonts-freefont-ttf
           fc-cache -f
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+        with:
+          tool: cargo-nextest
+      - name: Capture build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        # STORY-093 AC-001: capture link/codegen split under GNU ld (the true
+        # baseline — before mold takes effect). This step intentionally runs
+        # BEFORE the "Install mold linker" step below so GNU ld is still the
+        # active linker for this cargo invocation.
+        #
+        # The --profile ci / --cargo-profile ci flags match the compile units
+        # used by the nextest step so the baseline covers the same set of
+        # artifacts (and the resulting target/ci objects serve as a head-start
+        # for the nextest build — both steps share the same target directory).
+        #
+        # REMOVE THIS STEP (and the paired upload step below) after the
+        # before/after numbers have been captured and recorded in the PR
+        # description. See the REMOVE-AFTER-BASELINE block comment on the
+        # upload step for the after-mold data collection plan.
+        if: matrix.target.name == 'linux-arm64'
+        run: cargo build --workspace --all-features --tests --profile ci --timings
+      - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        # REMOVE-AFTER-BASELINE: remove this step once before/after numbers are
+        # recorded. The after-mold timings come from a workflow_dispatch
+        # full-tier run after this PR merges (the nextest step already builds
+        # under --profile ci so a second dispatch with this baseline step
+        # retained but placed after mold install captures the mold numbers).
+        # The removal commit lands only once both before and after numbers are
+        # recorded in the PR description.
+        #
+        # Note: cargo only writes cargo-timings.html at build completion. A
+        # mid-build hard cancel (e.g., runner timeout) yields no timings file;
+        # the artifact upload will simply upload an empty directory in that
+        # case. The if: condition below uses always() so the upload attempt
+        # runs even when earlier steps fail.
+        if: always() && matrix.target.name == 'linux-arm64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cargo-timings-arm64-baseline
+          path: target/cargo-timings/
       - name: Install mold linker (linux-arm64 ONLY)
         # STORY-093 AC-002: mold installed on the linux-arm64 leg only.
         # aarch64-unknown-linux-gnu still uses GNU ld as the default linker as of
@@ -392,49 +432,27 @@ jobs:
         # macOS: Apple ld64 is fast and parallel; mold gain is marginal.
         # Windows: lld-link; mold not supported.
         #
+        # Activation mechanism: setup-mold@9c9c13bf uses make-default: true
+        # (the action default), which symlinks /usr/bin/ld → mold. The cc/gcc
+        # driver invokes /usr/bin/ld at link time, so mold activates
+        # transparently without any RUSTFLAGS or CARGO_TARGET_* env var.
+        # Do NOT add CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS here —
+        # cargo rustflags sources are mutually exclusive: global env RUSTFLAGS
+        # beats CARGO_TARGET_<triple>_RUSTFLAGS (it does NOT merge with it),
+        # so the target-specific var would be silently ignored anyway.
+        # WARNING: if make-default is ever set to false, mold silently
+        # deactivates — the readelf verification step below will catch this.
+        #
         # SHA confirmed 2026-06-10 via `git ls-remote https://github.com/rui314/setup-mold refs/tags/v1`.
         # 9c9c13bf4c3f1adef0cc596abc155580bcb04444 is a peeled commit SHA (not a tag
         # object — verified via gh api). v1 is a moving major tag; re-confirm SHA
         # if bumping the mold version.
         if: matrix.target.name == 'linux-arm64'
         uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
-        with:
-          tool: cargo-nextest
-      - name: Capture build timings baseline (linux-arm64 ONE-OFF; AC-001)
-        # STORY-093 AC-001: capture link/codegen split before mold takes effect.
-        # This step runs BEFORE mold is active for the cargo invocation (setup-mold
-        # installs mold on PATH but mold only activates via
-        # CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS set on the nextest step
-        # below — this step does not set that env var). The --timings output shows
-        # the GNU-ld baseline link phase duration. Upload it as a GHA artifact so
-        # the before state is inspectable for one run.
-        #
-        # REMOVE THIS STEP after the baseline has been captured and recorded in the
-        # PR description. It exists solely to satisfy AC-001's one-off profiling
-        # requirement. Keep the artifact upload step below paired with it.
-        if: matrix.target.name == 'linux-arm64'
-        run: cargo build --workspace --all-features --timings
-      - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
-        if: matrix.target.name == 'linux-arm64'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: cargo-timings-arm64-baseline
-          path: target/cargo-timings/
-        # Upload on failure/cancellation too so we always get the artifact even if
-        # the subsequent nextest run fails. This is a one-off diagnostic step.
       - name: cargo nextest run
-        # STORY-093 AC-002: set CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS on
-        # the arm64 leg to activate mold without clobbering the global
-        # RUSTFLAGS=-D warnings. Global RUSTFLAGS overrides (does NOT merge with)
-        # [target.<triple>].rustflags in .cargo/config.toml (Architecture Compliance
-        # Rule 7). Using the target-specific env var is additive with the global
-        # RUSTFLAGS — both -D warnings (from env.RUSTFLAGS) and -C link-arg=-fuse-ld=mold
-        # (from CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS) are active simultaneously.
-        # This var is ignored by the macOS and Windows legs (different target triples).
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        # STORY-093 AC-002: mold activates on the linux-arm64 leg via the
+        # /usr/bin/ld symlink installed by setup-mold (make-default: true).
+        # No RUSTFLAGS or CARGO_TARGET_* env var is needed or used here.
         run: >
           cargo nextest run
           --workspace
@@ -442,6 +460,20 @@ jobs:
           --no-fail-fast
           --profile ci
           --cargo-profile ci
+      - name: Verify mold linked the test binaries (linux-arm64)
+        # Confirms that the /usr/bin/ld → mold symlink was effective and the
+        # nextest binaries were actually linked by mold (not silently falling
+        # back to GNU ld). Uses readelf to inspect the .comment ELF section,
+        # which mold stamps with its version string.
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          bin=$(find target/ci -maxdepth 2 -type f -perm -u+x ! -name '*.d' ! -name '*.so' | head -1)
+          if [ -z "$bin" ]; then
+            echo "::warning::No test binary found in target/ci — skipping mold verification"
+            exit 0
+          fi
+          readelf -p .comment "$bin" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default"; exit 1; }
 
   # ─── MSRV check (slow tier) ────────────────────────────────────────────────
   # Validates the declared rust-version = "1.88" in Cargo.toml.
