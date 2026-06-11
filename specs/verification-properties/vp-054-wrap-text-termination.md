@@ -7,7 +7,7 @@ tool: Kani
 phase: P6
 priority: P1
 status: draft
-spec_version: "1.2.0"
+spec_version: "1.2.1"
 bc_trace: [BC-4.03.002]
 traces_to: .factory/specs/verification-properties/VP-INDEX.md
 origin: STORY-095 / F-095-P1-003
@@ -242,7 +242,7 @@ Widths below are computed as `char_count * char_width_pts`.
 | single word over-width | `"hello"` (5 ch) | 5.0 | 3.0 | at least 1 elem, lossless (AC-002) |
 | two words fit | `"hi yo"` (5 ch) | 5.0 | 50.0 | `vec!["hi yo"]` (25 pts < 50 pts) |
 | two words wrap | `"hi yo"` | 5.0 | 15.0 | `vec!["hi", "yo"]` ("hi yo"=25 pts > 15 pts) |
-| only spaces | `"   "` | 5.0 | 50.0 | no panic, terminates (empty Vec) |
+| only spaces | `"   "` | 5.0 | 50.0 | `vec!["   "]` — whole-string fast-path (3×5.0=15.0 ≤ 50.0); lossless whitespace preservation (b) |
 | long word char-wrap | 100 × `'a'` | 1.0 | 10.0 | lossless, each line ≤ 10 pts |
 
 ## Verification Layers
@@ -258,5 +258,6 @@ Widths below are computed as `char_count * char_width_pts`.
 
 | Version | Date | Change |
 |---------|------|--------|
+| v1.2.1 | 2026-06-11 | F-095-P10-001 fix: corrected "only spaces" Test Coverage row — expected behavior changed from `vec![]` (wrong) to `vec!["   "]` (correct); whole-string fast-path triggers when `total_width ≤ max_width_pts` (3×5.0=15.0 ≤ 50.0), returning input unchanged and satisfying sub-property (b) losslessness |
 | v1.2.0 | 2026-06-11 | F-095-P9-001 fix: added `mock_space_width_pts: Option<f64>` to Scope/FontMetrics description (semantics: active only when `mock_char_width_pts` is `Some`; space measures as `mock_space_width_pts` pts while other chars use `mock_char_width_pts`; `None` in production and Kani proof); added `mock_space_width_pts: None` to all three `FontMetrics` struct literals in Proof Harness Skeleton and Proptest Strategy so skeletons compile against the real struct |
 | v1.1.0 | 2026-06-11 | F-095-P2-002 fix: updated Scope, Proof Harness Skeleton, and Proptest Strategy from stale 2-arg `(input: &str, max_width: usize)` to real 3-arg signature `(text: &str, max_width_pts: f64, metrics: &FontMetrics<'_>)` with `mock_char_width_pts: Some(w)` deterministic width model; restated max-width invariant in f64-points terms; updated Test Coverage table to pts notation; added spec_version frontmatter |
