@@ -1529,27 +1529,39 @@ fn measure_space_width_pt(
 /// Returns `Vec<Vec<SpanWord>>` — each inner `Vec` is one line's word sequence,
 /// ordered left-to-right as they should be drawn.
 ///
-/// ## Algorithm (F-095-P1-001 fix — VP-054 analogue for multi-face text)
+/// ## Algorithm (F-095-P1-001 fix + F-095-P2-001 fix — VP-054 analogue for multi-face text)
 ///
 /// Maintains a running `cursor_x` for the current line. For each word:
 /// - Measure the word width using the word's face kind (preserving bold/italic
 ///   metrics — they differ from regular face metrics).
-/// - If `cursor_x + space + word_width > max_line_width_pt` AND the line is
-///   non-empty: flush the current line, start a new one, reset cursor to `word_width`.
-/// - Otherwise: append the word to the current line and advance cursor.
+/// - If the word fits (`cursor_x + space + word_width ≤ max_line_width_pt`):
+///   append to the current line and advance cursor.
+/// - If the word does NOT fit but is itself narrower than the frame:
+///   flush the current line, start a new one with this word.
+/// - If the word is itself wider than `max_line_width_pt` (AC-002/REND-002):
+///   apply the character-wrap fallback (see below).
+///
+/// ## Character-wrap fallback (AC-002 / F-095-P2-001)
+///
+/// When a single word is wider than `max_line_width_pt`, it is split at character
+/// boundaries into the longest fragments that fit within the frame.  Each fragment
+/// inherits the original word's `FontFaceKind` (e.g., a bold word's fragments are
+/// all bold) and `y_offset_units` (super/subscript signal is preserved).
+///
+/// Termination guarantee: if even a single character does not fit within the frame
+/// (i.e., the frame is narrower than one character's advance), that character is
+/// emitted as a single-character fragment to prevent an infinite loop and to ensure
+/// no text is silently dropped (VP-054 sub-property a: lossless wrapping).
+///
+/// This mirrors the `wrap_text` phase-2 logic in `text_layout.rs`, extending it to
+/// the multi-face path.  A shared pure helper (`char_split_span_word`) extracts
+/// the character-splitting logic so both paths benefit from the same implementation.
 ///
 /// ## Space handling
 ///
 /// The inter-word space width is measured with the PRECEDING word's face (the
 /// most common convention — kerning between adjacent runs uses the dominant face).
 /// When a line is empty (first word on a new line), no space is prepended.
-///
-/// ## Empty line prevention
-///
-/// A word that is itself wider than `max_line_width_pt` is placed alone on its
-/// own line (no further char-splitting — that is handled by `wrap_text` for the
-/// simple-text path; multi-face char-splitting is deferred). This guarantees
-/// termination and ensures no word is silently dropped (VP-054 sub-property a).
 fn pack_words_into_lines(
     words: &[SpanWord],
     max_line_width_pt: f32,
@@ -1563,6 +1575,44 @@ fn pack_words_into_lines(
     for word in words {
         let word_w = measure_word_width_pt(&word.text, word.face, font_size, font_set);
 
+        // ── AC-002 / F-095-P2-001: character-wrap fallback for over-wide words ──
+        //
+        // When a word is wider than the entire frame, split it at character
+        // boundaries.  Each character-level fragment inherits the source word's
+        // `face` and `y_offset_units` so that bold/italic/super/subscript signals
+        // are preserved across the split (F-095-P2-001 requirement).
+        if word_w > max_line_width_pt {
+            // Produce char-split fragments from the source word.
+            let fragments = char_split_span_word(word, max_line_width_pt, font_size, font_set);
+
+            for fragment in fragments {
+                let frag_w =
+                    measure_word_width_pt(&fragment.text, fragment.face, font_size, font_set);
+
+                if current_line.is_empty() {
+                    // First item on this line — start directly with the fragment.
+                    cursor_x = frag_w;
+                    current_line.push(fragment);
+                } else {
+                    // Try appending the fragment to the current line (no separator —
+                    // fragments originate from the same source word; no inter-word
+                    // space should be inserted between them).
+                    if cursor_x + frag_w <= max_line_width_pt {
+                        cursor_x += frag_w;
+                        current_line.push(fragment);
+                    } else {
+                        // Fragment doesn't fit on current line — flush and start new.
+                        lines.push(std::mem::take(&mut current_line));
+                        cursor_x = frag_w;
+                        current_line.push(fragment);
+                    }
+                }
+            }
+            continue; // Move to next source word.
+        }
+
+        // ── Normal word packing (AC-001) ────────────────────────────────────────
+
         let space_w = if current_line.is_empty() {
             0.0
         } else {
@@ -1572,7 +1622,7 @@ fn pack_words_into_lines(
         };
 
         if current_line.is_empty() {
-            // First word on this line — always append (even if over-wide).
+            // First word on this line.
             current_line.push(word.clone());
             cursor_x = word_w;
         } else if cursor_x + space_w + word_w <= max_line_width_pt {
@@ -1593,6 +1643,81 @@ fn pack_words_into_lines(
     }
 
     lines
+}
+
+/// Split a single over-wide [`SpanWord`] into character-level fragments that
+/// each fit within `max_line_width_pt`.
+///
+/// ## Purpose (shared helper — F-095-P2-001)
+///
+/// This is a pure helper factored out from [`pack_words_into_lines`] so the
+/// character-splitting logic lives in one place and is independently testable.
+/// It mirrors the phase-2 character-wrap in `text_layout::wrap_text` but
+/// operates on multi-face `SpanWord` tokens instead of plain `String` slices.
+///
+/// ## Face and offset preservation
+///
+/// Each output fragment inherits `face` and `y_offset_units` from the source
+/// `SpanWord`.  A bold, italic, or super/subscript word's fragments must all
+/// retain the same typographic signal — losing it on continuation fragments
+/// would cause a visual regression (bold fragments rendered in regular weight).
+///
+/// ## Termination guarantee (VP-054 sub-property a)
+///
+/// If even a single character is wider than `max_line_width_pt` (extremely narrow
+/// frame), that character is emitted as a one-character fragment.  This guarantees
+/// the loop terminates and no text is silently dropped.
+fn char_split_span_word(
+    word: &SpanWord,
+    max_line_width_pt: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> Vec<SpanWord> {
+    let mut fragments: Vec<SpanWord> = Vec::new();
+    let mut remaining: &str = &word.text;
+
+    while !remaining.is_empty() {
+        // Find the longest character prefix of `remaining` that fits.
+        let mut fragment_end_byte: usize = 0;
+        let mut frag_width: f32 = 0.0;
+
+        for ch in remaining.chars() {
+            let mut buf = [0u8; 4];
+            let ch_str = ch.encode_utf8(&mut buf);
+            let ch_w = measure_word_width_pt(ch_str, word.face, font_size, font_set);
+            if frag_width + ch_w > max_line_width_pt && fragment_end_byte > 0 {
+                // Adding this character would overflow — stop here.
+                break;
+            }
+            frag_width += ch_w;
+            fragment_end_byte += ch.len_utf8();
+        }
+
+        // Safety: if even a single character does not fit (max_line_width_pt is
+        // smaller than one char's advance), emit it anyway to guarantee termination
+        // and ensure no text is silently dropped (VP-054 sub-property a / AC-002).
+        if fragment_end_byte == 0 {
+            fragment_end_byte = remaining.chars().next().map_or(0, char::len_utf8);
+        }
+
+        // Guard: if fragment_end_byte is still 0 after the fallback (empty string
+        // edge case — should never occur since we checked `!remaining.is_empty()`
+        // at the top of the loop), break to guarantee termination.
+        if fragment_end_byte == 0 {
+            break;
+        }
+
+        let (fragment_text, rest) = remaining.split_at(fragment_end_byte);
+        remaining = rest;
+
+        fragments.push(SpanWord {
+            face: word.face,
+            text: fragment_text.to_owned(),
+            y_offset_units: word.y_offset_units,
+        });
+    }
+
+    fragments
 }
 
 /// Draw one packed line of [`SpanWord`]s at a given baseline Y.
@@ -1686,8 +1811,9 @@ fn draw_packed_line(
 /// 1. [`expand_spans_to_words`]: split all spans into individual word tokens,
 ///    preserving each word's font face kind and super/subscript signal.
 /// 2. [`pack_words_into_lines`]: greedy line packing at `emu_to_pt(bbox.width)`.
-///    A word that is itself wider than the frame is placed alone on its line
-///    (no char-split in the multi-face path — VP-054 covers the single-face path).
+///    A word wider than the frame is char-split via [`char_split_span_word`],
+///    preserving the word's `FontFaceKind` on every character fragment (AC-002 /
+///    F-095-P2-001 fix — previously deferred, now implemented).
 /// 3. [`draw_packed_line`]: draw each packed line at the current `baseline_y`,
 ///    advancing the cursor with inter-word space using face-accurate metrics.
 /// 4. Advance `baseline_y` by `font_size * BODY_LINE_LEADING` after each line.
@@ -3915,6 +4041,251 @@ mod tests {
             "STORY-081 C2: /ActualText 'bold body text' must appear in uncompressed PDF structure.\n\
              This confirms extract_all_inline_text ran on the production path for the Text block.\n\
              PDF excerpt (first 3000 chars): {pdf_str:.3000}"
+        );
+    }
+
+    // ─── F-095-P2-001: char-split fallback in pack_words_into_lines ─────────────
+    //
+    // These tests drive the character-wrap fallback that was deferred (deferral
+    // comments at exporter.rs:1549-1552 and 1688-1690 — now removed).  They are
+    // LOAD-BEARING per TD-VSDD-059: each test exercises the production code path
+    // that was previously missing.
+    //
+    // Test inventory:
+    // | test_F095_P2_001_pack_words_char_split_over_wide_word      | F-095-P2-001 unit      |
+    // | test_F095_P2_001_pack_words_char_split_bold_word_keeps_face | F-095-P2-001 bold face |
+    // | test_F095_P2_001_inline_over_wide_word_export_no_panic     | F-095-P2-001 E2E       |
+
+    /// F-095-P2-001 (AC-002/REND-002 inline path): `pack_words_into_lines` must
+    /// split a single `SpanWord` that is wider than `max_line_width_pt` into ≥2
+    /// lines via character-wrap (not leave it on a single over-wide line).
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Before the fix, `pack_words_into_lines` places an over-wide word alone on
+    /// its line with no further splitting — a single-element `Vec<Vec<SpanWord>>`
+    /// where `lines[0][0].text == original_word`.  The test asserts ≥2 lines.
+    ///
+    /// ## Why a real font?
+    ///
+    /// `measure_word_width_pt` returns 0.0 for absent faces (graceful degradation).
+    /// A mock empty `ResolvedFontSet` makes everything "fit" and never triggers
+    /// the over-wide branch.  We therefore inject a real `ResolvedFace` (LM Math)
+    /// so measurements are non-zero and the 200-char word definitely overflows a
+    /// narrow 50pt frame.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_pack_words_char_split_over_wide_word() {
+        // Load LM Math as the regular face (same fixture used in story_095_red_gate.rs).
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // A 200-char word (no whitespace) with FontFaceKind::Regular.
+        let long_word = "a".repeat(200);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word.clone(),
+            y_offset_units: 0,
+        }];
+
+        // Narrow frame: 50pt. At 18pt font size, LM Math 'a' is ~8-10pt wide.
+        // 200 * ~9pt = ~1800pt >> 50pt → over-wide word must trigger char-split.
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Assertion 1 (F-095-P2-001 RED gate): must produce ≥2 lines.
+        assert!(
+            lines.len() >= 2,
+            "F-095-P2-001 FAIL: pack_words_into_lines placed a 200-char word alone on 1 line \
+             (no char-split).  Expected ≥2 lines for a word wider than {max_width_pt}pt. \
+             Without char-split, the word overflows the right margin — AC-002/REND-002 unsatisfied."
+        );
+
+        // Assertion 2 (F-095-P2-001): no content lost — all chars appear in output.
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.iter().map(|w| w.text.as_str()))
+            .collect();
+        assert_eq!(
+            all_text.len(),
+            long_word.len(),
+            "F-095-P2-001 FAIL: char-split must not drop characters. Input: {} chars, output: {} chars.",
+            long_word.len(),
+            all_text.len()
+        );
+        assert_eq!(
+            all_text, long_word,
+            "F-095-P2-001 FAIL: char-split output must equal original word (no chars inserted or dropped)."
+        );
+    }
+
+    /// F-095-P2-001 (bold face preserved): when an over-wide `SpanWord` with
+    /// `FontFaceKind::Bold` is char-split by `pack_words_into_lines`, ALL resulting
+    /// fragment `SpanWord`s must retain `face == FontFaceKind::Bold`.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without this test, a naive implementation could reset the face on char-split
+    /// fragments (e.g., defaulting to `FontFaceKind::Regular`), causing the second
+    /// and subsequent fragments to lose bold rendering — a visual regression.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_pack_words_char_split_bold_word_keeps_face() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        // Use the LM Math face as BOTH regular and bold (same file — bold measurement
+        // is the same as regular; what matters is that the face KIND tag is preserved).
+        let face_regular = crate::font::ResolvedFace {
+            font: font.clone(),
+            raw: raw.clone(),
+            face_index: 0,
+        };
+        let face_bold = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(
+            Some(face_regular),
+            Some(face_bold),
+            None,
+            None,
+        );
+
+        // 150-char word tagged Bold.
+        let long_word = "b".repeat(150);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Bold,
+            text: long_word.clone(),
+            y_offset_units: 0,
+        }];
+
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Must split (otherwise the face preservation test is vacuous).
+        assert!(
+            lines.len() >= 2,
+            "F-095-P2-001 bold FAIL: 150-char word must split into ≥2 lines."
+        );
+
+        // Every fragment on every line must retain FontFaceKind::Bold.
+        for (line_idx, line) in lines.iter().enumerate() {
+            for (word_idx, word) in line.iter().enumerate() {
+                assert_eq!(
+                    word.face,
+                    crate::slide_pdf::FontFaceKind::Bold,
+                    "F-095-P2-001 FAIL: char-split fragment at line={line_idx} word={word_idx} \
+                     lost bold face (got {:?}). A char-split BOLD word must keep bold face on \
+                     ALL fragments.",
+                    word.face
+                );
+            }
+        }
+    }
+
+    /// F-095-P2-001 (E2E export path): exporting a `FrameContent::Body` or
+    /// `FrameContent::TextRun` with a 200-char single-word token in a narrow
+    /// frame must NOT panic and the PDF must be valid.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without char-split, the word overflows the frame right margin.  The
+    /// export still completes (overflow is clamped), but this E2E test proves
+    /// the production path is exercised end-to-end — not just the unit function.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_inline_over_wide_word_export_no_panic() {
+        use slideforge_types::{Emu, InlineNode};
+
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font = krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+        let exporter = PdfExporter::with_resolved_font_set(font_set);
+
+        // 200-char single token — no whitespace — in a very narrow frame (1-inch = ~72pt).
+        let long_token: String = "x".repeat(200);
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames: vec![Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(914_400),
+                        width: Emu(914_400),    // 1 inch narrow (~72pt)
+                        height: Emu(7_315_200), // 8 inches — ample vertical space
+                    },
+                    content: FrameContent::TextRun(vec![InlineNode::Plain(Arc::from(
+                        long_token.as_str(),
+                    ))]),
+                    text_flow: None,
+                    region_role: None,
+                }],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let deck = minimal_deck();
+        let brand = minimal_brand();
+        let opts = slideforge_plugin_api::ExportOptions::default();
+
+        // F-095-P2-001 E2E assertion: export must not panic for over-wide single token.
+        let result = exporter.export_uncompressed(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "F-095-P2-001 E2E FAIL: export must succeed for 200-char single-token TextRun \
+             in a narrow frame. Got error: {:?}",
+            result.err()
+        );
+        let pdf_bytes = result.unwrap();
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "F-095-P2-001 E2E: PDF must start with %PDF-"
         );
     }
 }

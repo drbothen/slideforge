@@ -586,8 +586,9 @@ pub enum FrameContent {
         /// - `AltText::Unspecified`: no label supplied by the author; the PDF
         ///   exporter emits a `/Artifact` marker and logs a diagnostic.
         ///
-        /// The layout engine sets this from `ContentBlock::ColorBar`'s `label`
-        /// field when present; falls back to `AltText::Unspecified`.
+        /// The layout engine derives this from the adjacent `TextTag::ColorLabel`
+        /// `Text` block on the same slide; falls back to `AltText::Unspecified`
+        /// when no such sibling block is present.
         alt: AltText,
     },
     /// An empty placeholder (present in the layout but no content assigned).
