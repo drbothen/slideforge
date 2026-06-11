@@ -931,8 +931,9 @@ fn draw_frame(
 ///
 /// ## No-op on empty bar
 ///
-/// When `filled_width_emu.0 == 0` the bar is zero-width; no path is emitted.
-/// This is correct behavior (0% progress = nothing to draw).
+/// When `filled_width_emu.0 <= 0` (zero or negative) the bar is degenerate;
+/// no path is emitted. Emu is `i64`, so negative values are representable and
+/// treated identically to zero (0% progress = nothing to draw).
 fn draw_color_bar_rect(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,

@@ -156,11 +156,12 @@ fn minimal_deck() -> Deck {
 /// invariant — Kani proof target for Phase 6). The concrete test vector here
 /// drives the unit-level coverage layer.
 ///
-/// ## Red Gate rationale
+/// ## Red Gate rationale (historical)
 ///
-/// The stub in `text_layout.rs` returns the entire input as a single line,
-/// so `lines.len() == 1` and the single line is wider than 50 pts. The test
-/// FAILS against the stub (correct RED gate behavior).
+/// RED-gate (historical): before STORY-095 T-005, `text_layout.rs` contained a
+/// stub that returned the entire input as a single line, so `lines.len() == 1`
+/// and the single line was wider than 50 pts. The GREEN implementation now splits
+/// the input at word boundaries, satisfying all three assertions below.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_002_text_wrap_word_boundary() {
@@ -245,10 +246,11 @@ fn test_BC_4_03_002_text_wrap_word_boundary() {
 ///    concatenation of all output lines.
 /// 3. No individual line exceeds 100 pts.
 ///
-/// ## Red Gate rationale
+/// ## Red Gate rationale (historical)
 ///
-/// The stub returns the single 200-char word as one 400-pt line.
-/// Assertion 1 fails (1 line ≠ ≥2 lines). Correct RED gate.
+/// RED-gate (historical): before STORY-095 T-005, the stub returned the single
+/// 200-char word as one 400-pt line, so assertion 1 failed (1 line ≠ ≥2 lines).
+/// The GREEN implementation now performs character-boundary splitting.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_002_text_wrap_char_fallback() {
@@ -325,19 +327,20 @@ fn test_BC_4_03_002_text_wrap_char_fallback() {
 ///   - `/Figure` (not `/Artifact`) for the bar element.
 ///   - A non-empty `/Alt` attribute derived from the label.
 ///
-/// ## Implementation note (current state vs. target)
+/// ## Implementation note
 ///
-/// The current production code in `tag_engine.rs` tags `FrameContent::ColorBar`
-/// as a PDF Artifact (`decorative_frame_indices.push(frame_idx)`) without any
-/// structure element. After STORY-095 T-007 (GREEN phase), the implementer must
-/// add a `/Figure` tag carrying the label text as `/Alt`.
+/// RED-gate (historical): before STORY-095 T-007, `tag_engine.rs` pushed ALL
+/// `FrameContent::ColorBar` frames into `decorative_frame_indices`, tagging them
+/// as PDF Artifacts regardless of the alt text. The GREEN implementation now
+/// dispatches `AltText::Provided` → `/Figure + /Alt` and `AltText::Decorative` →
+/// `/Artifact`, matching the WCAG AA requirement.
 ///
-/// ## Red Gate rationale
+/// ## Red Gate rationale (historical)
 ///
-/// The current code pushes ColorBar into `decorative_frame_indices`. The PDF
-/// output contains `/Artifact BMC` for the bar, NOT `/Figure`. The test asserts
-/// `/Figure` is present and `/Artifact` is NOT present for the bar — FAILS
-/// against the current code (correct RED gate).
+/// RED-gate (historical): with the pre-T-007 code, the PDF output contained
+/// `/Artifact BMC` for the bar, NOT `/Figure`, so both assertions below failed.
+/// The GREEN implementation produces `/Figure` with `/Alt = label` for bars
+/// carrying `AltText::Provided`.
 ///
 /// ## EC-004 coverage
 ///
@@ -348,9 +351,8 @@ fn test_BC_4_03_002_text_wrap_char_fallback() {
 ///
 /// `decorative: true` keeps the Artifact tag — but there is no `decorative: true`
 /// concept on `FrameContent::ColorBar` directly (the `AltText::Decorative` variant
-/// on other frame types maps to Artifact). For a `ColorBar` with a label, the
-/// current code ignores the label and always emits Artifact — the bug this test
-/// catches.
+/// on other frame types maps to Artifact). `AltText::Decorative` on a `ColorBar`
+/// produces `/Artifact`; `AltText::Provided` produces `/Figure + /Alt`.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_001_progress_bar_figure_tag() {
@@ -390,19 +392,16 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
     // WORKAROUND FLAG: search for "STORY-095-T003-WORKAROUND" to find both the
     // workaround here and the note the implementer must address.
 
-    // --- STORY-095-T003-WORKAROUND START ---
+    // --- STORY-095-T003-WORKAROUND RESOLVED ---
     //
-    // Phase: ColorBar frame that SHOULD produce /Figure is currently always /Artifact.
-    // The test drives the CURRENT code path:
-    //   - ColorBar → decorative_frame_indices → /Artifact (wrong behavior).
-    //   - The test asserts /Figure IS present and /Artifact is NOT present for the bar.
-    //   - With the current code, /Figure is ABSENT for the bar → assertion FAILS (RED).
+    // Historical RED-gate (pre-T-007): ColorBar frames were always pushed into
+    // `decorative_frame_indices` → tagged `/Artifact` regardless of alt text.
     //
-    // After T-007 (GREEN): the implementer adds `alt: AltText` to `FrameContent::ColorBar`
-    // and updates `tag_engine.rs` to emit `/Figure + /Alt` when the alt is Provided.
-    // The test then constructs:
-    //   `FrameContent::ColorBar { alt: AltText::Provided(Arc::from(bar_label)), ... }`
-    // and the assertion passes (GREEN).
+    // GREEN implementation (T-007): `FrameContent::ColorBar` now carries an `alt:
+    // AltText` field; `tag_engine.rs` dispatches `AltText::Provided` → `/Figure +
+    // /Alt` and `AltText::Decorative` → `/Artifact`. The workaround that used
+    // `FrameContent::Image` as a stand-in has been replaced with a real
+    // `FrameContent::ColorBar { alt: AltText::Provided(...), ... }` construction.
 
     let color_bar_frame = Frame {
         bbox: BoundingBox {
@@ -479,19 +478,14 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
     // krilla 0.6.0 writes `/S /Figure` for TagKind::Figure in the structure tree.
     // This is the same byte pattern asserted in `test_bc_4_03_002_export_produces_tagged_pdf`.
     //
-    // With the CURRENT code (ColorBar → Artifact), /Figure is only present if the
-    // Title frame or another frame happened to produce a Figure tag. In our slide
-    // the only non-Title frame is the ColorBar (tagged Artifact), so /Figure is
-    // NOT in the structure tree for this slide → assertion FAILS (RED gate).
-    //
-    // After T-007: /Figure is added for the ColorBar (tag_engine updated) → PASSES.
+    // STORY-095 T-007 (GREEN): tag_engine.rs dispatches AltText::Provided →
+    // TagKind::Figure, so /Figure is present in the structure tree for this slide.
     let has_figure = pdf_bytes.windows(b"/Figure".len()).any(|w| w == b"/Figure");
     assert!(
         has_figure,
         "T-003 FAIL (AC-003): PDF structure tree must contain /Figure for the progress_bar \
-         visual bar (with non-empty Alt text). With the current code, ColorBar is tagged \
-         as /Artifact — update tag_engine.rs to emit /Figure for ColorBar when \
-         AltText::Provided is present (STORY-095 T-007)."
+         visual bar (AltText::Provided). If this fails, tag_engine.rs is not dispatching \
+         AltText::Provided → TagKind::Figure for FrameContent::ColorBar."
     );
 
     // AC-003 assertion 2: the /Alt attribute (carrying bar_label text) must appear
@@ -509,7 +503,8 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
         has_alt_text,
         "T-003 FAIL (AC-003, EC-004): PDF must contain the label text {:?} as the /Alt \
          attribute on the /Figure structure element for the progress_bar bar. \
-         With the current code, no /Alt is emitted because ColorBar is an Artifact.",
+         If this fails, tag_engine.rs is not propagating the AltText::Provided string \
+         to the TagKind::Figure alt parameter.",
         bar_label
     );
 }
@@ -524,17 +519,17 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
 ///
 /// This test has TWO sub-assertions that must BOTH pass for AC-004 to be satisfied:
 ///
-/// 1. **Wrap assertion (RED gate):** `wrap_text` correctly splits a long bold text
-///    string into ≥ 2 lines (each fitting within the frame). The stub returns 1 line →
-///    this assertion FAILS against the stub (correct RED gate).
+/// 1. **Wrap assertion:** `wrap_text` correctly splits a long bold text string into
+///    ≥ 2 lines (each fitting within the frame). RED-gate (historical): before
+///    STORY-095 T-005, the stub returned the input as a single line and this
+///    assertion failed. The GREEN implementation splits at word boundaries.
 ///
 /// 2. **Font dispatch assertion:** when wrapped lines are exported with bold inline
 ///    nodes, the PDF embeds TWO distinct font resources (LM Math for regular spans,
 ///    Tuffy for bold spans). This uses `with_resolved_font_set` for CI determinism.
 ///
 /// The two assertions are independent: (1) tests `text_layout::wrap_text`; (2) tests
-/// `exporter.rs` bold dispatch via `face_for_span_kind`. The test is RED because (1)
-/// fails against the stub. After T-005+T-006 (GREEN phase), both pass.
+/// `exporter.rs` bold dispatch via `face_for_span_kind`. Both pass after T-005+T-006.
 ///
 /// ## EC-001 coverage
 ///
@@ -542,12 +537,12 @@ fn test_BC_4_03_001_progress_bar_figure_tag() {
 /// only the regular font subset is embedded (no crash, no spurious bold resource).
 /// This is a current-code assertion that must continue to pass.
 ///
-/// ## Red Gate rationale
+/// ## Red Gate rationale (historical)
 ///
-/// `wrap_text` stub returns the 90-char bold text as a single unwrapped line.
-/// Assertion (1): `lines.len() >= 2` → FAILS (got 1). Test stops here (RED gate).
-/// After T-005 implements the real word-wrap, both lines are split correctly and
-/// assertion (2) proves bold dispatch still works in the wrapped output path.
+/// RED-gate (historical): before STORY-095 T-005, `wrap_text` returned the
+/// 90-char bold text as a single unwrapped line; assertion (1) failed (`lines.len()
+/// == 1`). The GREEN implementation splits at word boundaries so both (1) and (2)
+/// now pass.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_001_bold_font_subset_embedded() {
@@ -580,13 +575,13 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
 
     let wrapped_lines = wrap_text(bold_text, frame_width_pts, &wrap_metrics);
 
-    // Sub-assertion 1 (RED gate): wrap_text must split the 90-char string into ≥2 lines.
-    // The stub returns 1 line → this assertion FAILS → RED gate.
+    // Sub-assertion 1: wrap_text must split the 90-char string into ≥2 lines.
+    // RED-gate (historical): before T-005, the stub returned 1 line and this failed.
     assert!(
         wrapped_lines.len() >= 2,
         "T-004 FAIL (AC-004, sub-assertion 1): wrap_text must split a {}-char bold string \
-         into ≥2 lines for a {frame_width_pts}pt frame. Stub returns 1 line — \
-         implement wrap_text in text_layout.rs (STORY-095 T-005). \
+         into ≥2 lines for a {frame_width_pts}pt frame. If this fails, wrap_text has \
+         regressed in text_layout.rs (STORY-095 T-005 GREEN path). \
          VP-054: wrap_text must terminate for all bounded inputs (sub-property a).",
         bold_text.len(),
     );
@@ -691,7 +686,8 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
 
     // ─── EC-001: no bold runs → only regular subset, no crash ────────────────
     //
-    // This is a current-code assertion (must pass before AND after T-005+T-006).
+    // Regression guard: plain-text-only slides must never embed the bold font
+    // subset. Passed before T-005+T-006 and must continue to pass after.
     {
         let regular_face2 = load_resolved_face(&lm_path);
         let bold_face2 = load_resolved_face(&tuffy_path);
@@ -751,9 +747,9 @@ fn test_BC_4_03_001_bold_font_subset_embedded() {
 ///
 /// ## Red Gate status
 ///
-/// The stub already returns `vec![]` for empty input. This test PASSES against
-/// the stub (correct behavior for EC-002 — not a red gate test).
-/// Included for completeness and to prevent regression.
+/// This test was never a RED-gate test. Both the historical stub and the GREEN
+/// implementation return `vec![]` for empty input — EC-002 documents the
+/// invariant and prevents regression.
 #[test]
 fn test_BC_4_03_002_ec002_empty_frame_no_panic() {
     let metrics = FontMetrics {
@@ -778,24 +774,22 @@ fn test_BC_4_03_002_ec002_empty_frame_no_panic() {
 ///
 /// ## Current code behavior
 ///
-/// ALL `FrameContent::ColorBar` frames are currently pushed to
-/// `decorative_frame_indices` (tagged as Artifact). After T-007 (GREEN), only
-/// ColorBar frames WITH `AltText::Provided` get /Figure; those with
-/// `AltText::Decorative` stay as Artifact.
+/// STORY-095 T-007 (GREEN): `FrameContent::ColorBar` now carries `alt: AltText`.
+/// `tag_engine.rs` dispatches `AltText::Provided` → `/Figure + /Alt` and
+/// `AltText::Decorative` → `/Artifact`. This test uses `AltText::Decorative`, so
+/// the bar remains `/Artifact` both before and after T-007.
 ///
 /// ## Red Gate status
 ///
-/// This test PASSES against the current code (ColorBar is always Artifact).
-/// After T-007, the test still PASSES (Decorative stays Artifact).
-/// Included to prevent regression where T-007 accidentally upgrades all bars.
-///
-/// This test is NOT a red-gate test — it documents the invariant.
+/// This test was never a RED-gate test — it passed both before and after T-007.
+/// Included to prevent regression where a future change accidentally upgrades
+/// `AltText::Decorative` bars to `/Figure`.
 #[test]
 #[allow(clippy::unwrap_used)]
 fn test_BC_4_03_002_ec003_decorative_bar_is_artifact() {
-    // A progress_bar slide whose bar should remain /Artifact.
-    // After T-007: this would be a ColorBar with AltText::Decorative.
-    // Current: all ColorBar → Artifact (this test passes both before and after T-007).
+    // A progress_bar slide whose bar must remain /Artifact.
+    // AltText::Decorative on a ColorBar → /Artifact (STORY-095 T-007 GREEN behavior).
+    // This invariant holds both before T-007 (all ColorBar → Artifact) and after.
     let laid_out = LaidOutDeck {
         page_size: PageSize::default(),
         slides: vec![LaidOutSlide {
@@ -886,9 +880,9 @@ fn test_BC_4_03_002_ec003_decorative_bar_is_artifact() {
 ///
 /// ## Red Gate status
 ///
-/// The stub returns the text as a single line regardless, so this test PASSES
-/// against the stub. But the real implementation must also pass (no off-by-one
-/// that wraps exactly-fitting text). Included to guard against boundary regression.
+/// This test was never a RED-gate test. Both the historical stub and the GREEN
+/// implementation return the text as a single line for exactly-fitting input.
+/// Included to guard against off-by-one regressions in the boundary condition.
 #[test]
 fn test_BC_4_03_002_ec005_text_exact_width_no_spurious_wrap() {
     // 10 chars * 5.0 pts/char = exactly 50.0 pts.
