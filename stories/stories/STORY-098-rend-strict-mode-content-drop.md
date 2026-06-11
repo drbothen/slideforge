@@ -13,16 +13,13 @@ spec_version: "1.0"
 created: "2026-06-11"
 source_findings: [REND-005, REND-010]
 behavioral_contracts: [BC-3.03.002, BC-1.11.002, BC-3.03.001]
-# BC status: BC-3.03.002 (strict mode produces no output on validation error — W-VAL-103
-# currently exits 0 while content is silently dropped; this violates strict-default invariant
-# and DI-017). BC-1.11.002 (chart with empty data produces error-slide placeholder — REND-010a
-# shows chart with no data renders silently empty, violating BC-1.11.002 postconditions 1/2).
-# BC-3.03.001 (canvas overflow warning path — referenced for body/content schema drift).
-# All BCs are authored.
-#
-# REND-005 secondary root cause (body/content schema drift): validate vs eval inconsistency
-# for `body` field on `content` slide type. slideforge-validate/src/field_to_block.rs:135
-# passes `body` through while content.rs schema rejects it. Fix: reconcile.
+# BC-3.03.002 v1.2 (rendering-fix wave 2026-06-11): W-VAL-103 content-drop sub-case
+# promoted to broken/exit-2 in strict mode per Invariant 4 (Route A). Error taxonomy
+# v2.29 confirms: no new E-VAL-105 code — same W-VAL-103 message, context-sensitive
+# severity based on key in {"shape", "body"}.
+# Implementer action site: validate_fields in
+# crates/slideforge-plugin-api/src/slide_types/registry.rs
+# BC-1.11.002 all BCs are authored. BC-3.03.001 referenced for body/content schema drift.
 verification_properties: []
 nfr_refs: []
 closes_findings: [REND-005, REND-010]
@@ -79,20 +76,24 @@ Two post-merge defects remain:
 
 ## Architecture Compliance Rules
 
-- Per BC-3.03.002 invariant 1 (DI-017): all-or-nothing in strict mode. Silent content
-  drop IS a validation error in strict mode; W-VAL-103 must be promoted to exit-2-triggering
-  when the dropped content is user-authored (shape: or body fields on unsupported types).
-- Per error-taxonomy (W-VAL-103 Note, v2.20): W-VAL-103 is "cosmetic/exit 0" as a
-  formal registration. Changing this requires either: (a) reclassifying W-VAL-103 to
-  broken/exit 2, or (b) introducing E-VAL-105 for the content-drop sub-case. Route (a) is
-  simplest; if PO objects to reclassifying the general unknown-field warning, use route (b).
-  Document the chosen route in the story. The human directive says no deferral — pick and
-  implement.
+- **Route A is confirmed (error-taxonomy v2.29):** No new E-VAL-105 code. W-VAL-103 uses
+  context-sensitive severity. When the unknown field key is `"shape"` or `"body"` AND the
+  build mode is `strict`, accumulate W-VAL-103 with `broken` severity (exit 2). In
+  `--warn-only`, accumulate as `cosmetic` regardless of key. All other unknown-field keys:
+  `cosmetic` always (unchanged from v2.20).
+- **Implementer action site (BC-3.03.002 v1.2 Invariant 4):** In `validate_fields` in
+  `crates/slideforge-plugin-api/src/slide_types/registry.rs`, add the key-set check
+  `{"shape", "body"}` at the W-VAL-103 accumulation point. No other files need changing
+  to implement the severity promotion.
+- Per BC-3.03.002 v1.2 postcondition 3: the W-VAL-103 message format is UNCHANGED.
+  Severity is determined at accumulation time by the field-key check.
+- Per BC-3.03.002 invariant 1 (DI-017): all-or-nothing in strict mode.
 - Per BC-1.11.002 invariant 2: the ChartRenderer plugin MUST NOT be called with empty
   data. The validator intercepts before plugin invocation.
-- No new E-* codes needed unless route (b) above is taken; in that case register E-VAL-105
-  in error-taxonomy.md before implementing.
 - `slideforge-validate` MUST NOT bypass the existing error-accumulation model (DI-018).
+- body/content schema drift fix: reconcile `slideforge-validate/src/field_to_block.rs`
+  line ~135 with `content.rs` schema. Per BC-3.03.002 EC-007, `body` on `content` slide
+  type is schema-invalid — treat as W-VAL-103 content-drop sub-case → broken in strict mode.
 
 ## Library & Framework Requirements
 
@@ -126,24 +127,33 @@ Files to modify:
 
 ## Acceptance Criteria
 
-### AC-001: Strict mode exits non-zero when shape: field is silently dropped (W-VAL-103)
-(traces to BC-3.03.002 postcondition 3 — exit code 2 in strict mode on validation error)
+### AC-001: Strict mode exits non-zero when shape: field is silently dropped (W-VAL-103 content-drop sub-case)
+(traces to BC-3.03.002 v1.2 postcondition 3 + Invariant 4 — Route A: W-VAL-103 {shape} sub-case = broken/exit-2 in strict mode; error-taxonomy v2.29)
 
 `slideforge build deck.sf` (strict mode, default) where `deck.sf` contains a `shape:`
-field on a slide type that does not support it exits with code 2, NOT code 0. All
-authored content is either emitted or the build fails — no silent drops.
+field on a slide type that does not support it exits with code 2, NOT code 0.
+The W-VAL-103 message format is unchanged: `Unknown field 'shape' for slide type '<type>'...`.
+The severity is `broken` because the field key is `"shape"` (in the content-drop set
+`{"shape", "body"}`). This is Route A: context-sensitive severity at accumulation time
+in `validate_fields` (`crates/slideforge-plugin-api/src/slide_types/registry.rs`).
+No new error code E-VAL-105 is introduced (Route B was rejected — see error-taxonomy v2.29).
 
-Verified by: unit test in `slideforge-validate`/`slideforge-cli` integration: build a
-deck with an unsupported `shape:` field; assert exit code == 2 and error message cites
-the dropped content.
+Verified by: unit test in `slideforge-validate`; build a deck with `shape:` on a slide type
+that does not support it; assert exit 2; assert W-VAL-103 message in stderr with unchanged format.
 
 ### AC-002: Strict mode exits non-zero when body field silently dropped on content slide
-(traces to BC-3.03.002 postcondition 3)
+(traces to BC-3.03.002 v1.2 postcondition 3 + Invariant 4 + EC-007 — Route A: W-VAL-103 {body} sub-case = broken/exit-2 in strict mode)
 
 `slideforge build deck.sf` (strict mode) where a `content:` slide has a `body:` field
-(schema-invalid for `content` type) exits with code 2, NOT code 0.
+(schema-invalid for `content` type per `content.rs` schema, body/content schema drift fix)
+exits with code 2, NOT code 0. The W-VAL-103 message format is unchanged:
+`Unknown field 'body' for slide type 'content'...`. Severity `broken` because key is
+`"body"` in the content-drop set. This also closes the `field_to_block.rs:135` drift —
+after this story, `body` on `content` type is consistently rejected by both
+`slideforge-validate` and `slideforge-plugin-api/registry.rs::validate_fields`.
 
-Verified by: unit test with a `content:` slide carrying `body:` field; assert exit 2.
+Verified by: unit test with a `content:` slide carrying `body:` field in strict mode;
+assert exit 2; W-VAL-103 message citing the dropped content field in stderr.
 
 ### AC-003: Reconcile body/content schema drift
 (traces to BC-3.03.002 invariant 2 — strict mode is the default)

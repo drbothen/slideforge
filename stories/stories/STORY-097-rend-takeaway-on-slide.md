@@ -12,15 +12,7 @@ status: draft
 spec_version: "1.0"
 created: "2026-06-11"
 source_findings: [REND-004]
-behavioral_contracts: []
-# BC status: pending PO authorship — flag raised.
-# The takeaway field currently only aggregates into DOCX executive_summary via STORY-027/042.
-# The spec mandates a visible takeaway bar per slide in all presentation formats (PPTX,
-# HTML, PDF). No existing BC covers this on-slide rendering path. Product-owner must author
-# a new BC in the Authoring or Layout bounded context (suggest BC-3.07.001 or extend
-# BC-3.06 / BC-3.01).
-# Routing crates: slideforge-eval, slideforge-layout, slideforge-pptx, slideforge-html,
-# slideforge-pdf.
+behavioral_contracts: [BC-3.07.001]
 verification_properties: []
 nfr_refs: []
 closes_findings: [REND-004]
@@ -38,18 +30,14 @@ estimated_days: 5
 
 # STORY-097: REND-004 — takeaway Field Renders as Visible Bar on All Presentation Formats
 
-## BC Gap Notice
+## Behavioral Contracts
 
-No existing behavioral contract covers on-slide takeaway rendering. The PO must author
-a new BC (suggest BC-3.07.001 in a new §3.07 "Slide Takeaway Bar" section, or extend
-BC-3.01 or BC-3.04). Until that BC is authored and this story is updated with the BC ID,
-status remains `draft` and this story MUST NOT be dispatched to implementation.
-
-PO action required: author BC specifying:
-- `takeaway` field in a slide declaration produces a visible horizontal bar anchored
-  to the bottom of the slide in PPTX, HTML, and PDF output.
-- The bar displays the takeaway text in a visually distinguished style.
-- DOCX: takeaway continues to aggregate into executive_summary (existing behavior, no change).
+| BC ID | Title | Covering ACs |
+|-------|-------|-------------|
+| BC-3.07.001 | takeaway Field Renders as Visible Takeaway Bar on Presentation Slides (PPTX, HTML, PDF) | AC-001 through AC-006 |
+| BC-3.06.003 | All Positioned Elements Valid EMU Coords | AC-002 |
+| BC-4.03.001 | PDF/UA-1 compliant | AC-005 |
+| BC-4.03.003 | HTML WCAG AA | AC-004 |
 
 ## Subsystem Anchor Justification
 
@@ -84,17 +72,30 @@ threaded into the layout pass as a visual shape.
 
 ## Architecture Compliance Rules
 
-- `takeaway` must be threaded through as a new `ContentBlock::Takeaway(Arc<str>)` variant
-  or via an existing mechanism such as a custom frame. The IR design (ADR-019 / Two-IR
-  model) requires semantic info in `Deck` and geometric info in `LaidOutDeck`.
+- `takeaway` must be threaded through as a new `ContentBlock::Takeaway(Arc<str>)` variant.
+  The IR design (ADR-019 / Two-IR model) requires semantic info in `Deck` and geometric
+  info in `LaidOutDeck`.
 - The takeaway bar is a presentation-format concern only (PPTX, HTML, PDF). DOCX behavior
-  (executive_summary aggregation) is unchanged.
-- Per CLAUDE.md: `alt` required on the takeaway bar shape; if it is a visual element with
-  no explicit alt, use the takeaway text itself as the accessible alt/description.
-- Per BC-3.06.003: the takeaway bar's bbox must be within slide bounds (non-negative,
-  within page_size). The canonical position is a bar at the bottom of the slide (e.g.,
-  occupying the bottom 8-10% of slide height).
-- The bar must NOT overlap the slide content area — region maps must reserve space.
+  (executive_summary aggregation via BC-3.02.001) is unchanged.
+- Per BC-3.07.001 postcondition 7 and CLAUDE.md DI-001: the takeaway bar text IS the
+  accessible alt/description. `decorative: true` is not applicable — the bar always
+  conveys information. The PPTX shape carries `<p:cNvPr name="takeaway">`.
+- **Canonical takeaway bar geometry (BC-3.07.001 postcondition 2, gene-transfusion-assessment §1.5):**
+  - x: `0.67"` → `Emu(613_440)`, y: `6.1"` → `Emu(5_562_840)`
+  - width: `8.66"` → `Emu(7_924_320)`, height: `0.5"` → `Emu(457_200)`
+  - fill: `#E8F0F8` (light blue, `<a:srgbClr val="E8F0F8"/>`)
+- **Body region compression (BC-3.07.001 postcondition 2 + Invariant 4):** when a
+  `ContentBlock::Takeaway` is present on a slide, `BodyHeight::Full (5.0")` is replaced
+  by `BodyHeight::Compressed (4.2")`. Slides WITHOUT a takeaway continue to use
+  `BodyHeight::Full`. This is a per-slide decision, not a per-deck global setting.
+- Per BC-3.06.003: the takeaway bar bbox must be non-negative and within page bounds.
+  The canonical geometry fits within the default 16:9 dimensions (`9_144_000 × 5_143_500` EMU).
+- Per BC-3.07.001 Invariant 1: takeaway is supported on 20 of 31 slide types (exceptions:
+  `table`, `end`, `key_metrics`). `takeaway:` on an exception type produces W-VAL-103.
+- Per BC-3.07.001 postcondition 8: `takeaway_align` (default `center`) and
+  `takeaway_size` (default: brand body font size) are optional first-class fields.
+- Per BC-3.07.001 Invariant 6: empty `takeaway: ""` emits W-VAL-103 cosmetic warning;
+  no bar is rendered.
 
 ## Library & Framework Requirements
 
@@ -138,81 +139,113 @@ starting. If context is tight, split into two sub-stories: (A) layout + PPTX, (B
 ## Acceptance Criteria
 
 ### AC-001: takeaway FieldValue routed to ContentBlock in eval pass
-(pending BC — traces to takeaway field threading contract TBD)
+(traces to BC-3.07.001 postcondition 1 — evaluator produces ContentBlock::Takeaway for non-empty takeaway field)
 
 When a slide declaration contains `takeaway: "Key insight here"`, the evaluator produces
-a `ContentBlock::Takeaway("Key insight here")` in `Slide.blocks`. The existing DOCX
-executive_summary aggregation (STORY-027/042) is not regressed.
+a `ContentBlock::Takeaway("Key insight here")` in `Slide.blocks`. The eval pass routes
+takeaway into BOTH paths: `ContentBlock::Takeaway` in `Slide.blocks` (for presentation
+layout) and the existing `section_data.executive_summary` aggregation (for DOCX, BC-3.02.001).
+The DOCX executive_summary aggregation (STORY-027/042) is not regressed.
 
 Verified by: unit test in `slideforge-eval` asserting `ContentBlock::Takeaway` is present
 in evaluated slide blocks when `takeaway:` field is set.
 
-### AC-002: Takeaway bar frame produced by layout pass with valid bbox
-(pending BC — traces to layout bbox contract; partially covered by BC-3.06.003)
+### AC-002: Takeaway bar frame produced by layout pass with canonical geometry
+(traces to BC-3.07.001 postcondition 2 + BC-3.06.003 invariant 1 — takeaway bar Frame.bbox at canonical position)
 
 `layout::run()` produces a `FrameContent::Takeaway(text)` frame for each slide containing
-a takeaway, positioned in the bottom bar region of the slide. The frame's bbox is valid
-per BC-3.06.003 (non-negative, within page_size bounds), and does not overlap the slide's
-main content region.
+a takeaway. The `Frame.bbox` matches canonical geometry: x=`Emu(613_440)`, y=`Emu(5_562_840)`,
+width=`Emu(7_924_320)`, height=`Emu(457_200)`. The body region for the same slide uses
+`BodyHeight::Compressed (4.2")` instead of `BodyHeight::Full (5.0")`. Slides without a
+takeaway continue to use `BodyHeight::Full`. The takeaway bar bbox satisfies BC-3.06.003
+(non-negative, within page bounds).
 
 Verified by: unit test building a content slide with takeaway; assert `FrameContent::Takeaway`
-frame has `bbox.y >= page_size.height * 0.85` (bottom 15% of slide) and bbox within bounds.
+frame bbox matches canonical geometry exactly; assert `BodyHeight::Compressed` on that slide
+and `BodyHeight::Full` on a slide without takeaway.
 
 ### AC-003: PPTX emits takeaway bar as visible shape on each slide
-(pending BC — traces to PPTX serialization contract)
+(traces to BC-3.07.001 postcondition 3 — PPTX sp shape with canonical fill, name, and text)
 
 A deck built with `slideforge build --format pptx` and one or more slides with `takeaway:`
-produces a .pptx where each such slide contains a `<p:sp>` shape at the bottom of the
-slide with the takeaway text. The shape does not appear on slides without a `takeaway:`
-field.
+produces a .pptx where each such slide contains a `<p:sp>` shape with:
+- `<p:cNvPr name="takeaway">` (semantic accessibility name)
+- `<a:solidFill><a:srgbClr val="E8F0F8"/>` (canonical fill color)
+- The takeaway string as text content
+The shape does NOT appear on slides without a `takeaway:` field (BC-3.07.001 Invariant 2).
 
-Verified by: integration test building a mixed deck (with and without takeaway); assert
-the takeaway-bar shape present on expected slides, absent on others.
+Verified by: integration test building a mixed deck (with and without takeaway); parse
+PPTX XML; assert shape with `name="takeaway"` present on takeaway slides, absent on others.
 
 ### AC-004: HTML emits takeaway bar as accessible element
-(pending BC — traces to HTML export + WCAG AA contract BC-4.03.003)
+(traces to BC-3.07.001 postcondition 4 + BC-4.03.003 — HTML WCAG AA)
 
 In static HTML output, each slide with a `takeaway:` value has a
 `<div class="takeaway-bar" role="note">` element containing the takeaway text. The element
-is positioned at the bottom of the slide canvas. WCAG axe-core scan passes (no new violations).
+is positioned at the bottom of the slide canvas consistent with canonical geometry.
+WCAG axe-core scan passes (no new violations introduced by the bar).
 
-Verified by: unit test in `slideforge-html` asserting `class="takeaway-bar"` element in
-rendered HTML for takeaway slides.
+Verified by: unit test in `slideforge-html` asserting `class="takeaway-bar" role="note"`
+element in rendered HTML for takeaway slides.
 
 ### AC-005: PDF emits takeaway bar with correct structure tag
-(pending BC — traces to PDF/UA-1 contract BC-4.03.001)
+(traces to BC-3.07.001 postcondition 5 + BC-4.03.001 — PDF/UA-1)
 
-In PDF output, each slide with a `takeaway:` value has a tagged structure element for
-the takeaway bar. The element is tagged `/P` or `/Figure` (as appropriate per PDF/UA-1)
-with accessible text. veraPDF CI gate remains clean.
+In PDF output, each slide with a `takeaway:` value has a tagged `/P` structure element
+for the takeaway bar with the takeaway text as accessible text content. The veraPDF
+CI gate remains clean.
 
-Verified by: unit test asserting takeaway bar structure element in PDF output.
+Verified by: unit test asserting `/P` tagged structure element for takeaway bar in PDF
+output; veraPDF gate unbroken.
 
 ### AC-006: DOCX executive_summary aggregation not regressed
-(pending BC — existing behavior from STORY-027/042)
+(traces to BC-3.07.001 postcondition 6 + BC-3.02.001 — DOCX aggregate path independent)
 
 The DOCX output continues to produce the executive_summary section aggregating all
-`takeaway` values. This behavior is unchanged.
+`takeaway` values. This behavior is unchanged (BC-3.07.001 Invariant 5). The on-slide
+bar and the DOCX aggregate path are independent pipelines; a regression in either does
+not excuse failure in the other.
 
 Verified by: run existing STORY-027/042 regression tests; confirm all pass.
 
+### AC-007: Empty takeaway and exception slide types handled correctly
+(traces to BC-3.07.001 Invariants 1 and 6 — empty-string W-VAL-103; exception types W-VAL-103)
+
+`takeaway: ""` emits W-VAL-103 cosmetic warning (no bar rendered, body uses Full height).
+`takeaway:` on a `table`, `end`, or `key_metrics` slide type emits W-VAL-103 (unknown
+field for that type, no bar rendered).
+
+Verified by: unit tests for both cases; assert W-VAL-103 emitted, no takeaway bar frame
+in LaidOutDeck for either case.
+
 ## Tasks
 
-- [ ] **T-001:** Read the STORY-027, STORY-042, and BC-3.02.001 specs to understand the
-  existing takeaway DOCX path before touching any code.
-- [ ] **T-002 (RED):** Write `test_takeaway_in_content_blocks()` in `slideforge-eval`.
-- [ ] **T-003 (RED):** Write `test_takeaway_frame_bbox_in_bottom_region()` in `slideforge-layout`.
-- [ ] **T-004 (RED):** Write `test_pptx_has_takeaway_bar_shape()` in `slideforge-pptx`.
-- [ ] **T-005 (RED):** Write `test_html_has_takeaway_bar()` in `slideforge-html`.
+- [ ] **T-001:** Read STORY-027, STORY-042, BC-3.02.001, and BC-3.07.001 before touching
+  any code.
+- [ ] **T-002 (RED):** Write `test_takeaway_in_content_blocks()` in `slideforge-eval`;
+  assert `ContentBlock::Takeaway` present and DOCX path not regressed.
+- [ ] **T-003 (RED):** Write `test_takeaway_frame_canonical_geometry()` in `slideforge-layout`;
+  assert bbox = `(613_440, 5_562_840, 7_924_320, 457_200)` EMU and `BodyHeight::Compressed`
+  on the takeaway slide; `BodyHeight::Full` on a non-takeaway slide.
+- [ ] **T-004 (RED):** Write `test_pptx_has_takeaway_bar_shape()` in `slideforge-pptx`;
+  assert `<p:cNvPr name="takeaway">` and `srgbClr val="E8F0F8"` present; absent on
+  non-takeaway slides.
+- [ ] **T-005 (RED):** Write `test_html_has_takeaway_bar()` in `slideforge-html`; assert
+  `class="takeaway-bar" role="note"` element present.
 - [ ] **T-006 (RED):** Write `test_pdf_has_takeaway_structure_element()` in `slideforge-pdf`.
-- [ ] **T-007 (GREEN):** Add `ContentBlock::Takeaway` and `FrameContent::Takeaway` variants.
-- [ ] **T-008 (GREEN):** Route `takeaway` field in eval pass.
-- [ ] **T-009 (GREEN):** Add `TAKEAWAY_BAR_REGION` to region maps; map in layout pass.
-- [ ] **T-010 (GREEN):** Emit takeaway bar shape in PPTX serializer.
-- [ ] **T-011 (GREEN):** Emit takeaway bar element in HTML renderer.
-- [ ] **T-012 (GREEN):** Emit takeaway bar in PDF exporter.
-- [ ] **T-013:** Run `cargo nextest run -p slideforge-eval -p slideforge-layout -p slideforge-pptx -p slideforge-html -p slideforge-pdf --no-fail-fast`.
-- [ ] **T-014:** Run `just check` before declaring done.
+- [ ] **T-007 (RED):** Write `test_empty_takeaway_emits_w_val_103_no_bar()` and
+  `test_takeaway_on_exception_type_emits_w_val_103()`.
+- [ ] **T-008 (GREEN):** Add `ContentBlock::Takeaway` and `FrameContent::Takeaway` variants.
+- [ ] **T-009 (GREEN):** Route `takeaway` field in eval pass (both paths: ContentBlock +
+  executive_summary).
+- [ ] **T-010 (GREEN):** Add `TAKEAWAY_BAR_REGION` (canonical geometry) to region maps;
+  select `BodyHeight::Compressed` when `ContentBlock::Takeaway` present.
+- [ ] **T-011 (GREEN):** Emit takeaway bar `<p:sp>` shape in PPTX serializer with canonical
+  fill, semantic name, and text.
+- [ ] **T-012 (GREEN):** Emit `<div class="takeaway-bar" role="note">` in HTML renderer.
+- [ ] **T-013 (GREEN):** Emit tagged `/P` structure element in PDF exporter.
+- [ ] **T-014:** Run `cargo nextest run -p slideforge-eval -p slideforge-layout -p slideforge-pptx -p slideforge-html -p slideforge-pdf --no-fail-fast`.
+- [ ] **T-015:** Run `just check` before declaring done.
 
 ## Edge Cases
 
@@ -223,17 +256,13 @@ Verified by: run existing STORY-027/042 regression tests; confirm all pass.
 | EC-003 | takeaway field is empty string | Empty bar not emitted (same as absent field); W-VAL-103 cosmetic warning |
 | EC-004 | Deck with only takeaway slides | Each slide has bar; no crashes |
 
-## Behavioral Contracts Table
-
-| BC ID | Title | Covering ACs |
-|-------|-------|-------------|
-| (pending PO authorship) | On-slide takeaway bar rendering | AC-001 through AC-005 |
-| BC-3.06.003 | All Positioned Elements Valid EMU Coords | AC-002 |
-| BC-4.03.001 | PDF/UA-1 compliant | AC-005 |
-| BC-4.03.003 | HTML WCAG AA | AC-004 |
-
 ## Test Strategy
 
-TDD strict mode. Five failing tests across five crates. This is the largest story in the
-rendering-fix wave (5 crates, 5 days estimated). If context is tight during implementation,
-split as described in Token Budget section above.
+TDD strict mode. Seven failing tests across five crates (AC-001 through AC-007). This is
+the largest story in the rendering-fix wave (5 crates, 5 days estimated). If context is
+tight during implementation, split as described in Token Budget section above.
+
+Key geometry invariant for T-003: `bbox = Emu { x: 613_440, y: 5_562_840, w: 7_924_320, h: 457_200 }`.
+The layout test must assert these exact values from BC-3.07.001 postcondition 2, not
+approximate or derived values. Tests for AC-007 (empty string + exception types) must
+assert that no `FrameContent::Takeaway` appears in LaidOutDeck and W-VAL-103 is emitted.

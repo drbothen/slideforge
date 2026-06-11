@@ -11,7 +11,7 @@ traces_to:
   - .factory/specs/behavioral-contracts/BC-INDEX.md
 topological_sort: validated
 cycle_check: PASS
-total_stories: 93
+total_stories: 102
 ---
 
 # Story Dependency Graph — slideforge v1.0
@@ -212,6 +212,15 @@ canonical — individual story files use these exact IDs.
 | STORY-091 | EPIC-19 | CI: Tiered triggers + GitHub merge queue (remove slow legs from per-PR critical path) | — | STORY-092 |
 | STORY-092 | EPIC-19 | CI: Cache reliability + disk headroom (eliminate cold-build flakes) | STORY-091 | STORY-093 |
 | STORY-093 | EPIC-19 | CI: arm64 build-time reduction (mold linker + CI profile tuning) | STORY-091, STORY-092 | — |
+| STORY-094 | EPIC-08 | REND-001/003: Finalize placeholder bbox + nvGrpSpPr | STORY-026, STORY-037 | — |
+| STORY-095 | EPIC-13 | REND-002/008-pdf: PDF line-wrapping + progress_bar /Figure + bold font | STORY-043, STORY-044, STORY-045 | — |
+| STORY-096 | EPIC-08 | REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang | STORY-037, STORY-038 | — |
+| STORY-097 | EPIC-07 | REND-004: takeaway bar PPTX/HTML/PDF | STORY-073, STORY-037, STORY-046, STORY-043, STORY-086 | — |
+| STORY-098 | EPIC-04 | REND-005/010a: strict-mode W-VAL-103 exit + chart no-data | STORY-016, STORY-032, STORY-089 | — |
+| STORY-099 | EPIC-09 | REND-006: DOCX bullet run + numbering.xml + sectPr + lang | STORY-041, STORY-042, STORY-081 | — |
+| STORY-100 | EPIC-14 | REND-008-html: HTML chart EMU/px + image src + bullet semantics | STORY-046, STORY-031, STORY-081 | — |
+| STORY-101 | EPIC-15 | REND-009/010b: CLI bare-path fix + PPTX chart SVG embedding | STORY-055, STORY-031, STORY-037, STORY-038 | STORY-102 |
+| STORY-102 | EPIC-08 | REND-010b: Image binary embedding in PPTX and PDF | STORY-037, STORY-043, STORY-044, STORY-039, STORY-101 | — |
 
 > **CI-performance story scheduling note (human-authorized 2026-06-10):** STORY-091,
 > STORY-092, and STORY-093 MUST be dispatched and merged BEFORE the remaining Wave-5
@@ -332,6 +341,15 @@ canonical — individual story files use these exact IDs.
 | STORY-091 | EPIC-19 | ci-tiered-triggers-merge-queue | 5 | NEXT | 5 |
 | STORY-092 | EPIC-19 | ci-cache-reliability-disk | 5 | NEXT | 5 |
 | STORY-093 | EPIC-19 | ci-arm64-build-time | 5 | NEXT | 5 |
+| STORY-094 | EPIC-08 | rend-layout-pptx-bbox-nvgrpsppr | 5 | P0 | 8 |
+| STORY-095 | EPIC-13 | rend-pdf-line-wrap-a11y | 5 | P0 | 8 |
+| STORY-096 | EPIC-08 | rend-pptx-master-geometry-lang | 5 | P0 | 5 |
+| STORY-097 | EPIC-07 | rend-takeaway-on-slide | 5 | P0 | 8 |
+| STORY-098 | EPIC-04 | rend-strict-mode-content-drop | 5 | P0 | 5 |
+| STORY-099 | EPIC-09 | rend-docx-bullets-secpr-lang | 5 | P0 | 8 |
+| STORY-100 | EPIC-14 | rend-html-chart-emu-bullets-image | 5 | P0 | 5 |
+| STORY-101 | EPIC-15 | rend-cli-brand-path-pptx-chart-embed | 5 | P0 | 8 |
+| STORY-102 | EPIC-08 | rend-image-binary-pptx-pdf-embedding | 5 | P0 | 8 |
 
 > Note: Stories STORY-051 through STORY-054 are the EPIC-19 CI stories (Wave 1).
 > Stories STORY-055 through STORY-059 are EPIC-15 CLI stories (Wave 5).
@@ -380,6 +398,10 @@ Wave 5 (prereqs all in Waves 1-4):
   STORY-092,                                    ← EPIC-19 CI-performance [PRIORITY: NEXT, after STORY-091]
   STORY-093,                                    ← EPIC-19 CI-performance [PRIORITY: NEXT, after STORY-092]
   STORY-089,                                    ← EPIC-01 (slot 1 — independent, zero Wave 5 deps; Wave-4 follow-up (d))
+  STORY-094, STORY-095, STORY-096,              ← REND-fix wave [deliver BEFORE remaining Wave-5 features]
+  STORY-097, STORY-098, STORY-099, STORY-100,   ← REND-fix wave
+  STORY-101,                                    ← REND-fix wave (must precede STORY-102)
+  STORY-102,                                    ← REND-fix wave (depends on STORY-101)
   STORY-046, STORY-047, STORY-048,              ← EPIC-14
   STORY-055, STORY-056, STORY-057, STORY-058, STORY-059,  ← EPIC-15
   STORY-060, STORY-061, STORY-062, STORY-063,   ← EPIC-16
@@ -467,7 +489,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.02.002 | STORY-027, STORY-077 | Full (auto-generated sections: STORY-027; manually authored section IR extension + register routing: STORY-077) — STORY-081 re-anchored to BC-3.05.001 v1.4.0 (human ruling 2026-06-09; slide-level markup belongs to inline-formatting BC, not section-block BC) |
 | BC-3.02.001 | STORY-027 | Full |
 | BC-3.03.001 | STORY-016 | Full |
-| BC-3.03.002 | STORY-016 | Full |
+| BC-3.03.002 | STORY-016, STORY-098 | Full (baseline: STORY-016; W-VAL-103 content-drop Route A + body/content schema drift: STORY-098) |
 | BC-3.03.003 | STORY-016 | Full |
 | BC-3.03.004 | STORY-016 | Full |
 | BC-3.04.001 | STORY-028 | Full |
@@ -512,8 +534,12 @@ its dependencies. The dependency graph is a DAG.
 | BC-3.06.001 | STORY-026 | Full |
 | BC-3.06.002 | STORY-026 | Full |
 | BC-3.06.003 | STORY-026 | Full |
+| BC-3.07.001 | STORY-097 | Full (takeaway bar rendering: eval ContentBlock::Takeaway, layout canonical geometry + body compression, PPTX sp shape, HTML div, PDF /P tag) |
+| BC-3.07.002 | STORY-102 | Full (image binary embedding: PPTX media parts + rels + content-type, PDF XObject, invalid-image error, blip-less forbidden) |
+| BC-3.07.003 | STORY-101 | Full (normalize_parent() 4-case spec; empty-path diagnostic forbidden; brand/config discovery always uses normalized path) |
 
-**Coverage result: 112/112 BCs covered. Zero orphan BCs.**
+**Coverage result: 115/115 BCs covered. Zero orphan BCs.**
+(BC-3.07.001 added for STORY-097; BC-3.07.002 added for STORY-102; BC-3.07.003 added for STORY-101; BC-3.03.002 now also covered by STORY-098 — updated 2026-06-11 per rendering-fix wave finalization.)
 (BC-3.02.002 now covered by STORY-027 + STORY-077; BC-1.14.003 now covered by STORY-035 + STORY-077 + STORY-082; BC-1.14.004 now covered by STORY-035 + STORY-036 — updated 2026-05-31 per architect directive F-002. BC-4.01.003 Half A covered by STORY-040, Half B covered by STORY-082 — updated 2026-06-04 per human-authorized scope split.)
 
 ---

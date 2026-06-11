@@ -12,22 +12,16 @@ status: draft
 spec_version: "1.0"
 created: "2026-06-11"
 source_findings: [REND-009, REND-010]
-behavioral_contracts: [BC-4.01.001, BC-1.11.001]
-# BC status: BC-4.01.001 (valid .pptx — chart EC-004 states "Chart SVG embedded as media
-# part; chart present in /ppt/media/chart1.svg; relationship reference correct"). The
-# blip-less <p:pic> deferral violates this EC. BC-1.11.001 (chart renderer produces SVG
-# via plotters — currently the SVG is produced but not embedded in the .pptx output,
-# making the chart invisible in PPTX). Both BCs are authored.
-#
-# REND-009: CLI bare-path brand resolution — no BC covers CLI brand-discovery path
-# directly; the fix is a correctness obligation under BC-1.15.001 (error messages cite
-# correct source location). Flag raised for PO: consider a new BC in CLI subsystem or
-# extend BC-1.15.001 to cover path-normalization pre-conditions.
+behavioral_contracts: [BC-4.01.001, BC-1.11.001, BC-3.07.003]
+# BC-3.07.003 (CLI input path normalized before brand and config discovery) is the
+# authoritative contract for the REND-009 bare-path fix. It specifies the 4-case
+# normalize_parent() pure function, the forbidden empty-path diagnostic rule, and the
+# regression test requirement. Authored 2026-06-11 per product-owner rendering-fix wave burst.
 #
 # REND-010b: this story IS the anchor story for the "deferred to a later story" code
-# comment in slide_serializer.rs lines 653 and 1686. After this story is delivered,
-# those comments MUST be updated to cite STORY-101 (or removed if the feature is now
-# implemented).
+# comment in slide_serializer.rs line ~653 (FrameContent::Chart). After this story is
+# delivered, that comment is removed (chart SVG embedding implemented). The comment at
+# line ~1686 (build_image_picture) must be updated to cite STORY-102.
 verification_properties: []
 nfr_refs: []
 closes_findings: [REND-009, REND-010]
@@ -142,28 +136,37 @@ Files to modify:
 ## Acceptance Criteria
 
 ### AC-001: slideforge build deck.sf succeeds with bare filename
-(traces to BC-4.01.001 — build produces valid output; and BC-1.15.001 — errors cite correct location)
+(traces to BC-3.07.003 postcondition 3 — brand discovery succeeds for bare-filename invocations; BC-3.07.003 postcondition 2 — no diagnostic cites empty path)
 
 `slideforge build deck.sf` invoked from the directory containing `deck.sf` succeeds
 (exit 0) and produces output. No "brand I/O error for ''" diagnostic is emitted. The
-brand resolution correctly searches the directory containing the source file when given
-a bare filename with no directory component.
+brand resolution correctly searches the current working directory when the normalized
+parent is `"."`. Any E-BRD-* or I/O diagnostic cites the normalized path (`"."` or
+`"./brand.pptx"`) and NEVER an empty string `""` (BC-3.07.003 postcondition 2 —
+empty path in a diagnostic is a contract violation).
 
 Verified by: integration test invoking the CLI with `path = "deck.sf"` from a temp dir
 containing the file; assert exit 0 and no "I/O error for ''" in stderr.
 
-### AC-002: Parent path normalization: bare filename maps to "."
-(traces to BC-4.01.001 postcondition — correctness of brand resolution path)
+### AC-002: normalize_parent() 4-case pure-function contract
+(traces to BC-3.07.003 postcondition 1 + invariant 1 — pure function with no side effects, all four input forms)
 
-A unit test verifies the path normalization logic:
+`normalize_parent` is a pure function (BC-3.07.003 Invariant 1: same input always yields
+same output, no side effects). A unit test verifies all four canonical cases from
+BC-3.07.003 postcondition 1:
 ```
-normalize_parent("deck.sf") == Path::new(".")
-normalize_parent("./deck.sf") == Path::new(".")
-normalize_parent("/abs/path/deck.sf") == Path::new("/abs/path")
-normalize_parent("subdir/deck.sf") == Path::new("subdir")
+normalize_parent("deck.sf")          == Path::new(".")          // bare filename
+normalize_parent("./deck.sf")        == Path::new(".")          // dot-relative
+normalize_parent("/abs/path/deck.sf") == Path::new("/abs/path") // absolute
+normalize_parent("subdir/deck.sf")   == Path::new("subdir")     // relative-with-dir
 ```
+Per BC-3.07.003 Invariant 2, normalization is applied ONCE at the CLI entry point. No
+downstream crate (brand, config, layout, export) performs its own bare-filename fix.
+Per BC-3.07.003 Invariant 4, normalization does NOT change the source file path itself
+(only the parent used for brand/config discovery).
 
-Verified by: unit test in the CLI or brand module asserting these four cases.
+Verified by: unit test in `slideforge-cli` asserting these four cases exactly as specified
+in BC-3.07.003 postcondition 1.
 
 ### AC-003: Chart SVG embedded as media part in .pptx
 (traces to BC-4.01.001 EC-004 — chart SVG in /ppt/media/chart1.svg with relationship)
@@ -237,6 +240,7 @@ populated. This AC is OPTIONAL pending PO confirmation.
 
 | BC ID | Title | Covering ACs |
 |-------|-------|-------------|
+| BC-3.07.003 | CLI Input Path Normalized Before Brand and Config Discovery | AC-001, AC-002 |
 | BC-4.01.001 | Serialize LaidOutDeck to Valid .pptx | AC-003, AC-004 |
 | BC-1.11.001 | Chart renderer via plotters | AC-003, AC-004 |
 
