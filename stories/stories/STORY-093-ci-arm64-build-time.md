@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI build toolchain tuning.
 # Anchors to NFR-029 (Linux arm64 matrix reliability) and NFR-001 (cold build < 500ms
@@ -171,7 +171,7 @@ task; the artifact upload is removed after the baseline is recorded.
 
 The `rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444` step MUST appear in the
 `test (linux-arm64)` job ONLY (not in `test (linux-x86_64)`, `test (macos-arm64)`,
-`test (macos-x86_64)`, or `test (windows-x86_64)`). The step MUST set `make-default: true`
+or `test (windows-x86_64)`). The step MUST set `make-default: true`
 so that `setup-mold` symlinks `/usr/bin/ld` → mold. The `cc` driver (`gcc`/`clang`) then
 picks up mold automatically through the system linker path — no RUSTFLAGS modification is
 required or permitted.
@@ -320,11 +320,15 @@ this story provides defense-in-depth via smaller `target/`). Document before/aft
 Note: compare `du -sh target/ci/` against the old `target/debug/` or `target/test/`
 size (whichever the prior nextest invocation used) — they are different directories.
 
-### AC-006: All test suites pass on all 5 CI platforms after profile changes (traces to NFR-026 through NFR-030)
+### AC-006: All test suites pass on all 4 active CI platforms after profile changes (traces to NFR-026, NFR-028, NFR-029, NFR-030)
+
+<!-- NFR-027 (macOS x86_64) NOT traced: test (macos-x86_64) / macos-13 leg was removed
+     from ci.yml before this story (chronic runner availability issues); Intel macOS binary
+     coverage is release.yml's responsibility. Consistent with STORY-091 v1.4 precedent. -->
 
 After both mold and `debug = "line-tables-only"` changes land, the full CI matrix
-(triggered via develop push or `full-ci` label per STORY-091) MUST show green on all 5
-platforms. `line-tables-only` debug info MUST produce usable backtraces on test failures
+(triggered via develop push or `full-ci` label per STORY-091) MUST show green on all 4
+active CI platforms (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64). `line-tables-only` debug info MUST produce usable backtraces on test failures
 (verify by inspecting a test failure output if one occurs, or by intentionally triggering
 a panic in a test and confirming the backtrace contains file:line information).
 
@@ -469,7 +473,8 @@ Architecture section files: N/A — no source crate logic changes.
 
 ### D: Verification
 
-- [ ] Full matrix (develop push or `full-ci` label): all 5 platforms green
+- [ ] Full matrix (develop push or `full-ci` label): all 4 active CI platforms green
+      (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64; macos-x86_64 not in ci.yml)
 - [ ] Confirm no new `No space left on device` errors
 - [ ] Remove temporary profiling steps (upload-artifact for baseline) from ci.yml
       before final commit
@@ -621,7 +626,8 @@ observation and artifact inspection:
    CI YAML diff confirms `--cargo-profile ci` added to nextest invocation; NFR-001 bench
    run confirms < 500ms.
 4. **AC-005:** Before/after `target/` size from CI log lines (`du -sh target/ci/`).
-5. **AC-006:** Full matrix (develop push or `full-ci` label) shows all 5 platforms green.
+5. **AC-006:** Full matrix (develop push or `full-ci` label) shows all 4 active CI platforms
+   green (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64; macos-x86_64 not in ci.yml).
 
 ## Complexity Estimate
 
@@ -662,3 +668,4 @@ RUSTFLAGS to arm64-only, (c) the aarch64 default-linker gating pre-check. Estima
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: confirmed rui314/setup-mold SHA `9c9c13bf...` via `git ls-remote` 2026-06-10 (re-confirm at impl since v1 is moving tag); CORRECTNESS FIX to AC-004 — removed false parenthetical "confirm --profile ci is already the case"; rewrote AC-004 to require BOTH `[profile.ci]` in Cargo.toml AND `--cargo-profile ci` in nextest invocation (they are distinct flags — nextest `--profile ci` does NOT invoke a Cargo build profile); added `target/ci/` directory implication and cache interaction note; added RUSTFLAGS override correctness finding (global RUSTFLAGS overrides config.toml target rustflags — use CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS); added aarch64 default-linker gating pre-check as verify-at-impl; added EC-008 and EC-009; updated Architecture Compliance Rules 6 and 7; resolved `<owner>` placeholder; added Uncertainty Resolution Log. |
 | 1.2 | 2026-06-11 | story-writer | AC-002 corrected: CARGO_TARGET_*_RUSTFLAGS env-var mechanism REMOVED — empirically verified (cargo 1.95.0, feature/STORY-093 @ 22f57a53) that rustflags sources are MUTUALLY EXCLUSIVE and the target-specific env var is ENTIRELY IGNORED when global RUSTFLAGS is set; chosen mechanism changed to setup-mold `make-default: true` (ld-symlink activation via /usr/bin/ld → mold; cc driver picks up automatically); readelf .comment active-verification step added as required pass evidence for AC-002; LESSON-19 sweep: Architecture Compliance Rules 1 and 7 rewritten; Tasks B updated (removed env-var step, added readelf step); EC-009 updated (resolved by design); Rejected Alternatives updated; File Structure Requirements updated; Forbidden Dependencies updated; Test Strategy updated. Source: ci-workflow-analyzer empirical findings on feature/STORY-093. |
 | 1.3 | 2026-06-11 | story-writer | F-093-P2-003: AC-002 arm64-clippy clause dropped — unsatisfiable (clippy runs only on x86_64 fast leg; platform-independent lint; no arm64 clippy job exists); rewording clarifies arm64 tests-only pass requirement. F-093-P2-001: AC-003 extended with forced-relink requirement and flag-identical invocation rule — Cargo fingerprints do NOT track linker identity; without deleting target/ci/deps + .fingerprint, no relinking occurs and --timings measures nothing; baseline and after-mold captures must use identical flags for a valid delta. F-093-P2-004 (LESSON-19 sweep): no additional arm64-clippy or relink-blind statements found in the story body beyond the two corrected sites. Task B timings note updated with forced-relink procedure. |
+| 1.4 | 2026-06-11 | story-writer | F-093-P8-001: reconciled to 4-platform ci.yml matrix. `test (macos-x86_64)` / macos-13 leg was removed from ci.yml before this story (chronic runner availability; Intel macOS coverage is release.yml's responsibility). Changed: (1) AC-002 (~174): dropped `test (macos-x86_64)` from mold-exclusion enumeration; (2) AC-006 (~323): "all 5 CI platforms" → "all 4 active CI platforms"; NFR trace changed from "NFR-026 through NFR-030" to "NFR-026, NFR-028, NFR-029, NFR-030" (NFR-027 excluded per STORY-091 v1.4 precedent; inline comment added explaining release.yml coverage path); (3) Task D (~472): "all 5 platforms" → "all 4 active CI platforms" with enumeration; (4) Test Strategy item 5 (~624): same 5→4 correction. Consistent with STORY-091 v1.4 precedent. |
