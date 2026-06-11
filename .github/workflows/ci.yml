@@ -525,6 +525,21 @@ jobs:
           --no-fail-fast
           --profile ci
           --cargo-profile ci
+      - name: Capture target/ci size (linux-arm64, AC-005)
+        # STORY-093 AC-005: evidence that line-tables-only debug info reduces the
+        # target/ci directory size relative to the default full-debug profile.
+        # Runs after nextest (which uses --cargo-profile ci) so target/ci contains
+        # the compiled artifacts under the ci profile's debuginfo = "line-tables-only"
+        # setting.  A missing target/ci/ means the nextest build did not produce
+        # the expected artifacts — this is a hard failure, not a warning, because
+        # an absent directory cannot serve as size-reduction evidence (AC-002
+        # principle: absence of the check is NOT a passing state).
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          [ -d target/ci ] || { echo "::error::target/ci missing — AC-005 size capture impossible (nextest build did not populate target/ci/)"; exit 1; }
+          size=$(du -sh target/ci/ | cut -f1)
+          echo "Check passed: target/ci size ${size} (line-tables-only debuginfo; AC-005)"
       - name: Verify mold linked the test binaries (linux-arm64)
         # Confirms that the /usr/bin/ld → mold symlink was effective and the
         # nextest binaries were actually linked by mold (not silently falling
