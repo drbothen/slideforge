@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.1"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-06-11T00:00:00
 phase: 1a
 inputs: [domain-spec/L2-INDEX.md]
 input-hash: "[pending]"
@@ -14,7 +14,7 @@ subsystem: SS-TBD
 capability: CAP-030
 lifecycle_status: active
 introduced: v1.0.0
-modified: []
+modified: ["v1.2 — rendering-fix wave (REND-009/STORY-101): Invariant 3 extended to explicitly prohibit empty-string path in diagnostics; EC-005 added for bare-filename path normalization precondition. Traces to BC-3.07.003 (CLI path normalization contract)."]
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -51,6 +51,13 @@ via miette/ariadne with colored source-code pointers in terminal output.
 1. No diagnostic is ever emitted without a source span — a generic "unknown location" is not acceptable.
 2. No diagnostic is ever emitted without a correction hint — even if the hint is a documentation reference.
 3. The span always references a valid position in the source file (line ≤ file line count, col ≤ line length + 1).
+   **Path normalization corollary (REND-009):** The file path component of any span or
+   diagnostic message MUST NEVER be an empty string `""`. When the CLI receives a bare
+   filename (e.g., `deck.sf`), `Path::parent()` returns `Some(Path::new(""))`, which
+   renders as `""` in diagnostic messages. The CLI MUST normalize bare filenames before
+   any diagnostic-emitting code receives them (see BC-3.07.003). A diagnostic citing `""`
+   as the file path is a violation of this invariant — it makes the error unactionable.
+   Concrete: `"brand I/O error for ''"` (REND-009) is a violation of invariant 3.
 
 ## Edge Cases
 
@@ -60,6 +67,7 @@ via miette/ariadne with colored source-code pointers in terminal output.
 | EC-002 | Error from a data source (network error) | Span points to the `@data` directive line in the .sf source; hint: "use --offline" |
 | EC-003 | Error in a math block | Span points into the math expression (line within `$...$` or `$$...$$` block) |
 | EC-004 | CLI invoked with redirected stdout (no TTY) | Plain text output without ANSI color codes |
+| EC-005 | CLI invoked with bare filename `deck.sf` (no directory component); brand file missing | E-BRD-001 message cites the normalized directory (`"."` or `"./deck.sf"`), NOT an empty string `""`. The message is actionable (REND-009 fix). |
 
 ## Canonical Test Vectors
 

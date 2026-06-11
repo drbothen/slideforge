@@ -1,10 +1,10 @@
 ---
 document_type: behavioral-contract-index
 level: L3
-version: "1.1"
-status: draft
+version: "1.2"
+status: active
 producer: product-owner
-timestamp: 2026-05-24T00:00:00
+timestamp: 2026-06-11T00:00:00
 phase: 1a
 traces_to: domain-spec/L2-INDEX.md
 ---
@@ -146,7 +146,7 @@ traces_to: domain-spec/L2-INDEX.md
 
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
-| BC-1.15.001 | All errors carry file:line:col span and correction hint | P0 | active | [BC-1.15.001.md](BC-1.15.001.md) |
+| BC-1.15.001 | All Errors Carry file:line:col Span and Correction Hint (Path Normalization Invariant) | P0 | active | [BC-1.15.001.md](BC-1.15.001.md) |
 | BC-1.15.002 | All errors accumulated in single pass — no fail-on-first | P0 | active | [BC-1.15.002.md](BC-1.15.002.md) |
 | BC-1.15.003 | Parse errors are always fatal; validation errors fatal in strict mode only | P0 | active | [BC-1.15.003.md](BC-1.15.003.md) |
 
@@ -220,7 +220,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
 | BC-3.03.001 | Canvas overflow produces CanvasOverflow warning with EMU estimate | P0 | active | [BC-3.03.001.md](BC-3.03.001.md) |
-| BC-3.03.002 | Strict mode produces no output on validation error | P0 | active | [BC-3.03.002.md](BC-3.03.002.md) |
+| BC-3.03.002 | Strict Mode Produces No Output on Validation Error (incl. W-VAL-103 Content-Drop) | P0 | active | [BC-3.03.002.md](BC-3.03.002.md) |
 | BC-3.03.003 | Warn-only mode renders error-slide placeholders and continues | P0 | active | [BC-3.03.003.md](BC-3.03.003.md) |
 | BC-3.03.004 | Zero-slide deck produces validation error | P0 | active | [BC-3.03.004.md](BC-3.03.004.md) |
 
@@ -244,6 +244,17 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-3.06.001 | Layout Transformation Preserves Slide Count | P0 | active | [BC-3.06.001.md](BC-3.06.001.md) |
 | BC-3.06.002 | Layout Transformation Is Deterministic (Same Inputs Produce Identical LaidOutDeck) | P0 | active | [BC-3.06.002.md](BC-3.06.002.md) |
 | BC-3.06.003 | All Positioned Elements Have Valid Non-Negative EMU Coordinates Within Slide Bounds | P0 | active | [BC-3.06.003.md](BC-3.06.003.md) |
+
+### 3.07 — Rendering Fix Wave: Takeaway Bar, Media Embedding, CLI Path (CAP-010, CAP-015, CAP-030)
+
+> BCs authored in the rendering-fix wave (2026-06-11) to close REND-004, REND-009, REND-010b
+> findings from demo-deep-review-2026-06-11.md. Stories: STORY-097, STORY-101, STORY-102.
+
+| BC ID | Title | Priority | Status | File |
+|-------|-------|----------|--------|------|
+| BC-3.07.001 | takeaway Field Renders as Visible Takeaway Bar on Presentation Slides (PPTX, HTML, PDF) | P0 | active | [BC-3.07.001.md](BC-3.07.001.md) |
+| BC-3.07.002 | Image Binary Embedding in PPTX and PDF Output | P0 | active | [BC-3.07.002.md](BC-3.07.002.md) |
+| BC-3.07.003 | CLI Input Path Normalized Before Brand and Config Discovery | P0 | active | [BC-3.07.003.md](BC-3.07.003.md) |
 
 ---
 

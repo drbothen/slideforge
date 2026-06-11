@@ -2,10 +2,10 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.28"
+version: "2.29"
 status: active
 producer: product-owner
-timestamp: 2026-06-08T00:00:00
+timestamp: 2026-06-11T00:00:00
 phase: 1a
 traces_to: .factory/specs/prd.md
 primary_consumers: [implementer, test-writer]
@@ -451,20 +451,55 @@ error-taxonomy.md prior to v2.20. Confirmed present at the E-VAL-102 emission si
 
 Note (W-VAL-103): `validate_fields` formal registration. Emitted by `validate_fields`
 when a field key in `Slide.fields` is not in the union of `required_fields()` and
-`optional_fields()` for the slide's registered type. Severity: cosmetic. Exit 0 (warning
-does not block the build). The `<key>` placeholder is the unrecognized field name;
-`<type>` is the slide type ID; `<list>` is the sorted comma-separated known-field list
-(built once before the unknown-field loop: `known_list.sort_unstable(); known_list.join(", ")`).
+`optional_fields()` for the slide's registered type. The `<key>` placeholder is the
+unrecognized field name; `<type>` is the slide type ID; `<list>` is the sorted
+comma-separated known-field list (built once before the unknown-field loop:
+`known_list.sort_unstable(); known_list.join(", ")`).
 The diagnostic also carries a `hint` field: `"Valid fields for '<type>' are: <known_list_str>"`.
-Routed to `stderr` with a `warning:` prefix. Does NOT increment the error counter for
-exit-code calculation. Distinct from E-VAL-104 (type mismatch on a KNOWN field) — W-VAL-103
-fires when the field is UNKNOWN to the slide type entirely.
+Routed to `stderr` with a `warning:` prefix. Distinct from E-VAL-104 (type mismatch on a
+KNOWN field) — W-VAL-103 fires when the field is UNKNOWN to the slide type entirely.
+
+**Route A: Context-Sensitive Severity (v2.29, REND-005/STORY-098).**
+W-VAL-103 has TWO severity contexts — the message format is unchanged but the severity
+used at accumulation time differs:
+
+1. **Content-drop sub-case — broken/exit-2 in strict mode:**
+   When the unknown field key is `"shape"` or `"body"` on a slide type that does not
+   support that field (i.e., the field is unknown AND would cause authored user content
+   to be silently dropped), W-VAL-103 is promoted to `broken` severity in strict mode.
+   In strict mode, `validate_fields` adds this diagnostic to the error accumulator with
+   `broken` severity. The build exits 2 and produces no output (per BC-3.03.002 invariant 4).
+   In `--warn-only` mode, the severity is `cosmetic` (exit 0) and the field is dropped
+   with a warning.
+   Rationale: CLAUDE.md production-grade default principle — silent dropping of authored
+   content in the default build mode is a build failure, not a lint. "No silent fallback"
+   (CLAUDE.md Rule 1) and DI-017 (all-or-nothing in strict mode) both mandate this.
+
+2. **Non-content sub-case — cosmetic/exit-0 (unchanged):**
+   When the unknown field key is any key OTHER than `"shape"` or `"body"` (i.e., a
+   metadata annotation, a future-reserved keyword, or any field that has no content
+   impact on the rendered output), W-VAL-103 remains cosmetic and does NOT increment
+   the error counter. Behavior is unchanged from v2.20.
+
+**No new error code E-VAL-105 is introduced.** Route A was chosen over Route B
+(new E-VAL-105 for content-drop sub-case) because: (a) the two contexts differ only in
+the field-key set, not in the message format or user-visible semantics, making a new code
+redundant; (b) the content-drop check is a two-key set (`{"shape", "body"}`) and does not
+require a new code prefix; (c) adding a new code would require updating all test fixtures
+and consuming code without providing additional user value.
+
+**Implementer action (STORY-098):** In `validate_fields` in
+`crates/slideforge-plugin-api/src/slide_types/registry.rs`, when a W-VAL-103 diagnostic
+is about to be accumulated, check whether `key` is `"shape"` or `"body"`. If yes AND the
+build mode is `strict`, accumulate as `broken` severity (which causes the output gate in
+`slideforge-cli` to exit 2). If `--warn-only`, accumulate as `cosmetic` regardless of key.
+All other unknown-field keys: accumulate as `cosmetic` always.
 
 **Pre-registration collision check (2026-06-07):** W-VAL-103 confirmed not present in
 error-taxonomy.md prior to v2.20 (the W-VAL warning namespace was empty). Confirmed
 present at the W-VAL-103 emission site in `validate_fields`
 (`crates/slideforge-plugin-api/src/slide_types/registry.rs`) with `code: Arc::from("W-VAL-103")`.
-No implementer action required.
+v2.29: content-drop severity promotion added per BC-3.03.002 v1.2 Invariant 4 (STORY-098).
 
 Note (E-VAL-104): NEW — schema-driven field-value type validation. Emitted by the new
 type-check arm in `validate_fields` (to be added by STORY-089) when a field's runtime
