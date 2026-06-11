@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI build toolchain tuning.
 # Anchors to NFR-029 (Linux arm64 matrix reliability) and NFR-001 (cold build < 500ms
@@ -84,10 +84,13 @@ If `rust-lld` is already the default for `aarch64-unknown-linux-gnu`, recalibrat
 expected speedup downward; the story still lands (correctness/direction confirmed) but
 document the revised expectation in the PR description.
 
-Configuration: `rui314/setup-mold` action on the arm64 CI leg + `.cargo/config.toml`
-target-scoped linker override for `aarch64-unknown-linux-gnu`. Do NOT apply to x86_64
-(already lld; marginal gain), macOS (Apple ld64 is fast; mold gain is marginal), or
-Windows (lld-link is a real win but adds complexity and targets Windows).
+Configuration: `rui314/setup-mold` action (with `make-default: true`) on the arm64 CI leg
+only. `make-default: true` symlinks `/usr/bin/ld` → mold so the `cc` driver picks it up
+automatically — no RUSTFLAGS modification required or permitted (RUSTFLAGS sources are
+mutually exclusive; `CARGO_TARGET_*_RUSTFLAGS` is silently ignored when global `RUSTFLAGS`
+is set — verified empirically on cargo 1.95.0). Do NOT apply mold to x86_64 (already lld;
+marginal gain), macOS (Apple ld64 is fast; mold gain is marginal), or Windows (lld-link is
+a real win but adds complexity and targets Windows).
 
 **Research caveat:** The speedup magnitude is UNVERIFIED for slideforge specifically. It
 depends on the link/codegen split of the cold build. The `cargo build --timings` capture
@@ -164,43 +167,65 @@ The `--timings` artifact MUST be uploaded as a GitHub Actions artifact from the 
 test leg for one run, to make the before state inspectable. This is a ONE-OFF profiling
 task; the artifact upload is removed after the baseline is recorded.
 
-### AC-002: mold installed and active on linux-arm64 leg ONLY (traces to NFR-029)
+### AC-002: mold installed and active on linux-arm64 leg ONLY via ld-symlink activation; readelf verifies (traces to NFR-029)
 
 The `rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444` step MUST appear in the
 `test (linux-arm64)` job ONLY (not in `test (linux-x86_64)`, `test (macos-arm64)`,
-`test (macos-x86_64)`, or `test (windows-x86_64)`).
+`test (macos-x86_64)`, or `test (windows-x86_64)`). The step MUST set `make-default: true`
+so that `setup-mold` symlinks `/usr/bin/ld` → mold. The `cc` driver (`gcc`/`clang`) then
+picks up mold automatically through the system linker path — no RUSTFLAGS modification is
+required or permitted.
 
-**RUSTFLAGS interaction (correctness requirement):** CI sets a global `RUSTFLAGS=-D warnings`
-environment variable. A global `RUSTFLAGS` env var OVERRIDES (does NOT merge with)
-`[target.<triple>].rustflags` entries in `.cargo/config.toml`. This means:
-- If mold linker args are added via `[target.aarch64-unknown-linux-gnu].rustflags` in
-  `.cargo/config.toml`, they will be CLOBBERED by the global `RUSTFLAGS=-D warnings`.
-- Conversely, if mold args are added to the global `RUSTFLAGS` env, `-D warnings` will
-  be dropped.
+**RUSTFLAGS precedence (correctness requirement — empirically verified on cargo 1.95.0):**
+Cargo's rustflags sources are MUTUALLY EXCLUSIVE in this strict precedence order:
 
-The correct resolution is to configure the arm64 CI job's RUSTFLAGS to include BOTH
-`-D warnings` AND the mold linker arguments, using one of these approaches:
-- Set `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"` in
-  the arm64 job's env block (target-specific env var takes precedence over global
-  RUSTFLAGS for that target; does NOT affect other targets).
-- OR inject the arm64 linker arg in the `.cargo/config.toml` `[target.aarch64-unknown-linux-gnu]`
-  section AND pass RUSTFLAGS as `"-D warnings"` explicitly for that job step (ensuring
-  BOTH flags are active).
+```
+CARGO_ENCODED_RUSTFLAGS > RUSTFLAGS > target.<triple>.rustflags > build.rustflags
+```
 
-The implementer MUST choose the approach that preserves both `-D warnings` and the mold
-linker flag. Do NOT use `RUSTFLAGS` as a workspace-wide env to carry the mold linker
-arg — it would break macOS/Windows legs.
+CI sets a global `RUSTFLAGS=-D warnings` environment variable at the workflow level.
+Because `RUSTFLAGS` is set globally, `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS`
+(target-specific env var) is ENTIRELY IGNORED — it is lower in the precedence chain.
+Any `-C link-arg=-fuse-ld=mold` added via that env var will NEVER reach the linker while
+the global `RUSTFLAGS` env var is set.
+
+**CARGO_TARGET_*_RUSTFLAGS MUST NOT be used for the mold linker flag in this repo.** The
+env-var approach is removed from the implementation. The ld-symlink mechanism
+(`make-default: true`) bypasses the RUSTFLAGS precedence problem entirely because mold
+activation goes through the system linker path, not through compiler driver flags.
+
+Correct `setup-mold` configuration for the arm64 job:
+```yaml
+- name: Install mold linker (arm64 only)
+  uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+  with:
+    make-default: true
+  # make-default: true symlinks /usr/bin/ld → mold.
+  # The cc driver picks it up via the system linker path.
+  # No RUSTFLAGS modification needed or allowed.
+  # SHA confirmed 2026-06-10; re-confirm at implementation (v1 is a moving tag).
+```
+
+**Active-verification (readelf .comment — pass evidence):** A `readelf -p .comment`
+check on a compiled binary MUST be run as a post-build CI step on the arm64 leg to assert
+mold actually linked the binaries. This closes the silent-deactivation false-success hole
+where the step runs without error but mold is not the actual linker. Pass criteria: the
+`.comment` section of at least one compiled binary (e.g., the workspace's main CLI binary
+or a test binary) contains the string `mold`. Example step:
+
+```yaml
+- name: Verify mold linked the binaries
+  run: |
+    binary=$(find target -name 'slideforge' -o -name 'slideforge-cli' | head -1)
+    if [ -z "$binary" ]; then binary=$(find target -name '*.d' | head -1 | sed 's/.d$//'); fi
+    readelf -p .comment "$binary" | grep -q mold || \
+      (echo "FAIL: mold not in .comment section — mold was not the active linker" && exit 1)
+```
+
+If `readelf` confirms mold, the AC passes. If it does not, the step fails loudly — do NOT
+treat the absence of the check as a passing state.
 
 All test suites and clippy checks on the arm64 leg MUST still pass after mold is activated.
-
-**Verify-at-implementation:** Confirm `clang` (needed for `-fuse-ld=mold` driver support)
-is available on the live `ubuntu-24.04-arm` partner image:
-```bash
-which clang && clang --version
-```
-If `clang` is absent, use `gcc` as the fallback driver (see EC-002). The standard
-`ubuntu-24.04-arm` image is expected to include clang, but this must be verified at
-implementation time.
 
 ### AC-003: arm64 link phase faster after mold (traces to NFR-029)
 
@@ -275,7 +300,7 @@ a panic in a test and confirming the backtrace contains file:line information).
 | Component | File | Pure/Effectful |
 |-----------|------|---------------|
 | CI workflow (modified) | `.github/workflows/ci.yml` | Effectful (GitHub Actions DSL) |
-| Cargo config (modified) | `.cargo/config.toml` | Build config (target-scoped linker — see RUSTFLAGS interaction note in AC-002) |
+| Cargo config (modified or created) | `.cargo/config.toml` | Build config (no rustflags entry for mold — ld-symlink activation used instead; see AC-002) |
 | Cargo workspace manifest (modified) | `Cargo.toml` | Build config (profile section) |
 | Profiling artifact (one-off) | `target/cargo-timings/*.html` | CI artifact (removed after baseline captured) |
 
@@ -288,7 +313,7 @@ Architecture section files: N/A — no source crate logic changes.
 | This story spec | ~4,000 |
 | `.github/workflows/ci.yml` (full file, ~490 lines) | ~7,000 |
 | `Cargo.toml` (relevant profile section, ~50 lines) | ~700 |
-| `.cargo/config.toml` (current content + new target section) | ~500 |
+| `.cargo/config.toml` (current content; no rustflags entry for mold) | ~500 |
 | `.config/nextest.toml` (verify nextest profile definition) | ~300 |
 | ci-speed-research.md Q6 + Q7 sections | ~2,800 |
 | `cargo build --timings` HTML output (reference for AC-001) | ~1,000 |
@@ -344,25 +369,35 @@ Architecture section files: N/A — no source crate logic changes.
       which clang && clang --version
       ```
       If absent, fall back to `gcc` as the driver (see EC-002).
-- [ ] Add `setup-mold` step to `test (linux-arm64)` job ONLY (BEFORE the build step):
+- [ ] Add `setup-mold` step to `test (linux-arm64)` job ONLY (BEFORE the build step),
+      with `make-default: true` for ld-symlink activation:
       ```yaml
       - name: Install mold linker (arm64 only)
         uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
-        # mold 3-10x faster than GNU ld on aarch64-unknown-linux-gnu.
+        with:
+          make-default: true
+        # make-default: true symlinks /usr/bin/ld → mold; cc driver picks it up.
+        # No RUSTFLAGS modification needed or permitted (see AC-002 for the
+        # mutual-exclusion trap: CARGO_TARGET_*_RUSTFLAGS is silently ignored while
+        # global RUSTFLAGS is set — verified empirically on cargo 1.95.0).
         # x86_64 already uses rust-lld (Rust 1.90 default); mold gain is marginal there.
         # macOS/Windows: Apple ld64/lld-link; mold not applied.
-        # SHA confirmed 2026-06-10; re-confirm at implementation (v1 is moving tag).
+        # SHA confirmed 2026-06-10; re-confirm at implementation (v1 is a moving tag).
       ```
-- [ ] Handle RUSTFLAGS interaction correctly (see AC-002). Set the linker flag WITHOUT
-      clobbering `-D warnings`. Preferred: add to the arm64 job's env:
+- [ ] Do NOT add `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` to the arm64 job env.
+      The ld-symlink approach (`make-default: true`) makes this unnecessary and avoids the
+      RUSTFLAGS mutual-exclusion trap entirely.
+- [ ] Add a post-build `readelf .comment` verification step to the arm64 job (see AC-002)
+      to assert mold actually linked the binaries. Example:
       ```yaml
-      env:
-        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      - name: Verify mold linked the binaries
+        run: |
+          binary=$(find target -name 'slideforge' -o -name 'slideforge-cli' | head -1)
+          if [ -z "$binary" ]; then binary=$(find target -name '*.d' | head -1 | sed 's/.d$//'); fi
+          readelf -p .comment "$binary" | grep -q mold || \
+            (echo "FAIL: mold not in .comment — mold was not the active linker" && exit 1)
       ```
-      This target-specific env var is additive with global `RUSTFLAGS=-D warnings`
-      (they govern different targets). Verify both flags are active by checking CI build
-      output for both `-D warnings` (any clippy/test warnings become errors) and mold
-      (build output references mold linker or `target/cargo-timings/` shows link via mold).
+      This step MUST fail loudly if mold is not confirmed. Do NOT skip it.
 - [ ] Run full arm64 test suite (via develop push or `full-ci` label) to confirm all
       tests pass with mold active
 - [ ] Capture `cargo build --timings` AFTER mold to get the after state; document in PR
@@ -423,11 +458,14 @@ increase total cache size during the first LRU cycle after landing, until the ol
 
 ## Architecture Compliance Rules
 
-1. **mold MUST be scoped to arm64 ONLY.** Use `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS`
-   (target-specific env var) to carry the mold linker flag. Do NOT use the global `RUSTFLAGS`
-   env var (it applies to ALL targets and would clobber `-D warnings`). Do NOT add mold
-   to x86_64 (already lld since Rust 1.90; marginal gain). Do NOT add mold to macOS
-   (Apple ld64 is fast; marginal gain and adds complexity).
+1. **mold MUST be scoped to arm64 ONLY.** Use `setup-mold` with `make-default: true`
+   (ld-symlink activation) on the arm64 CI leg only. Do NOT use
+   `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` to carry the mold flag — this env
+   var is ENTIRELY IGNORED while the global `RUSTFLAGS=-D warnings` env var is set (cargo
+   1.95.0 empirically verified; mutual-exclusion in rustflags precedence chain). Do NOT
+   modify the global `RUSTFLAGS` env var (it applies to ALL targets). Do NOT add mold to
+   x86_64 (already lld since Rust 1.90; marginal gain). Do NOT add mold to macOS (Apple
+   ld64 is fast; marginal gain and adds complexity).
 2. **Profile tuning MUST NOT modify `[profile.release]` or `[profile.bench]`.** Those
    profiles govern production binary and benchmark binary quality; touching them requires
    explicit architectural sign-off. Only `[profile.ci]` (test/lint profile) is in scope.
@@ -443,10 +481,14 @@ increase total cache size during the first LRU cycle after landing, until the ol
 6. **`--profile ci` and `--cargo-profile ci` are DISTINCT flags.** The former is a
    nextest execution profile; the latter is a Cargo build profile. Both must be present
    in the nextest invocation for this story's changes to take effect.
-7. **RUSTFLAGS override rule.** Global `RUSTFLAGS` env var OVERRIDES (does NOT merge with)
-   `[target.<triple>].rustflags` in `.cargo/config.toml`. Use target-specific env vars
-   (`CARGO_TARGET_<TRIPLE>_RUSTFLAGS`) to avoid this override and carry both `-D warnings`
-   and the mold flag simultaneously.
+7. **RUSTFLAGS mutual-exclusion rule (empirically verified cargo 1.95.0).** Cargo's
+   rustflags sources are MUTUALLY EXCLUSIVE: `CARGO_ENCODED_RUSTFLAGS` > `RUSTFLAGS` >
+   `target.<triple>.rustflags` > `build.rustflags`. When `RUSTFLAGS` is set globally,
+   ALL lower-precedence sources — including `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` — are
+   ENTIRELY IGNORED (not merged; ignored). The correct solution for mold activation in this
+   repo is the ld-symlink approach (`setup-mold` with `make-default: true`), which bypasses
+   the RUSTFLAGS mechanism completely. Do NOT attempt to route mold activation through any
+   RUSTFLAGS source.
 
 ## Library and Framework Requirements
 
@@ -477,8 +519,8 @@ Conditioned also on the aarch64 default-linker pre-check (see Summary and Task A
 
 | Action | File | Change |
 |--------|------|--------|
-| Modify | `.github/workflows/ci.yml` | Add `setup-mold` step to arm64 test job only; set `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` for arm64 job; add `--cargo-profile ci` to nextest invocation; add temporary `--timings` artifact step for baseline (remove before merge or note as one-off) |
-| Modify | `.cargo/config.toml` | Add `[target.aarch64-unknown-linux-gnu]` section if needed for linker override; see RUSTFLAGS interaction note — may be handled via env var instead |
+| Modify | `.github/workflows/ci.yml` | Add `setup-mold` step (with `make-default: true`) to arm64 test job only; add `readelf .comment` verification step to arm64 job; do NOT add `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` (env-var mechanism is removed — ld-symlink activation is used instead); add `--cargo-profile ci` to nextest invocation; add temporary `--timings` artifact step for baseline (remove before merge or note as one-off) |
+| Modify or Create | `.cargo/config.toml` | If the file does not exist, create it. No `[target.aarch64-unknown-linux-gnu]` rustflags entry is needed for mold (ld-symlink handles it). The file may only need documentation comments noting the activation mechanism. |
 | Modify | `Cargo.toml` | Add `[profile.ci]` with `debug = "line-tables-only"` |
 | No change | Any `*.rs` file | No Rust source changes |
 | No change | `.config/nextest.toml` | Do NOT modify the nextest execution profile — only add Cargo build profile |
@@ -496,13 +538,16 @@ Conditioned also on the aarch64 default-linker pre-check (see Summary and Task A
 | EC-006 | NFR-001 criterion benchmark regresses after profile changes | Profile change was scoped to `[profile.ci]`; bench job should use `[profile.bench]` or `release`. Inspect if bench job accidentally picks up `[profile.ci]`; separate bench and test profiles if conflated. |
 | EC-007 | `.cargo/config.toml` does not exist yet | Create it; if using target-specific env var approach for RUSTFLAGS (preferred), `config.toml` may only need the `[target.aarch64-unknown-linux-gnu]` linker comment/documentation section, not an active rustflags entry. |
 | EC-008 | `rust-lld` is already the default for aarch64 on current stable Rust | mold's benefit is smaller (lld→mold delta). Still proceed with the change; calibrate expectation; document in PR description. The gating pre-check in Task A surfaces this before implementation. |
-| EC-009 | Global `RUSTFLAGS=-D warnings` clobbers mold linker flag from `.cargo/config.toml` | Use `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` env var for the mold flag instead of config.toml rustflags. This is the PREFERRED approach per AC-002 and Architecture Compliance Rule 7. |
+| EC-009 | Global `RUSTFLAGS=-D warnings` clobbers mold linker flag from `.cargo/config.toml` or from `CARGO_TARGET_*_RUSTFLAGS` | This is RESOLVED BY DESIGN in this story. The ld-symlink mechanism (`make-default: true`) bypasses the RUSTFLAGS precedence chain entirely. If an implementer erroneously re-introduces the env-var approach, the `readelf .comment` verification step will FAIL (no mold in `.comment`), surfacing the problem immediately. Do NOT fall back to env-var-based activation. |
 
 ## Forbidden Dependencies
 
 - Do NOT add mold to x86_64, macOS, or Windows legs.
 - Do NOT set `RUSTFLAGS=-Clink-arg=-fuse-ld=mold` as a global env var in `ci.yml` (it
   would clobber `-D warnings` and apply to all targets).
+- Do NOT use `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` to carry the mold linker
+  flag. This env var is ENTIRELY IGNORED when `RUSTFLAGS` is set globally (cargo 1.95.0
+  mutual-exclusion; empirically verified). The ld-symlink mechanism replaces this approach.
 - Do NOT modify `[profile.release]` or `[profile.bench]` (only `[profile.ci]`).
 - Do NOT set `debug = 0` (no debug info) in `[profile.ci]` — backtraces become useless.
 - Do NOT adopt nextest archive/partition in this story (deferred; see below).
@@ -521,7 +566,7 @@ Conditioned also on the aarch64 default-linker pre-check (see Summary and Task A
 | `codegen-units = 1` in CI profile | REJECTED | Maximizes code quality but MAXIMIZES compile time. This is the opposite of what we want. Keep at default (256) for maximum parallelism in CI. |
 | `strip = "debuginfo"` or `strip = "symbols"` | REJECTED | Stripping test binaries costs additional time and breaks backtrace usefulness. Not appropriate for CI test binaries. |
 | `debug = 0` (no debug info) | REJECTED | Backtraces become unusable. `line-tables-only` is the correct balance: usable backtraces at significantly reduced object size. |
-| Setting linker flag via `.cargo/config.toml` `rustflags` only | RISKY | Global `RUSTFLAGS=-D warnings` env var overrides config.toml `[target.*].rustflags`. Use `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` env var instead to avoid the override. |
+| Setting mold flag via RUSTFLAGS sources (config.toml `[target.*].rustflags` or `CARGO_TARGET_*_RUSTFLAGS` env var) | REJECTED | All RUSTFLAGS sources are MUTUALLY EXCLUSIVE in cargo's precedence chain (empirically verified on cargo 1.95.0). When the global `RUSTFLAGS=-D warnings` env var is set, BOTH config.toml `[target.*].rustflags` AND `CARGO_TARGET_*_RUSTFLAGS` are entirely ignored. Any `-C link-arg=-fuse-ld=mold` added through these channels never reaches the linker. Chosen mechanism: `setup-mold` with `make-default: true` (ld-symlink activation), which bypasses RUSTFLAGS entirely. |
 
 ## Test Strategy
 
@@ -530,9 +575,11 @@ observation and artifact inspection:
 
 1. **AC-001:** `cargo build --timings` artifact uploaded from arm64 run; link/codegen
    split recorded in PR description before mold is added.
-2. **AC-002/AC-003:** Inspect CI YAML diff; confirm `setup-mold` is ONLY in the arm64
-   job; confirm `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` is set correctly;
-   after-mold timings in PR description; confirm both `-D warnings` and mold are active.
+2. **AC-002/AC-003:** Inspect CI YAML diff; confirm `setup-mold` with `make-default: true`
+   is ONLY in the arm64 job; confirm NO `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS`
+   is present (env-var mechanism removed); confirm `readelf .comment` verification step is
+   present and passes (`.comment` section contains `mold`); after-mold timings in PR
+   description; confirm `-D warnings` still active (all warning-as-error behavior unchanged).
 3. **AC-004:** `Cargo.toml` diff confirms `[profile.ci]` with `debug = "line-tables-only"`;
    CI YAML diff confirms `--cargo-profile ci` added to nextest invocation; NFR-001 bench
    run confirms < 500ms.
@@ -558,7 +605,7 @@ RUSTFLAGS to arm64-only, (c) the aarch64 default-linker gating pre-check. Estima
 | `[profile.ci]` conflation with nextest `--profile ci` | **CORRECTNESS BUG FIXED.** The prior AC-004 stated "confirm this is already the case — ci.yml runs `--profile ci`." This was INCORRECT. `--profile ci` is a nextest execution profile flag; `[profile.ci]` in Cargo.toml requires `--cargo-profile ci` (a SEPARATE flag). Verified against repo: `ci.yml:168` runs nextest `--profile ci`; `Cargo.toml` has no `[profile.ci]`; there is no `.cargo/config.toml`. AC-004 fully rewritten to require (a) `[profile.ci]` in Cargo.toml, (b) `--cargo-profile ci` added to nextest in ci.yml, and (c) `--profile ci` kept as-is. |
 | `taiki-e/install-action` v2.81.9 SHA | SHA `fd2f5e3d...` noted; DEFERRED — current pin `d9be7d8c` stays; only relevant if nextest archiving adopted. |
 | Repo owner placeholder | Confirmed: `drbothen/slideforge`, PUBLIC. |
-| RUSTFLAGS override interaction | **NEW FINDING added to story.** Global `RUSTFLAGS` env var overrides (does NOT merge with) `[target.<triple>].rustflags` in `.cargo/config.toml`. Added as Architecture Compliance Rule 7, updated AC-002, added EC-009, added verify-at-impl task, updated Tasks B and rejected alternatives. Resolution: use `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` env var. |
+| RUSTFLAGS override interaction | **FINDING UPDATED in v1.2.** v1.1 proposed `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS` as the resolution. This was INCORRECT — rustflags sources are MUTUALLY EXCLUSIVE (cargo 1.95.0 empirically verified on feature/STORY-093): when global `RUSTFLAGS` is set, the target-specific env var is ENTIRELY IGNORED. v1.2 replaces the mechanism with `setup-mold make-default: true` (ld-symlink activation), which bypasses RUSTFLAGS entirely. See AC-002 for full correction. |
 | `target/ci/` new directory after `--cargo-profile ci` | **NEW FINDING noted.** Adding `--cargo-profile ci` means Cargo uses `target/ci/` (not `target/debug/` or `target/test/`). First run will be cold for this directory. Added to AC-004, AC-005, Previous Story Intelligence, and Tasks C. |
 
 ### Deferred to Implementation (verify-at-implementation markers)
@@ -576,3 +623,4 @@ RUSTFLAGS to arm64-only, (c) the aarch64 default-linker gating pre-check. Estima
 |---------|------|--------|---------|
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q6 + Q7. mold arm64-only (x86_64 already lld since Rust 1.90). debug=line-tables-only for profile tuning. Speedup magnitudes are directional — AC-001 requires profiling before commit. Depends on STORY-091 + STORY-092. |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: confirmed rui314/setup-mold SHA `9c9c13bf...` via `git ls-remote` 2026-06-10 (re-confirm at impl since v1 is moving tag); CORRECTNESS FIX to AC-004 — removed false parenthetical "confirm --profile ci is already the case"; rewrote AC-004 to require BOTH `[profile.ci]` in Cargo.toml AND `--cargo-profile ci` in nextest invocation (they are distinct flags — nextest `--profile ci` does NOT invoke a Cargo build profile); added `target/ci/` directory implication and cache interaction note; added RUSTFLAGS override correctness finding (global RUSTFLAGS overrides config.toml target rustflags — use CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS); added aarch64 default-linker gating pre-check as verify-at-impl; added EC-008 and EC-009; updated Architecture Compliance Rules 6 and 7; resolved `<owner>` placeholder; added Uncertainty Resolution Log. |
+| 1.2 | 2026-06-11 | story-writer | AC-002 corrected: CARGO_TARGET_*_RUSTFLAGS env-var mechanism REMOVED — empirically verified (cargo 1.95.0, feature/STORY-093 @ 22f57a53) that rustflags sources are MUTUALLY EXCLUSIVE and the target-specific env var is ENTIRELY IGNORED when global RUSTFLAGS is set; chosen mechanism changed to setup-mold `make-default: true` (ld-symlink activation via /usr/bin/ld → mold; cc driver picks up automatically); readelf .comment active-verification step added as required pass evidence for AC-002; LESSON-19 sweep: Architecture Compliance Rules 1 and 7 rewritten; Tasks B updated (removed env-var step, added readelf step); EC-009 updated (resolved by design); Rejected Alternatives updated; File Structure Requirements updated; Forbidden Dependencies updated; Test Strategy updated. Source: ci-workflow-analyzer empirical findings on feature/STORY-093. |
