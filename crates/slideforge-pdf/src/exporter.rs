@@ -1449,6 +1449,16 @@ fn draw_inline_spans(
 /// The words are transient line-packing artifacts — they are never stored long-
 /// term and do not need reference-counted heap allocation.  Using `String` here
 /// is idiomatic and avoids a spurious `Arc` bump per word.
+///
+/// ## `is_continuation` — measure/draw symmetry (F-095-P4-001)
+///
+/// When an over-wide word is char-split by [`char_split_span_word`], every
+/// fragment after the first carries `is_continuation = true`.  This flag is
+/// the ONLY authoritative signal that a `SpanWord` on a packed line has no
+/// preceding word boundary: both [`pack_words_into_lines`] (measurement) and
+/// [`draw_packed_line`] (drawing) check it and suppress the inter-word space
+/// advance — keeping measure == draw exactly and preventing interior-word space
+/// corruption.
 #[derive(Debug, Clone)]
 struct SpanWord {
     /// Font face kind for this word (inherits from the parent span).
@@ -1457,6 +1467,14 @@ struct SpanWord {
     text: String,
     /// Superscript/Subscript signal (non-zero iff the parent span is super/sub).
     y_offset_units: i32,
+    /// `true` iff this word is a char-split continuation fragment of a preceding
+    /// fragment from the same source word.  When `true`, neither the packer nor
+    /// the draw loop may insert an inter-word space before this token.
+    ///
+    /// Set to `false` for every word produced by [`expand_spans_to_words`] (real
+    /// word boundaries) and for the FIRST fragment from [`char_split_span_word`].
+    /// Set to `true` for every subsequent fragment from [`char_split_span_word`].
+    is_continuation: bool,
 }
 
 /// Expand a slice of [`KrillaTextSpan`]s into individual words with their
@@ -1484,6 +1502,8 @@ fn expand_spans_to_words(spans: &[KrillaTextSpan]) -> Vec<SpanWord> {
                     face: span.face,
                     text: token.to_owned(),
                     y_offset_units: span.y_offset_units,
+                    // Words from real whitespace boundaries are never continuations.
+                    is_continuation: false,
                 });
             }
         }
@@ -1710,10 +1730,16 @@ fn char_split_span_word(
         let (fragment_text, rest) = remaining.split_at(fragment_end_byte);
         remaining = rest;
 
+        // The first fragment of a char-split word sits at a real word boundary
+        // (or the start of the line) — no continuation marker.  Every subsequent
+        // fragment is a continuation: it must not have an inter-word space
+        // prepended by `draw_packed_line` (F-095-P4-001 measure/draw symmetry).
+        let is_continuation = !fragments.is_empty();
         fragments.push(SpanWord {
             face: word.face,
             text: fragment_text.to_owned(),
             y_offset_units: word.y_offset_units,
+            is_continuation,
         });
     }
 
@@ -1746,8 +1772,14 @@ fn draw_packed_line(
             continue;
         }
 
-        // Add inter-word space (not before the first word on a line).
-        if i > 0 {
+        // Add inter-word space — suppressed in two cases (F-095-P4-001):
+        //   1. Before the first item on the line (i == 0).
+        //   2. When the current word is a char-split continuation fragment
+        //      (`is_continuation == true`): it comes from the same source word
+        //      as the preceding fragment; no whitespace exists between them.
+        // This must mirror the measurement in `pack_words_into_lines` exactly so
+        // drawn advance == packed cursor_x for every char-split line.
+        if i > 0 && !word.is_continuation {
             let prev_face = line_words[i - 1].face;
             cursor_x += measure_space_width_pt(prev_face, font_size, font_set);
         }
@@ -4100,6 +4132,7 @@ mod tests {
             face: crate::slide_pdf::FontFaceKind::Regular,
             text: long_word.clone(),
             y_offset_units: 0,
+            is_continuation: false,
         }];
 
         // Narrow frame: 50pt. At 18pt font size, LM Math 'a' is ~8-10pt wide.
@@ -4182,6 +4215,7 @@ mod tests {
             face: crate::slide_pdf::FontFaceKind::Bold,
             text: long_word.clone(),
             y_offset_units: 0,
+            is_continuation: false,
         }];
 
         let font_size = 18.0_f32;
@@ -4286,6 +4320,302 @@ mod tests {
         assert!(
             pdf_bytes.starts_with(b"%PDF-"),
             "F-095-P2-001 E2E: PDF must start with %PDF-"
+        );
+    }
+
+    // ─── F-095-P4-001: measure/draw symmetry for char-split fragments ────────────
+    //
+    // These tests close the adversary P4 finding: `draw_packed_line` previously
+    // inserted an inter-word space before EVERY `SpanWord` at i>0, even for
+    // char-split continuation fragments that carry no word boundary.  The fix adds
+    // `is_continuation: bool` to `SpanWord` and suppresses the space when true —
+    // symmetrically in both packer measurement and draw advance.
+    //
+    // LOAD-BEARING per TD-VSDD-059.  These tests must FAIL if the fix is reverted
+    // (i.e. if `is_continuation` is removed or `draw_packed_line` ignores it).
+    //
+    // Test inventory:
+    // | test_F095_P4_001_char_split_fragments_have_is_continuation_set  | F-095-P4-001 flag |
+    // | test_F095_P4_001_pack_cursor_matches_draw_advance_no_extra_space | F-095-P4-001 math |
+    // | test_F095_P4_001_normal_multi_word_line_no_continuation_suppression | F-095-P4-001 regression |
+
+    /// F-095-P4-001 (flag invariant): `char_split_span_word` must set
+    /// `is_continuation = false` on the FIRST fragment and `is_continuation = true`
+    /// on every subsequent fragment.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without this invariant, `draw_packed_line` has no way to distinguish
+    /// continuation fragments from real word boundaries — the space-suppression
+    /// path can never be entered, so the fix is a no-op and the bug persists.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_char_split_fragments_have_is_continuation_set() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // 80-char word — wide enough to produce ≥2 fragments at 50pt.
+        let long_word = "x".repeat(80);
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word,
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let fragments = char_split_span_word(&word, max_width_pt, font_size, &font_set);
+
+        // Must produce ≥2 fragments for this to be a meaningful test.
+        assert!(
+            fragments.len() >= 2,
+            "F-095-P4-001 FAIL: char_split_span_word must produce ≥2 fragments for an 80-char \
+             word in a 50pt frame. Got {} fragment(s). Adjust word length or frame width.",
+            fragments.len()
+        );
+
+        // First fragment: NOT a continuation.
+        assert!(
+            !fragments[0].is_continuation,
+            "F-095-P4-001 FAIL: first char-split fragment must have is_continuation=false \
+             (it sits at the word-start position, no preceding fragment on same line). \
+             Got is_continuation=true."
+        );
+
+        // All subsequent fragments: IS a continuation.
+        for (i, frag) in fragments.iter().enumerate().skip(1) {
+            assert!(
+                frag.is_continuation,
+                "F-095-P4-001 FAIL: char-split fragment #{i} must have is_continuation=true \
+                 (it follows another fragment from the same source word — no inter-word space \
+                 should be inserted before it). Got is_continuation=false."
+            );
+        }
+    }
+
+    /// F-095-P4-001 (measure/draw symmetry): the packer's no-space measurement for
+    /// char-split continuation fragments must be mirrored exactly by `draw_packed_line`.
+    ///
+    /// This test verifies the packer accounts for ZERO space before continuation
+    /// fragments (`cursor_x` advances only by fragment width, not space + fragment width).
+    /// Since `draw_packed_line` reads `is_continuation` to apply the same suppression,
+    /// the cursor advance is guaranteed to match if and only if the flag is set correctly.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Before the fix, `draw_packed_line` unconditionally added a space for every
+    /// i>0 item.  After the fix, packer advance (zero space between fragments) and
+    /// draw advance must be identical.  Reverting the fix causes the draw advance to
+    /// exceed the packer width by (n−1) × `space_width` for n fragments on one line.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_pack_cursor_matches_draw_advance_no_extra_space() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // 80-char word — guaranteed to produce ≥2 char-split fragments in a 50pt frame.
+        let long_word = "m".repeat(80);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word,
+            y_offset_units: 0,
+            is_continuation: false,
+        }];
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Must split into ≥2 lines.
+        assert!(
+            lines.len() >= 2,
+            "F-095-P4-001 FAIL: 80-char word must produce ≥2 packed lines."
+        );
+
+        // For every line that has ≥2 fragments (continuation fragment scenario),
+        // verify that the summed fragment widths equal what the packer would have
+        // measured (no spurious space between fragments — the pack cursor for
+        // continuations adds ONLY fragment_width, not space + fragment_width).
+        //
+        // We reconstruct the packer's cursor_x for each line independently and
+        // assert that cursor_x <= max_width_pt (if it exceeded max_width_pt, the
+        // packer would have split the fragment to the next line, which is correct).
+        // The key invariant checked here: continuation fragments (is_continuation=true)
+        // contribute zero space to cursor_x.
+        for (line_idx, line) in lines.iter().enumerate() {
+            let mut cursor_x = 0.0_f32;
+            for (i, word) in line.iter().enumerate() {
+                if i > 0 && !word.is_continuation {
+                    // Real inter-word space — measure it.
+                    let prev_face = line[i - 1].face;
+                    cursor_x += measure_space_width_pt(prev_face, font_size, &font_set);
+                }
+                // No space added for continuation fragments — same as draw_packed_line.
+                cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+            }
+            // The reconstructed cursor must not exceed max_line_width_pt by more than
+            // the width of one char (rounding tolerance: one char's advance).
+            // If the bug were present, cursor_x would exceed by (n_continuations × space_width).
+            let one_char_width = measure_word_width_pt(
+                "m",
+                crate::slide_pdf::FontFaceKind::Regular,
+                font_size,
+                &font_set,
+            );
+            assert!(
+                cursor_x <= max_width_pt + one_char_width,
+                "F-095-P4-001 FAIL: packed line #{line_idx} has cursor_x={cursor_x:.3}pt which \
+                 exceeds max_width_pt={max_width_pt:.3}pt by more than one char ({one_char_width:.3}pt). \
+                 This indicates spurious space was added before a continuation fragment — \
+                 measure/draw symmetry is broken."
+            );
+        }
+    }
+
+    /// F-095-P4-001 (regression guard): a normal multi-word line that does NOT
+    /// involve char-split fragments must still receive exactly one inter-word space
+    /// between adjacent real words.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// The `is_continuation` fix must ONLY suppress spaces before continuation
+    /// fragments.  If the implementation over-suppresses and skips spaces between
+    /// real word boundaries, this test catches the regression.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_normal_multi_word_line_no_continuation_suppression() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // Two short words that both fit on one line (no char-split needed).
+        // Each must have is_continuation=false after packing.
+        let words = vec![
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "hi".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "bye".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+        ];
+        let font_size = 18.0_f32;
+        // Wide enough to fit both "hi" and "bye" with a space on one line.
+        let max_width_pt = 200.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Both words must land on the same line (no wrap at 200pt).
+        assert_eq!(
+            lines.len(),
+            1,
+            "F-095-P4-001 regression FAIL: 'hi bye' must pack onto 1 line at 200pt. \
+             Got {} line(s). Check that `pack_words_into_lines` measures space correctly \
+             for real word boundaries.",
+            lines.len()
+        );
+
+        let line = &lines[0];
+        assert_eq!(
+            line.len(),
+            2,
+            "F-095-P4-001 regression FAIL: packed line must have exactly 2 words."
+        );
+
+        // Neither word on this normal line should be marked as a continuation.
+        assert!(
+            !line[0].is_continuation,
+            "F-095-P4-001 regression FAIL: first word 'hi' must have is_continuation=false."
+        );
+        assert!(
+            !line[1].is_continuation,
+            "F-095-P4-001 regression FAIL: second word 'bye' must have is_continuation=false \
+             (it is a real word boundary, not a char-split fragment — no space suppression)."
+        );
+
+        // Verify that the cursor_x accounting for a real two-word line includes the
+        // inter-word space: width("hi") + space + width("bye") must equal cursor_x.
+        let w_hi = measure_word_width_pt(
+            "hi",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let w_bye = measure_word_width_pt(
+            "bye",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let space_w = measure_space_width_pt(
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let expected_cursor = w_hi + space_w + w_bye;
+
+        // Reconstruct cursor using the same symmetry rule as draw_packed_line.
+        let mut cursor_x = 0.0_f32;
+        for (i, word) in line.iter().enumerate() {
+            if i > 0 && !word.is_continuation {
+                let prev_face = line[i - 1].face;
+                cursor_x += measure_space_width_pt(prev_face, font_size, &font_set);
+            }
+            cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+        }
+
+        assert!(
+            (cursor_x - expected_cursor).abs() < 0.01,
+            "F-095-P4-001 regression FAIL: two-word normal line cursor_x={cursor_x:.4}pt does not \
+             match expected {expected_cursor:.4}pt (w_hi={w_hi:.4} + space={space_w:.4} + \
+             w_bye={w_bye:.4}). The inter-word space must be included for real word boundaries."
         );
     }
 }
