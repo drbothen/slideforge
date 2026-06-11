@@ -427,6 +427,7 @@ jobs:
             echo "::error::no timings produced — baseline build did not complete (target/cargo-timings/ is empty or missing)"
             exit 1
           }
+          echo "Check passed: timings artifact present ($(find target/cargo-timings -maxdepth 1 -type f | wc -l) file(s))"
       - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
         # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
         # The after-mold timings come from a workflow_dispatch full-tier run
@@ -500,8 +501,9 @@ jobs:
         # mold; codegen artifacts are reused from cache (the head-start is intact).
         #
         # Predicate: -type f -executable ! -name '*.so' ! -name '*.d'
-        # This is byte-identical to the predicate in the readelf verification
-        # step below — any change to one must be applied to both (TD-VSDD-060).
+        # This is byte-identical to the predicates in the readelf verification
+        # step below (bin probe + count find) — any change to one must be
+        # applied to all three (TD-VSDD-060).
         if: matrix.target.name == 'linux-arm64'
         run: |
           set -euo pipefail
@@ -541,9 +543,10 @@ jobs:
         # NOT a passing state.
         #
         # Find predicate: -type f -executable ! -name '*.so' ! -name '*.d'
-        # This is byte-identical to the predicate in the "Force relink under mold"
-        # step above (TD-VSDD-060: both must be kept in sync — any change to one
-        # must be applied to both).
+        # This appears in three places: "Force relink under mold" step (delete),
+        # this step's bin probe (-print -quit), and the count find on the success
+        # path below (TD-VSDD-060: all three must be kept in sync — any change
+        # to one must be applied to all three).
         #
         # The file(1) ELF guard ensures we don't hand a non-ELF file to readelf
         # (e.g., a Rust proc-macro .so symlink or a build script artifact that
@@ -560,7 +563,10 @@ jobs:
             echo "::error::Candidate binary '$bin' is not an ELF file — cannot verify mold linkage (unexpected artifact type)"
             exit 1
           fi
-          readelf -p .comment "$bin" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default: true is set"; exit 1; }
+          out=$(readelf -p .comment "$bin")
+          printf '%s' "$out" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default: true is set"; exit 1; }
+          count=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' | wc -l)
+          echo "Check passed: mold linkage verified on $bin (.comment contains mold); $count executable(s) present"
 
   # ─── MSRV check (slow tier) ────────────────────────────────────────────────
   # Validates the declared rust-version = "1.88" in Cargo.toml.
