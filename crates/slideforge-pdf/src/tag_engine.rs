@@ -15,8 +15,11 @@
 //!     Table → TR → TH/TD  ← for table frames
 //! ```
 //!
-//! Decorative elements (`AltText::Decorative`) are NOT wrapped in a `Tag` group —
-//! they will be marked as PDF Artifacts by the exporter during content drawing.
+//! Decorative/unspecified elements (`AltText::Decorative` or `AltText::Unspecified`
+//! on ColorBar/Image/Shape/Diagram/Chart frames) are NOT wrapped in a `Tag` group —
+//! they are marked as PDF Artifacts by the exporter during content drawing.
+//! `ColorBar` frames with `AltText::Provided` are an exception: they are placed in the
+//! structure tree as `/Figure` with an `/Alt` attribute (STORY-095 AC-003).
 //!
 //! ## Actual krilla 0.6.0 API (verified against local source)
 //!
@@ -80,10 +83,11 @@ pub struct PartResult {
     /// Per-frame, per-block child indices into `part.children` for MCID linkage.
     ///
     /// `frame_child_part_indices[frame_idx]` is:
-    /// - `None` for empty or decorative frames (no tagged groups in the Part).
+    /// - `None` for empty or decorative/unspecified frames (no tagged groups in the Part).
     /// - `Some(vec![child_idx])` for single-block frames (`Title`, `Subtitle`,
-    ///   `TextRun`, `Image` with alt, `Shape` with alt, `ErrorSlidePlaceholder`): one
-    ///   child index pointing to the single group pushed into `part.children`.
+    ///   `TextRun`, `Image` with alt, `Shape` with alt, `ColorBar` with
+    ///   `AltText::Provided`, `ErrorSlidePlaceholder`): one child index pointing to
+    ///   the single group pushed into `part.children`.
     /// - `Some(vec![idx_0, idx_1, ..., idx_N])` for Body frames with N content
     ///   blocks that each push a group: each element is the `part.children`
     ///   index for the corresponding block's structure group.
@@ -128,14 +132,15 @@ impl SlideTagEngine {
     ///   H2          ← for Subtitle frames
     ///   P           ← for body paragraph blocks and TextRun frames
     ///   L (Disc)    ← for body bullet-list blocks, with LI+LBody children
-    ///   Figure+Alt  ← for Image, Diagram, Chart frames (alt from frame content)
+    ///   Figure+Alt  ← for Image, Diagram, Chart frames and ColorBar with AltText::Provided
     ///   Table→TR→TH/TD ← for Table frames
     ///   P           ← for Shape, ErrorSlidePlaceholder, and unknown frames
     /// ```
     ///
-    /// Decorative frames (frames containing `FrameContent::Image { alt: AltText::Decorative }`
-    /// or `FrameContent::Shape` with `AltText::Decorative`)
-    /// are NOT added to the Part group.
+    /// Decorative/unspecified frames — `FrameContent::Image`, `FrameContent::Shape`,
+    /// `FrameContent::Diagram`, `FrameContent::Chart` with `AltText::Decorative`, and
+    /// `FrameContent::ColorBar` with `AltText::Decorative` or `AltText::Unspecified` —
+    /// are NOT added to the Part group (they go into `decorative_frame_indices`).
     ///
     /// Empty frames (`FrameContent::Empty`) are skipped.
     ///

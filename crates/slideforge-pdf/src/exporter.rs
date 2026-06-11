@@ -907,11 +907,21 @@ fn draw_frame(
 ///
 /// ## Tagging contract
 ///
-/// The bar is tagged as a PDF Artifact by `tag_engine.rs` (pushed into
-/// `decorative_frame_indices`). The call-site in the draw loop wraps Artifact
-/// frames with `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`).
-/// WCAG accessibility co-encoding is provided by the adjacent `ColorLabel`
-/// (Body-role) text frame that renders the percentage label.
+/// `tag_engine.rs` dispatches on the `ColorBar` `alt` field before this draw
+/// function is called. Two outcomes are possible:
+///
+/// - **`AltText::Provided(label)`** — the bar is placed in the structure tree
+///   as `/Figure` with `/Alt = label` (pushed into `frame_child_part_indices`,
+///   drawn under `ContentTag::Other`). The draw loop opens a
+///   `start_tagged(ContentTag::Other)` region that links the rectangle to the
+///   Figure structure element (STORY-095 AC-003 / BC-4.03.001).
+///
+/// - **`AltText::Decorative` or `AltText::Unspecified`** — the bar is excluded
+///   from the structure tree (pushed into `decorative_frame_indices`). The draw
+///   loop wraps the rectangle with `ContentTag::Artifact(ArtifactType::Other)`
+///   (`/Artifact BMC … EMC`), suppressing it from assistive technology (EC-003).
+///   WCAG co-encoding is provided by the adjacent `ColorLabel` (Body-role) text
+///   frame that renders the percentage label in text.
 ///
 /// ## Coordinate policy
 ///
