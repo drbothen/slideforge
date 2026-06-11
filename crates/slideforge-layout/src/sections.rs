@@ -834,6 +834,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -852,6 +853,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -874,6 +876,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -908,6 +911,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -1646,6 +1650,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1678,6 +1683,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1706,6 +1712,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1737,6 +1744,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_executive_summary(&deck);
@@ -1778,6 +1786,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -1823,6 +1832,7 @@ mod tests {
                 source_span: SourceSpan::default(),
                 overlay: None,
                 register_content: vec![],
+                field_spans: OrderedMap::new(),
             }
         };
         let normal_slide =
@@ -1881,6 +1891,7 @@ mod tests {
                 source_span: SourceSpan::default(),
                 overlay: None,
                 register_content: vec![],
+                field_spans: OrderedMap::new(),
             }
         };
 
@@ -2341,6 +2352,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck_with_section_blocks(vec![expr_takeaway_slide], vec![block]);
         // collect_sections must succeed (the manual section is collected; the
@@ -2447,6 +2459,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2477,6 +2490,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2505,6 +2519,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let result = collect_risk_register(&deck);
@@ -2904,6 +2919,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 

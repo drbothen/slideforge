@@ -43,6 +43,7 @@ fn blank_slide(slide_type: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -65,6 +66,7 @@ fn slide_with_takeaway(title: &str, takeaway: &str, register: Option<Register>) 
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -83,6 +85,7 @@ fn severity_cards_slide(title: &str, register: Option<Register>) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

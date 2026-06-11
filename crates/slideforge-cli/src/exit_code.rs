@@ -7,10 +7,15 @@
 //! | Success (no errors, or warnings only) | 0 |
 //! | Parse errors (E-PAR-*) — always fatal | 1 |
 //! | Validation errors in strict mode (E-EVL-*, E-A11-*, etc.) | 2 |
+//! | User-authoring layout errors (E-LAY-008 and other taxonomy-classified variants) | 2 |
 //! | Export errors (E-EXP-*) — always fatal | 3 |
 //!
 //! `--warn-only` NEVER demotes parse or export errors (BC-1.15.003
 //! invariants 1 and 2).
+//!
+//! `--warn-only` DOES demote user-authoring layout errors (E-LAY-008:
+//! `BulletsOnContentlessSlideType`) to error-slide placeholders — build continues
+//! and exits 0 (F-094-P9-001 / error-taxonomy v2.30 §232).
 
 use std::process::ExitCode;
 
@@ -25,9 +30,13 @@ pub const EXIT_SUCCESS: u8 = 0;
 /// (BC-1.15.003 invariant 1).
 pub const EXIT_PARSE_ERROR: u8 = 1;
 
-/// Exit code for validation failures in strict mode (E-EVL-*, E-A11-*, etc.).
+/// Exit code for validation failures in strict mode (E-EVL-*, E-A11-*, etc.)
+/// and for user-authoring layout errors (E-LAY-008, E-LAY-004, etc.).
 ///
-/// With `--warn-only` these are demoted to warnings and exit code is 0.
+/// With `--warn-only`, eval errors and user-authoring layout errors (E-LAY-008:
+/// `BulletsOnContentlessSlideType`) are demoted to error-slide placeholders — exit 0.
+/// Internal layout invariant violations (`SlideCountMismatch`, `InvalidBoundingBox`)
+/// always exit 1 (parse-category internal error) regardless of mode.
 pub const EXIT_VALIDATION_ERROR: u8 = 2;
 
 /// Exit code for export failures (E-EXP-*).

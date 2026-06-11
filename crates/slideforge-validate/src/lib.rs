@@ -126,6 +126,7 @@ mod integration_tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         // Deck with lang: None — triggers E-A11-003
@@ -233,6 +234,7 @@ mod integration_tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         let deck = Deck {

@@ -1135,6 +1135,7 @@ fn test_f_p15_high_001_notes_link_nested_display_link_one_rel_one_click() {
                 register: Register::Notes,
                 content: vec![InlineNode::Plain(Arc::from("inner"))],
             }],
+            field_spans: OrderedMap::new(),
         }],
         vars: OrderedMap::new(),
         metadata: make_metadata(),

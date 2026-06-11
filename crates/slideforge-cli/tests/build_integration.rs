@@ -1984,3 +1984,353 @@ fn test_OBS_1_bc_1_15_002_exact_error_count_in_rendered_output() {
          got {hint_count} hint occurrences"
     );
 }
+
+// ── F-094-P4-006: real source filename threaded through CompileOptions ────────
+
+/// F-094-P4-006 / BC-1.15.001 (file:line:col):
+/// When a build fails with a span-carrying diagnostic, the `file:` field in the
+/// rendered output must cite the REAL source filename (the path the user passed),
+/// NOT the old hardcoded `"deck.sf"` sentinel and NOT the library fallback
+/// `"<source>"`.
+///
+/// Fixture: `.sf` source named `"quarterly-review.sf"` that triggers a
+/// parse-error (E-PAR-003 — tab indentation) so the diagnostic path through
+/// `run_build` → `compile` → parse failure exercises the source_name field.
+///
+/// This is a CLI-level regression guard for F-094-P4-006: the CLI MUST thread
+/// `args.source.to_string_lossy()` into `CompileOptions::source_name` so that
+/// diagnostics cite the real file.
+#[test]
+fn test_f094_p4_006_cli_diagnostic_cites_real_source_filename() {
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use std::sync::Arc;
+
+    // Use a uniquely-named source file ("quarterly-review.sf") to verify
+    // it appears in diagnostics — NOT "deck.sf" or "<source>".
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("quarterly-review.sf");
+    write_parse_error_sf(&src_path); // tab error → E-PAR-003 parse failure
+    write_brand_toml(tmp.path());
+
+    let args = slideforge_cli::cli::BuildArgs {
+        source: src_path.clone(),
+        output_dir: tmp.path().join("dist"),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    let global = default_global();
+
+    // run_build internally calls compile() which threads source_name.
+    // It will fail (exit 1) due to the parse error in quarterly-review.sf.
+    let code = run_build(&args, &global);
+    assert_eq!(
+        code,
+        ExitCode::from(1),
+        "F-094-P4-006: parse-error .sf must produce exit 1"
+    );
+
+    // Now verify source_name propagation directly by exercising the compile API
+    // the same way run_build does, so we can assert on the rendered error string.
+    //
+    // We construct CompileOptions manually with the real path, matching what
+    // build.rs does after the F-094-P4-006 fix, and call slideforge::compile.
+    // This tests the API contract directly without spawning a subprocess.
+    let source_text = std::fs::read_to_string(&src_path).expect("read quarterly-review.sf");
+    let brand_toml_path = tmp.path().join("brand.toml");
+    let brand_toml_str = brand_toml_path
+        .to_str()
+        .expect("brand.toml path UTF-8")
+        .to_owned();
+
+    let compile_opts = slideforge::CompileOptions {
+        brand_source: Some(slideforge::BrandSource::TomlFile(Arc::from(
+            brand_toml_str.as_str(),
+        ))),
+        strict: true,
+        active_variant: None,
+        // This is the fix under test: pass the real filename.
+        source_name: Some(Arc::from(src_path.to_string_lossy().as_ref())),
+    };
+
+    let result = slideforge::compile(&source_text, &compile_opts);
+    let err = match result {
+        Err(e) => e,
+        Ok(_) => panic!("F-094-P4-006: parse-error source must produce Err from compile(), not Ok"),
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // The rendered output MUST contain a reference to the real file name.
+    // (The exact path format varies by OS so we check just the file stem.)
+    assert!(
+        rendered.contains("quarterly-review.sf"),
+        "F-094-P4-006: rendered diagnostic must contain 'quarterly-review.sf' \
+         (the real source filename); got:\n{rendered}"
+    );
+
+    // Must NOT contain the old hardcoded sentinel.
+    assert!(
+        !rendered.contains("deck.sf"),
+        "F-094-P4-006: rendered diagnostic must NOT contain old 'deck.sf' sentinel; \
+         got:\n{rendered}"
+    );
+
+    // Must NOT contain the byte-offset synthetic sentinel.
+    assert!(
+        !rendered.contains("<byte:"),
+        "F-094-P4-006: rendered diagnostic must NOT contain '<byte:N>' synthetic sentinel; \
+         got:\n{rendered}"
+    );
+}
+
+/// F-094-P4-006 (CLI None-fallback guard):
+/// When `CompileOptions::source_name` is `None` (e.g., from a library caller
+/// that doesn't know the filename), the fallback `"<source>"` must appear in
+/// diagnostics — NOT the old `"deck.sf"` fabricated name.
+///
+/// This tests the library fallback path, not the CLI path.
+#[test]
+fn test_f094_p4_006_library_fallback_is_not_deck_sf() {
+    use slideforge_cli::commands::build::render_build_error_to_string;
+    use std::sync::Arc;
+
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("deck.sf"); // intentionally named "deck.sf"
+    write_parse_error_sf(&src_path); // tab error → E-PAR-003
+    write_brand_toml(tmp.path());
+
+    let source_text = std::fs::read_to_string(&src_path).expect("read deck.sf");
+    let brand_toml_path = tmp.path().join("brand.toml");
+    let brand_toml_str = brand_toml_path
+        .to_str()
+        .expect("brand.toml path UTF-8")
+        .to_owned();
+
+    let compile_opts = slideforge::CompileOptions {
+        brand_source: Some(slideforge::BrandSource::TomlFile(Arc::from(
+            brand_toml_str.as_str(),
+        ))),
+        strict: true,
+        active_variant: None,
+        // Deliberately pass None to exercise the library fallback.
+        source_name: None,
+    };
+
+    let result = slideforge::compile(&source_text, &compile_opts);
+    let err = match result {
+        Err(e) => e,
+        Ok(_) => panic!(
+            "F-094-P4-006 fallback: parse-error source must produce Err from compile(), not Ok"
+        ),
+    };
+
+    let rendered = render_build_error_to_string(&err, false);
+
+    // With source_name=None, the fallback "<source>" must appear, NOT "deck.sf".
+    // Note: miette renders the file name as part of the "× " header + source label.
+    // We assert "<source>" appears somewhere in the rendered output.
+    assert!(
+        rendered.contains("<source>"),
+        "F-094-P4-006 fallback: rendered diagnostic must contain '<source>' when \
+         source_name=None; got:\n{rendered}"
+    );
+
+    // The old hardcoded "deck.sf" must NOT appear (even though the file is literally
+    // named "deck.sf" — we passed source_name=None, not source_name=Some("deck.sf")).
+    // This test verifies the library fallback is "<source>", not a file scan.
+    assert!(
+        !rendered.contains("deck.sf"),
+        "F-094-P4-006 fallback: rendered diagnostic must NOT contain 'deck.sf' when \
+         source_name=None (fallback must be '<source>', not a file path); got:\n{rendered}"
+    );
+}
+
+// ── F-094-P9-001 Prong 1: E-LAY-008-only strict deck exits 2 ─────────────────
+
+/// Write a `.sf` source with `bullets:` on a `title` slide type (E-LAY-008).
+///
+/// The `title` slide type has no Body or Generic Empty region. Adding `bullets:`
+/// triggers `LayoutError::BulletsOnContentlessSlideType` → E-LAY-008.
+///
+/// This fixture is valid DSL syntax (parses and evaluates without error) so that
+/// ONLY the layout error is present — isolating the exit-code test to E-LAY-008.
+fn write_lay_008_sf(path: &std::path::Path) {
+    // A `title` slide with a `bullets:` field → E-LAY-008 at layout time.
+    // The slide passes parse + eval; the layout stage rejects it.
+    let content = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide title:\n",
+        "  title \"Title slide\"\n",
+        "  bullets: [\"Item A\", \"Item B\"]\n",
+    );
+    std::fs::write(path, content).expect("write E-LAY-008 .sf fixture");
+}
+
+/// F-094-P9-001 Prong 1: E-LAY-008-only deck in strict mode must exit 2.
+///
+/// Error taxonomy v2.30 row E-LAY-008: `broken | 2`.
+/// When strict mode (default) encounters a layout-only E-LAY-008 error with no
+/// pre-layout validator errors, the exit code must be 2 (EXIT_VALIDATION_ERROR),
+/// not 1 (EXIT_PARSE_ERROR).
+///
+/// RED Gate: this test FAILS before the fix because `BuildError::Layout(_)` falls
+/// to the catch-all `EXIT_PARSE_ERROR` (exit 1) branch.
+#[test]
+fn test_BC_1_15_003_f094_p9_001_lay_008_strict_exits_2_not_1() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_strict.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    // Brand discovery: CLI looks for brand.toml next to the source file.
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path,
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    // strict = true (warn_only = false) is the default.
+    let global = GlobalFlags {
+        warn_only: false,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::from(2),
+        "F-094-P9-001 Prong 1: E-LAY-008-only build in strict mode must exit 2 \
+         (error-taxonomy v2.30: broken|2); got exit code {:?}",
+        code
+    );
+    // No output must be written (strict: broken → no partial output).
+    assert!(
+        !out_dir.exists()
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
+        "F-094-P9-001 Prong 1: no output files must be written on E-LAY-008 in strict mode"
+    );
+}
+
+// ── F-094-P9-001 Prong 2: E-LAY-008 warn-only → placeholder + exit 0 ─────────
+
+/// F-094-P9-001 Prong 2: E-LAY-008 deck with --warn-only must exit 0 and produce output.
+///
+/// Error taxonomy v2.30 prose §232: "In `--warn-only` mode: error-slide placeholder
+/// rendered at the affected slide position; build continues; exit 0 (unless other
+/// fatal errors are also present)."
+///
+/// RED Gate: this test FAILS before the fix because `BuildError::Layout(_)` is never
+/// demoted under --warn-only; currently exits 1 with no output.
+#[test]
+fn test_BC_1_15_003_f094_p9_001_lay_008_warn_only_exits_0_output_written() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_warn.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-094-P9-001 Prong 2: E-LAY-008 with --warn-only must exit 0 \
+         (error-slide placeholder substituted, build continues); got: {:?}",
+        code
+    );
+    // Output file must exist (error-slide placeholder at the affected slide position).
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    assert!(
+        out_dir.join(format!("{stem}.pptx")).exists(),
+        "F-094-P9-001 Prong 2: .pptx must be written even on E-LAY-008 when --warn-only is set"
+    );
+    // Non-empty output: at least minimal PPTX structure.
+    let file_size = std::fs::metadata(out_dir.join(format!("{stem}.pptx")))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    assert!(
+        file_size > 0,
+        "F-094-P9-001 Prong 2: .pptx output must be non-empty (error-slide placeholder content)"
+    );
+}
+
+// ── F-094-P10-001: warn-only placeholder renders diagnostic in output content ─
+
+/// F-094-P10-001: E-LAY-008 warn-only placeholder must render the diagnostic
+/// text ("E-LAY-008") in the exported HTML output at the affected slide position.
+///
+/// Error taxonomy v2.30 §232 (BINDING): warn-only → "error-slide placeholder
+/// RENDERED at the affected slide position" (red border, error code, message).
+///
+/// This test verifies the OUTPUT CONTENT, not merely file existence. The
+/// affirmative claim is that the error code "E-LAY-008" appears somewhere in
+/// the rendered HTML for the affected slide. A blank slide trivially passes the
+/// file_size > 0 check but fails this content check.
+///
+/// RED Gate: fails before the fix because the placeholder slide has no blocks
+/// after `thread_fields_to_blocks` is skipped on the substituted deck, so the
+/// layout produces only `FrameContent::Empty` frames → blank slide → no
+/// diagnostic text in the HTML output.
+#[test]
+fn test_f094_p10_001_lay_008_warn_only_html_contains_error_code() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_content.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Html],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-094-P10-001: E-LAY-008 with --warn-only must exit 0; got: {:?}",
+        code
+    );
+
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    let html_path = out_dir.join(format!("{stem}.html"));
+    assert!(
+        html_path.exists(),
+        "F-094-P10-001: .html must be written under --warn-only"
+    );
+
+    let html_content =
+        std::fs::read_to_string(&html_path).expect("F-094-P10-001: failed to read .html output");
+
+    assert!(
+        html_content.contains("E-LAY-008"),
+        "F-094-P10-001: HTML output must contain the error code 'E-LAY-008' \
+         at the affected slide position (error-slide placeholder must be RENDERED, \
+         not blank); html snippet (first 4000 chars): {:.4000}",
+        html_content
+    );
+}

@@ -128,12 +128,21 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     // - Undefined variant → E-EVL-001 in EvalFailed → exit 2
     // The blanket --variant rejection that was here before is removed; the eval
     // layer now correctly handles both defined and undefined variant names.
+    //
+    // F-094-P4-006 fix: thread the real source file path as source_name so that
+    // all span-carrying diagnostics (parse, eval, layout) cite the actual filename
+    // (e.g., "quarterly-review.sf") instead of the library fallback "<source>".
+    // to_string_lossy() is correct here: PathBuf paths are OS-native and may
+    // contain non-UTF-8 components on some platforms; lossy conversion is
+    // acceptable because source_name is used only for human-readable diagnostic output.
+    let source_name = std::sync::Arc::from(args.source.to_string_lossy().as_ref());
     let compile_opts = CompileOptions {
         brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
             brand_toml_path.as_str(),
         ))),
         strict,
         active_variant: args.variant.clone(),
+        source_name: Some(source_name),
     };
 
     let compiled = match slideforge::compile(&source_text, &compile_opts) {
@@ -210,6 +219,58 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Map a [`slideforge::LayoutError`] variant to the exit code it should produce.
+///
+/// Taxonomy (error-taxonomy.md v2.30) classification:
+///
+/// | `LayoutError` variant | Taxonomy code | Exit |
+/// |-----------------------|---------------|------|
+/// | `BulletsOnContentlessSlideType` | E-LAY-008 broken | 2 |
+/// | `EmptyDeck` | E-LAY-002 broken | 2 |
+/// | `UnknownSlideType` | user-authoring (unlisted) | 2 |
+/// | `UnknownSectionType` | user-authoring (unlisted) | 2 |
+/// | `MissingAlt` | E-LAY-004 broken | 2 |
+/// | `InlineDepthExceeded` | E-LAY-005 broken | 2 |
+/// | `BulletDepthExceeded` | E-LAY-007 broken | 2 |
+/// | `ArithmeticOverflow` | E-LAY-006 broken | 2 |
+/// | `MissingRiskCardField` | user-authoring (unlisted) | 2 |
+/// | `MalformedSeverityCards` | user-authoring (unlisted) | 2 |
+/// | `UnresolvedSeverityCards` | evaluator-bug (unlisted) | 2 |
+/// | `UnresolvedTakeaway` | evaluator-bug (unlisted) | 2 |
+/// | `Multiple` | max-severity of inner errors | — |
+/// | `InvalidBoundingBox` | internal invariant (not in taxonomy) | 1 |
+/// | `SlideCountMismatch` | internal invariant (not in taxonomy) | 1 |
+///
+/// `F-094-P9-001`: `InvalidBoundingBox` and `SlideCountMismatch` are internal
+/// engine bugs (not user-authoring errors) and are not listed in the taxonomy.
+/// They retain exit 1 (parse-category internal error) because they indicate a
+/// bug in the layout engine itself, not a user-correctable DSL problem. All
+/// other `LayoutError` variants correspond to user-authoring or evaluator-stage
+/// errors that the taxonomy classifies as `broken | 2`.
+fn exit_code_for_layout_error(layout_err: &slideforge::LayoutError) -> u8 {
+    use slideforge::LayoutError;
+    match layout_err {
+        // Internal invariant violations — engine bugs, not user-authoring errors.
+        // Not in the error taxonomy; retain exit 1 (internal error category).
+        LayoutError::InvalidBoundingBox { .. } | LayoutError::SlideCountMismatch { .. } => {
+            EXIT_PARSE_ERROR
+        },
+        // `Multiple` — recurse and take the max severity of the inner errors.
+        // If all inners are internal (exit 1), Multiple is also exit 1.
+        // If any inner is user-authoring (exit 2), Multiple is exit 2.
+        LayoutError::Multiple { inner } => inner
+            .iter()
+            .map(exit_code_for_layout_error)
+            .max()
+            .unwrap_or(EXIT_PARSE_ERROR),
+        // All other variants are user-authoring or evaluator errors.
+        // Taxonomy classifies them as `broken | 2`.
+        // This arm intentionally catches all non-exhaustive future variants
+        // conservatively as exit 2 (user-authoring class).
+        _ => EXIT_VALIDATION_ERROR,
+    }
+}
+
 /// Map a [`BuildError`] to the appropriate exit code as `u8`.
 ///
 /// Differentiates E-PAR (exit 1) from E-EXP (exit 3), both of which surface
@@ -222,8 +283,14 @@ pub fn run_build(args: &BuildArgs, global: &GlobalFlags) -> ExitCode {
 /// | `EvalFailed` (strict) | 2 |
 /// | `ValidationFailed` (strict) | 2 |
 /// | `MultistageFailed` (strict) | 2 |
+/// | `Layout` (user-authoring variants) | 2 |
+/// | `Layout` (internal invariant variants) | 1 |
 /// | `Export` | 3 |
-/// | Other (`Registry`, `Brand`, `Layout`, `Plugin`, `UnknownFormat`) | 1 |
+/// | Other (`Registry`, `Brand`, `Plugin`, `UnknownFormat`) | 1 |
+///
+/// `F-094-P9-001`: `BuildError::Layout` is now classified per
+/// `exit_code_for_layout_error` — user-authoring layout errors (E-LAY-008,
+/// E-LAY-004, etc.) produce exit 2; internal invariant violations produce exit 1.
 ///
 /// This function operates on `u8` directly (HIGH-004 fix: avoids the
 /// `exit_code_to_u8` guessing pattern that had a silent fallback to
@@ -234,7 +301,10 @@ fn exit_code_for_build_error_u8(err: &BuildError) -> u8 {
         | BuildError::ValidationFailed { .. }
         | BuildError::MultistageFailed { .. } => EXIT_VALIDATION_ERROR,
         BuildError::Export(_) => EXIT_EXPORT_ERROR,
-        // ParseFailed, Brand, Layout, Registry, Plugin, NoBrandSource, NoBrandProvider,
+        // F-094-P9-001: Layout errors are classified per the error taxonomy.
+        // User-authoring variants → exit 2; internal invariant violations → exit 1.
+        BuildError::Layout(layout_err) => exit_code_for_layout_error(layout_err),
+        // ParseFailed, Brand, Registry, Plugin, NoBrandSource, NoBrandProvider,
         // UnknownFormat — all treated as fatal parse-category errors (exit 1).
         _ => EXIT_PARSE_ERROR,
     }
@@ -402,6 +472,30 @@ pub fn render_build_error_to_string(err: &BuildError, use_color: bool) -> String
                     },
                 };
                 buf.push_str(&rendered);
+            }
+        },
+        BuildError::Layout(layout_err) => {
+            // F-094-P4-004 / error-taxonomy v2.30 §234 / DI-018:
+            // Layout errors render with their structured message (which embeds the
+            // error code prefix and source span from the thiserror Display).
+            //
+            // When `layout_err` is `LayoutError::Multiple { inner }` (the accumulation
+            // wrapper for E-LAY-008 cross-slide accumulation), render EACH inner error
+            // on its own line so all instances are visible to the user in one build pass.
+            //
+            // For all other (non-Multiple) LayoutError variants, render the error directly.
+            match layout_err {
+                slideforge::LayoutError::Multiple { inner } => {
+                    for (i, err) in inner.iter().enumerate() {
+                        if i > 0 {
+                            buf.push('\n');
+                        }
+                        let _ = write!(buf, "{err}");
+                    }
+                },
+                other => {
+                    let _ = write!(buf, "{other}");
+                },
             }
         },
         other => {
@@ -596,6 +690,79 @@ fn render_validation_diagnostic_to_string(
     buf
 }
 
+/// Serialize a single flat (non-`Multiple`) [`slideforge::LayoutError`] to a JSON
+/// diagnostic object matching the schema used by `ValidationFailed` entries:
+///
+/// ```json
+/// { "code": "E-LAY-008", "message": "…", "severity": "error", "span": { "file": "…", "line": N, "col": N } }
+/// ```
+///
+/// `span` is included when the variant carries a [`slideforge_types::SourceSpan`].
+/// `severity` is always `"error"` — layout errors are fatal by definition.
+///
+/// ## Code extraction
+///
+/// Layout error codes are embedded in the `thiserror` `#[error("...")]` strings as
+/// `[E-LAY-NNN]` prefixes (e.g. `BulletsOnContentlessSlideType` embeds `[E-LAY-008]`).
+/// For variants that carry a code prefix the code is extracted from the Display string;
+/// for variants without a code prefix the code field is left empty (`""`).
+///
+/// ## Non-exhaustive guard
+///
+/// `LayoutError` is `#[non_exhaustive]`. All unrecognised variants fall through to the
+/// `_ =>` arm, which emits an empty code + the Display string as the message.
+///
+/// ## Traceability
+///
+/// - F-094-P7-001: JSON render path for accumulated E-LAY-008 instances
+/// - error-taxonomy v2.30 §E-LAY-008 accumulation on the machine-consumable surface
+fn layout_error_to_json_diag(err: &slideforge::LayoutError) -> serde_json::Value {
+    use slideforge::LayoutError;
+
+    // Extract (code, span) by matching known variants that carry structured fields.
+    // All layout errors are severity "error".
+    //
+    // `code` is `String` throughout to avoid lifetime issues in the fall-through
+    // arm where the code is extracted from a temporary `to_string()` allocation.
+    //
+    // Future span-carrying variants: add `if let` branches here to avoid falling to the
+    // display-parse path. For now, all other variants lack a machine-readable code
+    // (they have no [E-LAY-NNN] prefix in their error strings), so we extract
+    // whatever prefix is present from the Display string.
+    let (code, span_opt) = if let LayoutError::BulletsOnContentlessSlideType { span, .. } = err {
+        ("E-LAY-008".to_owned(), Some(span.clone()))
+    } else {
+        // Attempt to parse `[E-LAY-NNN]` from the Display string.
+        // The extracted slice is turned into an owned String before `msg` is dropped.
+        let msg = err.to_string();
+        let code = if msg.starts_with('[') {
+            msg.find(']')
+                .and_then(|end| msg.get(1..end))
+                .unwrap_or("")
+                .to_owned()
+        } else {
+            String::new()
+        };
+        // Cannot recover a structured span from unknown variants.
+        (code, None)
+    };
+
+    let message = err.to_string();
+    let mut obj = serde_json::json!({
+        "code": code,
+        "message": message,
+        "severity": "error",
+    });
+    if let Some(span) = span_opt {
+        obj["span"] = serde_json::json!({
+            "file": span.file.as_ref(),
+            "line": span.line,
+            "col": span.col,
+        });
+    }
+    obj
+}
+
 /// Render a [`BuildError`] to a [`serde_json::Value`] (pure, side-effect-free).
 ///
 /// OBS-P4-004 fix: extracted from `render_build_error_json` so that the JSON
@@ -760,6 +927,20 @@ pub fn render_build_error_to_json_value(err: &BuildError) -> serde_json::Value {
                     },
                 })
                 .collect()
+        },
+        // F-094-P7-001 / error-taxonomy v2.30 §E-LAY-008: Layout errors MUST appear
+        // on the machine-consumable JSON surface with full code + span, not collapsed
+        // into the catch-all Display string.
+        //
+        // `Multiple { inner }` is the E-LAY-008 accumulation wrapper: each inner error
+        // becomes one JSON diagnostic object (same count as the text path).
+        //
+        // A bare (non-Multiple) LayoutError maps to one object.
+        BuildError::Layout(layout_err) => match layout_err {
+            slideforge::LayoutError::Multiple { inner } => {
+                inner.iter().map(layout_error_to_json_diag).collect()
+            },
+            single => vec![layout_error_to_json_diag(single)],
         },
         other => {
             vec![serde_json::json!({"message": other.to_string()})]
@@ -1279,6 +1460,307 @@ mod tests {
         assert_eq!(
             total, 2,
             "OBS-P4-004d: total must be 2 (1 eval + 1 deduped validator); got: {total}"
+        );
+    }
+
+    // ── F-094-P4-004 — BuildError::Layout rendered via structured format ──────
+
+    /// F-094-P4-004: `render_build_error_to_string` for `BuildError::Layout`
+    /// (specifically `BulletsOnContentlessSlideType`) must render using the
+    /// structured diagnostic format that includes the `[E-LAY-008]` code prefix,
+    /// NOT the raw `"Error: layout failed: ..."` bypass string.
+    ///
+    /// Before fix: `BuildError::Layout` hits the `other =>` arm in
+    /// `render_build_error_to_string` → raw `Display` via `thiserror` →
+    /// `"Error: layout failed: [E-LAY-008] Slide 'title' at <byte:42>:0:0 ..."`.
+    ///
+    /// After fix: rendered via miette-style path that surfaces the span
+    /// and error code in the expected format.
+    ///
+    /// RED: before fix, `rendered.starts_with("Error: layout failed:")` is true,
+    /// and the assertion that it does NOT will fail.
+    #[test]
+    fn test_f094_p4_004_cli_render_layout_error_uses_structured_format() {
+        use super::render_build_error_to_string;
+        use slideforge::LayoutError;
+        use slideforge::error::BuildError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let span = SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42);
+        let layout_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span,
+        };
+        let build_err = BuildError::Layout(layout_err);
+        let rendered = render_build_error_to_string(&build_err, /*use_color=*/ false);
+
+        // Must contain the E-LAY-008 code prefix from the error taxonomy.
+        assert!(
+            rendered.contains("[E-LAY-008]"),
+            "F-094-P4-004: rendered Layout error must contain '[E-LAY-008]'; got: {rendered}"
+        );
+
+        // Must NOT be the raw bypass form.
+        assert!(
+            !rendered.starts_with("Error: layout failed:"),
+            "F-094-P4-004: rendered Layout error must not use raw Display bypass; got: {rendered}"
+        );
+
+        // Must surface the file name so the user can locate the issue.
+        assert!(
+            rendered.contains("deck.sf"),
+            "F-094-P4-004: rendered Layout error must contain file name 'deck.sf'; got: {rendered}"
+        );
+    }
+
+    // ── F-094-P7-001 — JSON render path reports all accumulated E-LAY-008 instances ──
+
+    /// F-094-P7-001: `render_build_error_to_json_value` for `BuildError::Layout`
+    /// wrapping `LayoutError::Multiple { inner }` with 2 `BulletsOnContentlessSlideType`
+    /// instances MUST emit `total == 2` and each diagnostic object MUST carry the
+    /// `"code"` field with value `"E-LAY-008"`, a `"message"` field, and a `"span"`
+    /// object with `"file"`, `"line"`, and `"col"` keys.
+    ///
+    /// Before fix: `BuildError::Layout` falls to `other =>` catch-all which produces
+    /// ONE entry whose `"message"` is the `Multiple` Display string
+    /// `"layout error: 2 accumulated errors; first: ..."`, so `total == 1`,
+    /// `code` is `""`, and both span and the second instance are dropped.
+    ///
+    /// After fix: iterates `Multiple { inner }`, emitting one JSON object per inner
+    /// error with `code`, `message`, and `span` fields.
+    ///
+    /// JSON shape mirrors the `ValidationFailed` arm (code/message/severity/span:
+    /// {file/line/col}) with `severity` hardcoded to `"error"` for layout errors.
+    #[test]
+    fn test_f094_p7_001_json_render_layout_multiple_reports_all_instances() {
+        use super::render_build_error_to_json_value;
+        use slideforge::LayoutError;
+        use slideforge::error::BuildError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        // Two slides, each with bullets on a contentless 'title' slide type.
+        let span0 = SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42);
+        let span1 = SourceSpan::new(Arc::from("deck.sf"), 8, 3, 99);
+
+        let err0 = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span: span0,
+        };
+        let err1 = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("closing"),
+            source_slide_index: 2,
+            span: span1,
+        };
+        let multiple = LayoutError::Multiple {
+            inner: vec![err0, err1],
+        };
+        let build_err = BuildError::Layout(multiple);
+
+        let json = render_build_error_to_json_value(&build_err);
+
+        // total MUST be 2 — not 1 (the old catch-all collapsed everything).
+        assert_eq!(
+            json["total"].as_u64(),
+            Some(2),
+            "F-094-P7-001: total must be 2 for Multiple with 2 inner errors; got: {}",
+            json["total"]
+        );
+
+        let diags = json["diagnostics"]
+            .as_array()
+            .expect("F-094-P7-001: 'diagnostics' must be an array");
+        assert_eq!(
+            diags.len(),
+            2,
+            "F-094-P7-001: diagnostics array must have 2 entries; got {}",
+            diags.len()
+        );
+
+        // First diagnostic.
+        let d0 = &diags[0];
+        assert_eq!(
+            d0["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: diag[0] 'code' must be 'E-LAY-008'; got: {}",
+            d0["code"]
+        );
+        assert!(
+            d0["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("E-LAY-008")),
+            "F-094-P7-001: diag[0] 'message' must contain 'E-LAY-008'; got: {}",
+            d0["message"]
+        );
+        assert_eq!(
+            d0["span"]["file"].as_str(),
+            Some("deck.sf"),
+            "F-094-P7-001: diag[0] span.file must be 'deck.sf'; got: {}",
+            d0["span"]["file"]
+        );
+        assert_eq!(
+            d0["span"]["line"].as_u64(),
+            Some(4),
+            "F-094-P7-001: diag[0] span.line must be 4; got: {}",
+            d0["span"]["line"]
+        );
+        assert_eq!(
+            d0["span"]["col"].as_u64(),
+            Some(3),
+            "F-094-P7-001: diag[0] span.col must be 3; got: {}",
+            d0["span"]["col"]
+        );
+
+        // Second diagnostic — must NOT be dropped.
+        let d1 = &diags[1];
+        assert_eq!(
+            d1["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: diag[1] 'code' must be 'E-LAY-008'; got: {}",
+            d1["code"]
+        );
+        assert_eq!(
+            d1["span"]["file"].as_str(),
+            Some("deck.sf"),
+            "F-094-P7-001: diag[1] span.file must be 'deck.sf'; got: {}",
+            d1["span"]["file"]
+        );
+        assert_eq!(
+            d1["span"]["line"].as_u64(),
+            Some(8),
+            "F-094-P7-001: diag[1] span.line must be 8; got: {}",
+            d1["span"]["line"]
+        );
+        assert_eq!(
+            d1["span"]["col"].as_u64(),
+            Some(3),
+            "F-094-P7-001: diag[1] span.col must be 3; got: {}",
+            d1["span"]["col"]
+        );
+
+        // A bare (non-Multiple) LayoutError must also produce code + span (regression guard).
+        let span2 = SourceSpan::new(Arc::from("other.sf"), 2, 1, 10);
+        let bare_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 1,
+            span: span2,
+        };
+        let bare_build_err = BuildError::Layout(bare_err);
+        let bare_json = render_build_error_to_json_value(&bare_build_err);
+        assert_eq!(
+            bare_json["total"].as_u64(),
+            Some(1),
+            "F-094-P7-001: bare Layout error total must be 1; got: {}",
+            bare_json["total"]
+        );
+        let bare_diags = bare_json["diagnostics"]
+            .as_array()
+            .expect("F-094-P7-001: bare diagnostics must be an array");
+        assert_eq!(
+            bare_diags[0]["code"].as_str(),
+            Some("E-LAY-008"),
+            "F-094-P7-001: bare diag 'code' must be 'E-LAY-008'; got: {}",
+            bare_diags[0]["code"]
+        );
+        assert_eq!(
+            bare_diags[0]["span"]["file"].as_str(),
+            Some("other.sf"),
+            "F-094-P7-001: bare diag span.file must be 'other.sf'; got: {}",
+            bare_diags[0]["span"]["file"]
+        );
+    }
+
+    // ── F-094-P9-001 Prong 1+3: E-LAY-008 exit-code taxonomy mapping unit tests ─
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(BulletsOnContentlessSlideType)` → exit 2.
+    ///
+    /// Error taxonomy v2.30 row E-LAY-008: `broken | 2`.
+    /// The `exit_code_for_build_error` function must return exit 2 for layout errors
+    /// that are user-authoring errors (E-LAY-008 and all other taxonomy-classified variants).
+    ///
+    /// RED Gate: before the fix, `BuildError::Layout(_)` fell to the catch-all
+    /// `EXIT_PARSE_ERROR` (exit 1). After the fix, `exit_code_for_layout_error`
+    /// is called to classify per the taxonomy.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_lay_008_user_authoring_maps_to_2() {
+        use slideforge::LayoutError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let lay_err = LayoutError::BulletsOnContentlessSlideType {
+            slide_type: Arc::from("title"),
+            source_slide_index: 0,
+            span: SourceSpan::default(),
+        };
+        let err = BuildError::Layout(lay_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(2),
+            "F-094-P9-001 Prong 1: BuildError::Layout(BulletsOnContentlessSlideType) must → exit 2 \
+             (taxonomy v2.30: broken|2)"
+        );
+    }
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(SlideCountMismatch)` → exit 1.
+    ///
+    /// `SlideCountMismatch` is an internal engine invariant violation (not in the
+    /// user-authoring taxonomy). It must retain exit 1 (parse-category internal error).
+    /// This test uses `SlideCountMismatch` instead of `InvalidBoundingBox` because
+    /// `BoundingBox`/`Emu` are in `slideforge-layout::types` (not a direct dependency
+    /// of `slideforge-cli`), while `SlideCountMismatch` fields are all primitive types.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_slide_count_mismatch_internal_maps_to_1() {
+        use slideforge::LayoutError;
+
+        let lay_err = LayoutError::SlideCountMismatch {
+            expected: 3,
+            actual: 2,
+            source_slide_index: 0,
+        };
+        let err = BuildError::Layout(lay_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(1),
+            "F-094-P9-001 Prong 1: BuildError::Layout(SlideCountMismatch) must → exit 1 \
+             (internal invariant violation, not in user-authoring taxonomy)"
+        );
+    }
+
+    /// F-094-P9-001 Prong 1: `BuildError::Layout(Multiple { BulletsOnContentless, MissingAlt })` → exit 2.
+    ///
+    /// `Multiple` with all user-authoring inners must produce exit 2 (max-severity of inners).
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_1_15_003_f094_p9_001_exit_code_multiple_user_authoring_maps_to_2() {
+        use slideforge::LayoutError;
+        use slideforge_types::SourceSpan;
+        use std::sync::Arc;
+
+        let inner = vec![
+            LayoutError::BulletsOnContentlessSlideType {
+                slide_type: Arc::from("title"),
+                source_slide_index: 0,
+                span: SourceSpan::default(),
+            },
+            LayoutError::MissingAlt {
+                source_slide_index: 1,
+                span: SourceSpan::default(),
+            },
+        ];
+        let multi_err = LayoutError::multiple(inner);
+        let err = BuildError::Layout(multi_err);
+        let code = exit_code_for_build_error(&err);
+        assert_eq!(
+            code,
+            ExitCode::from(2),
+            "F-094-P9-001 Prong 1: Multiple with all user-authoring inners must → exit 2"
         );
     }
 }

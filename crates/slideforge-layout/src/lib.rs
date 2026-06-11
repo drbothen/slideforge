@@ -84,7 +84,11 @@ pub use types::{
     // unused_variables: some test doc-level bindings (e.g., page_height) are
     // retained for reference clarity even when the variable is not read in an
     // assertion. Test-local documentation bindings are intentional.
-    unused_variables
+    unused_variables,
+    // non_snake_case: test functions follow the BC-based naming convention
+    // test_BC_S_SS_NNN_xxx() for full traceability to behavioral contracts.
+    // This pattern is project-wide policy (see CLAUDE.md TDD naming convention).
+    non_snake_case
 )]
 mod tests {
     use std::sync::Arc;
@@ -132,6 +136,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -150,6 +155,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -455,6 +461,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -478,6 +485,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -523,6 +531,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content,
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -568,6 +577,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = slideforge_types::Deck {
             slides: vec![slide_with_takeaway],
@@ -648,6 +658,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -667,6 +678,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -867,6 +879,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -992,6 +1005,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1084,6 +1098,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1166,6 +1181,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1221,6 +1237,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1296,6 +1313,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1390,6 +1408,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1463,6 +1482,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1525,6 +1545,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
 
@@ -1703,6 +1724,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content,
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1949,8 +1971,10 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot). "title" slides have no Body slot
+        // and now correctly return Err(InvalidBoundingBox) for bullets.
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -1958,6 +1982,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -1968,7 +1993,7 @@ mod tests {
         let slide_out = &result.slides[0];
 
         // Count only the TextRun frames produced for bullet items.
-        // The title slide has region-map frames (Title + Subtitle) before the bullet frames.
+        // The content slide has region-map frames (Title + Body) before the bullet frames.
         let text_run_frames: Vec<_> = slide_out
             .frames
             .iter()
@@ -2016,8 +2041,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2025,6 +2051,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2109,6 +2136,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         // Provide "introduction" as a slide title so the Xref is known.
         let deck = {
@@ -2174,8 +2202,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2183,6 +2212,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2220,8 +2250,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2229,6 +2260,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2286,8 +2318,10 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot). "title" now returns
+        // Err(InvalidBoundingBox) which would mask the InlineDepthExceeded error.
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2295,6 +2329,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2349,6 +2384,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2405,8 +2441,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2414,6 +2451,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2512,8 +2550,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2521,6 +2560,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2624,8 +2664,9 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has Body slot).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2633,6 +2674,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2699,6 +2741,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let title_slide = make_slide_with_title("title", "known-slide-title");
         let deck = make_deck(vec![title_slide, bullets_slide]);
@@ -2864,8 +2907,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before the
+        // depth guard can fire).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2873,6 +2919,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -2902,7 +2949,7 @@ mod tests {
     /// BEFORE deep recursion exhausts the stack.
     ///
     /// Regression guard: `push_bullet_frames` has a structural depth guard.
-    /// A 65-deep children chain returns `Err(LayoutError::InlineDepthExceeded)`.
+    /// A 65-deep children chain returns `Err(LayoutError::BulletDepthExceeded)`.
     /// Depth 65 is chosen to be above the limit but below stack overflow depth.
     ///
     /// Anti-paper-fix (TD-VSDD-059): the variant check inside `match` ensures
@@ -2934,8 +2981,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before the
+        // depth guard can fire, masking the depth-exceeded signal).
         let slide = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![block],
             register: None,
@@ -2943,6 +2993,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3003,8 +3054,11 @@ mod tests {
             label: None,
             span: SourceSpan::default(),
         };
+        // F-094-P1-002: use "content" (has a Body slot; "title" has no content
+        // region for bullets and would return Err(InvalidBoundingBox) before slide1
+        // is reached, masking the source_slide_index threading test).
         let slide0 = Slide {
-            slide_type: Arc::from("title"),
+            slide_type: Arc::from("content"),
             fields: OrderedMap::new(),
             blocks: vec![slide0_block],
             register: None,
@@ -3012,6 +3066,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         // Slide 1: a structurally 65-deep bullet chain (MAX_BULLET_DEPTH + 1 = 65).
@@ -3040,6 +3095,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
 
         let deck = make_deck(vec![slide0, slide1]);
@@ -3133,6 +3189,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3254,6 +3311,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3490,6 +3548,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         };
         let deck = make_deck(vec![slide]);
         let brand = make_brand();
@@ -3661,5 +3720,392 @@ mod tests {
             "has_non_plain_inline must return true when Bold node is present; \
              got false — would incorrectly route to Subtitle (plain) instead of SubtitleInlines"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STORY-094 — REND-001 Red Gate tests
+    //
+    // T-001: test_BC_3_06_003_bullets_bbox_nonzero
+    //   AC-001 / BC-3.06.003 postcondition 1
+    //   Every FrameContent::TextRun frame produced from ContentBlock::Bullets on a
+    //   `content` slide must have bbox.x > 0, bbox.y > 0, width > 0, height > 0.
+    //   Defect: push_bullet_frames_inner emits frames at (0,0) hardcoded.
+    //
+    // AC-005: test_BC_3_06_003_invalid_region_bbox_returns_error
+    //   BC-3.06.003 postcondition 2 / EC-004
+    //   A region map that returns x = Emu(-1) must cause layout::run to return
+    //   Err(LayoutError::InvalidBoundingBox), not silently produce a negative-coord frame.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// STORY-094 T-001 / BC-3.06.003 AC-001 (REND-001 Red Gate):
+    /// A `content` slide containing `ContentBlock::Bullets` must produce
+    /// `FrameContent::TextRun` frames whose bounding boxes satisfy:
+    ///   - `bbox.x > Emu(0)`
+    ///   - `bbox.y > Emu(0)`
+    ///   - `bbox.width > Emu(0)`
+    ///   - `bbox.height > Emu(0)`
+    ///   - `bbox.y + bbox.height <= page_size.height`
+    ///
+    /// DEFECT (REND-001): `push_bullet_frames_inner` in `layout.rs` hardcodes
+    /// `x: Emu(0), y: Emu(0)` for every bullet frame, stacking all bullets at the
+    /// top-left of the slide. This test MUST FAIL until the bbox finalization fix
+    /// is applied (STORY-094 T-004).
+    ///
+    /// Load-bearing: if `x > 0` or `y > 0` is removed, the test passes vacuously
+    /// against the defective code. Both assertions are required.
+    #[test]
+    fn test_BC_3_06_003_bullets_bbox_nonzero() {
+        use slideforge_types::{Block, BulletItem, ContentBlock, InlineNode, SourceSpan};
+
+        // Build a `content` slide with three bullet items.
+        let bullet_items = vec![
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("First bullet"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("Second bullet"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+            BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from("Third bullet"))],
+                children: vec![],
+                span: SourceSpan::default(),
+            },
+        ];
+        let block = Block {
+            content: ContentBlock::Bullets(bullet_items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result =
+            run(&deck, &brand).expect("layout::run must succeed for content slide with bullets");
+
+        let page_w = result.page_size.width;
+        let page_h = result.page_size.height;
+        let slide_out = &result.slides[0];
+
+        // Collect all TextRun frames (produced by push_bullet_frames).
+        let text_run_frames: Vec<_> = slide_out
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .collect();
+
+        // AC-001: the bullets block must produce at least one TextRun frame.
+        assert!(
+            !text_run_frames.is_empty(),
+            "content slide with 3 bullet items must produce at least one FrameContent::TextRun \
+             frame; got 0 TextRun frames (total frames: {})",
+            slide_out.frames.len()
+        );
+
+        // AC-001 / BC-3.06.003 postcondition 1:
+        // Every TextRun frame from bullets must have a non-zero, in-bounds bbox.
+        for (idx, frame) in text_run_frames.iter().enumerate() {
+            let bbox = frame.bbox;
+
+            // REND-001 defect: x and y are hardcoded to 0 — these assertions MUST
+            // fail against the unfixed code.
+            assert!(
+                bbox.x > crate::types::Emu(0),
+                "STORY-094 T-001 Red Gate: TextRun frame {idx} bbox.x must be > Emu(0) \
+                 (REND-001: bullet frames stacked at 0,0); got bbox.x = {:?}",
+                bbox.x
+            );
+            assert!(
+                bbox.y > crate::types::Emu(0),
+                "STORY-094 T-001 Red Gate: TextRun frame {idx} bbox.y must be > Emu(0) \
+                 (REND-001: bullet frames stacked at 0,0); got bbox.y = {:?}",
+                bbox.y
+            );
+            assert!(
+                bbox.width > crate::types::Emu(0),
+                "TextRun frame {idx} bbox.width must be > Emu(0); got {:?}",
+                bbox.width
+            );
+            assert!(
+                bbox.height > crate::types::Emu(0),
+                "TextRun frame {idx} bbox.height must be > Emu(0); got {:?}",
+                bbox.height
+            );
+            // Bounds check: frame must not extend beyond the page.
+            assert!(
+                crate::types::Emu(bbox.y.0.saturating_add(bbox.height.0)) <= page_h,
+                "TextRun frame {idx} bbox.y ({:?}) + bbox.height ({:?}) must not exceed \
+                 page_height ({:?})",
+                bbox.y,
+                bbox.height,
+                page_h
+            );
+            assert!(
+                crate::types::Emu(bbox.x.0.saturating_add(bbox.width.0)) <= page_w,
+                "TextRun frame {idx} bbox.x ({:?}) + bbox.width ({:?}) must not exceed \
+                 page_width ({:?})",
+                bbox.x,
+                bbox.width,
+                page_w
+            );
+        }
+    }
+
+    /// STORY-094 AC-005 / BC-3.06.003 postcondition 2 / EC-004 (REND-001 Red Gate):
+    /// When a region map produces a bbox with `x = Emu(-1)` (negative coordinate —
+    /// hypothetical defect), `layout::run` must return
+    /// `Err(LayoutError::InvalidBoundingBox { ... })` rather than silently emitting
+    /// a frame with negative coordinates.
+    ///
+    /// This test injects the invalid condition by using a slide type whose region
+    /// map IS valid, then verifies the BC-3.06.003 defensive check fires on a
+    /// manually constructed negative-coordinate bbox injected via the error.rs types.
+    ///
+    /// IMPLEMENTATION NOTE: Because `region_frames_for` always produces valid
+    /// coordinates from its const table, we test the `InvalidBoundingBox` variant
+    /// via `BoundingBox::is_valid` directly plus the error variant construction,
+    /// matching BC-3.06.003 EC-004's contract ("region map bug produces x = -1 →
+    /// Err(InvalidBoundingBox)").
+    ///
+    /// Load-bearing (TD-VSDD-059): if the `InvalidBoundingBox` variant is removed
+    /// from `LayoutError`, this test fails to compile. If `BoundingBox::is_valid`
+    /// is changed to accept negative x, the first assertion fails.
+    #[test]
+    fn test_BC_3_06_003_invalid_region_bbox_returns_error() {
+        use crate::error::LayoutError;
+        use crate::types::{BoundingBox, DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, Emu};
+        use slideforge_types::{Emu as TypesEmu, LayoutDefinition};
+
+        // Construct a bbox that simulates a region map bug: x = Emu(-1).
+        let bad_bbox = BoundingBox {
+            x: Emu(-1),
+            y: Emu(100_000),
+            width: Emu(1_000_000),
+            height: Emu(500_000),
+        };
+
+        // AC-005 assertion 1: is_valid must reject this bbox.
+        assert!(
+            !bad_bbox.is_valid(DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT),
+            "BoundingBox with x = Emu(-1) must fail is_valid (BC-3.06.003 EC-004)"
+        );
+
+        // AC-005 assertion 2: the LayoutError::InvalidBoundingBox variant exists and
+        // can be constructed with the canonical field names (source_slide_index,
+        // frame_index, bbox). This is a compile-time assertion — if the variant is
+        // renamed or its fields change, this test fails to compile.
+        let err = LayoutError::InvalidBoundingBox {
+            source_slide_index: 0,
+            frame_index: 2,
+            bbox: bad_bbox,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains('0'),
+            "InvalidBoundingBox message must include source_slide_index; got: {msg}"
+        );
+        assert!(
+            msg.contains('2'),
+            "InvalidBoundingBox message must include frame_index; got: {msg}"
+        );
+
+        // AC-005 assertion 3: layout::run returns Err(InvalidBoundingBox) when any
+        // slide type is processed with a brand that causes a 0-size page dimension.
+        // Trigger it by passing a brand with canvas_width = Emu(0) — region coordinates
+        // scaled to a zero-width page will produce is_valid = false for any frame with
+        // width > 0, because x + width = 0 + width > 0 = page_width.
+        //
+        // This exercises the same code path (layout::run's bbox validation loop) that
+        // would fire for a region map bug producing x = -1.
+
+        let mut zero_width_brand = make_brand();
+        // canvas_width = 1 EMU (smallest valid non-zero), canvas_height = 5_143_500 (default).
+        // Region coords scaled to 1-EMU width produce frames > 1 EMU wide → is_valid fails.
+        zero_width_brand.layouts.push(LayoutDefinition {
+            name: Arc::from("zero-width"),
+            canvas_width: TypesEmu(1),
+            canvas_height: TypesEmu(5_143_500),
+            span: SourceSpan::default(),
+        });
+
+        let deck = make_deck(vec![make_slide("title")]);
+        let result = run(&deck, &zero_width_brand);
+
+        // The layout pass must detect the invalid bbox and return an error
+        // (NOT Ok with a silently emitted out-of-bounds frame).
+        match result {
+            Err(LayoutError::InvalidBoundingBox {
+                source_slide_index,
+                bbox,
+                ..
+            }) => {
+                assert_eq!(
+                    source_slide_index, 0,
+                    "InvalidBoundingBox must cite slide index 0"
+                );
+                assert!(
+                    !bbox.is_valid(TypesEmu(1), TypesEmu(5_143_500)),
+                    "reported bbox must actually be invalid for the given page dimensions"
+                );
+            },
+            Ok(lod) => {
+                // If layout returned Ok, check whether any frame is actually invalid.
+                // If so, the defensive check is missing — test should fail.
+                let any_invalid = lod.slides.iter().any(|s| {
+                    s.frames
+                        .iter()
+                        .any(|f| !f.bbox.is_valid(TypesEmu(1), TypesEmu(5_143_500)))
+                });
+                assert!(
+                    !any_invalid,
+                    "STORY-094 AC-005 Red Gate: layout::run returned Ok but produced frames with \
+                     invalid bounding boxes for page_width=Emu(1) — the InvalidBoundingBox \
+                     defensive check is missing or bypassed"
+                );
+            },
+            Err(other) => {
+                // Any other error (e.g., EmptyDeck) is also a failure for this test.
+                panic!(
+                    "STORY-094 AC-005 Red Gate: expected Ok (valid path) or \
+                     Err(InvalidBoundingBox); got unexpected error: {other:?}"
+                );
+            },
+        }
+    }
+
+    /// STORY-094 EC-002 / BC-3.06.003 postcondition 1 — title + bullets slide:
+    /// A `content` slide with BOTH a title text block AND a bullets block must
+    /// produce a Title frame and TextRun frames with distinct, non-zero bboxes.
+    ///
+    /// This verifies that the REND-001 fix does not cause title and bullet frames
+    /// to overlap (both at 0,0) or share the same y coordinate.
+    ///
+    /// Load-bearing: the distinct-y assertion would pass vacuously on the defective
+    /// code only if both title and body were at y=0 — which is exactly the bug we fixed.
+    #[test]
+    fn test_BC_3_06_003_ec002_title_and_bullets_distinct_bbox() {
+        use slideforge_types::{
+            Block, BulletItem, ContentBlock, InlineNode, SourceSpan, TextBlock, TextTag,
+        };
+
+        let title_block = Block {
+            content: ContentBlock::Text(TextBlock {
+                tag: TextTag::Title,
+                inlines: vec![InlineNode::Plain(Arc::from("EC-002 Title"))],
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        let bullet_block = Block {
+            content: ContentBlock::Bullets(vec![
+                BulletItem {
+                    inlines: vec![InlineNode::Plain(Arc::from("Bullet A"))],
+                    children: vec![],
+                    span: SourceSpan::default(),
+                },
+                BulletItem {
+                    inlines: vec![InlineNode::Plain(Arc::from("Bullet B"))],
+                    children: vec![],
+                    span: SourceSpan::default(),
+                },
+            ]),
+            label: None,
+            span: SourceSpan::default(),
+        };
+
+        let slide = Slide {
+            slide_type: Arc::from("content"),
+            fields: OrderedMap::new(),
+            blocks: vec![title_block, bullet_block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        };
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let result = run(&deck, &brand)
+            .expect("layout::run must succeed for content slide with title + bullets (EC-002)");
+
+        let slide_out = &result.slides[0];
+        let page_w = result.page_size.width;
+        let page_h = result.page_size.height;
+
+        // EC-002: all frames must have non-zero, in-bounds bbox.
+        assert!(
+            !slide_out.frames.is_empty(),
+            "EC-002: content slide with title + bullets must produce at least one frame"
+        );
+        for (idx, frame) in slide_out.frames.iter().enumerate() {
+            let b = frame.bbox;
+            assert!(
+                b.width > crate::types::Emu(0),
+                "EC-002: frame {idx} bbox.width must be > Emu(0); got {:?}",
+                b.width
+            );
+            assert!(
+                b.height > crate::types::Emu(0),
+                "EC-002: frame {idx} bbox.height must be > Emu(0); got {:?}",
+                b.height
+            );
+            assert!(
+                crate::types::Emu(b.x.0.saturating_add(b.width.0)) <= page_w,
+                "EC-002: frame {idx} x + width exceeds page_width"
+            );
+            assert!(
+                crate::types::Emu(b.y.0.saturating_add(b.height.0)) <= page_h,
+                "EC-002: frame {idx} y + height exceeds page_height"
+            );
+        }
+
+        // EC-002: title frame and bullet frames must have distinct y values
+        // (they occupy different vertical regions on the slide).
+        let title_frames: Vec<_> = slide_out
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::Title(_)))
+            .collect();
+        let text_run_frames: Vec<_> = slide_out
+            .frames
+            .iter()
+            .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+            .collect();
+
+        assert!(
+            !title_frames.is_empty(),
+            "EC-002: content slide with title block must produce a Title frame"
+        );
+        assert!(
+            !text_run_frames.is_empty(),
+            "EC-002: content slide with bullets must produce TextRun frames"
+        );
+
+        let title_y = title_frames[0].bbox.y;
+        for (idx, tr) in text_run_frames.iter().enumerate() {
+            assert_ne!(
+                tr.bbox.y, title_y,
+                "EC-002: TextRun frame {idx} bbox.y ({:?}) must differ from Title frame \
+                 bbox.y ({title_y:?}) — bullet frames must not stack on top of the title",
+                tr.bbox.y
+            );
+        }
     }
 }

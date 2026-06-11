@@ -128,6 +128,7 @@ fn make_deck(n: usize) -> Deck {
                 source_span: slideforge_types::SourceSpan::default(),
                 overlay: None,
                 register_content: vec![],
+                field_spans: OrderedMap::new(),
             })
             .collect(),
         vars: OrderedMap::new(),

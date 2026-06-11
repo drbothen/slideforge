@@ -53,17 +53,30 @@ impl SourceSpan {
         }
     }
 
-    /// Return `true` if this span represents an unknown / synthetic location.
+    /// Return `true` if this span represents an unknown / synthetic / unresolved location.
+    ///
+    /// Returns `true` for three cases:
+    /// 1. Empty file string — the default `SourceSpan::default()` state.
+    /// 2. `"<unknown>"` — the conventional explicit unknown sentinel.
+    /// 3. `"<byte:N>"` — the unresolved byte-offset sentinel produced by
+    ///    `span_to_source_span` in `slideforge-eval` when no `SourceMap` is
+    ///    available. These strings look like real file names but are NOT —
+    ///    any diagnostic renderer that would display them to the user MUST
+    ///    treat them as unresolved (F-094-P4-006 invariant: no fake filenames
+    ///    in user-facing output).
     ///
     /// # Examples
     ///
     /// ```
     /// use slideforge_types::SourceSpan;
+    /// use std::sync::Arc;
     /// assert!(SourceSpan::default().is_unknown());
+    /// assert!(SourceSpan { file: Arc::from("<byte:42>"), line: 0, col: 0, byte_offset: 42 }.is_unknown());
+    /// assert!(!SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42).is_unknown());
     /// ```
     #[must_use]
     pub fn is_unknown(&self) -> bool {
-        self.file.is_empty() || self.file.as_ref() == "<unknown>"
+        self.file.is_empty() || self.file.as_ref() == "<unknown>" || self.file.starts_with("<byte:")
     }
 }
 
@@ -154,5 +167,49 @@ mod tests {
     fn test_bc_1_01_009_source_span_display_known() {
         let span = SourceSpan::new(Arc::from("deck.sf"), 10, 3, 150);
         assert_eq!(span.to_string(), "deck.sf:10:3");
+    }
+
+    // ── F-094-P4-006 — `<byte:N>` sentinel treated as unresolved by is_unknown() ──
+
+    /// F-094-P4-006: A span with `file = "<byte:42>"` is an UNRESOLVED sentinel
+    /// (produced by `span_to_source_span` when `SourceMap` is not available).
+    /// `is_unknown()` must return `true` for these sentinels so no future diagnostic
+    /// renderer can display a fake filename to the user.
+    ///
+    /// RED: before the fix `is_unknown()` only checks for `""` and `"<unknown>"`,
+    /// so `"<byte:42>"` is treated as a real filename → `is_unknown()` returns `false`.
+    #[test]
+    fn test_f094_p4_006_byte_sentinel_is_unknown() {
+        // Sentinel produced by old span_to_source_span — must be treated as unresolved.
+        let byte_sentinel = SourceSpan {
+            file: Arc::from("<byte:42>"),
+            line: 0,
+            col: 0,
+            byte_offset: 42,
+        };
+        assert!(
+            byte_sentinel.is_unknown(),
+            "F-094-P4-006: span with file='<byte:42>' must be is_unknown()=true; \
+             got false — the byte-sentinel is not a real file name"
+        );
+
+        // Variant with a different byte offset — same expectation.
+        let byte_zero = SourceSpan {
+            file: Arc::from("<byte:0>"),
+            line: 0,
+            col: 0,
+            byte_offset: 0,
+        };
+        assert!(
+            byte_zero.is_unknown(),
+            "F-094-P4-006: span with file='<byte:0>' must be is_unknown()=true"
+        );
+
+        // A real file name must still be NOT unknown.
+        let real = SourceSpan::new(Arc::from("deck.sf"), 4, 3, 42);
+        assert!(
+            !real.is_unknown(),
+            "F-094-P4-006: span with file='deck.sf' must be is_unknown()=false"
+        );
     }
 }

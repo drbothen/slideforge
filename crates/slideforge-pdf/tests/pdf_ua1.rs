@@ -1705,6 +1705,7 @@ fn slide_with_title(title: &str, slide_type: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -1722,6 +1723,7 @@ fn slide_without_title(slide_type: &str) -> Slide {
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 
@@ -2933,6 +2935,7 @@ fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
             source_span: slideforge_types::SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }],
         vars: OrderedMap::new(),
         metadata: slideforge_types::DeckMetadata {

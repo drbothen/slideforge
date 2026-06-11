@@ -98,6 +98,7 @@ fn make_slide_with_blocks(slide_type: &str, blocks: Vec<Block>, title: Option<&s
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

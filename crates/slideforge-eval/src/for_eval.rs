@@ -446,6 +446,7 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     slide_node: &SlideNode,
     set_rule_defaults: &HashMap<(Arc<str>, Arc<str>), Value, S>,
     sink: &mut DiagnosticSink,
+    source_map: Option<&slideforge_syntax::span::SourceMap>,
 ) -> Option<Slide> {
     let slide_type: Arc<str> = Arc::from(slide_node.kind.value().as_str());
 
@@ -454,9 +455,17 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
     // Used by the dual-title path (STORY-081 I2) to insert "title_inlines"
     // as a shadow field alongside the plain-text "title" field.
     let mut extra_insertions: Vec<(Arc<str>, slideforge_types::FieldValue)> = Vec::new();
+    // F-094-P3-001: collect the source span of each authored field's keyword token.
+    // Populated below via span_to_source_span(field_node.name.span()).
+    // Non-zero byte-offset spans produce non-unknown SourceSpans; zero-offset test
+    // spans produce SourceSpan::default() per span_to_source_span contract.
+    let mut field_spans: OrderedMap<Arc<str>, SourceSpan> = OrderedMap::new();
 
     for field_node in &slide_node.fields {
         let field_name: Arc<str> = Arc::from(field_node.name.value().as_str());
+        // Record the source span of this field's name token (F-094-P3-001).
+        let name_span = crate::if_eval::span_to_source_span(field_node.name.span(), source_map);
+        field_spans.insert(Arc::clone(&field_name), name_span);
         let field_value = match field_node.value.value() {
             FieldValue::Template(chunks) => {
                 // STORY-081 AC-001 / BC-3.05.001 precondition 5:
@@ -657,6 +666,9 @@ pub fn eval_slide_node<S: std::hash::BuildHasher>(
         overlay: None,
         // Initialised empty; populated immediately below.
         register_content: vec![],
+        // F-094-P3-001: field_spans populated above in the field loop.
+        // Each entry maps a field name to the source span of its keyword token.
+        field_spans,
     };
 
     // ── Step 2: Populate register_content (F-001 / STORY-035) ────────────────
@@ -778,9 +790,18 @@ pub(crate) fn eval_block_items_with_sections<S: std::hash::BuildHasher>(
                 let slide_node = spanned_slide.value();
                 // Capture the slide's source span so it can be threaded into
                 // the resulting Slide IR (PR-A Finding 2 / diag-span fix).
-                let slide_span = crate::if_eval::span_to_source_span(spanned_slide.span());
+                let slide_span = crate::if_eval::span_to_source_span(
+                    spanned_slide.span(),
+                    config.source_map.as_deref(),
+                );
                 // Evaluate the primary slide.
-                if let Some(mut slide) = eval_slide_node(env, slide_node, set_rule_defaults, sink) {
+                if let Some(mut slide) = eval_slide_node(
+                    env,
+                    slide_node,
+                    set_rule_defaults,
+                    sink,
+                    config.source_map.as_deref(),
+                ) {
                     // Thread the real byte-offset span into the Slide so that
                     // downstream validation diagnostics carry file:line:col.
                     slide.source_span = slide_span;
@@ -1433,6 +1454,7 @@ mod tests {
         let config = EvalConfig {
             large_deck_warn_threshold: 3,
             max_total_slides: None,
+            source_map: None,
         };
 
         // @for x in [1..=5]: slide content: — 5 slides, threshold is 3
@@ -1473,6 +1495,7 @@ mod tests {
         let config = EvalConfig {
             large_deck_warn_threshold: 3,
             max_total_slides: None,
+            source_map: None,
         };
 
         // Exactly 3 slides (== threshold): must produce NO warning.
@@ -1504,6 +1527,7 @@ mod tests {
         let config = EvalConfig {
             large_deck_warn_threshold: 3,
             max_total_slides: None,
+            source_map: None,
         };
 
         // 4 slides (> threshold of 3): must produce a warning.
@@ -1627,6 +1651,7 @@ mod tests {
         let config = EvalConfig {
             large_deck_warn_threshold: 500,
             max_total_slides: Some(2),
+            source_map: None,
         };
 
         let body = vec![slide_block_item("content")];
@@ -1660,7 +1685,7 @@ mod tests {
         let mut sink = slideforge_syntax::DiagnosticSink::new();
 
         let node = minimal_slide_node("bullets");
-        let slide = eval_slide_node(&env, &node, &empty_defaults(), &mut sink);
+        let slide = eval_slide_node(&env, &node, &empty_defaults(), &mut sink, None);
 
         let slide = slide.expect("eval_slide_node must return Some for valid input");
         assert_eq!(
@@ -1696,7 +1721,7 @@ mod tests {
             inline_items: vec![],
         };
 
-        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink)
+        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink, None)
             .expect("eval_slide_node must return Some for valid input");
         assert_eq!(
             slide.title_str(),
@@ -1728,7 +1753,7 @@ mod tests {
             inline_items: vec![],
         };
 
-        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink)
+        let slide = eval_slide_node(&env, &slide_node, &empty_defaults(), &mut sink, None)
             .expect("eval_slide_node must return Some");
         assert_eq!(
             slide.title_str(),

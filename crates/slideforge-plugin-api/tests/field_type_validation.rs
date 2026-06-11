@@ -68,6 +68,7 @@ fn make_slide_with_fields(slide_type: &str, fields: OrderedMap<Arc<str>, FieldVa
         source_span: SourceSpan::default(),
         overlay: None,
         register_content: vec![],
+        field_spans: OrderedMap::new(),
     }
 }
 

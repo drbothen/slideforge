@@ -491,6 +491,42 @@ pub fn region_frames_for(
             },
         ],
 
+        // ── __error_placeholder__ ─────────────────────────────────────────
+        // Internal IR type used by the warn-only demotion path (F-094-P9-001).
+        //
+        // When `--warn-only` is active and a user-authoring layout error occurs
+        // (e.g., E-LAY-008: bullets on a content-less slide type), the pipeline:
+        //   1. Substitutes the offending `Deck` slide with a placeholder whose
+        //      `slide_type` is `"__error_placeholder__"` and whose `body` field
+        //      carries the diagnostic message.
+        //   2. Calls `thread_fields_to_blocks` on the modified deck (F-094-P10-001),
+        //      converting the `body` field into a `ContentBlock::Text(TextTag::Body)`
+        //      block.
+        //   3. Re-runs `layout::run`.
+        //
+        // This single full-page Body-role region absorbs the threaded `body` block
+        // and produces `FrameContent::Body([diagnostic message])`.  All exporters
+        // (PPTX, HTML, PDF, DOCX) render `FrameContent::Body`, so the diagnostic text
+        // appears in every output format.  The `title` field is handled by the Phase-3
+        // append fallback (no Title-role slot exists here) and produces a clamped
+        // `FrameContent::Title` frame appended after this region frame.
+        //
+        // The region is intentionally full-page (0 margin, full width × height)
+        // to give the exporter the maximum canvas for the error card.
+        slideforge_types::ERROR_PLACEHOLDER_SLIDE_TYPE => {
+            vec![Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: page_width,
+                    height: page_height,
+                },
+                content: FrameContent::Empty,
+                text_flow: None,
+                region_role: Some(RegionRole::Body),
+            }]
+        },
+
         // Unknown keyword — caller should return LayoutError::UnknownSlideType
         _ => return None,
     };

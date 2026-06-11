@@ -29,7 +29,10 @@ use crate::types::{BoundingBox, Emu, TextFlow, TextOverflow};
 pub const ESTIMATED_CHAR_WIDTH_EMU: Emu = Emu(76_200);
 
 /// Line height at 12pt with 1.5 leading (18pt = 18 × 12,700 EMU = 228,600 EMU).
-const LINE_HEIGHT_EMU: Emu = Emu(228_600);
+///
+/// Exposed as `pub(crate)` so that `layout.rs` can use the same value when
+/// computing per-bullet flow cursor advances (F-094-P2-001 vertical stacking).
+pub(crate) const LINE_HEIGHT_EMU: Emu = Emu(228_600);
 
 /// Compute a heuristic [`TextFlow`] for `text` within the given `bounding_box`.
 ///

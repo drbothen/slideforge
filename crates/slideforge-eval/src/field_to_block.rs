@@ -107,375 +107,426 @@ const MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS: usize = 5;
 #[allow(clippy::too_many_lines)]
 pub fn thread_fields_to_blocks(deck: &mut Deck) {
     for slide in &mut deck.slides {
-        // ── 1. Title ─────────────────────────────────────────────────────────
-        // TextTag::Title is set so layout.rs routes this block to FrameContent::Title
-        // instead of the generic FrameContent::TextRun (ADR-019 Decision 3 / AC-019).
-        if let Some(text) = extract_str_field(slide, "title")
-            && !text.trim().is_empty()
-        {
-            slide
-                .blocks
-                .push(make_text_block_tagged(text, TextTag::Title));
-        }
+        thread_one_slide(slide);
+    }
+}
 
-        // ── 2. Subtitle ──────────────────────────────────────────────────────
-        // TextTag::Subtitle routes to FrameContent::Subtitle (PPTX subTitle placeholder,
-        // DOCX Heading2 paragraph) per BC-4.01.001 v1.2 postcondition 10 / BC-4.02.001 v1.2 PC-9.
-        //
-        // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
-        // when subtitle contains inline markup like `_italic subtitle_`). Previously
-        // extract_str_field returned None for Inlines, silently dropping the subtitle.
-        match slide.fields.get("subtitle") {
-            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
-                slide.blocks.push(make_text_block_tagged_inlines(
-                    nodes.clone(),
-                    TextTag::Subtitle,
-                ));
-            },
-            _ => {
-                if let Some(text) = extract_str_field(slide, "subtitle")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::Subtitle));
-                }
-            },
-        }
+/// Thread field values into content blocks for a single [`slideforge_types::Slide`].
+///
+/// This is the per-slide variant of [`thread_fields_to_blocks`].  Use it when
+/// you need to thread a specific slide without touching any other slide in the
+/// deck — for example, after the warn-only demotion path substitutes
+/// `BulletsOnContentlessSlideType` slides with error-placeholder slides
+/// (F-094-P10-001 / `compile_inner` demotion fix).
+///
+/// Calling `thread_fields_to_blocks` a second time on an already-threaded deck
+/// would append duplicate blocks to non-placeholder slides.  This function
+/// threads exactly one slide without that risk.
+///
+/// # Contract
+///
+/// Identical to `thread_fields_to_blocks` for a single-slide deck.
+/// The same field-to-block mapping rules apply (ADR-019 Decision 3).
+#[allow(clippy::too_many_lines)]
+pub fn thread_slide_fields_to_blocks(slide: &mut slideforge_types::Slide) {
+    thread_one_slide(slide);
+}
 
-        // ── 3. Body ──────────────────────────────────────────────────────────
-        // TextTag::Body routes to FrameContent::Body (PPTX body placeholder,
-        // DOCX Normal paragraph) per BC-4.01.001 v1.2 postcondition 11 / BC-4.02.001 v1.2 PC-10.
-        //
-        // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
-        // when body contains inline markup like `**bold body text**`). Previously
-        // extract_str_field returned None for Inlines, silently dropping the body.
-        // This is the primary failing path identified by adversary finding C2.
-        match slide.fields.get("body") {
-            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+/// Inner per-slide threading pass, shared by [`thread_fields_to_blocks`] and
+/// [`thread_slide_fields_to_blocks`].
+///
+/// Contains the full field-to-block mapping logic (ADR-019 Decision 3).
+/// The `#[allow(clippy::too_many_lines)]` is justified by the chartered
+/// monolithic threading contract — extracting further would scatter the
+/// field-threading contract across multiple files.
+#[allow(clippy::too_many_lines)]
+fn thread_one_slide(slide: &mut slideforge_types::Slide) {
+    // ── 1. Title ─────────────────────────────────────────────────────────
+    // TextTag::Title is set so layout.rs routes this block to FrameContent::Title
+    // instead of the generic FrameContent::TextRun (ADR-019 Decision 3 / AC-019).
+    if let Some(text) = extract_str_field(slide, "title")
+        && !text.trim().is_empty()
+    {
+        slide
+            .blocks
+            .push(make_text_block_tagged(text, TextTag::Title));
+    }
+
+    // ── 2. Subtitle ──────────────────────────────────────────────────────
+    // TextTag::Subtitle routes to FrameContent::Subtitle (PPTX subTitle placeholder,
+    // DOCX Heading2 paragraph) per BC-4.01.001 v1.2 postcondition 10 / BC-4.02.001 v1.2 PC-9.
+    //
+    // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
+    // when subtitle contains inline markup like `_italic subtitle_`). Previously
+    // extract_str_field returned None for Inlines, silently dropping the subtitle.
+    match slide.fields.get("subtitle") {
+        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+            slide.blocks.push(make_text_block_tagged_inlines(
+                nodes.clone(),
+                TextTag::Subtitle,
+            ));
+        },
+        _ => {
+            if let Some(text) = extract_str_field(slide, "subtitle")
+                && !text.trim().is_empty()
+            {
                 slide
                     .blocks
-                    .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
-            },
-            _ => {
-                if let Some(text) = extract_str_field(slide, "body")
+                    .push(make_text_block_tagged(text, TextTag::Subtitle));
+            }
+        },
+    }
+
+    // ── 3. Body ──────────────────────────────────────────────────────────
+    // TextTag::Body routes to FrameContent::Body (PPTX body placeholder,
+    // DOCX Normal paragraph) per BC-4.01.001 v1.2 postcondition 11 / BC-4.02.001 v1.2 PC-10.
+    //
+    // STORY-081 C2 fix: also handle FieldValue::Inlines (produced by eval_slide_node
+    // when body contains inline markup like `**bold body text**`). Previously
+    // extract_str_field returned None for Inlines, silently dropping the body.
+    // This is the primary failing path identified by adversary finding C2.
+    match slide.fields.get("body") {
+        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+            slide
+                .blocks
+                .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
+        },
+        _ => {
+            if let Some(text) = extract_str_field(slide, "body")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::Body));
+            }
+        },
+    }
+
+    // ── 4a. Caption ──────────────────────────────────────────────────────
+    // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
+    // STORY-081 P31-MED-001 fix: caption field was in INLINE_CONTENT_FIELDS so
+    // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
+    // had no match arm for it, silently dropping inline nodes before they reached exporters.
+    match slide.fields.get("caption") {
+        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+            slide.blocks.push(make_text_block_tagged_inlines(
+                nodes.clone(),
+                TextTag::Untagged,
+            ));
+        },
+        _ => {
+            if let Some(text) = extract_str_field(slide, "caption")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::Untagged));
+            }
+        },
+    }
+
+    // ── 4b. Description ──────────────────────────────────────────────────
+    // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
+    // STORY-081 P31-MED-001 fix: description field was in INLINE_CONTENT_FIELDS so
+    // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
+    // had no match arm for it, silently dropping inline nodes before they reached exporters.
+    match slide.fields.get("description") {
+        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
+            slide.blocks.push(make_text_block_tagged_inlines(
+                nodes.clone(),
+                TextTag::Untagged,
+            ));
+        },
+        _ => {
+            if let Some(text) = extract_str_field(slide, "description")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::Untagged));
+            }
+        },
+    }
+
+    // ── 5. Bullets ───────────────────────────────────────────────────────
+    // F-094-P3-001: Block.span is set from field_spans["bullets"] so that
+    // LayoutError::BulletsOnContentlessSlideType can report the authored
+    // keyword location instead of <unknown> (E-LAY-008 / BC-3.06.003).
+    let bullets_span = slide
+        .field_spans
+        .get("bullets")
+        .cloned()
+        .unwrap_or_default();
+    match slide.fields.get("bullets") {
+        Some(FieldValue::Literal(Value::List(items))) => {
+            let bullet_items: Vec<BulletItem> = items
+                .iter()
+                .filter_map(|v| {
+                    if let Value::Str(s) = v {
+                        Some(BulletItem {
+                            inlines: vec![InlineNode::Plain(Arc::clone(s))],
+                            children: vec![],
+                            span: SourceSpan::default(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            slide.blocks.push(Block {
+                content: ContentBlock::Bullets(bullet_items),
+                label: None,
+                span: bullets_span,
+            });
+        },
+        Some(FieldValue::Inlines(nodes)) => {
+            // ADR-019 Decision 3.2: FieldValue::Inlines bullets threaded as-is.
+            // We don't have structured BulletItem from Inlines — emit as a single
+            // BulletItem carrying the already-bound inline nodes directly, without
+            // redundantly re-fetching slide.fields.get("bullets").
+            slide.blocks.push(Block {
+                content: ContentBlock::Bullets(vec![BulletItem {
+                    inlines: nodes.clone(),
+                    children: vec![],
+                    span: SourceSpan::default(),
+                }]),
+                label: None,
+                span: bullets_span,
+            });
+        },
+        Some(FieldValue::InlinesList(items)) => {
+            // STORY-081×STORY-088: list-literal bullets with inline markup.
+            // Each Vec<InlineNode> in items is one bullet item with full inline
+            // structure. Build BulletItem directly from the preserved nodes.
+            let bullet_items: Vec<BulletItem> = items
+                .iter()
+                .filter(|item_nodes| !item_nodes.is_empty())
+                .map(|item_nodes| BulletItem {
+                    inlines: item_nodes.clone(),
+                    children: vec![],
+                    span: SourceSpan::default(),
+                })
+                .collect();
+            slide.blocks.push(Block {
+                content: ContentBlock::Bullets(bullet_items),
+                label: None,
+                span: bullets_span,
+            });
+        },
+        _ => {},
+    }
+
+    // ── 5. Media (chart / image / diagram) ───────────────────────────────
+    //
+    // `resolve_alt` and `is_decorative` are called ONLY inside each media
+    // branch — NOT unconditionally here — so that the W-A11-002 warning
+    // (emitted by `resolve_alt` when both `decorative: true` AND a non-empty
+    // `alt` are set) fires only when the slide is actually a media slide.
+    // Non-media slides may carry inert `decorative:` / `alt:` fields without
+    // triggering the conflict warning (F-086-P13-OBS-001 fix;
+    // error-taxonomy v2.17 W-A11-002 scopes this warning to the MEDIA path).
+    let slide_type: &str = slide.slide_type.as_ref();
+
+    // Chart: slide_type == "chart" (or any ChartRenderer surface type).
+    // For v1.0, keyed on slide_type == "chart".
+    //
+    // NOTE on alt=None handling (ADR-019 Decision 3 / ADR-018 v1.2 Decision-3):
+    // Stage 2b emits ContentBlock::Chart even when alt=None. The pre-layout
+    // AltTextValidator::validate() is restricted to ContentBlock::Shape ONLY (ADR-018 v1.2
+    // Decision-3), so no double-fire occurs. thread_media_alt_into_frames maps None →
+    // AltText::Unspecified on the frame, and validate_post_layout emits exactly one
+    // E-A11-001 for the missing alt (BC-5.01.001 postcondition 1 / AC-005).
+    //
+    // This design change (architect-pass-1-adjudication Issue 1 verdict CODE-CONFORMS)
+    // supersedes the prior anti-double-fire skip logic.
+    if slide_type == "chart" {
+        // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001):
+        // W-A11-002 fires only for chart slides, not for non-media slides.
+        let alt = resolve_alt(slide);
+        let decorative = is_decorative(slide);
+        // F-094-P3-001: thread field span for chart_type keyword.
+        let chart_span = slide
+            .field_spans
+            .get("chart_type")
+            .cloned()
+            .unwrap_or_default();
+        if let Some(chart_type) = extract_str_field(slide, "chart_type") {
+            // Always emit the ContentBlock::Chart, even when alt=None.
+            // Pre-layout validate() is restricted to Shape; post-layout fires exactly once.
+            slide.blocks.push(Block {
+                content: ContentBlock::Chart(ChartSpec {
+                    chart_type: Arc::from(chart_type),
+                    alt,
+                    decorative,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: chart_span,
+            });
+        } else {
+            tracing::warn!(
+                slide_type,
+                "Stage 2b: chart slide has no 'chart_type' field — \
+                     skipping ContentBlock::Chart construction; \
+                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.3)"
+            );
+        }
+    } else if matches!(slide_type, "image" | "screenshot" | "bio") {
+        // Image: slide_type in {image, screenshot, bio}.
+        // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
+        let alt = resolve_alt(slide);
+        let decorative = is_decorative(slide);
+        // F-094-P3-001: thread field span for src keyword.
+        let src_span = slide.field_spans.get("src").cloned().unwrap_or_default();
+        // Same rule as chart: emit unconditionally; pre-layout validate() is Shape-only.
+        if let Some(src) = extract_str_field(slide, "src") {
+            // Always emit the ContentBlock::Image, even when alt=None.
+            slide.blocks.push(Block {
+                content: ContentBlock::Image(ImageSpec {
+                    path: Arc::from(src),
+                    alt,
+                    decorative,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: src_span,
+            });
+        } else {
+            tracing::warn!(
+                slide_type,
+                "Stage 2b: image-type slide has no 'src' field — \
+                     skipping ContentBlock::Image construction; \
+                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.4)"
+            );
+        }
+    } else if slide_type == "diagram" {
+        // Diagram: slide_type == "diagram".
+        // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
+        let alt = resolve_alt(slide);
+        let decorative = is_decorative(slide);
+        // F-094-P3-001: thread field span for source keyword.
+        let source_span = slide.field_spans.get("source").cloned().unwrap_or_default();
+        // Same rule as chart/image: emit unconditionally; pre-layout validate() is Shape-only.
+        if let Some(source) = extract_str_field(slide, "source") {
+            // Always emit the ContentBlock::Diagram, even when alt=None.
+            slide.blocks.push(Block {
+                content: ContentBlock::Diagram(DiagramSpec {
+                    source: Arc::from(source),
+                    alt,
+                    decorative,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: source_span,
+            });
+        } else {
+            tracing::warn!(
+                slide_type,
+                "Stage 2b: diagram slide has no 'source' field — \
+                     skipping ContentBlock::Diagram construction; \
+                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.5)"
+            );
+        }
+    }
+
+    // ── 6. Color-coded slide types (status / progress_bar / weighted_composite / stat_callout)
+    //
+    // These types carry fields beyond title/subtitle/body that encode WCAG co-encoding
+    // text (`label`) and numeric state (`value`, `components`). Stage 2b threads them
+    // into ContentBlocks so that `layout::run` can fill the pre-allocated region slots.
+    //
+    // Threading contract per architect pass-2 adjudication §4.2 (STORY-087):
+    //   "label"       → ContentBlock::Text(TextTag::ColorLabel) — Body-role slot
+    //   "value"       → ContentBlock::ColorBar(ColorBarSpec)    — Generic-role bar-fill
+    //   "components"  → ContentBlock::Text(TextTag::Body) × N  — Generic-role row slots
+    //   stat fields   → ContentBlock::Text(TextTag::Body) × N  — Generic-role stat slots
+    //
+    // Purity: this block is a pure extension; no I/O, no global state, no existing
+    // slide-type code path is modified (blast radius = zero per adjudication §5).
+    match slide_type {
+        "status" => {
+            // Thread "label" → ColorLabel (Body-role slot: wide right-side frame).
+            if let Some(text) = extract_str_field(slide, "label")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::ColorLabel));
+            }
+        },
+        "progress_bar" => {
+            // Thread "label" → ColorLabel (Body-role slot: label below bar).
+            if let Some(text) = extract_str_field(slide, "label")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::ColorLabel));
+            }
+            // Thread "value" → ColorBar (Generic-role slot: bar-fill geometry).
+            // ValueRangeValidator already rejects out-of-range values at Stage 5;
+            // clamp defensively here to prevent layout panics on invalid inputs.
+            if let Some(FieldValue::Literal(Value::Int(v))) = slide.fields.get("value") {
+                let pct = (*v).clamp(0, 100);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let percent = pct as u8;
+                slide.blocks.push(Block {
+                    content: ContentBlock::ColorBar(ColorBarSpec { percent }),
+                    label: None,
+                    span: SourceSpan::default(),
+                });
+            }
+        },
+        "weighted_composite" => {
+            // Thread "label" (aggregate) → ColorLabel (Body-role slot).
+            if let Some(text) = extract_str_field(slide, "label")
+                && !text.trim().is_empty()
+            {
+                slide
+                    .blocks
+                    .push(make_text_block_tagged(text, TextTag::ColorLabel));
+            }
+            // Thread each component → TextTag::Body (one per component, Generic-role slots).
+            // compose_component_row_text formats: "<name>: <score>/100 (wt: <weight>) — <label>".
+            //
+            // BC-1.17.003 PC-9: cap at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5) — exactly the
+            // number of Generic-role slots pre-allocated in `slideforge-layout/src/regions.rs`
+            // for `weighted_composite`. Components beyond index 4 produce no Body block and
+            // therefore claim no additional frame. (F-087-P7-001)
+            if let Some(FieldValue::Literal(Value::List(components))) =
+                slide.fields.get("components")
+            {
+                for comp_val in components
+                    .iter()
+                    .take(MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS)
+                {
+                    if let Value::Map(comp) = comp_val {
+                        let row_text = compose_component_row_text(comp);
+                        if !row_text.is_empty() {
+                            slide
+                                .blocks
+                                .push(make_text_block_tagged(&row_text, TextTag::Body));
+                        }
+                    }
+                }
+            }
+        },
+        "stat_callout" => {
+            // Thread stat_1/label_1/stat_2/label_2/stat_3/label_3 → TextTag::Body
+            // (each claims a Generic-role slot in registration order).
+            for field_name in &[
+                "stat_1", "label_1", "stat_2", "label_2", "stat_3", "label_3",
+            ] {
+                if let Some(text) = extract_str_field(slide, field_name)
                     && !text.trim().is_empty()
                 {
                     slide
                         .blocks
                         .push(make_text_block_tagged(text, TextTag::Body));
                 }
-            },
-        }
-
-        // ── 4a. Caption ──────────────────────────────────────────────────────
-        // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
-        // STORY-081 P31-MED-001 fix: caption field was in INLINE_CONTENT_FIELDS so
-        // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
-        // had no match arm for it, silently dropping inline nodes before they reached exporters.
-        match slide.fields.get("caption") {
-            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
-                slide.blocks.push(make_text_block_tagged_inlines(
-                    nodes.clone(),
-                    TextTag::Untagged,
-                ));
-            },
-            _ => {
-                if let Some(text) = extract_str_field(slide, "caption")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::Untagged));
-                }
-            },
-        }
-
-        // ── 4b. Description ──────────────────────────────────────────────────
-        // TextTag::Untagged routes to FrameContent::TextRun (generic body-style).
-        // STORY-081 P31-MED-001 fix: description field was in INLINE_CONTENT_FIELDS so
-        // eval_slide_node correctly produced FieldValue::Inlines — but thread_fields_to_blocks
-        // had no match arm for it, silently dropping inline nodes before they reached exporters.
-        match slide.fields.get("description") {
-            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
-                slide.blocks.push(make_text_block_tagged_inlines(
-                    nodes.clone(),
-                    TextTag::Untagged,
-                ));
-            },
-            _ => {
-                if let Some(text) = extract_str_field(slide, "description")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::Untagged));
-                }
-            },
-        }
-
-        // ── 5. Bullets ───────────────────────────────────────────────────────
-        match slide.fields.get("bullets") {
-            Some(FieldValue::Literal(Value::List(items))) => {
-                let bullet_items: Vec<BulletItem> = items
-                    .iter()
-                    .filter_map(|v| {
-                        if let Value::Str(s) = v {
-                            Some(BulletItem {
-                                inlines: vec![InlineNode::Plain(Arc::clone(s))],
-                                children: vec![],
-                                span: SourceSpan::default(),
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                slide.blocks.push(Block {
-                    content: ContentBlock::Bullets(bullet_items),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            },
-            Some(FieldValue::Inlines(nodes)) => {
-                // ADR-019 Decision 3.2: FieldValue::Inlines bullets threaded as-is.
-                // We don't have structured BulletItem from Inlines — emit as a single
-                // BulletItem carrying the already-bound inline nodes directly, without
-                // redundantly re-fetching slide.fields.get("bullets").
-                slide.blocks.push(Block {
-                    content: ContentBlock::Bullets(vec![BulletItem {
-                        inlines: nodes.clone(),
-                        children: vec![],
-                        span: SourceSpan::default(),
-                    }]),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            },
-            Some(FieldValue::InlinesList(items)) => {
-                // STORY-081×STORY-088: list-literal bullets with inline markup.
-                // Each Vec<InlineNode> in items is one bullet item with full inline
-                // structure. Build BulletItem directly from the preserved nodes.
-                let bullet_items: Vec<BulletItem> = items
-                    .iter()
-                    .filter(|item_nodes| !item_nodes.is_empty())
-                    .map(|item_nodes| BulletItem {
-                        inlines: item_nodes.clone(),
-                        children: vec![],
-                        span: SourceSpan::default(),
-                    })
-                    .collect();
-                slide.blocks.push(Block {
-                    content: ContentBlock::Bullets(bullet_items),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            },
-            _ => {},
-        }
-
-        // ── 5. Media (chart / image / diagram) ───────────────────────────────
-        //
-        // `resolve_alt` and `is_decorative` are called ONLY inside each media
-        // branch — NOT unconditionally here — so that the W-A11-002 warning
-        // (emitted by `resolve_alt` when both `decorative: true` AND a non-empty
-        // `alt` are set) fires only when the slide is actually a media slide.
-        // Non-media slides may carry inert `decorative:` / `alt:` fields without
-        // triggering the conflict warning (F-086-P13-OBS-001 fix;
-        // error-taxonomy v2.17 W-A11-002 scopes this warning to the MEDIA path).
-        let slide_type: &str = slide.slide_type.as_ref();
-
-        // Chart: slide_type == "chart" (or any ChartRenderer surface type).
-        // For v1.0, keyed on slide_type == "chart".
-        //
-        // NOTE on alt=None handling (ADR-019 Decision 3 / ADR-018 v1.2 Decision-3):
-        // Stage 2b emits ContentBlock::Chart even when alt=None. The pre-layout
-        // AltTextValidator::validate() is restricted to ContentBlock::Shape ONLY (ADR-018 v1.2
-        // Decision-3), so no double-fire occurs. thread_media_alt_into_frames maps None →
-        // AltText::Unspecified on the frame, and validate_post_layout emits exactly one
-        // E-A11-001 for the missing alt (BC-5.01.001 postcondition 1 / AC-005).
-        //
-        // This design change (architect-pass-1-adjudication Issue 1 verdict CODE-CONFORMS)
-        // supersedes the prior anti-double-fire skip logic.
-        if slide_type == "chart" {
-            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001):
-            // W-A11-002 fires only for chart slides, not for non-media slides.
-            let alt = resolve_alt(slide);
-            let decorative = is_decorative(slide);
-            if let Some(chart_type) = extract_str_field(slide, "chart_type") {
-                // Always emit the ContentBlock::Chart, even when alt=None.
-                // Pre-layout validate() is restricted to Shape; post-layout fires exactly once.
-                slide.blocks.push(Block {
-                    content: ContentBlock::Chart(ChartSpec {
-                        chart_type: Arc::from(chart_type),
-                        alt,
-                        decorative,
-                        span: SourceSpan::default(),
-                    }),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            } else {
-                tracing::warn!(
-                    slide_type,
-                    "Stage 2b: chart slide has no 'chart_type' field — \
-                     skipping ContentBlock::Chart construction; \
-                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.3)"
-                );
             }
-        } else if matches!(slide_type, "image" | "screenshot" | "bio") {
-            // Image: slide_type in {image, screenshot, bio}.
-            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
-            let alt = resolve_alt(slide);
-            let decorative = is_decorative(slide);
-            // Same rule as chart: emit unconditionally; pre-layout validate() is Shape-only.
-            if let Some(src) = extract_str_field(slide, "src") {
-                // Always emit the ContentBlock::Image, even when alt=None.
-                slide.blocks.push(Block {
-                    content: ContentBlock::Image(ImageSpec {
-                        path: Arc::from(src),
-                        alt,
-                        decorative,
-                        span: SourceSpan::default(),
-                    }),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            } else {
-                tracing::warn!(
-                    slide_type,
-                    "Stage 2b: image-type slide has no 'src' field — \
-                     skipping ContentBlock::Image construction; \
-                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.4)"
-                );
-            }
-        } else if slide_type == "diagram" {
-            // Diagram: slide_type == "diagram".
-            // Resolve alt/decorative inside the media branch (F-086-P13-OBS-001).
-            let alt = resolve_alt(slide);
-            let decorative = is_decorative(slide);
-            // Same rule as chart/image: emit unconditionally; pre-layout validate() is Shape-only.
-            if let Some(source) = extract_str_field(slide, "source") {
-                // Always emit the ContentBlock::Diagram, even when alt=None.
-                slide.blocks.push(Block {
-                    content: ContentBlock::Diagram(DiagramSpec {
-                        source: Arc::from(source),
-                        alt,
-                        decorative,
-                        span: SourceSpan::default(),
-                    }),
-                    label: None,
-                    span: SourceSpan::default(),
-                });
-            } else {
-                tracing::warn!(
-                    slide_type,
-                    "Stage 2b: diagram slide has no 'source' field — \
-                     skipping ContentBlock::Diagram construction; \
-                     layout will retain AltText::Unspecified structural placeholder (ADR-019 Decision 3.5)"
-                );
-            }
-        }
-
-        // ── 6. Color-coded slide types (status / progress_bar / weighted_composite / stat_callout)
-        //
-        // These types carry fields beyond title/subtitle/body that encode WCAG co-encoding
-        // text (`label`) and numeric state (`value`, `components`). Stage 2b threads them
-        // into ContentBlocks so that `layout::run` can fill the pre-allocated region slots.
-        //
-        // Threading contract per architect pass-2 adjudication §4.2 (STORY-087):
-        //   "label"       → ContentBlock::Text(TextTag::ColorLabel) — Body-role slot
-        //   "value"       → ContentBlock::ColorBar(ColorBarSpec)    — Generic-role bar-fill
-        //   "components"  → ContentBlock::Text(TextTag::Body) × N  — Generic-role row slots
-        //   stat fields   → ContentBlock::Text(TextTag::Body) × N  — Generic-role stat slots
-        //
-        // Purity: this block is a pure extension; no I/O, no global state, no existing
-        // slide-type code path is modified (blast radius = zero per adjudication §5).
-        match slide_type {
-            "status" => {
-                // Thread "label" → ColorLabel (Body-role slot: wide right-side frame).
-                if let Some(text) = extract_str_field(slide, "label")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
-                }
-            },
-            "progress_bar" => {
-                // Thread "label" → ColorLabel (Body-role slot: label below bar).
-                if let Some(text) = extract_str_field(slide, "label")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
-                }
-                // Thread "value" → ColorBar (Generic-role slot: bar-fill geometry).
-                // ValueRangeValidator already rejects out-of-range values at Stage 5;
-                // clamp defensively here to prevent layout panics on invalid inputs.
-                if let Some(FieldValue::Literal(Value::Int(v))) = slide.fields.get("value") {
-                    let pct = (*v).clamp(0, 100);
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let percent = pct as u8;
-                    slide.blocks.push(Block {
-                        content: ContentBlock::ColorBar(ColorBarSpec { percent }),
-                        label: None,
-                        span: SourceSpan::default(),
-                    });
-                }
-            },
-            "weighted_composite" => {
-                // Thread "label" (aggregate) → ColorLabel (Body-role slot).
-                if let Some(text) = extract_str_field(slide, "label")
-                    && !text.trim().is_empty()
-                {
-                    slide
-                        .blocks
-                        .push(make_text_block_tagged(text, TextTag::ColorLabel));
-                }
-                // Thread each component → TextTag::Body (one per component, Generic-role slots).
-                // compose_component_row_text formats: "<name>: <score>/100 (wt: <weight>) — <label>".
-                //
-                // BC-1.17.003 PC-9: cap at MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS (5) — exactly the
-                // number of Generic-role slots pre-allocated in `slideforge-layout/src/regions.rs`
-                // for `weighted_composite`. Components beyond index 4 produce no Body block and
-                // therefore claim no additional frame. (F-087-P7-001)
-                if let Some(FieldValue::Literal(Value::List(components))) =
-                    slide.fields.get("components")
-                {
-                    for comp_val in components
-                        .iter()
-                        .take(MAX_WEIGHTED_COMPOSITE_COMPONENT_ROWS)
-                    {
-                        if let Value::Map(comp) = comp_val {
-                            let row_text = compose_component_row_text(comp);
-                            if !row_text.is_empty() {
-                                slide
-                                    .blocks
-                                    .push(make_text_block_tagged(&row_text, TextTag::Body));
-                            }
-                        }
-                    }
-                }
-            },
-            "stat_callout" => {
-                // Thread stat_1/label_1/stat_2/label_2/stat_3/label_3 → TextTag::Body
-                // (each claims a Generic-role slot in registration order).
-                for field_name in &[
-                    "stat_1", "label_1", "stat_2", "label_2", "stat_3", "label_3",
-                ] {
-                    if let Some(text) = extract_str_field(slide, field_name)
-                        && !text.trim().is_empty()
-                    {
-                        slide
-                            .blocks
-                            .push(make_text_block_tagged(text, TextTag::Body));
-                    }
-                }
-            },
-            _ => {},
-        }
+        },
+        _ => {},
     }
 }
 
@@ -683,6 +734,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -1000,5 +1052,101 @@ mod tests {
             deck.slides[0].blocks[0].content,
             ContentBlock::Text(_)
         ));
+    }
+
+    // ── thread_slide_fields_to_blocks (F-094-P10-001) ─────────────────────────
+
+    /// F-094-P10-001: `thread_slide_fields_to_blocks` threads a single slide's
+    /// fields without touching any other slides in a deck.
+    ///
+    /// This is the per-slide variant used by the warn-only E-LAY-008 demotion
+    /// path to thread only newly substituted placeholder slides, avoiding
+    /// duplicate blocks on already-threaded non-placeholder slides.
+    #[test]
+    fn test_f094_p10_001_thread_slide_fields_to_blocks_threads_single_slide() {
+        use slideforge_types::{ContentBlock, TextBlock, TextTag};
+        // Two slides: first has title (already threaded), second is fresh placeholder.
+        let mut slide_a = make_slide("title");
+        slide_a.fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Slide A"))),
+        );
+        // Simulate already-threaded: push a block manually as stage-2b would have.
+        slide_a.blocks.push(Block {
+            content: ContentBlock::Text(TextBlock {
+                inlines: vec![InlineNode::Plain(Arc::from("Slide A"))],
+                tag: TextTag::Title,
+                span: SourceSpan::default(),
+            }),
+            label: None,
+            span: SourceSpan::default(),
+        });
+
+        let mut slide_b = make_slide("__error_placeholder__");
+        slide_b.fields.insert(
+            Arc::from("body"),
+            FieldValue::Literal(Value::Str(Arc::from("E-LAY-008: bullets on title slide"))),
+        );
+        // slide_b.blocks is empty (as error_slide_placeholder constructs it).
+
+        let mut deck = make_deck(vec![slide_a, slide_b]);
+
+        // Thread ONLY slide_b (index 1) — slide_a must NOT gain a second block.
+        thread_slide_fields_to_blocks(&mut deck.slides[1]);
+
+        // slide_a must still have exactly 1 block (no duplication).
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            1,
+            "thread_slide_fields_to_blocks must NOT affect other slides; \
+             slide_a.blocks: {:?}",
+            deck.slides[0].blocks
+        );
+
+        // slide_b must now have its body block.
+        assert_eq!(
+            deck.slides[1].blocks.len(),
+            1,
+            "thread_slide_fields_to_blocks must produce 1 block from the body field; \
+             slide_b.blocks: {:?}",
+            deck.slides[1].blocks
+        );
+        assert!(
+            matches!(
+                deck.slides[1].blocks[0].content,
+                ContentBlock::Text(ref tb) if tb.tag == TextTag::Body
+            ),
+            "body field must produce TextTag::Body block; got: {:?}",
+            deck.slides[1].blocks[0].content
+        );
+    }
+
+    /// F-094-P10-001: calling `thread_fields_to_blocks` twice on an already-threaded
+    /// deck doubles the blocks — confirming that the per-slide variant is necessary
+    /// to avoid this.
+    #[test]
+    fn test_f094_p10_001_thread_fields_to_blocks_twice_doubles_blocks() {
+        let mut slide = make_slide("title");
+        slide.fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("My Title"))),
+        );
+        let mut deck = make_deck(vec![slide]);
+
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            1,
+            "first pass must produce 1 block"
+        );
+
+        thread_fields_to_blocks(&mut deck);
+        assert_eq!(
+            deck.slides[0].blocks.len(),
+            2,
+            "second call appends (idempotency is not guaranteed — whole-deck \
+             re-threading doubles blocks on already-threaded slides; \
+             use thread_slide_fields_to_blocks for selective threading)"
+        );
     }
 }

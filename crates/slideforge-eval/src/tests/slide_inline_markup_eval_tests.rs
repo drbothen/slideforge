@@ -99,7 +99,7 @@ fn test_BC_3_05_001_ac001_bullet_bold_produces_field_value_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed for a valid slide");
 
     let field_value =
@@ -140,7 +140,7 @@ fn test_BC_3_05_001_ac001_bullet_italic_produces_field_value_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -180,7 +180,7 @@ fn test_BC_3_05_001_ac001_rejects_literal_asterisks_in_bullet() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -210,7 +210,7 @@ fn test_BC_3_05_001_ac001_plain_bullet_stays_str() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -248,7 +248,7 @@ fn test_BC_3_05_001_ac001_body_inline_markup_produces_field_value_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "body").expect("body field must be present");
@@ -272,7 +272,7 @@ fn test_BC_3_05_001_ac001_caption_inline_markup_produces_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "caption").expect("caption field must be present");
@@ -296,7 +296,7 @@ fn test_BC_3_05_001_ac001_description_inline_markup_produces_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "description").expect("description field must be present");
@@ -319,7 +319,7 @@ fn test_BC_3_05_001_ac001_subtitle_inline_markup_produces_inlines() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "subtitle").expect("subtitle field must be present");
@@ -363,7 +363,7 @@ fn test_BC_3_05_001_ac001_all_8_inline_forms_in_body() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "body").expect("body field must be present");
@@ -427,7 +427,7 @@ fn test_BC_3_05_001_ac006_title_with_bold_emits_warning() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must not return None for a title-with-markup slide");
 
     // The diagnostic sink must contain EvalError::InlineMarkupInTitle (E-EVL-015).
@@ -478,7 +478,7 @@ fn test_BC_3_05_001_ac006_title_with_bold_strips_to_plain_str() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must not return None");
 
     let field_value = get_field(&result, "title").expect("title field must be present");
@@ -511,7 +511,7 @@ fn test_BC_3_05_001_ac006_plain_title_no_warning() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed for plain title");
 
     let has_warning = sink_has_inline_markup_title_warning(&sink);
@@ -535,7 +535,7 @@ fn test_BC_3_05_001_ec003_nested_bold_italic_in_bullet() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -601,7 +601,7 @@ fn test_BC_3_05_001_ec007_var_resolves_to_asterisks_stays_plain() {
     let mut sink = DiagnosticSink::new();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -643,7 +643,7 @@ fn test_BC_3_05_001_ec010_empty_bullets_list() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink);
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None);
 
     // Must not panic or return None (unless there is a fatal error for other reasons).
     // An empty bullets list is valid — either produces nothing or Inlines([]).
@@ -722,7 +722,7 @@ fn test_P27_MED_001_title_markup_diagnostic_has_distinguishing_fields() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must not return None for a title-with-markup slide");
 
     // Must have emitted E-EVL-015.
@@ -792,7 +792,7 @@ fn test_P27_MED_001_italic_title_diagnostic_has_distinguishing_fields() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     assert!(
@@ -878,7 +878,7 @@ fn test_BC_3_05_001_ac001_list_form_bullet_bold_produces_inlines_list() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed for list-form bullets");
 
     assert!(
@@ -975,7 +975,7 @@ fn test_BC_3_05_001_ac001_list_form_plain_bullets_stay_literal_list() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed for plain list bullets");
 
     assert!(
@@ -1036,7 +1036,7 @@ fn test_BC_3_05_001_ec007_list_form_var_resolves_to_asterisks_stays_plain() {
     let mut sink = DiagnosticSink::new();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     let field_value = get_field(&result, "bullets").expect("bullets field must be present");
@@ -1081,7 +1081,7 @@ fn test_P27_MED_001_code_title_diagnostic_has_distinguishing_fields() {
     let (env, mut sink) = make_env_and_sink();
     let set_rules: HashMap<(Arc<str>, Arc<str>), slideforge_types::Value> = HashMap::new();
 
-    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink)
+    let _result = eval_slide_node(&env, &slide_node, &set_rules, &mut sink, None)
         .expect("eval_slide_node must succeed");
 
     assert!(

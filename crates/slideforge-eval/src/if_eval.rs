@@ -45,36 +45,62 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use slideforge_syntax::error::ParseSeverity;
+use slideforge_syntax::span::SourceMap;
 use slideforge_syntax::{DiagnosticSink, IfNode};
 use slideforge_types::{Slide, SourceSpan, Value};
 
 // ─── span_to_source_span ────────────────────────────────────────────────────
 
-/// Convert a `slideforge_syntax::Span` to a `SourceSpan` carrying the byte
-/// offset of the condition expression.
+/// Convert a `slideforge_syntax::Span` to a `SourceSpan`.
 ///
-/// At eval time, the evaluator operates on the merged AST without a live
-/// `SourceMap`. We can extract the `byte_offset` from the syntax span's
-/// `start` field, but we cannot resolve the file path or line/col without
-/// the `SourceMap`. We mark the file as `"<span:byte>"` with the byte offset
-/// embedded so that error messages carry at least partial location info.
+/// When `source_map` is `Some`, the byte offset is resolved to a real
+/// `file:line:col` using [`SourceMap`]. This is the production path taken by
+/// `compile_inner` which threads a `SourceMap` through `EvalConfig`.
 ///
-/// Full `<file>:<line>:<col>` resolution is deferred to when the evaluator
-/// receives `SourceMap` context (a future story that threads `SourceMap` through
-/// the pipeline). Until then this is better than a zero-origin default.
-pub(crate) fn span_to_source_span(syntax_span: slideforge_syntax::span::Span) -> SourceSpan {
+/// When `source_map` is `None` (test helpers, or callers that have not yet
+/// threaded the source map), a zero-span returns `SourceSpan::default()` and a
+/// non-zero span returns `SourceSpan::default()` as well — avoiding the
+/// `<byte:N>:0:0` fake-filename sentinel which was rejected by F-094-P4-006.
+///
+/// ## Invariant (F-094-P4-004 / F-094-P4-006)
+///
+/// No `<byte:N>` strings must appear in user-facing output. Either a real
+/// `file:line:col` (when `source_map` is provided) or a blank / default
+/// unknown span (when it is not) is acceptable; a synthetic filename that
+/// looks real but carries no useful information is not.
+pub(crate) fn span_to_source_span(
+    syntax_span: slideforge_syntax::span::Span,
+    source_map: Option<&SourceMap>,
+) -> SourceSpan {
     if syntax_span.start == 0 && syntax_span.end == 0 {
-        // Synthetic span from test helpers — return default (unknown).
-        SourceSpan::default()
-    } else {
-        // Carry the byte offset; mark file as "<byte:N>" for triage.
-        SourceSpan {
-            file: Arc::from(format!("<byte:{}>", syntax_span.start).as_str()),
-            line: 0,
-            col: 0,
-            byte_offset: syntax_span.start,
+        // Synthetic span from test helpers or parser-generated nodes — unknown.
+        return SourceSpan::default();
+    }
+
+    if let Some(sm) = source_map {
+        // Resolve the byte offset to a real file:line:col using the SourceMap API:
+        //   sm.get(file_id) → Option<&SourceFile>
+        //   source_file.path        → Arc<str>  (the registered file path, e.g. "deck.sf")
+        //   source_file.offset_to_line_col(offset) → (line: u32, col: u32) — 1-based
+        //
+        // Fall back to default if the file_id is not registered (should never
+        // happen in a well-formed pipeline, but we must not panic).
+        if let Some(source_file) = sm.get(syntax_span.file_id) {
+            let (line, col) = source_file.offset_to_line_col(syntax_span.start);
+            return SourceSpan {
+                file: Arc::clone(&source_file.path),
+                line,
+                col,
+                byte_offset: syntax_span.start,
+            };
         }
     }
+
+    // No source map available, or the file_id was not found: return a clean
+    // default (unknown) rather than the `<byte:N>` sentinel. Downstream
+    // renderers check `is_unknown()` and display `<unknown>` to the user —
+    // which is honest about the lack of location information.
+    SourceSpan::default()
 }
 
 use crate::config::EvalConfig;
@@ -127,7 +153,7 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
 ) -> Vec<Slide> {
     // Step 1: evaluate the @if condition.
     // Extract the condition's syntax span for error reporting (FINDING-006).
-    let if_span = span_to_source_span(if_node.condition.span());
+    let if_span = span_to_source_span(if_node.condition.span(), config.source_map.as_deref());
     match eval_bool_condition(env, if_node.condition.value(), if_span, sink) {
         None => {
             // Evaluation failed or type error — error already in sink; return empty.
@@ -141,7 +167,10 @@ pub fn eval_if_chain<S: std::hash::BuildHasher>(
         Some(false) => {
             // @if branch is false: try @elif branches in order (lazy).
             for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
-                let elif_span = span_to_source_span(elif_condition_spanned.span());
+                let elif_span = span_to_source_span(
+                    elif_condition_spanned.span(),
+                    config.source_map.as_deref(),
+                );
                 match eval_bool_condition(env, elif_condition_spanned.value(), elif_span, sink) {
                     None => {
                         // Error in this elif condition — already in sink.
@@ -200,7 +229,7 @@ pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
     membership: &mut Vec<Option<(u32, Arc<str>)>>,
     section_group_counter: &mut u32,
 ) -> Vec<Slide> {
-    let if_span = span_to_source_span(if_node.condition.span());
+    let if_span = span_to_source_span(if_node.condition.span(), config.source_map.as_deref());
     match eval_bool_condition(env, if_node.condition.value(), if_span, sink) {
         None => vec![],
         Some(true) => eval_block_items_with_sections(
@@ -215,7 +244,10 @@ pub(crate) fn eval_if_chain_with_sections<S: std::hash::BuildHasher>(
         ),
         Some(false) => {
             for (elif_condition_spanned, elif_body) in &if_node.elif_branches {
-                let elif_span = span_to_source_span(elif_condition_spanned.span());
+                let elif_span = span_to_source_span(
+                    elif_condition_spanned.span(),
+                    config.source_map.as_deref(),
+                );
                 match eval_bool_condition(env, elif_condition_spanned.value(), elif_span, sink) {
                     None => return vec![],
                     Some(true) => {

@@ -79,6 +79,7 @@ fn make_deck_one_slide() -> Deck {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }],
         vars: OrderedMap::new(),
         metadata: DeckMetadata {

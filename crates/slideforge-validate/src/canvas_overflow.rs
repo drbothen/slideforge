@@ -1,16 +1,36 @@
 //! Canvas overflow validator (STORY-016).
 //!
-//! [`CanvasOverflowValidator`] detects when a slide's bullet content is likely
-//! to overflow the body placeholder at standard font sizes. It uses a
-//! conservative line-height estimate in EMU units, multiplied by the total
-//! bullet count, and compares the result against the standard body placeholder
-//! height.
+//! [`CanvasOverflowValidator`] detects bullet content overflow via four
+//! complementary mechanisms:
 //!
-//! This is a heuristic check — it cannot know the exact rendered dimensions
-//! before layout occurs, but it catches obvious overflow (e.g., 30 bullets
-//! on a single slide) at validation time before any export runs.
+//! 1. **Pre-layout count heuristic** ([`Validator::validate`]): counts bullets
+//!    and compares estimated height against the body placeholder. Catches obvious
+//!    overflow (e.g., 30 bullets) before layout runs.
 //!
-//! ## Overflow threshold
+//! 2. **Post-layout identical-bbox stacking** ([`Validator::validate_post_layout`],
+//!    F-094-P3-002): detects y-axis overflow where the layout engine clamps many
+//!    excess bullets to the same `y = page_height − 1, height = 1` position,
+//!    producing duplicate bboxes on `TextRun` frames. Catches the many-bullet
+//!    overflow case below the count threshold. Does NOT catch single-bullet
+//!    overflow or differing-depth overflow (those produce distinct bboxes).
+//!
+//! 3. **Post-layout degenerate-width sliver** ([`Validator::validate_post_layout`],
+//!    F-094-P16-001): detects x-axis depth-clamp overflow where deep bullet
+//!    indentation on narrow columns (e.g., `two_col`) collapses `width` to 1 EMU
+//!    (the floor-clamp sentinel). Distinct bboxes — mechanism (2) does NOT catch
+//!    this case.
+//!
+//! 4. **Post-layout degenerate-height sliver** ([`Validator::validate_post_layout`],
+//!    F-094-P17-001): detects y-axis overflow where the layout engine clamps
+//!    `height` to 1 EMU via `(page_height − bullet_y).clamp(1, LINE_HEIGHT_EMU)`.
+//!    Catches the single-bullet overflow case (unique bbox — mechanism (2) silent)
+//!    and the differing-depth case (parent+child overflow at distinct x values —
+//!    mechanism (2) still silent). Symmetric to mechanism (3) for the y-axis.
+//!
+//! Mechanisms (2), (3), and (4) are all scoped to `FrameContent::TextRun` frames
+//! to avoid false positives on non-bullet slide furniture.
+//!
+//! ## Overflow threshold (pre-layout)
 //!
 //! The threshold is based on:
 //! - Standard body placeholder height: 4,343,400 EMU (~4.75 inches)
@@ -28,7 +48,7 @@
 //!
 //! | Code | Severity | Meaning |
 //! |------|----------|---------|
-//! | `E-LAY-001` | Warning (or Error if `strict_overflow`) | Estimated content height exceeds body placeholder |
+//! | `E-LAY-001` | Warning (or Error if `strict_overflow`) | Bullet overflow — pre-layout heuristic, post-layout stacking, post-layout degenerate-width, or post-layout degenerate-height |
 
 use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
 use slideforge_types::{Deck, Emu, Slide, SourceSpan};
@@ -37,6 +57,46 @@ use crate::ValidationConfig;
 
 /// Error code emitted when estimated content height exceeds the body placeholder.
 pub(crate) const E_LAY_001: &str = "E-LAY-001";
+
+/// The minimum valid frame width produced by the bullet layout engine's x-clamp.
+///
+/// When a bullet is indented so deeply that `bullet_x >= body_right_edge`, the
+/// layout engine clamps the width to `(body_right_edge − bullet_x).max(1)`.
+/// A width of exactly `1` EMU is therefore the unambiguous sentinel that the
+/// x-axis floor-clamp fired: the frame occupies a 1/914400-inch sliver that is
+/// invisible in any rendered output.
+///
+/// This constant is the detection threshold used by [`CanvasOverflowValidator::validate_post_layout`]
+/// for the degenerate-width check (F-094-P16-001). Only `FrameContent::TextRun` frames are
+/// inspected — the same scope as the existing identical-bbox stacking check.
+///
+/// Justification for 1 EMU (not a larger threshold): any width > 1 EMU could be a
+/// legitimately narrow column in an unusual multi-column layout. Only the exact
+/// floor-clamp output (1 EMU) is unambiguous evidence of the depth-overflow defect.
+pub(crate) const DEGENERATE_WIDTH_FLOOR_EMU: slideforge_types::Emu = slideforge_types::Emu(1);
+
+/// The minimum valid frame height produced by the bullet layout engine's y-clamp.
+///
+/// When the y-cursor for a bullet exceeds `page_height − 1`, the layout engine
+/// clamps the y position to `page_height − 1` and the height to
+/// `(page_height − bullet_y).clamp(1, LINE_HEIGHT_EMU)`. When `bullet_y` is at
+/// the maximum clamped position (`page_height − 1`), the resulting height is
+/// `clamp(page_height − (page_height − 1), 1, LINE_HEIGHT_EMU) = clamp(1, 1, ...) = 1` EMU.
+///
+/// A height of exactly `1` EMU is therefore the unambiguous sentinel that the
+/// y-axis floor-clamp fired: the frame occupies a 1/914400-inch sliver at the
+/// very bottom of the page that is invisible in any rendered output.
+///
+/// This constant is the detection threshold used by [`CanvasOverflowValidator::validate_post_layout`]
+/// for the degenerate-height check (F-094-P17-001). Symmetric to [`DEGENERATE_WIDTH_FLOOR_EMU`].
+///
+/// Only `FrameContent::TextRun` frames are inspected — non-bullet slide furniture
+/// is excluded from both checks to avoid false positives.
+///
+/// Justification for 1 EMU (not a larger threshold): any height > 1 EMU could be a
+/// legitimately short last-line frame at the page bottom. Only the exact floor-clamp
+/// output (1 EMU) is unambiguous evidence of the y-overflow defect.
+pub(crate) const DEGENERATE_HEIGHT_FLOOR_EMU: slideforge_types::Emu = slideforge_types::Emu(1);
 
 /// Standard body placeholder height used for overflow estimation.
 ///
@@ -105,6 +165,169 @@ impl Validator for CanvasOverflowValidator {
                     severity,
                     &slide.source_span,
                 ));
+            }
+        }
+
+        diagnostics
+    }
+
+    /// Detect geometric bullet-overflow defects after the layout pass.
+    ///
+    /// The pre-layout `validate()` catches overflow by counting bullets against a
+    /// heuristic threshold (≥ 24). However, three subtler defects can produce invisible
+    /// content at bullet counts below that threshold:
+    ///
+    /// - **y-axis stacking (F-094-P3-002):** the layout engine clamps many overflow
+    ///   bullets to identical coordinates (y = `page_height` − 1, height = 1), producing
+    ///   duplicate [`slideforge_layout::BoundingBox`] values on `TextRun` frames. Does NOT
+    ///   catch single-bullet overflow or differing-depth overflow (distinct bboxes).
+    ///
+    /// - **x-axis degenerate-width (F-094-P16-001):** deep bullet indentation on
+    ///   narrow columns clamps `bullet_width` to 1 EMU via `.max(1)`. Each overflow
+    ///   bullet lands at a distinct y position (distinct bboxes) — stacking detection
+    ///   does NOT catch this. The 1-EMU floor is the unambiguous clamp sentinel.
+    ///
+    /// - **y-axis degenerate-height (F-094-P17-001):** the layout engine clamps the
+    ///   height of overflow bullets to 1 EMU via `(page_height − bullet_y).clamp(1, …)`.
+    ///   Catches the single-bullet case (unique bbox — stacking silent) and the
+    ///   differing-depth case (parent+child overflow at distinct x values — stacking
+    ///   silent). Symmetric to the degenerate-width check for the y-axis.
+    ///
+    /// All three checks are scoped to `FrameContent::TextRun` frames only, avoiding
+    /// false positives on non-bullet slide furniture.
+    ///
+    /// `E-LAY-001` diagnostics are emitted for each defect detected.
+    /// Severity respects [`CanvasOverflowValidator::strict_overflow`]:
+    /// - `false` (default): `Warning`
+    /// - `true`: `Error`
+    ///
+    /// ## Complexity
+    ///
+    /// O(N) per slide where N = number of frames in the slide, using a `HashSet`.
+    ///
+    /// ## Coverage
+    ///
+    /// Three geometric defects are detected (all scoped to `FrameContent::TextRun`
+    /// to avoid false positives on non-bullet slide furniture):
+    ///
+    /// 1. **Identical-bbox stacking (y-axis overflow, many bullets):** two or more
+    ///    `TextRun` frames share the same [`slideforge_layout::BoundingBox`]. The layout
+    ///    engine clamps overflow bullets to `y = page_height − 1, height = 1`; many
+    ///    bullets land on the same position (F-094-P3-002).
+    ///
+    /// 2. **Degenerate-width sliver (x-axis depth-clamp):** a `TextRun` frame has
+    ///    `width == DEGENERATE_WIDTH_FLOOR_EMU` (1 EMU) — the `.max(1)` sentinel for
+    ///    deep indent exceeding body region width. Distinct bboxes — defect (1) does
+    ///    NOT catch this (F-094-P16-001).
+    ///
+    /// 3. **Degenerate-height sliver (y-axis, single or few bullets):** a `TextRun`
+    ///    frame has `height == DEGENERATE_HEIGHT_FLOOR_EMU` (1 EMU) — the `.clamp(1,…)`
+    ///    sentinel for y-cursor exceeding `page_height − 1`. Fires when only ONE bullet
+    ///    overflows (unique bbox — defect (1) silent) or when differing-depth bullets
+    ///    overflow at distinct x values (distinct bboxes — defect (1) still silent).
+    ///    Symmetric to defect (2) for the y-axis (F-094-P17-001).
+    fn validate_post_layout(
+        &self,
+        laid_out: &slideforge_layout::LaidOutDeck,
+        _opts: &ValidatorOptions,
+    ) -> Vec<Diagnostic> {
+        use slideforge_layout::{BoundingBox, FrameContent};
+        use std::collections::HashSet;
+
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+        for (slide_idx, slide) in laid_out.slides.iter().enumerate() {
+            // Single O(N) pass: detect stacking, degenerate-width, and degenerate-height
+            // in one iteration over TextRun frames.  Non-TextRun frames are excluded —
+            // these are bullet-overflow defects, not layout artefacts of title/body/image
+            // regions.
+            let mut seen_bboxes: HashSet<BoundingBox> = HashSet::new();
+            let mut stacked = false;
+            let mut degenerate_width = false;
+            let mut degenerate_height = false;
+
+            for frame in &slide.frames {
+                if let FrameContent::TextRun(_) = &frame.content {
+                    // Check (2): degenerate-width sliver (x-axis depth-clamp).
+                    if frame.bbox.width == DEGENERATE_WIDTH_FLOOR_EMU {
+                        degenerate_width = true;
+                    }
+                    // Check (3): degenerate-height sliver (y-axis overflow floor-clamp).
+                    // Symmetric to check (2): height == 1 EMU is the unambiguous sentinel
+                    // that `(page_height − bullet_y).clamp(1, LINE_HEIGHT_EMU)` fired at
+                    // the minimum (bullet_y clamped to page_height − 1). Catches the
+                    // single-overflow case and the differing-depth case where distinct x
+                    // values prevent check (1) from firing (F-094-P17-001).
+                    if frame.bbox.height == DEGENERATE_HEIGHT_FLOOR_EMU {
+                        degenerate_height = true;
+                    }
+                    // Check (1): identical-bbox stacking (y-axis overflow, many bullets).
+                    if !seen_bboxes.insert(frame.bbox) {
+                        stacked = true;
+                    }
+                }
+            }
+
+            let severity = if self.strict_overflow {
+                DiagnosticSeverity::Error
+            } else {
+                DiagnosticSeverity::Warning
+            };
+            let slide_label = slide.slide_type_keyword.as_ref();
+            let source_span = slideforge_types::SourceSpan::default();
+
+            if stacked {
+                diagnostics.push(Diagnostic {
+                    severity,
+                    code: std::sync::Arc::from(E_LAY_001),
+                    message: std::sync::Arc::from(format!(
+                        "CanvasOverflow: slide {slide_idx} (type '{slide_label}') has \
+                         geometrically stacked TextRun frames — bullet content overflowed \
+                         the body placeholder and frames were clamped to identical positions. \
+                         Count-based detection did not fire. \
+                         Split the slide or reduce bullet count (E-LAY-001)."
+                    )),
+                    span: source_span.clone(),
+                    hint: Some(std::sync::Arc::from(
+                        "Split the slide or reduce the number of bullet points (E-LAY-001)",
+                    )),
+                });
+            }
+
+            if degenerate_width {
+                diagnostics.push(Diagnostic {
+                    severity,
+                    code: std::sync::Arc::from(E_LAY_001),
+                    message: std::sync::Arc::from(format!(
+                        "CanvasOverflow: slide {slide_idx} (type '{slide_label}') has \
+                         degenerate-width TextRun frames (width = 1 EMU) — deep bullet \
+                         indentation exceeded the body region width and the x-axis \
+                         floor-clamp fired. The affected bullets are invisible in rendered \
+                         output. Reduce bullet nesting depth (E-LAY-001)."
+                    )),
+                    span: source_span.clone(),
+                    hint: Some(std::sync::Arc::from(
+                        "Reduce bullet nesting depth or widen the body column (E-LAY-001)",
+                    )),
+                });
+            }
+
+            if degenerate_height {
+                diagnostics.push(Diagnostic {
+                    severity,
+                    code: std::sync::Arc::from(E_LAY_001),
+                    message: std::sync::Arc::from(format!(
+                        "CanvasOverflow: slide {slide_idx} (type '{slide_label}') has \
+                         degenerate-height TextRun frames (height = 1 EMU) — bullet content \
+                         overflowed the page bottom and the y-axis floor-clamp fired. \
+                         The affected bullets are invisible in rendered output. \
+                         Split the slide or reduce bullet count (E-LAY-001)."
+                    )),
+                    span: source_span,
+                    hint: Some(std::sync::Arc::from(
+                        "Split the slide or reduce the number of bullet points (E-LAY-001)",
+                    )),
+                });
             }
         }
 
@@ -201,7 +424,7 @@ mod tests {
 
     use slideforge_plugin_api::{DiagnosticSeverity, Validator, ValidatorOptions};
     use slideforge_types::{
-        Block, BulletItem, ContentBlock, Deck, DeckMetadata, InlineNode, OrderedMap, Slide,
+        Block, BulletItem, ContentBlock, Deck, DeckMetadata, Emu, InlineNode, OrderedMap, Slide,
         SourceSpan, block::TextBlock,
     };
 
@@ -258,6 +481,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -281,6 +505,7 @@ mod tests {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }
     }
 
@@ -604,6 +829,670 @@ mod tests {
         assert_eq!(
             h, expected,
             "estimate_height(usize::MAX) must equal estimate_height(MAX_BULLET_COUNT)"
+        );
+    }
+
+    // ── F-094-P3-002 — Geometric overflow detection (post-layout) ─────────────
+
+    /// F-094-P3-002: `validate_post_layout` must detect silently-stacked bullet
+    /// frames (identical bounding boxes) caused by layout overflow-clamping and
+    /// emit an E-LAY-001 diagnostic.
+    ///
+    /// 16 bullet frames are used — below the count-based threshold of 24 — but
+    /// frames 6..15 are identical (stacked at page bottom). The count-based
+    /// `validate()` would NOT catch this; `validate_post_layout()` MUST.
+    ///
+    /// RED: currently `validate_post_layout` is the inherited no-op from Validator
+    /// trait. Fails until `CanvasOverflowValidator::validate_post_layout` is
+    /// overridden to detect geometric overflow on `LaidOutDeck`.
+    #[test]
+    fn test_f094_p3_002_geometric_overflow_detected_not_count_based() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        // Build a LaidOutDeck simulating broken overflow-clamping:
+        // 16 bullet frames, frames 5..15 are clamped to identical positions.
+        let line_h = 228_600_i64; // layout::LINE_HEIGHT_EMU
+        let body_top: i64 = 1_143_000;
+        let body_height: i64 = 5 * line_h; // fits exactly 5 bullets
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+        let bullet_x: i64 = 457_200;
+        let bullet_w: i64 = page_w - bullet_x;
+
+        let make_frame = |y: i64, h: i64| -> Frame {
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(bullet_x),
+                    y: Emu(y),
+                    width: Emu(bullet_w),
+                    height: Emu(h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            }
+        };
+
+        let mut frames = Vec::new();
+        for i in 0..16_i64 {
+            let y = body_top + i * line_h;
+            if y + line_h <= body_top + body_height {
+                frames.push(make_frame(y, line_h));
+            } else {
+                // Broken behaviour: overflow bullets clamped to page bottom.
+                frames.push(make_frame(page_h - 1, 1));
+            }
+        }
+
+        // Verify setup: ≥2 frames share identical stacked position.
+        let stacked = frames
+            .iter()
+            .filter(|f| f.bbox.y == Emu(page_h - 1) && f.bbox.height == Emu(1))
+            .count();
+        assert!(
+            stacked >= 2,
+            "test setup: expected ≥2 stacked frames; got {stacked}"
+        );
+
+        // Confirm count-based would NOT fire (16 < 24).
+        assert!(frames.len() < 24, "test setup: {}", frames.len());
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            !diags.is_empty(),
+            "F-094-P3-002: geometric overflow with stacked frames (16 bullets, <24 count) \
+             must produce ≥1 diagnostic from validate_post_layout; got 0. \
+             Count-based detection is insufficient."
+        );
+        assert!(
+            diags.iter().any(|d| d.code.as_ref() == E_LAY_001),
+            "F-094-P3-002: overflow diagnostic must carry E-LAY-001 code; got: {diags:?}"
+        );
+    }
+
+    /// F-094-P3-002 (b): When all frames have distinct positions, `validate_post_layout`
+    /// must NOT produce a false-positive stacking diagnostic.
+    #[test]
+    fn test_f094_p3_002_no_false_positive_when_frames_are_distinct() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        let line_h = 228_600_i64;
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+        let bullet_x: i64 = 457_200;
+        let bullet_w: i64 = page_w - bullet_x;
+
+        // 5 bullets, all within the page — each with a distinct y position.
+        let frames: Vec<Frame> = (0..5_i64)
+            .map(|i| Frame {
+                bbox: BoundingBox {
+                    x: Emu(bullet_x),
+                    y: Emu(i * line_h),
+                    width: Emu(bullet_w),
+                    height: Emu(line_h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            })
+            .collect();
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            diags.is_empty(),
+            "F-094-P3-002: 5 distinct frames must produce 0 stacking diagnostics; got: {diags:?}"
+        );
+    }
+
+    // ── F-094-P16-001 — Degenerate-width (x-sliver) bullet detection ──────────
+
+    /// F-094-P16-001: `validate_post_layout` must detect `TextRun` frames whose
+    /// width has been clamped to the floor value (1 EMU) by the bullet layout
+    /// engine and emit an `E-LAY-001` diagnostic.
+    ///
+    /// This catches the x-axis depth-clamp SLIVER case: deep-nested bullets on a
+    /// narrow column (e.g., `two_col`) cause `bullet_x` to exceed `body_right_edge`,
+    /// so `bullet_width = (body_right_edge − bullet_x).max(1) = 1 EMU`. The resulting
+    /// frame is geometrically valid (passes `is_valid`) and has a *distinct* bbox
+    /// from all other frames (distinct x, y) — so the existing identical-bbox stacking
+    /// detector does NOT catch it. The content is visually invisible.
+    ///
+    /// Scenario: simulate a `two_col` left-column body (width 3,886,200 EMU,
+    /// x = 457,200) with bullets at depth 9–11. At depth 9 the `raw_x` exceeds
+    /// `body_right_edge` (4,343,400 EMU), so `bullet_x` is clamped and
+    /// `bullet_width` collapses to 1 EMU.
+    ///
+    /// RED: `validate_post_layout` currently only checks for identical bboxes
+    /// (stacking). It does NOT check for `width == 1` EMU. Fails until the
+    /// degenerate-width check is added.
+    #[test]
+    fn test_f094_p16_001_degenerate_width_sliver_detected() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        // two_col left body geometry:
+        //   body_x = 457_200, body_width = 3_886_200
+        //   body_right_edge = 457_200 + 3_886_200 = 4_343_400
+        // BULLET_DEPTH_INDENT_EMU = 457_200
+        // At depth 9: raw_x = 457_200 + 9*457_200 = 4_572_000 > 4_343_400
+        //             bullet_x clamped to max_x = 4_343_399
+        //             bullet_width = (4_343_400 − 4_343_399).max(1) = 1 EMU  ← degenerate
+        let line_h: i64 = 228_600;
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+        let body_x: i64 = 457_200;
+        let body_right_edge: i64 = 4_343_400;
+
+        // Normal-width frames: depths 0–8 fit within the body (distinct bboxes, no sliver)
+        let normal_bullet_width = body_right_edge - body_x; // 3_886_200 EMU
+        let mut frames: Vec<Frame> = (0_i64..9)
+            .map(|i| Frame {
+                bbox: BoundingBox {
+                    x: Emu(body_x),
+                    y: Emu(i * line_h),
+                    width: Emu(normal_bullet_width),
+                    height: Emu(line_h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            })
+            .collect();
+
+        // Degenerate-width frames: depth 9–11, each at a distinct y (no stacking),
+        // but width == 1 EMU (the floor-clamp sentinel).
+        let degenerate_x: i64 = body_right_edge - 1; // 4_343_399 — clamped bullet_x
+        for i in 9_i64..12 {
+            frames.push(Frame {
+                bbox: BoundingBox {
+                    x: Emu(degenerate_x),
+                    y: Emu(i * line_h),
+                    width: Emu(1), // floor-clamp sentinel — degenerate sliver
+                    height: Emu(line_h),
+                },
+                content: FrameContent::TextRun(vec![]),
+                text_flow: None,
+                region_role: None,
+            });
+        }
+
+        // Verify the test setup is correct:
+        // - all bboxes are DISTINCT (no stacking — existing check must NOT fire)
+        // - at least one frame has width == 1 EMU
+        let all_distinct = {
+            let bboxes: std::collections::HashSet<_> = frames
+                .iter()
+                .map(|f| f.bbox)
+                .collect::<std::collections::HashSet<_>>();
+            bboxes.len() == frames.len()
+        };
+        assert!(
+            all_distinct,
+            "test setup error: expected all bboxes distinct (no stacking)"
+        );
+        let sliver_count = frames
+            .iter()
+            .filter(|f| matches!(&f.content, FrameContent::TextRun(_)) && f.bbox.width == Emu(1))
+            .count();
+        assert!(
+            sliver_count >= 1,
+            "test setup error: expected ≥1 degenerate-width (width=1) TextRun frame; got {sliver_count}"
+        );
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("two_col"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            !diags.is_empty(),
+            "F-094-P16-001: TextRun frames with width == 1 EMU (degenerate x-sliver) \
+             must produce ≥1 E-LAY-001 diagnostic from validate_post_layout; got 0. \
+             The x-axis depth-clamp case produces distinct bboxes so the stacking \
+             detector does not fire; a dedicated degenerate-width check is required."
+        );
+        assert!(
+            diags.iter().any(|d| d.code.as_ref() == E_LAY_001),
+            "F-094-P16-001: degenerate-width diagnostic must carry E-LAY-001 code; got: {diags:?}"
+        );
+    }
+
+    /// F-094-P16-001 (b): Non-TextRun frames with width == 1 EMU must NOT trigger
+    /// the degenerate-width check.
+    ///
+    /// The check is scoped to `FrameContent::TextRun` only (same scoping as the
+    /// identical-bbox stacking check). Progress-bar decorations or other slide
+    /// furniture may legitimately use 1-EMU-wide placeholder geometry during the
+    /// layout pass.
+    #[test]
+    fn test_f094_p16_001_no_false_positive_non_textrun_narrow_frame() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+
+        // A single Empty (non-TextRun) frame with width == 1 EMU — must not fire.
+        let frames = vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(1),
+                height: Emu(100_000),
+            },
+            content: FrameContent::Empty,
+            text_flow: None,
+            region_role: None,
+        }];
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("blank"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            diags.is_empty(),
+            "F-094-P16-001: non-TextRun frame with width==1 EMU must NOT produce \
+             degenerate-width diagnostic; got: {diags:?}"
+        );
+    }
+
+    // ── F-094-P17-001 — height-floor degeneracy (real layout) ─────────────────
+
+    /// Build a `Brand` suitable for layout tests.
+    fn make_brand() -> slideforge_types::Brand {
+        use slideforge_types::{Brand, BrandFonts, BrandPalette};
+        Brand {
+            name: Arc::from("test-brand"),
+            palette: BrandPalette {
+                primary: Arc::from("#003087"),
+                secondary: Arc::from("#0066CC"),
+                accent: Arc::from("#FF6B35"),
+                neutral: Arc::from("#F5F5F5"),
+            },
+            fonts: BrandFonts {
+                heading: Arc::from("Calibri"),
+                body: Arc::from("Calibri"),
+                mono: Arc::from("Courier New"),
+                font_size_emu: 457_200,
+            },
+            layouts: vec![],
+            span: SourceSpan::default(),
+        }
+    }
+
+    /// Build a slide with one `ContentBlock::Bullets` block containing `items`.
+    fn bullets_slide(slide_type: &str, items: Vec<BulletItem>) -> Slide {
+        let block = Block {
+            content: ContentBlock::Bullets(items),
+            label: None,
+            span: SourceSpan::default(),
+        };
+        Slide {
+            slide_type: Arc::from(slide_type),
+            fields: OrderedMap::new(),
+            blocks: vec![block],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        }
+    }
+
+    /// F-094-P17-001 (SINGLE overflow) — `validate_post_layout` must detect a
+    /// height-floor degenerate frame produced by real `layout::run()` when exactly
+    /// one bullet overflows the page bottom.
+    ///
+    /// Geometry for a "content" slide (from regions.rs):
+    ///   body: `x=457_200`, `y=1_188_720`, `width=8_229_600`, `height=3_657_600`
+    ///   `body_top    = 1_188_720`
+    ///   `body_bottom = 1_188_720 + 3_657_600 = 4_846_320`
+    ///   `LINE_HEIGHT_EMU = 228_600`
+    ///   Page height = `5_143_500` → `max_y = 5_143_499`
+    ///
+    /// Cursor positions (cursor starts at `body_top = 1_188_720`):
+    ///   Bullet 17: `y_cursor = 1_188_720 + 16*228_600 = 4_846_320` → `h=228_600`
+    ///   Bullet 18: `y_cursor = 5_075_520` → `h=67_980`
+    ///   Bullet 19: `y_cursor = 5_304_120 > 5_143_499` → y clamped to `5_143_499`
+    ///              `h = clamp(5_143_500 - 5_143_499, 1, 228_600) = 1 EMU` ← DEGENERATE
+    ///
+    /// With 19 bullets exactly ONE produces `height=1` (bullet 19, distinct bbox).
+    ///   - Stacking check: SILENT (only one frame at `y=5_143_499`)
+    ///   - Width check:    SILENT (normal body width, not 1 EMU)
+    ///   - Count heuristic: SILENT (19 < 24)
+    ///   - Height-floor check: MUST FIRE
+    ///
+    /// RED: no height-floor check exists yet. Fails until F-094-P17-001 is fixed.
+    #[test]
+    fn test_f094_p17_001_height_floor_single_overflow_bullet_real_layout() {
+        use slideforge_layout::FrameContent;
+
+        // 19 bullets: all distinct bboxes (different y), all normal width.
+        // Bullet 19 gets y_cursor=5_304_120 > max_y=5_143_499 → y=5_143_499, h=1 EMU.
+        let items: Vec<BulletItem> = (0..19)
+            .map(|i| BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from(format!("Bullet {i}")))],
+                children: vec![],
+                span: SourceSpan::default(),
+            })
+            .collect();
+
+        let slide = bullets_slide("content", items);
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("F-094-P17-001: layout::run must succeed for 19-bullet content slide");
+
+        // Setup verification: confirm ≥1 TextRun frame has height=1 (degenerate).
+        let degenerate_count = laid_out.slides[0]
+            .frames
+            .iter()
+            .filter(|f| matches!(&f.content, FrameContent::TextRun(_)) && f.bbox.height.0 == 1)
+            .count();
+        assert!(
+            degenerate_count >= 1,
+            "F-094-P17-001 setup: expected ≥1 TextRun frame with height=1 EMU from real layout; \
+             got 0. Check bullet count vs page geometry. \
+             All frames: {:?}",
+            laid_out.slides[0].frames
+        );
+
+        // Setup verification: all TextRun bboxes are DISTINCT (stacking check is silent).
+        {
+            use std::collections::HashSet;
+            let bboxes: HashSet<_> = laid_out.slides[0]
+                .frames
+                .iter()
+                .filter(|f| matches!(&f.content, FrameContent::TextRun(_)))
+                .map(|f| f.bbox)
+                .collect();
+            let total = laid_out.slides[0]
+                .frames
+                .iter()
+                .filter(|f| matches!(&f.content, FrameContent::TextRun(_)))
+                .count();
+            assert_eq!(
+                bboxes.len(),
+                total,
+                "F-094-P17-001 setup: all TextRun bboxes must be distinct (no stacking); \
+                 got {} unique for {} frames",
+                bboxes.len(),
+                total
+            );
+        }
+
+        // Core assertion: height-floor diagnostic must fire.
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            !diags.is_empty(),
+            "F-094-P17-001: single height-degenerate TextRun frame (height=1 EMU, \
+             distinct bbox) must produce ≥1 E-LAY-001 from validate_post_layout; got 0. \
+             Stacking does not fire (unique bbox); width check does not fire (normal width). \
+             Dedicated height-floor check required (F-094-P17-001)."
+        );
+        assert!(
+            diags.iter().any(|d| d.code.as_ref() == E_LAY_001),
+            "F-094-P17-001: height-floor diagnostic must carry E-LAY-001 code; got: {diags:?}"
+        );
+    }
+
+    /// F-094-P17-001 (DIFFERING-DEPTH overflow) — `validate_post_layout` must detect
+    /// height-floor degenerate frames when a parent bullet and its child both overflow
+    /// the page bottom, producing two frames with `height=1` but DISTINCT bboxes
+    /// (child is indented so has a different x).
+    ///
+    /// With 18 flat bullets + 1 parent-with-child:
+    ///   Bullet 19 (parent, depth=0): `y_cursor > max_y` → `y=5_143_499, h=1, x=457_200`
+    ///   Bullet 19's child (depth=1): `y_cursor` even higher → `y=5_143_499, h=1, x=914_400`
+    ///   (child `x = body_x + BULLET_DEPTH_INDENT_EMU = 457_200 + 457_200 = 914_400`)
+    ///
+    /// Both frames have `height=1` but DIFFERENT x → NOT identical bboxes.
+    /// Stacking check: SILENT. Width check: SILENT. Only height-floor catches both.
+    ///
+    /// RED: fails until F-094-P17-001 height-floor check is added.
+    #[test]
+    fn test_f094_p17_001_height_floor_differing_depth_overflow_real_layout() {
+        use slideforge_layout::FrameContent;
+
+        // 18 flat bullets + 1 parent-with-child bullet.
+        let mut items: Vec<BulletItem> = (0..18)
+            .map(|i| BulletItem {
+                inlines: vec![InlineNode::Plain(Arc::from(format!("Flat {i}")))],
+                children: vec![],
+                span: SourceSpan::default(),
+            })
+            .collect();
+
+        // Bullet 19 (index 18): parent with one child at depth-1.
+        let child = BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("nested overflow child"))],
+            children: vec![],
+            span: SourceSpan::default(),
+        };
+        items.push(BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from("parent overflows page bottom"))],
+            children: vec![child],
+            span: SourceSpan::default(),
+        });
+
+        let slide = bullets_slide("content", items);
+        let deck = make_deck(vec![slide]);
+        let brand = make_brand();
+
+        let laid_out = slideforge_layout::run(&deck, &brand)
+            .expect("F-094-P17-001 differing-depth: layout::run must succeed");
+
+        // Setup verification: ≥2 TextRun frames with height=1 at distinct x values.
+        let deg_frames: Vec<_> = laid_out.slides[0]
+            .frames
+            .iter()
+            .filter(|f| matches!(&f.content, FrameContent::TextRun(_)) && f.bbox.height.0 == 1)
+            .collect();
+        assert!(
+            deg_frames.len() >= 2,
+            "F-094-P17-001 differing-depth setup: expected ≥2 height-degenerate frames; \
+             got {}: {:?}",
+            deg_frames.len(),
+            deg_frames
+        );
+        let x_set: std::collections::HashSet<i64> = deg_frames.iter().map(|f| f.bbox.x.0).collect();
+        assert!(
+            x_set.len() >= 2,
+            "F-094-P17-001 differing-depth setup: degenerate frames must have distinct x \
+             (parent x≠child x due to depth indent); got x={x_set:?}"
+        );
+
+        // Setup verification: stacking check would be silent (all bboxes distinct).
+        {
+            use std::collections::HashSet;
+            let bboxes: HashSet<_> = laid_out.slides[0]
+                .frames
+                .iter()
+                .filter(|f| matches!(&f.content, FrameContent::TextRun(_)))
+                .map(|f| f.bbox)
+                .collect();
+            let total = laid_out.slides[0]
+                .frames
+                .iter()
+                .filter(|f| matches!(&f.content, FrameContent::TextRun(_)))
+                .count();
+            assert_eq!(
+                bboxes.len(),
+                total,
+                "F-094-P17-001 differing-depth setup: all TextRun bboxes must be distinct"
+            );
+        }
+
+        // Core assertion: height-floor diagnostic must fire.
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            !diags.is_empty(),
+            "F-094-P17-001 differing-depth: height-degenerate TextRun frames \
+             (height=1, parent x=457_200 and child x=914_400 — distinct bboxes) must \
+             produce ≥1 E-LAY-001 from validate_post_layout; got 0. \
+             Stacking does not fire (distinct x values); height-floor check required."
+        );
+        assert!(
+            diags.iter().any(|d| d.code.as_ref() == E_LAY_001),
+            "F-094-P17-001 differing-depth: diagnostic must carry E-LAY-001; got: {diags:?}"
+        );
+    }
+
+    /// F-094-P17-001 (false-positive guard) — `Empty` frame with height=1 must NOT
+    /// trigger the height-floor diagnostic (only `TextRun` frames are checked).
+    #[test]
+    fn test_f094_p17_001_no_false_positive_empty_frame_height_one() {
+        use slideforge_layout::{
+            BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize,
+        };
+
+        let page_w: i64 = 9_144_000;
+        let page_h: i64 = 5_143_500;
+
+        // One Empty (non-TextRun) frame with height=1 — must NOT fire.
+        let frames = vec![Frame {
+            bbox: BoundingBox {
+                x: Emu(0),
+                y: Emu(0),
+                width: Emu(100_000),
+                height: Emu(1),
+            },
+            content: FrameContent::Empty,
+            text_flow: None,
+            region_role: None,
+        }];
+
+        let laid_out = LaidOutDeck {
+            page_size: PageSize {
+                width: Emu(page_w),
+                height: Emu(page_h),
+            },
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("blank"),
+                frames,
+                speaker_notes: None,
+                register_tags: vec![],
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let opts = ValidatorOptions::default();
+        let diags = CanvasOverflowValidator {
+            strict_overflow: false,
+        }
+        .validate_post_layout(&laid_out, &opts);
+
+        assert!(
+            diags.is_empty(),
+            "F-094-P17-001: Empty frame with height=1 must NOT trigger height-floor diagnostic; \
+             got: {diags:?}"
         );
     }
 }

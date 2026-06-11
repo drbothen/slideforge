@@ -10,6 +10,8 @@
 //! `idx`, `slide_idx`, or any other spelling. This is the source of truth for
 //! all `LayoutError` variant authoring.
 
+use std::sync::Arc;
+
 use thiserror::Error;
 
 use crate::types::BoundingBox;
@@ -259,6 +261,35 @@ pub enum LayoutError {
         /// The structural nesting depth at which the limit was exceeded.
         /// This equals `MAX_BULLET_DEPTH + 1` for the first rejected level.
         depth: usize,
+    },
+
+    /// A `bullets:` field was encountered on a slide type whose region map
+    /// defines no Body or Generic Empty region (error taxonomy **E-LAY-008**).
+    ///
+    /// Examples of content-less slide types: `title`, `closing`, `section_break`,
+    /// `blank`. Slide types that DO have a content region include `content`,
+    /// `detail`, `bullets_only`, and most body-content types.
+    ///
+    /// This is a USER-AUTHORING error, not an internal invariant breach. The
+    /// layout engine fires E-LAY-008 when it cannot find any region to receive
+    /// the `bullets:` content, rather than silently emitting a sentinel
+    /// zero-coordinate frame.
+    ///
+    /// `span` points at the first character of the `bullets:` keyword in the
+    /// authored `.sf` file (same convention as E-LAY-004 and E-LAY-006).
+    #[error(
+        "[E-LAY-008] Slide '{slide_type}' at {span} has no content region for 'bullets'. \
+         Slide type '{slide_type}' defines no Body or Generic Empty region. \
+         Use a slide type with a body region (e.g. 'content', 'detail', 'bullets_only') \
+         or remove the 'bullets:' field."
+    )]
+    BulletsOnContentlessSlideType {
+        /// The slide type keyword (e.g. `"title"`, `"closing"`) that has no body region.
+        slide_type: Arc<str>,
+        /// Zero-based index of the offending slide in the input `Deck.slides`.
+        source_slide_index: usize,
+        /// Source location of the `bullets:` field in the authored `.sf` file.
+        span: SourceSpan,
     },
 
     /// A `Shape` node reached the layout stage without `alt` text or

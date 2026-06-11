@@ -52,6 +52,7 @@ fn make_deck(lang: Option<&str>) -> Deck {
             source_span: SourceSpan::default(),
             overlay: None,
             register_content: vec![],
+            field_spans: OrderedMap::new(),
         }],
         vars: OrderedMap::new(),
         metadata: make_metadata(lang),
