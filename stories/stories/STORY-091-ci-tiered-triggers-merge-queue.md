@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.2"
+spec_version: "1.3"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI workflow restructuring.
 # These stories anchor to NFRs (NFR-026 through NFR-030 multi-platform gates) and the
@@ -63,7 +63,7 @@ This story restructures `ci.yml` to implement tiered triggers:
 
 1. **Fast tier (every PR push):** `fmt` + `clippy` + `test (linux-x86_64)` + `doctest` +
    `check-panic-profile` + `check-pdf-deps` + `supply-chain`. These complete in ~6-8 min.
-2. **Full tier (merge-queue + develop push + nightly + `full-ci` label):** the complete
+2. **Full tier (merge-queue + develop push + main push + manual dispatch + nightly + `full-ci` label):** the complete
    5-platform matrix including `test (linux-arm64)`, `test (macos-arm64)`, `test (macos-x86_64)`,
    `test (windows-x86_64)`, `snapshots`, `visual-regression`, `bench`, `perf-smoke`, `msrv`, `docs`.
 3. **Aggregator stays:** the existing `CI / all-checks-pass` synthetic job is made the
@@ -148,7 +148,9 @@ When `github.event_name == 'merge_group'`, ALL jobs in the matrix MUST execute (
 `skipped` slow legs). The full-tier condition MUST cover these event/ref combinations:
 - `merge_group` event (always full matrix)
 - `push` to `refs/heads/develop` (full matrix)
+- `push` to `refs/heads/main` (full matrix — so release merges to main get full validation; added to close ci-workflow-analyzer finding #5)
 - `schedule` (nightly cron — full matrix)
+- `workflow_dispatch` (manual full-matrix trigger via `gh workflow run`; added to close ci-workflow-analyzer finding #3 — without this, manual dispatch leaves all slow legs skipped)
 - `pull_request` with label `full-ci` present on the PR (full matrix on demand)
 The `all-checks-pass` aggregator MUST fail in merge_group if any leg reports `failure`.
 
@@ -216,12 +218,14 @@ Architecture section files: N/A — no source crate changes.
 - [ ] Add `merge_group:` to the `on:` block in `ci.yml`
 - [ ] Add `schedule:` nightly cron if not already present (target: `0 6 * * *` UTC);
       note in playbook that this only fires from `main` (default branch), not `develop`
-- [ ] Define the full-tier `if:` condition expression:
+- [ ] Define the full-tier `if:` condition expression (canonical 6-combo gate — verbatim
+      from ci.yml HEAD a0388bd4, applied at 7 job sites):
       ```yaml
       if: >
         github.event_name == 'merge_group' ||
         github.event_name == 'schedule' ||
-        (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
         (github.event_name == 'pull_request' &&
          contains(github.event.pull_request.labels.*.name, 'full-ci'))
       ```
@@ -417,3 +421,4 @@ configuration.
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q8 (merge queue + tiered triggers, HIGH confidence). Highest-priority CI story; blocks STORY-092 and STORY-093. |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: pinned repo as `drbothen/slideforge` PUBLIC (free merge queue confirmed); reframed AC-001 wall-clock from fixed ≤8min gate to measure-to-confirm; added `schedule:` default-branch constraint to AC-005 and playbook task; added verify-at-impl markers for merge-queue-on-develop config and required-check skip semantics; added Uncertainty Resolution Log. |
 | 1.2 | 2026-06-10 | story-writer | EC-002 corrected (source: ci-workflow-analyzer review finding #2, 2026-06-10; fixed at implementation a0388bd4). Previous text claimed "the NEXT push or re-run triggers full matrix" — both claims were wrong. Correct behavior: (1) `on.pull_request.types` MUST include `labeled`; the `labeled` event itself fires a fresh full-tier run immediately when the label is applied. (2) Re-running an existing run via GitHub's "Re-run jobs" button reuses the original event payload, which does NOT contain the label if it was added after the run started — re-run does NOT pick up newly added labels and MUST NOT be relied on. Companion playbook (`tiered-ci-merge-queue.md`) corrected identically in Steps 7 and 9. |
+| 1.3 | 2026-06-10 | story-writer | AC-003 and Tasks `if:` expression aligned to 6-combo full-tier gate (F-091-P4-001). Two combos added: (1) `workflow_dispatch` — closes ci-workflow-analyzer finding #3; required so `gh workflow run` does not leave all slow legs skipped. (2) `push` to `refs/heads/main` — closes ci-workflow-analyzer finding #5; ensures release merges to main receive full matrix validation. Summary prose (§ Summary, item 2) updated to name all 6 triggers. Canonical expression is byte-identical to ci.yml HEAD a0388bd4 lines 294-300, applied at 7 job sites. |
