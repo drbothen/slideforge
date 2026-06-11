@@ -1202,8 +1202,11 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 /// - `y = *y_cursor` — current cursor position.
 /// - `height = LINE_HEIGHT_EMU` — one line per bullet item.
 /// - `*y_cursor` advances by `LINE_HEIGHT_EMU` after each item.
-/// - If `y_cursor` exceeds `body_bbox.y + body_bbox.height`, bullets are clipped
-///   to the region boundary (no underflow — canvas-overflow validator territory).
+/// - If `y_cursor` exceeds `body_bbox.y + body_bbox.height`, bullets are clamped
+///   to `y = page_height − 1, height = 1`; multiple overflow bullets land at the
+///   same position (identical bboxes). The post-layout geometric validator detects
+///   these via the identical-bbox stacking check (`validate_post_layout`,
+///   F-094-P3-002).
 ///
 /// # Depth indentation (F-094-P2-001)
 ///
@@ -1211,6 +1214,10 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 /// - `x = body_bbox.x + BULLET_DEPTH_INDENT_EMU * depth` (clamped to `[body_bbox.x, body_right_edge − 1]`)
 /// - `body_right_edge = min(page_width, body_bbox.x + body_bbox.width)`
 /// - `width = (body_right_edge − x).max(1)` (clamped >= 1 EMU)
+///
+///   When `x` is clamped, `width` collapses to 1 EMU — a degenerate sliver
+///   invisible in rendered output. The post-layout geometric validator detects
+///   these via the degenerate-width check (`validate_post_layout`, F-094-P16-001).
 ///
 /// # Pre-condition
 ///
@@ -1283,8 +1290,11 @@ fn push_bullet_frames_inner(
         //
         // Vertical overflow: if the cursor already exceeds the body region bottom,
         // additional bullets are placed at the region bottom with height 1 (minimal
-        // valid frame). The canvas-overflow validator (E-LAY-001) will flag this
-        // separately; layout does NOT silently clip or error here.
+        // valid frame). The post-layout geometric validator detects these via the
+        // identical-bbox stacking check in `validate_post_layout` (F-094-P3-002):
+        // overflow bullets share the same y = page_height−1, height=1 position,
+        // producing duplicate bboxes that the stacking detector catches.
+        // Layout does NOT silently clip or error here.
         // current_depth is always ≤ MAX_BULLET_DEPTH (64); i64::try_from is infallible
         // for any usize value that fits in 64 bits (all contemporary platforms).
         let depth_as_i64 = i64::try_from(current_depth).unwrap_or(i64::MAX);
@@ -1302,8 +1312,15 @@ fn push_bullet_frames_inner(
         //
         // Clamp bullet_x to [body_bbox.x, body_right_edge − 1] so that extreme depth
         // indentation never causes is_valid to fail before the structural depth guard
-        // can fire (F-094-P2-001, BC-3.06.003). The canvas-overflow validator
-        // (E-LAY-001) flags visible clipping separately.
+        // can fire (F-094-P2-001, BC-3.06.003).
+        //
+        // When bullet_x is clamped to body_right_edge − 1, the resulting
+        // bullet_width = (body_right_edge − bullet_x).max(1) = 1 EMU — a degenerate
+        // sliver invisible in rendered output.  The post-layout geometric validator
+        // detects these via the degenerate-width check in `validate_post_layout`
+        // (F-094-P16-001): any TextRun frame with width == 1 EMU triggers E-LAY-001.
+        // The identical-bbox stacking check does NOT catch this case because each
+        // overflow bullet lands at a distinct y position (distinct bboxes).
         let body_right_edge = page_size
             .width
             .0
