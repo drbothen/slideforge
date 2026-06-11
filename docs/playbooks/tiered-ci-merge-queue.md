@@ -67,23 +67,26 @@ expression at the job level:
 if: >
   github.event_name == 'merge_group' ||
   github.event_name == 'schedule' ||
-  (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+  github.event_name == 'workflow_dispatch' ||
+  (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
   (github.event_name == 'pull_request' &&
    contains(github.event.pull_request.labels.*.name, 'full-ci'))
 ```
 
-The four conditions that trigger the full tier:
+The five conditions that trigger the full tier:
 
 | Condition | When it fires | Why |
 |-----------|---------------|-----|
 | `merge_group` | PR enters the merge queue | Full matrix validates before landing on `develop` |
-| `schedule` | Nightly cron (06:00 UTC) | Catch platform-specific regressions within 24 hours |
-| `push` to `refs/heads/develop` | Direct push or squash-merge completes | Redundant safety net on the protected branch |
+| `schedule` | Nightly cron (06:00 UTC) | Catch toolchain/environment drift on `main` within 24 hours |
+| `workflow_dispatch` | Manual trigger via gh CLI or Actions UI | Ad-hoc full-matrix run without needing to push a commit |
+| `push` to `refs/heads/develop` OR `refs/heads/main` | Direct push or squash-merge completes | Safety net on the protected branches |
 | `pull_request` with `full-ci` label | Developer opts in | On-demand full matrix for cross-platform investigation |
 
 **Maintainer rule:** when adding a new slow job to `ci.yml`, copy this `if:`
-expression verbatim to that job. Do NOT invent a variation — inconsistency
-between slow-job conditions leads to subtle coverage gaps.
+expression verbatim from an existing slow job. Do NOT invent a variation, and do
+NOT copy from this playbook comment — transcription drift between the playbook
+and the YAML is the failure mode. The YAML copy is canonical.
 
 ---
 
@@ -139,10 +142,34 @@ on:
 ### Safe pattern (correct)
 
 ```
-branch protection requires: "CI / all-checks-pass"   ← single required check
+branch protection requires: "all-checks-pass"   ← single required check (API context name)
+                                                   PR UI displays as "CI / all-checks-pass"
 aggregator: needs all jobs, if: always(), skip == OK
-slow jobs:  job-level if: (merge_group || schedule || push-to-develop || full-ci-label)
+slow jobs:  job-level if: (merge_group || schedule || workflow_dispatch || push-to-develop/main || full-ci-label)
 ```
+
+### Repo-wide invariant: companion workflows must never be required checks
+
+`pdf-ua1.yml`, `html-wcag.yml`, and `security.yml` use `pull_request.paths:`
+filters and do NOT have `merge_group:` triggers. This means:
+
+- On PRs that touch filtered-out files, the entire workflow is skipped.
+- On merge-queue entries, the workflow never fires (no `merge_group:` trigger).
+
+**Consequence:** these workflows MUST NEVER be added as required status checks.
+Doing so deadlocks every PR whose changed files do not match the path filter, and
+deadlocks every merge-queue entry permanently.
+
+If a future decision requires any of these checks to be mandatory:
+1. Remove the `paths:` filter from the workflow, OR restructure to the
+   job-level `if:` pattern (no workflow-level path filtering).
+2. Add `merge_group:` to the workflow's `on:` triggers.
+3. Add the job to the `all-checks-pass` aggregator's `needs:` list (the
+   aggregator is already the single required check — no change to branch
+   protection is needed).
+
+Until those steps are taken, these workflows operate as informational-only
+checks. Their failure does not block PRs or merge-queue entries.
 
 ---
 
@@ -151,33 +178,59 @@ slow jobs:  job-level if: (merge_group || schedule || push-to-develop || full-ci
 The branch protection rule on `develop` MUST be configured as follows:
 
 **Required status checks:**
-- `CI / all-checks-pass` — the aggregator job (the ONLY required check)
+- `all-checks-pass` — the aggregator job (the ONLY required check)
+
+**IMPORTANT — context name vs. PR UI display:**
+The GitHub branch-protection API uses the bare job name as the context string.
+The PR check-list displays it as "CI / all-checks-pass" (workflow name / job
+name), but the `contexts` field in the PUT payload and the verify output use
+`all-checks-pass` alone. Using `"CI / all-checks-pass"` in the API payload will
+create a check that never matches the actual reported context — PRs will be
+permanently blocked.
+
+To confirm the exact context string reported for a real PR, run:
+```bash
+gh api repos/drbothen/slideforge/commits/<head-sha>/check-runs \
+  --jq '.check_runs[].name'
+```
+Copy the name exactly as returned. For this workflow the returned name is
+`all-checks-pass`.
 
 **Do NOT add:**
-- `CI / test (linux-arm64)` — would deadlock on normal PR pushes
-- `CI / test (macos-arm64)` — same
-- `CI / test (windows-x86_64)` — same
+- `test (linux-arm64)` — would deadlock on normal PR pushes
+- `test (macos-arm64)` — same
+- `test (windows-x86_64)` — same
 - Any other individual slow-tier job name
 
-**Merge queue:** enable the merge queue on `develop`'s branch protection rule.
-This causes the `merge_group` event to fire when a PR is queued, triggering the
-full matrix before the merge commit lands on `develop`.
+**Merge queue:** enable the merge queue via the develop branch protection rule's
+"Require merge queue" option (Settings → Branches → Edit rule → "Require merge
+queue"). This causes the `merge_group` event to fire when a PR is queued,
+triggering the full matrix before the merge commit lands on `develop`. Do NOT
+look for a merge-queue toggle in Settings → General — it lives inside the branch
+protection rule itself (or in a branch ruleset if using the newer ruleset UI).
 
-### Enabling merge queue and updating required checks (gh CLI)
+### Establishing branch protection for the first time (gh CLI)
 
-These commands must be run by a repository admin after this story's PR merges to
-`develop`:
+**Pre-condition:** `drbothen/slideforge` currently has NO branch protection and
+NO rulesets on `develop` (verified 2026-06-10). The procedure below CREATES
+protection fresh — it does not modify existing protection.
+
+**Safe ordering:**
+1. Merge this story's PR to `develop` first. Nothing currently blocks it — no
+   protection exists yet, so there is no deadlock window during migration.
+2. After the merge completes, run the commands below to establish protection.
 
 ```bash
-# 1. Update required status checks to ONLY all-checks-pass.
-#    Replace the entire required_status_checks list — do not ADD to it.
+# Step 1 — Create branch protection with all-checks-pass as the ONLY required
+#           status check.
+#           NOTE: contexts value is the bare job name, NOT "CI / all-checks-pass".
 gh api repos/drbothen/slideforge/branches/develop/protection \
   -X PUT \
   --input - <<'EOF'
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["CI / all-checks-pass"]
+    "contexts": ["all-checks-pass"]
   },
   "required_pull_request_reviews": {
     "required_approving_review_count": 0
@@ -187,29 +240,46 @@ gh api repos/drbothen/slideforge/branches/develop/protection \
 }
 EOF
 
-# 2. Enable merge queue.
-#    GitHub's merge queue is configured via repository rulesets in the UI
-#    (Settings → Rules → Rulesets) or via the REST API for rulesets.
-#    For legacy branch protection (the gh api command above), merge queue is
-#    enabled separately in Settings → General → Pull Requests → Merge queue.
-#
-#    drbothen/slideforge is a PUBLIC repo — merge queue is FREE.
-#    No Team or Enterprise plan is required.
-#
-# 3. Verify:
+# Step 2 — Enable merge queue.
+#   The merge queue is enabled inside the branch protection rule via the UI:
+#   Settings → Branches → Edit rule for 'develop' → check "Require merge queue".
+#   drbothen/slideforge is a PUBLIC repo — merge queue is FREE.
+#   No Team or Enterprise plan is required.
+
+# Step 3 — Verify required checks (context string must be 'all-checks-pass').
 gh api repos/drbothen/slideforge/branches/develop/protection \
   | python3 -m json.tool | grep -A 5 "required_status_checks"
-# Expected: only "CI / all-checks-pass" in the contexts list.
+# Expected output contains: "all-checks-pass" (NOT "CI / all-checks-pass").
+
+# Step 4 — Cross-check by reading the actual check-run name from a merged PR:
+gh api repos/drbothen/slideforge/commits/<head-sha-of-merged-pr>/check-runs \
+  --jq '.check_runs[].name'
+# Copy the exact string. It must match what you put in contexts above.
 ```
+
+**Warning for repos that ALREADY have per-leg required checks:**
+If `develop` has existing required status checks pointing at individual slow-tier
+jobs (e.g. `test (linux-arm64)`), those checks deadlock on every normal PR push
+because skipped jobs are never reported as satisfied. Fix procedure:
+1. GET the current protection: `gh api repos/drbothen/slideforge/branches/develop/protection`
+2. Remove all individual leg entries; keep only `all-checks-pass`.
+3. Use PATCH on `required_status_checks` (not PUT on the full protection object)
+   to avoid accidentally resetting review/admin/restriction settings:
+   ```bash
+   gh api repos/drbothen/slideforge/branches/develop/protection/required_status_checks \
+     -X PATCH --input - <<'EOF'
+   {"strict": true, "contexts": ["all-checks-pass"]}
+   EOF
+   ```
+4. Re-enable merge queue if it was disrupted.
 
 **Note on rulesets vs legacy branch protection:**
 GitHub offers two branch protection mechanisms: legacy branch protection (used
-above) and repository rulesets (newer). The merge queue feature may behave
-slightly differently between the two. At implementation time (2026-06-10),
-confirm that your chosen mechanism supports the `merge_group` event and that
-`skipped` results satisfy the required-check gate for `all-checks-pass`. If
-using rulesets, the required check name format and skip-semantics may differ —
-check current GitHub documentation.
+above) and repository rulesets (newer). Either can work. If using rulesets,
+confirm that: (a) the required check name in the ruleset matches the bare job
+name `all-checks-pass`; (b) the ruleset `merge_group` trigger is enabled; and
+(c) `skipped` results satisfy the ruleset's required-check gate. Check current
+GitHub documentation at time of setup — ruleset semantics are evolving.
 
 ---
 
@@ -222,8 +292,11 @@ first). This is an intentional trade-off:
 **Why it is acceptable:**
 - The full matrix still runs before any commit lands on `develop`. No regression
   slips through to the default branch.
-- The nightly cron provides a safety net: platform-specific regressions are
-  caught within ~24 hours even if no PR is queued.
+- Every squash-merge to `develop` triggers a push-to-develop run with the full
+  matrix — `develop` is always validated end-to-end after each story lands.
+- The nightly cron (firing from `main`) validates `main` against
+  environmental and toolchain drift — new compiler warnings, dependency
+  yanks, runner image updates — independent of whether any PR is queued.
 - The `full-ci` label gives any developer an escape hatch: apply it to trigger
   the full matrix on a specific PR before queuing.
 - The merge queue run itself blocks the merge on failure — a Windows-only bug
@@ -240,7 +313,7 @@ first). This is an intentional trade-off:
 
 ---
 
-## 6. `schedule:` default-branch constraint
+## 6. `schedule:` default-branch constraint and manual dispatch
 
 **GitHub Actions only fires `schedule:` triggers from the workflow file on the
 DEFAULT branch.** The default branch for `drbothen/slideforge` is `main` (not
@@ -251,11 +324,26 @@ Consequences:
   `ci.yml` is only on `develop`.
 - The nightly leg becomes active once this story's changes are merged from
   `develop` to `main` (the normal release flow).
-- Until then, nightly runs can be triggered manually via:
-  ```bash
-  gh workflow run ci.yml --repo drbothen/slideforge --ref main
-  ```
-  (This only works once `ci.yml` with the `schedule:` block is on `main`.)
+
+**Manual full-matrix trigger (workflow_dispatch):**
+
+`ci.yml` exposes `workflow_dispatch:` so any admin can fire the full matrix
+without pushing a commit. The `workflow_dispatch` event is included in the
+full-tier `if:` condition, so all slow jobs run when it fires.
+
+```bash
+# Trigger a manual full-matrix run on develop (or any ref):
+gh workflow run ci.yml --repo drbothen/slideforge --ref develop
+
+# Trigger on main (to replicate what nightly does):
+gh workflow run ci.yml --repo drbothen/slideforge --ref main
+
+# Watch the run complete:
+gh run watch --repo drbothen/slideforge
+```
+
+This replaces the previous workaround of triggering the workflow on `main`
+before it was merged. You can now fire the full matrix on `develop` directly.
 
 **Developer action required:** after the develop → main release merge, verify
 that the nightly run fires by checking the Actions tab the morning after the
@@ -292,10 +380,14 @@ When adding a new job to `.github/workflows/ci.yml`:
 | Scenario | Behavior |
 |----------|----------|
 | PR pushed without `full-ci` label | Fast tier only; slow jobs `skipped`; aggregator reports `success` |
-| PR pushed with `full-ci` label | Full tier runs immediately (not just fast) |
-| `full-ci` label added after a run starts | Current run finishes with fast tier; NEXT push or re-run triggers full tier |
+| PR pushed with `full-ci` label | Full tier runs immediately because `on.pull_request.types` includes `labeled` |
+| `full-ci` label added to a PR that already has a run in progress | The `labeled` event fires a fresh run with the label in the payload; full tier runs. WARNING: manually RE-RUNNING an existing run does NOT pick up the newly-added label — the re-run replays the original event payload which does not include the label. Only the fresh run triggered by the `labeled` event (or a subsequent push) carries the label. |
+| `full-ci` label added, then removed, then re-added | Each `labeled` event triggers a fresh full-tier run |
 | Merge queue entry | Full tier runs via `merge_group` event; aggregator fails if any leg fails |
-| Nightly cron (from `main`) | Full tier runs via `schedule` event; Slack/GitHub notification on failure |
+| Nightly cron (from `main`) | Full tier runs via `schedule` event; validates `main` against toolchain/environment drift |
 | Nightly cron (before merged to `main`) | Does NOT fire (schedule only runs from default branch); expected behavior |
+| Manual dispatch (`workflow_dispatch`) | Full tier runs on the specified ref; see §6 |
+| Squash-merge to `develop` | Push-to-develop fires; full tier runs; `develop` is validated end-to-end |
 | New slow job added without full-tier `if:` | Runs on every PR — breaks tiered design; see maintainer checklist above |
-| Branch protection accidentally adds a slow leg | Deadlock; fix: remove it from required checks immediately |
+| Branch protection accidentally adds a slow leg as required | Deadlock; fix: remove it from required checks immediately; use PATCH not PUT to avoid resetting other protection settings |
+| Branch protection `contexts` set to `"CI / all-checks-pass"` | Never satisfies — the check is never reported under that name; fix: use `"all-checks-pass"` (bare job name) |

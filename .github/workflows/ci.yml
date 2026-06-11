@@ -1,14 +1,15 @@
 name: CI
 
 # Triggers: PRs to develop/main, direct pushes to develop/main, merge queue,
-# and a nightly schedule (see IMPORTANT note on schedule: below).
+# workflow_dispatch (manual), and a nightly schedule (see IMPORTANT note on
+# schedule: below).
 #
 # TIERED TRIGGER DESIGN (STORY-091):
 #   FAST tier — runs on every PR push and every trigger:
 #     fmt, clippy, test (linux-x86_64), doctest, check-panic-profile,
 #     check-pdf-deps, supply-chain
-#   SLOW tier — runs only on: merge_group, push to develop, schedule, or
-#     pull_request carrying the 'full-ci' label:
+#   SLOW tier — runs only on: merge_group, push to develop/main, schedule,
+#     workflow_dispatch, or pull_request carrying the 'full-ci' label:
 #     test (linux-arm64, macos-arm64, windows-x86_64), snapshots, msrv, docs,
 #     visual-regression, bench, perf-smoke
 #
@@ -22,14 +23,18 @@ name: CI
 # ANTI-DEADLOCK RULES (AC-004):
 #   - Slow legs use job-level if: ONLY — no workflow-level paths/paths-ignore.
 #   - all-checks-pass has if: always() and treats 'skipped' as PASS.
-#   - Branch protection must declare ONLY 'CI / all-checks-pass' as required.
+#   - Branch protection must declare ONLY 'all-checks-pass' as the required
+#     status check context (API name). The PR UI shows it as
+#     "CI / all-checks-pass" but the API context string is 'all-checks-pass'.
 #   See docs/playbooks/tiered-ci-merge-queue.md for the full rationale.
 on:
   push:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+    types: [opened, synchronize, reopened, labeled]
   merge_group:
+  workflow_dispatch:
   schedule:
     # Nightly full-matrix run at 06:00 UTC.
     # NOTE: only fires from the default branch ('main'). See header comment above.
@@ -70,11 +75,15 @@ env:
 #
 #   github.event_name == 'merge_group' ||
 #   github.event_name == 'schedule'   ||
-#   (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+#   github.event_name == 'workflow_dispatch' ||
+#   (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
 #   (github.event_name == 'pull_request' &&
 #    contains(github.event.pull_request.labels.*.name, 'full-ci'))
 #
 # This expression is reused verbatim on every slow job below.
+# TD-VSDD-060: keep ALL copies byte-identical. Currently 8 copies (7 slow jobs +
+# this header comment). When adding a slow job, copy the expression from an
+# existing slow job, not from this comment (avoids transcription drift).
 # ─────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -163,10 +172,12 @@ jobs:
   # the primary per-PR developer feedback signal.
   # Slow platforms (linux-arm64, macos-arm64, windows-x86_64) are in the
   # test-matrix-slow job below, gated by the full-tier condition.
+  # timeout-minutes: 30 — fast tier; linux-x86_64 warm builds complete in < 10min.
+  # The slow cross-platform matrix uses 75min to accommodate cold arm64 builds.
   test:
     name: test (linux-x86_64)
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
@@ -250,7 +261,8 @@ jobs:
   #
   # These jobs are SKIPPED on normal PR pushes. They run on:
   #   - merge_group (merge queue validation — always runs full matrix)
-  #   - push to refs/heads/develop
+  #   - push to refs/heads/develop OR refs/heads/main
+  #   - workflow_dispatch (manual trigger for ad-hoc full-matrix runs)
   #   - schedule (nightly — only fires from default branch 'main')
   #   - pull_request with 'full-ci' label (developer opt-in)
   #
@@ -282,7 +294,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     strategy:
@@ -332,7 +345,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
@@ -356,7 +370,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     env:
@@ -383,7 +398,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
@@ -428,7 +444,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
@@ -478,7 +495,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
@@ -557,7 +575,8 @@ jobs:
     if: >
       github.event_name == 'merge_group' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/develop') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'full-ci'))
     steps:
@@ -586,16 +605,20 @@ jobs:
 
   # ─── Summary: all required checks passed ───────────────────────────────────
   # This synthetic job depends on every required check in both tiers.
-  # Branch protection MUST declare ONLY "CI / all-checks-pass" as required —
-  # never an individual slow leg (deadlock: a skipped individual required check
-  # is never reported, blocking the PR forever).
+  # Branch protection MUST declare ONLY 'all-checks-pass' as the required status
+  # check context (the API context string). The PR UI displays it as
+  # "CI / all-checks-pass" but the branch-protection PUT payload uses the bare
+  # job name: 'all-checks-pass'. Never add individual slow legs as required checks
+  # (deadlock: a skipped individual required check is never reported, blocking
+  # the PR forever).
   #
   # SKIPPED == PASS: slow-tier jobs are skipped on normal PR pushes.
   # The aggregator treats 'skipped' as success and only fails when a job that
   # actually ran reported 'failure' or 'cancelled'.
   #
-  # TD-VSDD-060 note: if a new job is added to ci.yml, it MUST be added to the
-  # 'needs:' list below AND the python check MUST enumerate it explicitly.
+  # TD-VSDD-060 note: when adding a new job to ci.yml, add it to the needs: list
+  # below. The Python result-check iterates needs automatically — no other change
+  # to this aggregator is required.
   all-checks-pass:
     name: all-checks-pass
     needs:
@@ -618,20 +641,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
     steps:
       - name: Check all required jobs passed
         shell: bash
         run: |
           set -euo pipefail
-          results='${{ toJSON(needs) }}'
-          echo "Job results: $results"
+          echo "Job results: $NEEDS_JSON"
           # Fail if any required job did not succeed.
           # 'skipped' is treated as success — slow-tier jobs that skip on normal
           # PR pushes (full-tier condition false) do not block merges.
           # 'failure' or 'cancelled' from any job that DID run causes failure.
-          failed=$(echo "$results" | python3 -c "
-          import json, sys
-          results = json.load(sys.stdin)
+          failed=$(python3 -c "
+          import json, os
+          results = json.loads(os.environ['NEEDS_JSON'])
           failed = [name for name, info in results.items()
                     if info['result'] not in ('success', 'skipped')]
           if failed:
