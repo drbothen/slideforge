@@ -397,7 +397,13 @@ jobs:
         # --profile ci --timings.
         #
         # The resulting target/ci objects serve as a head-start for the nextest
-        # build — both steps share the same target directory.
+        # build — both steps share the same target directory. HOWEVER, because
+        # Cargo fingerprints do not track the system linker identity, the linked
+        # executables produced here (under GNU ld) must be deleted before nextest
+        # runs under mold. The "Force relink under mold" step (immediately after
+        # "Install mold linker") handles this: it removes target/ci/deps
+        # executables while preserving rlib/rmeta artifacts, forcing Cargo to
+        # relink under mold without re-running codegen.
         #
         # REMOVE THIS STEP (and the paired upload step below) after the
         # before/after numbers have been captured and recorded in the PR
@@ -424,9 +430,15 @@ jobs:
       - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
         # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
         # The after-mold timings come from a workflow_dispatch full-tier run
-        # after this PR merges (the nextest step already builds under --profile
-        # ci so a second dispatch with this baseline step retained but placed
-        # after mold install captures the mold numbers).
+        # after this PR merges. The after-mold capture run MUST use flag-identical
+        # invocation: cargo build --workspace --all-features --tests --profile ci
+        # --timings (identical to the baseline step above — any flag deviation
+        # makes the link-time comparison non-comparable). Additionally, the
+        # after-mold capture MUST follow a forced relink (same mechanism as the
+        # "Force relink under mold" step: delete linked executables in
+        # target/ci/deps while preserving rlib/rmeta artifacts) so the link
+        # phase is actually measured under mold rather than skipped due to
+        # cargo fingerprint reuse.
         # The removal commit lands only once both before and after numbers are
         # recorded in the PR description.
         #
@@ -473,6 +485,33 @@ jobs:
         uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
         with:
           make-default: true
+      - name: Force relink under mold (linux-arm64)
+        # F-093-P2-001 fix: Cargo fingerprints do not track the system linker
+        # identity. The baseline step above already linked all test executables
+        # into target/ci/deps under GNU ld; without intervention, nextest would
+        # skip relinking (fingerprints unchanged) and the resulting binaries
+        # would carry GNU ld provenance — causing the readelf verification step
+        # to fail on every run.
+        #
+        # This step deletes the linked executables from target/ci/deps (those
+        # lacking a file extension — the canonical ELF binary pattern under
+        # --cargo-profile ci) while preserving compiled rlib/rmeta artifacts.
+        # Cargo detects the missing outputs and relinks ONLY the link step under
+        # mold; codegen artifacts are reused from cache (the head-start is intact).
+        #
+        # Predicate: -type f -executable ! -name '*.so' ! -name '*.d'
+        # This is byte-identical to the predicate in the readelf verification
+        # step below — any change to one must be applied to both (TD-VSDD-060).
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          # Cargo fingerprints do not track the system linker. The GNU-ld baseline step
+          # already linked all test binaries into target/ci/deps; delete the linked
+          # products (executables only — compiled rlib/rmeta artifacts are preserved as
+          # the head-start) so the nextest build relinks them under mold.
+          if [ -d target/ci/deps ]; then
+            find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' -delete
+          fi
       - name: cargo nextest run
         # STORY-093 AC-002: mold activates on the linux-arm64 leg via the
         # /usr/bin/ld symlink installed by setup-mold (make-default: true).
@@ -490,11 +529,21 @@ jobs:
         # back to GNU ld). Uses readelf to inspect the .comment ELF section,
         # which mold stamps with its version string.
         #
+        # This verification is reliable because the "Force relink under mold"
+        # step (immediately after mold install) deletes GNU-ld-linked executables
+        # from target/ci/deps before nextest runs, ensuring binaries found here
+        # were produced by the nextest relink under mold.
+        #
         # Search is narrowed to target/ci/deps at maxdepth 1 (the canonical
         # location where nextest deposits test binaries for --cargo-profile ci).
         # Absence of a binary in this location after a successful nextest run is
         # itself an anomaly and must fail — per AC-002: absence of the check is
         # NOT a passing state.
+        #
+        # Find predicate: -type f -executable ! -name '*.so' ! -name '*.d'
+        # This is byte-identical to the predicate in the "Force relink under mold"
+        # step above (TD-VSDD-060: both must be kept in sync — any change to one
+        # must be applied to both).
         #
         # The file(1) ELF guard ensures we don't hand a non-ELF file to readelf
         # (e.g., a Rust proc-macro .so symlink or a build script artifact that
@@ -502,7 +551,7 @@ jobs:
         if: matrix.target.name == 'linux-arm64'
         run: |
           set -euo pipefail
-          bin=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' | head -1)
+          bin=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' -print -quit)
           if [ -z "$bin" ]; then
             echo "::error::No test binary found in target/ci/deps — nextest build may have failed or target dir layout changed; cannot verify mold linkage"
             exit 1
