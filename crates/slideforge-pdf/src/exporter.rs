@@ -1181,6 +1181,7 @@ fn draw_text_at_bbox(
         face_index: face.face_index,
         font_size_pts: f64::from(font_size),
         mock_char_width_pts: None,
+        mock_space_width_pts: None, // production path: real font metrics used for all chars
     };
     let max_width_pts = f64::from(emu_to_pt(bbox.width));
     let lines = crate::text_layout::wrap_text(text, max_width_pts, &metrics);
