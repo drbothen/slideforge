@@ -191,8 +191,19 @@ slow legs are skipped), so branch protection never deadlocks.
 ### Step 7 — Add an opt-in label
 
 Create a `full-ci` label (or equivalent) in your GitHub repo. Any PR author can apply it to
-trigger the full matrix on their next push — useful for cross-platform bug investigations or
-before marking a PR ready for review.
+trigger the full matrix immediately — useful for cross-platform bug investigations or before
+marking a PR ready for review.
+
+**Important:** For label application to fire a workflow run, `on.pull_request.types` MUST
+include `labeled`. With that event type present, GitHub fires a fresh run the moment the label
+is added; the new run's event payload contains the label, so the full-tier `if:` condition
+evaluates to true. Without `labeled` in `on.pull_request.types`, adding the label fires NO
+workflow run at all — a subsequent push is required instead.
+
+**Do NOT rely on re-running an existing run after adding the label.** GitHub's "Re-run jobs"
+button reuses the original event payload. If the label was added after the run started, the
+labels array in the stored payload does not contain it — a re-run executes only the fast tier
+and produces a false-green against the full-tier intent.
 
 ### Step 8 — Verify the nightly schedule
 
@@ -203,7 +214,7 @@ queue time.
 ### Step 9 — Test the configuration
 
 1. Open a PR without the `full-ci` label — confirm only fast legs run, aggregator reports green.
-2. Add the `full-ci` label to the PR — confirm slow legs are triggered on the next push.
+2. Add the `full-ci` label to the PR — confirm a fresh workflow run fires immediately (no push required) and that the slow legs execute in that run. Note: this requires `labeled` in `on.pull_request.types`. Do NOT re-run an existing run to test this; re-runs reuse the original event payload and will not reflect labels added after the run started.
 3. Queue the PR for merge — confirm the merge queue runs both fast and slow legs.
 4. Verify the nightly run in the Actions tab after 24 hours.
 

@@ -9,7 +9,7 @@ points: 5
 priority: NEXT
 tdd_mode: facade
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 behavioral_contracts: []
 # BC status: pending PO authorship — no product BC governs CI workflow restructuring.
 # These stories anchor to NFRs (NFR-026 through NFR-030 multi-platform gates) and the
@@ -324,7 +324,7 @@ steps documented as Verify-at-Implementation tasks above.
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
 | EC-001 | PR pushed with `full-ci` label already applied | Full matrix runs immediately (not just fast tier) |
-| EC-002 | PR pushed, then `full-ci` label added mid-run | The NEXT push or re-run triggers full matrix; the current run finishes with fast tier |
+| EC-002 | `full-ci` label added to PR while a run is in progress | The in-progress run finishes as fast-tier only (its event payload does not contain the label). Adding the label fires a FRESH workflow run immediately — but ONLY if `on.pull_request.types` includes `labeled`. Re-running an existing run (via GitHub's "Re-run jobs" button) reuses the ORIGINAL event payload; the labels array in that payload does NOT contain `full-ci` if it was added after the run started — so a re-run still executes fast-tier only and MUST NOT be relied on to pick up a newly added label. The correct mechanism is the `labeled` event itself triggering a new run. |
 | EC-003 | `all-checks-pass` has a slow leg in its `needs:` that gets skipped | Aggregator treats the `skipped` result as pass; PR becomes mergeable |
 | EC-004 | Developer adds a new slow job to ci.yml without adding the full-tier `if:` | The new job runs on every PR, breaking the tiered design. Mitigation: document the full-tier `if:` pattern in the playbook and add a comment block above the slow-job section |
 | EC-005 | merge_group event runs and a slow leg fails | `all-checks-pass` reports `failure`; merge is blocked; developer sees the failure in the merge queue |
@@ -416,3 +416,4 @@ configuration.
 |---------|------|--------|---------|
 | 1.0 | 2026-06-10 | story-writer | Initial creation per human direction 2026-06-10. Grounded in ci-speed-research.md Q8 (merge queue + tiered triggers, HIGH confidence). Highest-priority CI story; blocks STORY-092 and STORY-093. |
 | 1.1 | 2026-06-10 | story-writer | remove-uncertainty pass: pinned repo as `drbothen/slideforge` PUBLIC (free merge queue confirmed); reframed AC-001 wall-clock from fixed ≤8min gate to measure-to-confirm; added `schedule:` default-branch constraint to AC-005 and playbook task; added verify-at-impl markers for merge-queue-on-develop config and required-check skip semantics; added Uncertainty Resolution Log. |
+| 1.2 | 2026-06-10 | story-writer | EC-002 corrected (source: ci-workflow-analyzer review finding #2, 2026-06-10; fixed at implementation a0388bd4). Previous text claimed "the NEXT push or re-run triggers full matrix" — both claims were wrong. Correct behavior: (1) `on.pull_request.types` MUST include `labeled`; the `labeled` event itself fires a fresh full-tier run immediately when the label is applied. (2) Re-running an existing run via GitHub's "Re-run jobs" button reuses the original event payload, which does NOT contain the label if it was added after the run started — re-run does NOT pick up newly added labels and MUST NOT be relied on. Companion playbook (`tiered-ci-merge-queue.md`) corrected identically in Steps 7 and 9. |
