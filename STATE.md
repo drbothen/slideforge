@@ -259,6 +259,37 @@ Rebase `5c665cd0`→`78b4d692` onto `1ea6409d` was zero-conflict/zero-new-code. 
 
 STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU-SEC-001-GIT2-OPENSSL first).
 
+---
+
+## TASK LEDGER (durable mirror — reconstruct harness tasks from this)
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| T1 | Deliver STORY-091 — CI tiered triggers + merge queue | DONE | PR #82 merged 2026-06-11 |
+| T2 | Deliver STORY-092 — CI cache reliability + disk headroom | DONE | PR #83 merged 2026-06-11 |
+| T3 | Deliver STORY-093 — CI arm64 build-time (mold + profile.ci) | DONE | PR #84 merged 2026-06-11 |
+| T4 | Merge STORY-081 PR #80 | DONE | merged 2026-06-11, develop 433b3c01 |
+| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — prep DONE, delivery PENDING | see checklist below |
+
+T5 delivery checklist (per-story, full BC-5.39.001 flow each: worktree → implement → ci-workflow-analyzer where CI-relevant → LOCAL adversary 3-CLEAN sequential → demo evidence → push → PR → security-reviewer + pr-reviewer (orchestrator-dispatched, LESSON-5) → CI green → STANDING MERGE AUTH squash-merge → post-merge state burst → worktree cleanup):
+- [ ] STORY-094 (CRIT: layout bbox stacking + dup ph idx + nvGrpSpPr) — 8 pts — FIRST
+- [ ] STORY-095 (CRIT: PDF line-wrap + /Figure tag + bold subset) — 8 pts
+- [ ] STORY-098 (HIGH: strict-mode content-drop Route A + chart no-data) — 5 pts
+- [ ] STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang) — 5 pts
+- [ ] STORY-099 (HIGH: DOCX bullets/numbering/sectPr/lang) — 8 pts
+- [ ] STORY-100 (MED: HTML EMU/px + ul/li + image placeholder) — 5 pts
+- [ ] STORY-101 (HIGH: CLI path normalization + chart SVG embed) — 8 pts
+- [ ] STORY-097 (HIGH: takeaway bar, BC-3.07.001) — 8 pts
+- [ ] STORY-102 (image binary embedding, BC-3.07.002; re-sequenceable to Wave 6 by human) — 8 pts
+
+Then: T6 (pending) remaining 10 Wave-5 feature stories (STORY-056/048 unblocked; 057/058/064 cli-serialized; 060/061 after FU-SEC-001-GIT2-OPENSSL).
+
+OPEN HUMAN ACTIONS: (1) FU-MERGE-QUEUE-UI-TOGGLE — Settings → Branches → develop rule → "Require merge queue". (2) Confirm STORY-102 wave placement (currently in fix wave per "fix ALL" directive).
+
+DEMO ARTIFACTS (human-facing, untracked): target/demo/dist/sample-deck.{pptx,html,pdf,docx} built from target/demo/sample-deck.sf on develop f3502c50 — NOTE: exhibits the REND defects by design; rebuild after fix wave to verify.
+
+---
+
 **Diagnostic commands:** `gh pr checks 80` / `gh run rerun --failed <run-id>`
 
 **PER-STORY DELIVERY SEQUENCE (BC-5.39.001):**
@@ -304,7 +335,7 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 | **STORY-081 state** | MERGED PR #80 2026-06-11 → develop `433b3c01`. LOCAL 3/3 (passes 28-29-30). PR-level P31-P34 CONVERGED. Open follow-ups: FU-S1-FONTDB-COUNT-VISIBILITY, FU-S3-CAPTION-FIXTURE, FU-TD1-DEAD-FONT-COUNTER. |
 | **Workspace tests** | 4091 pass / 20 skip / 0 fail (develop `433b3c01`) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | **STEP 0 (HUMAN):** Enable merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 1:** RENDERING-FIX WAVE — per-story delivery of STORY-094..102 (BC-5.39.001 full flow, CRITs first). **STEP 2:** Remaining Wave-5 feature stories (STORY-056/048 unblocked; STORY-057/058/064 cli-serialized; STORY-060/061 after FU-SEC-001-GIT2-OPENSSL). |
+| **RESUME INSTRUCTION** | **READ FIRST:** STATE.md § TASK LEDGER — reconstruct exact task list and T5 per-story checklist from there. **STEP 0 (HUMAN):** Enable merge-queue UI toggle (Settings → Branches → develop → "Require merge queue"). **STEP 1:** RENDERING-FIX WAVE — per-story delivery of STORY-094..102 (BC-5.39.001 full flow, CRITs first; see T5 checklist in TASK LEDGER). **STEP 2:** Remaining Wave-5 feature stories (STORY-056/048 unblocked; STORY-057/058/064 cli-serialized; STORY-060/061 after FU-SEC-001-GIT2-OPENSSL). |
 
 ---
 
