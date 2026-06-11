@@ -48,13 +48,75 @@ workspace_test_failures: 0
 **Repository:** https://github.com/drbothen/slideforge (public) | **Default branch:** `main` | **Dev branch:** `develop`
 **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop`. Canonical SHA: `c72bd2f6` (85 merged PRs, 0 open PRs).
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop` must equal `c72bd2f61cd84e71977b1766bccc204a705288de` (85 merged PRs, 0 open PRs). If the short SHA `c72bd2f6` does not match, STOP — do not create worktrees or dispatch agents.
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
 **Current position:** Phase 3, **Wave 5 IN PROGRESS**. 16 of 34 done (102 stories / 642 pts). 18 remain (8 rendering-fix P0 + 10 feature). **STORY-094 MERGED PR #85 → `c72bd2f6` (REND-001+REND-003 CLOSED). CI INITIATIVE COMPLETE. STORY-081 MERGED.** Workstream B CLOSED.
 
 **STANDING MERGE AUTH:** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking human.
+
+---
+
+### STORY-095 KICKOFF RUNBOOK (zero-context orchestrator: execute in order, no skips)
+
+**Pre-flight (do these first, block on any failure):**
+```bash
+# 1. Verify develop is fully synced — both must print c72bd2f61cd84e71977b1766bccc204a705288de
+git rev-parse develop
+git rev-parse origin/develop
+# If they differ: git fetch && git merge --ff-only origin/develop (no force-push)
+```
+
+**Step 1 — Worktree creation (devops-engineer):**
+```bash
+git worktree add /Users/jmagady/Dev/slideforge/.worktrees/STORY-095 -b feature/STORY-095 develop
+```
+
+**Step 2 — Per-story delivery (BC-5.39.001), in strict sequence:**
+1. **test-writer** — Red Gate: write failing tests, confirm they fail (no stubs that pass vacuously, per SID-1)
+2. **implementer** — TDD green: minimum code to pass tests; exit gate MUST include: `cargo fmt --all -- --check` + pedantic clippy (LESSON-2) + `cargo nextest run --workspace --no-fail-fast` + `cargo test --workspace --all-features` + `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` (LESSON-21). NOTE: verify fmt-clean ON the commit, not just the tree (SEC-001 commit failed CI fmt despite clean exit-gate claim).
+3. **LOCAL adversary** — 3-CLEAN sequential (BC-5.39.001, LESSON-7): pass 1 → fix-burst → pass 2 → fix-burst → pass 3. STRICT CLEAN = ZERO findings any severity. Three consecutive strict-CLEAN passes required. Never parallelize passes of same story.
+4. **demo-recorder** — per-AC evidence (one demo per acceptance criterion)
+5. **push + pr-manager** — PR prep only; pr-manager MUST NOT open the PR (orchestrator does via gh pr create); pr-manager MUST NOT push to develop
+6. **orchestrator dispatches** (LESSON-5): security-reviewer independently, then pr-reviewer independently
+7. **LESSON-9**: if any post-convergence fixes land after security/pr-reviewer pass, RE-RUN both reviewers before merge
+8. **CI green** → **STANDING MERGE AUTH** squash-merge
+9. **devops-engineer** — worktree cleanup: `git worktree remove --force .worktrees/STORY-095 && git branch -d feature/STORY-095`
+10. **state-manager** — post-merge burst (TD-VSDD-053: single commit on factory-artifacts)
+
+**Story spec:** `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-095-rend-pdf-line-wrap-a11y.md`
+**Traced BCs (pass ABSOLUTE paths in every dispatch per LESSON-20):**
+- `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.03.001.md`
+- `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.03.002.md`
+**Traced VP:** `/Users/jmagady/Dev/slideforge/.factory/specs/verification-properties/VP-006.md`
+**Target crate:** `slideforge-pdf` (SS-07). Depends on STORY-043/044/045.
+
+**Delivery order after STORY-095:** 098 → 096 → 099 → 100 → 101 → 097 → 102 (rate-limit: serialize, one at a time).
+
+---
+
+### MANDATORY DISPATCH PREAMBLES (copy verbatim into every agent dispatch)
+
+**PATH DISCIPLINE** (all reviewer / adversary / architect dispatches — include this text):
+> Your file tools resolve RELATIVE paths against the MAIN repo root, not the worktree. EVERY Read/Grep/Glob MUST use ABSOLUTE paths. For worktree agents: use paths under `/Users/jmagady/Dev/slideforge/.worktrees/STORY-NNN/`. Sanity-check the worktree `git log` SHAs FIRST before reading any file; if Grep and Read disagree on content, you used a relative path. (STORY-094 adversary pass 4 was VOIDED for this; an architect dispatch read stale main-repo state for the same reason.)
+
+**IMPLEMENTER GUARD** (all implementer dispatches — include this text):
+> You MUST NOT create pull requests or push to develop. You MUST NOT run `gh pr create` or `git push origin develop`. Your scope ends at: all tests green, exit gate clean, feature branch pushed to origin/feature/STORY-NNN. The pr-manager and orchestrator own the PR lifecycle. (STORY-094's implementer opened PR #85 prematurely — orchestrator had to draft it.)
+
+**ADVERSARY REPORT FORMAT** (all adversary dispatches — include this text):
+> End your report with: (1) findings table with columns [ID | Severity | File:Line | Description | Fix]; (2) "CLEAN (strict): yes/no" — yes ONLY if zero findings of ANY severity; (3) "CLEAN (PR-merge): yes/no" — yes if zero CRIT/HIGH/MED findings; (4) Standing adjudications carried forward (list any previously settled items that are NOT re-litigated). First pass: no standing adjudications. Each subsequent pass: re-include the list from the prior pass.
+
+**EXIT GATE** (all implementer dispatches — include this text):
+> Before declaring work done, run ALL of the following in the worktree and confirm each exits 0:
+> ```bash
+> cargo fmt --all -- --check
+> cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::pedantic -D clippy::unwrap_used -W clippy::missing_docs_in_private_items
+> cargo nextest run --workspace --no-fail-fast
+> cargo test --workspace --all-features
+> RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+> ```
+> Verify fmt-clean ON the commit (run fmt --check after staging, not just in the working tree).
 
 ---
 
@@ -160,7 +222,7 @@ Then read `.factory/STATE.md` → NEXT ACTIONS. STORY-095 is next (no active wor
 
 ## WAVE 5 DELIVERY SUMMARY
 
-**15 of 34 done (develop 433b3c01, 84 PRs). +3 CI initiative stories (STORY-091/092/093) added 2026-06-10; +9 rendering-fix stories (STORY-094..102) added 2026-06-11. STORY-091/092/093 + STORY-081 MERGED. CI INITIATIVE COMPLETE. Workstream B CLOSED. RENDERING-FIX WAVE READY.**
+**16 of 34 done (develop c72bd2f6, 85 PRs). +3 CI initiative stories (STORY-091/092/093) added 2026-06-10; +9 rendering-fix stories (STORY-094..102) added 2026-06-11. STORY-091/092/093 + STORY-081 + STORY-094 MERGED. CI INITIATIVE COMPLETE. Workstream B CLOSED. RENDERING-FIX WAVE IN PROGRESS (1/9).**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation. FieldSchemaValidator live. error-taxonomy v2.24. ADR-020.
 - **STORY-046 MERGED** PR #70 (fa85d113): Static HTML exporter (slideforge-html crate). P4 Composite Rendering Model. BC-4.03.003 v1.4. STORY-047 + STORY-081 UNLOCKED.
@@ -297,7 +359,7 @@ T5 delivery checklist (per-story, full BC-5.39.001 flow each: worktree → imple
 
 Then: T6 (pending) remaining 10 Wave-5 feature stories (STORY-056/048 unblocked; 057/058/064 cli-serialized; 060/061 after FU-SEC-001-GIT2-OPENSSL).
 
-OPEN HUMAN ACTIONS: (1) FU-MERGE-QUEUE-UI-TOGGLE — Settings → Branches → develop rule → "Require merge queue". (2) Confirm STORY-102 wave placement (currently in fix wave per "fix ALL" directive).
+OPEN HUMAN ACTIONS: (1) FU-MERGE-QUEUE-UI-TOGGLE — Settings → Branches → develop rule → "Require merge queue" (cannot be set via API). (2) FU-NOTES-SLIDE-RAW-XML-ADR001 — adjudicate whether `notes_slide.rs` + `notes_master.rs` raw-string XML builders constitute an ADR-001 violation requiring a fix story, or are acceptable given no ooxmlsdk CT_NotesBody type. Human/architect decision required; do NOT resolve in a BC fix burst.
 
 DEMO ARTIFACTS (human-facing, untracked): target/demo/dist/sample-deck.{pptx,html,pdf,docx} built from target/demo/sample-deck.sf on develop f3502c50 — NOTE: exhibits the REND defects by design; rebuild after fix wave to verify.
 
@@ -348,7 +410,7 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 | **STORY-081 state** | MERGED PR #80 2026-06-11 → develop `433b3c01`. LOCAL 3/3 (passes 28-29-30). PR-level P31-P34 CONVERGED. Open follow-ups: FU-S1-FONTDB-COUNT-VISIBILITY, FU-S3-CAPTION-FIXTURE, FU-TD1-DEAD-FONT-COUNTER. |
 | **Workspace tests** | 4142 pass / 20 skip / 0 fail (develop `c72bd2f6`) |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Begin STORY-095 per-story delivery (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts). Full delivery sequence: (1) factory-worktree-health, (2) verify develop == origin/develop == `c72bd2f6`, (3) create worktree `.worktrees/STORY-095` branch `feature/STORY-095`, (4) implement + LOCAL adversary 3-CLEAN (BC-5.39.001), (5) demo-recorder per-AC → push → pr-manager → security-reviewer + pr-reviewer (LESSON-5) → CI green → STANDING MERGE AUTH → post-merge burst. Delivery order after 095: 098→096/099/100/101→097→102. |
+| **RESUME INSTRUCTION** | Begin STORY-095 per-story delivery (CRIT: PDF line-wrap + /Figure tag + bold subset, 8 pts, SS-07, BC-4.03.001+BC-4.03.002). Run `vsdd-factory:factory-worktree-health` first. Then follow the STORY-095 KICKOFF RUNBOOK in the ZERO-CONTEXT RESUME section above — it contains exact git commands, exact BC absolute paths, mandatory dispatch preambles, and step-by-step sequence with all LESSON refs. Delivery order after 095: 098→096→099→100→101→097→102. |
 
 ---
 
