@@ -71,9 +71,11 @@ env:
 # To update: resolve the new tag to its commit SHA and replace below.
 #
 #   actions/checkout          v4  → 34e114876b0b11c390a56381ad16ebd13914f8d5
+#   actions/upload-artifact   v4  → ea165f8d65b6e75b540449e92b4886f43607fa02
 #   Swatinem/rust-cache     v2.9.1  → c19371144df3bb44fab255c43d04cbc2ab54d1c4
 #   dtolnay/rust-toolchain  HEAD  → 3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
 #   taiki-e/install-action    v2  → d9be7d8cda89035c9c843f78bd44d4f72d8403d4
+#   rui314/setup-mold         v1  → 9c9c13bf4c3f1adef0cc596abc155580bcb04444
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─── FULL-TIER CONDITION ─────────────────────────────────────────────────────
@@ -240,6 +242,7 @@ jobs:
           --all-features
           --no-fail-fast
           --profile ci
+          --cargo-profile ci
 
   # ─── Doctests (fast tier) ──────────────────────────────────────────────────
   # cargo-nextest does not execute doctests (by design). This job closes DI-5
@@ -381,13 +384,243 @@ jobs:
         uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4
         with:
           tool: cargo-nextest
+      - name: Capture build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        # STORY-093 AC-001: capture link/codegen split under GNU ld (the true
+        # baseline — before mold takes effect). This step intentionally runs
+        # BEFORE the "Install mold linker" step below so GNU ld is still the
+        # active linker for this cargo invocation.
+        #
+        # --tests is deliberately included here (deviates from the AC-001 prose
+        # example) to match the exact compile units used by the nextest step.
+        # The after-mold capture MUST use the IDENTICAL flag set for AC-003
+        # comparability: cargo build --workspace --all-features --tests
+        # --profile ci --timings.
+        #
+        # The resulting target/ci objects serve as a head-start for the nextest
+        # build — both steps share the same target directory. HOWEVER, because
+        # Cargo fingerprints do not track the system linker identity, the linked
+        # executables produced here (under GNU ld) must be deleted before nextest
+        # runs under mold. The "Force relink under mold" step (immediately after
+        # "Install mold linker") handles this: it removes target/ci/deps
+        # executables while preserving rlib/rmeta artifacts, forcing Cargo to
+        # relink under mold without re-running codegen.
+        #
+        # REMOVE THIS STEP (and the paired upload step below) after the
+        # before/after numbers have been captured and recorded in the PR
+        # description. See the REMOVE-AFTER-BASELINE block comment on the
+        # upload step for the after-mold data collection plan.
+        # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
+        if: matrix.target.name == 'linux-arm64'
+        run: cargo build --workspace --all-features --tests --profile ci --timings
+      - name: Guard timings presence before upload (linux-arm64 ONE-OFF; AC-001)
+        # Fail loudly if the baseline build produced no timing artifacts.
+        # An empty target/cargo-timings/ means cargo-timings.html was never
+        # written — indicating the baseline build did not complete (e.g., hard
+        # cancel before codegen finished). Absence of timings is NOT a passing
+        # state (AC-002 principle: absence of the check is a failure).
+        # The upload step below uses if: always() so it still runs on failure
+        # and uploads whatever partial state exists for diagnostics.
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          [ -n "$(ls -A target/cargo-timings 2>/dev/null)" ] || {
+            echo "::error::no timings produced — baseline build did not complete (target/cargo-timings/ is empty or missing)"
+            exit 1
+          }
+          echo "Check passed: timings artifact present ($(find target/cargo-timings -maxdepth 1 -type f | wc -l) file(s))"
+      - name: Upload build timings baseline (linux-arm64 ONE-OFF; AC-001)
+        # REMOVE-AFTER-BASELINE — tracked as FU-093-BASELINE-REMOVAL in .factory STATE.md open follow-ups; removal commit lands once before/after timings are recorded in PR #<this PR>.
+        # The after-mold timings come from a workflow_dispatch full-tier run
+        # after this PR merges. The after-mold capture run MUST use flag-identical
+        # invocation: cargo build --workspace --all-features --tests --profile ci
+        # --timings (identical to the baseline step above — any flag deviation
+        # makes the link-time comparison non-comparable). Additionally, the
+        # after-mold capture MUST follow a forced relink (same mechanism as the
+        # "Force relink under mold" step: delete linked executables in
+        # target/ci/deps while preserving rlib/rmeta artifacts) so the link
+        # phase is actually measured under mold rather than skipped due to
+        # cargo fingerprint reuse.
+        # The removal commit lands only once both before and after numbers are
+        # recorded in the PR description.
+        #
+        # Note: cargo only writes cargo-timings.html at build completion. A
+        # mid-build hard cancel (e.g., runner timeout) yields no timings file.
+        # if: always() ensures the upload attempt runs even when the guard step
+        # above fails — partial-write dirs still upload for diagnostics.
+        # if-no-files-found: error ensures CI fails if the dir is truly absent
+        # (guards against a silent empty-artifact upload masking a build failure).
+        if: always() && matrix.target.name == 'linux-arm64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cargo-timings-arm64-baseline
+          path: target/cargo-timings/
+          if-no-files-found: error
+      - name: Install mold linker (linux-arm64 ONLY)
+        # STORY-093 AC-002: mold installed on the linux-arm64 leg only.
+        # aarch64-unknown-linux-gnu still uses GNU ld as the default linker as of
+        # Rust 1.95.0 stable (the Rust 1.90 lld-default change covered x86_64-linux
+        # only; arm64-linux was NOT included). mold's 3-10x link speedup over GNU ld
+        # is therefore available in full on this leg.
+        #
+        # x86_64-linux: already uses rust-lld by default since Rust 1.90 — only the
+        # lld→mold delta (~2-4x on link) would apply; marginal vs arm64 win.
+        # macOS: Apple ld64 is fast and parallel; mold gain is marginal.
+        # Windows: lld-link; mold not supported.
+        #
+        # Activation mechanism: setup-mold@9c9c13bf uses make-default: true
+        # (the action default), which symlinks /usr/bin/ld → mold. The cc/gcc
+        # driver invokes /usr/bin/ld at link time, so mold activates
+        # transparently without any RUSTFLAGS or CARGO_TARGET_* env var.
+        # Do NOT add CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS here —
+        # cargo rustflags sources are mutually exclusive: global env RUSTFLAGS
+        # beats CARGO_TARGET_<triple>_RUSTFLAGS (it does NOT merge with it),
+        # so the target-specific var would be silently ignored anyway.
+        # WARNING: if make-default is ever set to false, mold silently
+        # deactivates — the readelf verification step below will catch this.
+        #
+        # SHA confirmed 2026-06-10 via `git ls-remote https://github.com/rui314/setup-mold refs/tags/v1`.
+        # 9c9c13bf4c3f1adef0cc596abc155580bcb04444 is a peeled commit SHA (not a tag
+        # object — verified via gh api). v1 is a moving major tag; re-confirm SHA
+        # if bumping the mold version.
+        #
+        # mold-version: 2.41.0 pinned explicitly (CWE-494: deterministic install).
+        # The action default at this SHA is 2.41.0; we pin it explicitly so any
+        # future action default change does not silently alter the installed binary.
+        # The sha256 verification step below validates the installed binary.
+        #
+        # CVE-2026-3994 (heap overflow, local-attacker, CI-only exposure):
+        # mold 2.41.0 is post-2.40.4 (the last confirmed-affected release) and
+        # is expected to carry the fix. Re-verify against the CVE advisory when
+        # the full disclosure lands; upgrade + re-checksum if needed.
+        # Tracked as FU-MOLD-CVE-2026-3994 in .factory STATE.md open follow-ups.
+        if: matrix.target.name == 'linux-arm64'
+        uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
+        with:
+          mold-version: "2.41.0"
+          make-default: true
+      - name: Verify mold binary integrity (linux-arm64)
+        # CWE-494 mitigation: confirms the binary installed by setup-mold matches
+        # the sha256 of the official mold 2.41.0 aarch64-linux release tarball's
+        # bin/mold extracted file.
+        #
+        # Hash provenance:
+        #   Source: https://github.com/rui314/mold/releases/download/v2.41.0/mold-2.41.0-aarch64-linux.tar.gz
+        #   Tarball sha256: 946de2774b06a71346bd59b55fddba610b65b8d93c3a4a1559cc84e103472710
+        #   Extracted bin/mold sha256: 77b312b3d49f3417d8b39ad429f0fa45b687fb24c9600f780edaec8ee84ad93f
+        #   Extracted on: 2026-06-10 (darwin aarch64, via `tar -xzf ... --strip-components=1`)
+        #   No official SHA256SUMS asset published by the rui314/mold project for this release.
+        #
+        # Re-compute when bumping mold-version:
+        #   curl -fsSL https://github.com/rui314/mold/releases/download/v<VER>/mold-<VER>-aarch64-linux.tar.gz \
+        #     | tar -xzO mold-<VER>-aarch64-linux/bin/mold | sha256sum
+        #
+        # setup-mold extracts the tarball to /usr/local via:
+        #   tar -C /usr/local --strip-components=1 -xzf mold-<ver>-$(uname -m)-linux.tar.gz
+        # so bin/mold lands at /usr/local/bin/mold.
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          /usr/local/bin/mold --version | grep -F "2.41.0" || {
+            echo "::error::mold version mismatch — expected 2.41.0, got: $(/usr/local/bin/mold --version)"; exit 1
+          }
+          echo "77b312b3d49f3417d8b39ad429f0fa45b687fb24c9600f780edaec8ee84ad93f  /usr/local/bin/mold" | sha256sum --check
+          echo "Check passed: mold binary sha256 verified (2.41.0 aarch64-linux)"
+      - name: Force relink under mold (linux-arm64)
+        # F-093-P2-001 fix: Cargo fingerprints do not track the system linker
+        # identity. The baseline step above already linked all test executables
+        # into target/ci/deps under GNU ld; without intervention, nextest would
+        # skip relinking (fingerprints unchanged) and the resulting binaries
+        # would carry GNU ld provenance — causing the readelf verification step
+        # to fail on every run.
+        #
+        # This step deletes the linked executables from target/ci/deps (those
+        # lacking a file extension — the canonical ELF binary pattern under
+        # --cargo-profile ci) while preserving compiled rlib/rmeta artifacts.
+        # Cargo detects the missing outputs and relinks ONLY the link step under
+        # mold; codegen artifacts are reused from cache (the head-start is intact).
+        #
+        # Predicate: -type f -executable ! -name '*.so' ! -name '*.d'
+        # This is byte-identical to the predicates in the readelf verification
+        # step below (bin probe + count find) — any change to one must be
+        # applied to all three (TD-VSDD-060).
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          # Cargo fingerprints do not track the system linker. The GNU-ld baseline step
+          # already linked all test binaries into target/ci/deps; delete the linked
+          # products (executables only — compiled rlib/rmeta artifacts are preserved as
+          # the head-start) so the nextest build relinks them under mold.
+          if [ -d target/ci/deps ]; then
+            find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' -delete
+          fi
       - name: cargo nextest run
+        # STORY-093 AC-002: mold activates on the linux-arm64 leg via the
+        # /usr/bin/ld symlink installed by setup-mold (make-default: true).
+        # No RUSTFLAGS or CARGO_TARGET_* env var is needed or used here.
         run: >
           cargo nextest run
           --workspace
           --all-features
           --no-fail-fast
           --profile ci
+          --cargo-profile ci
+      - name: Capture target/ci size (linux-arm64, AC-005)
+        # STORY-093 AC-005: evidence that line-tables-only debug info reduces the
+        # target/ci directory size relative to the default full-debug profile.
+        # Runs after nextest (which uses --cargo-profile ci) so target/ci contains
+        # the compiled artifacts under the ci profile's debuginfo = "line-tables-only"
+        # setting.  A missing target/ci/ means the nextest build did not produce
+        # the expected artifacts — this is a hard failure, not a warning, because
+        # an absent directory cannot serve as size-reduction evidence (AC-002
+        # principle: absence of the check is NOT a passing state).
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          [ -d target/ci ] || { echo "::error::target/ci missing — AC-005 size capture impossible (nextest build did not populate target/ci/)"; exit 1; }
+          size=$(du -sh target/ci/ | cut -f1)
+          echo "Check passed: target/ci size ${size} (line-tables-only debuginfo; AC-005)"
+      - name: Verify mold linked the test binaries (linux-arm64)
+        # Confirms that the /usr/bin/ld → mold symlink was effective and the
+        # nextest binaries were actually linked by mold (not silently falling
+        # back to GNU ld). Uses readelf to inspect the .comment ELF section,
+        # which mold stamps with its version string.
+        #
+        # This verification is reliable because the "Force relink under mold"
+        # step (immediately after mold install) deletes GNU-ld-linked executables
+        # from target/ci/deps before nextest runs, ensuring binaries found here
+        # were produced by the nextest relink under mold.
+        #
+        # Search is narrowed to target/ci/deps at maxdepth 1 (the canonical
+        # location where nextest deposits test binaries for --cargo-profile ci).
+        # Absence of a binary in this location after a successful nextest run is
+        # itself an anomaly and must fail — per AC-002: absence of the check is
+        # NOT a passing state.
+        #
+        # Find predicate: -type f -executable ! -name '*.so' ! -name '*.d'
+        # This appears in three places: "Force relink under mold" step (delete),
+        # this step's bin probe (-print -quit), and the count find on the success
+        # path below (TD-VSDD-060: all three must be kept in sync — any change
+        # to one must be applied to all three).
+        #
+        # The file(1) ELF guard ensures we don't hand a non-ELF file to readelf
+        # (e.g., a Rust proc-macro .so symlink or a build script artifact that
+        # slips through the ! -name '*.so' filter on edge-case rustc outputs).
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          bin=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' -print -quit)
+          if [ -z "$bin" ]; then
+            echo "::error::No test binary found in target/ci/deps — nextest build may have failed or target dir layout changed; cannot verify mold linkage"
+            exit 1
+          fi
+          if ! file "$bin" | grep -q ELF; then
+            echo "::error::Candidate binary '$bin' is not an ELF file — cannot verify mold linkage (unexpected artifact type)"
+            exit 1
+          fi
+          out=$(readelf -p .comment "$bin")
+          printf '%s' "$out" | grep -qi mold || { echo "::error::mold not used for linking — check setup-mold make-default: true is set"; exit 1; }
+          count=$(find target/ci/deps -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.d' | wc -l)
+          echo "Check passed: mold linkage verified on $bin (.comment contains mold); $count executable(s) present"
 
   # ─── MSRV check (slow tier) ────────────────────────────────────────────────
   # Validates the declared rust-version = "1.88" in Cargo.toml.
