@@ -482,10 +482,49 @@ jobs:
         # 9c9c13bf4c3f1adef0cc596abc155580bcb04444 is a peeled commit SHA (not a tag
         # object — verified via gh api). v1 is a moving major tag; re-confirm SHA
         # if bumping the mold version.
+        #
+        # mold-version: 2.41.0 pinned explicitly (CWE-494: deterministic install).
+        # The action default at this SHA is 2.41.0; we pin it explicitly so any
+        # future action default change does not silently alter the installed binary.
+        # The sha256 verification step below validates the installed binary.
+        #
+        # CVE-2026-3994 (heap overflow, local-attacker, CI-only exposure):
+        # mold 2.41.0 is post-2.40.4 (the last confirmed-affected release) and
+        # is expected to carry the fix. Re-verify against the CVE advisory when
+        # the full disclosure lands; upgrade + re-checksum if needed.
+        # Tracked as FU-MOLD-CVE-2026-3994 in .factory STATE.md open follow-ups.
         if: matrix.target.name == 'linux-arm64'
         uses: rui314/setup-mold@9c9c13bf4c3f1adef0cc596abc155580bcb04444
         with:
+          mold-version: "2.41.0"
           make-default: true
+      - name: Verify mold binary integrity (linux-arm64)
+        # CWE-494 mitigation: confirms the binary installed by setup-mold matches
+        # the sha256 of the official mold 2.41.0 aarch64-linux release tarball's
+        # bin/mold extracted file.
+        #
+        # Hash provenance:
+        #   Source: https://github.com/rui314/mold/releases/download/v2.41.0/mold-2.41.0-aarch64-linux.tar.gz
+        #   Tarball sha256: 946de2774b06a71346bd59b55fddba610b65b8d93c3a4a1559cc84e103472710
+        #   Extracted bin/mold sha256: 77b312b3d49f3417d8b39ad429f0fa45b687fb24c9600f780edaec8ee84ad93f
+        #   Extracted on: 2026-06-10 (darwin aarch64, via `tar -xzf ... --strip-components=1`)
+        #   No official SHA256SUMS asset published by the rui314/mold project for this release.
+        #
+        # Re-compute when bumping mold-version:
+        #   curl -fsSL https://github.com/rui314/mold/releases/download/v<VER>/mold-<VER>-aarch64-linux.tar.gz \
+        #     | tar -xzO mold-<VER>-aarch64-linux/bin/mold | sha256sum
+        #
+        # setup-mold extracts the tarball to /usr/local via:
+        #   tar -C /usr/local --strip-components=1 -xzf mold-<ver>-$(uname -m)-linux.tar.gz
+        # so bin/mold lands at /usr/local/bin/mold.
+        if: matrix.target.name == 'linux-arm64'
+        run: |
+          set -euo pipefail
+          /usr/local/bin/mold --version | grep -F "2.41.0" || {
+            echo "::error::mold version mismatch — expected 2.41.0, got: $(/usr/local/bin/mold --version)"; exit 1
+          }
+          echo "77b312b3d49f3417d8b39ad429f0fa45b687fb24c9600f780edaec8ee84ad93f  /usr/local/bin/mold" | sha256sum --check
+          echo "Check passed: mold binary sha256 verified (2.41.0 aarch64-linux)"
       - name: Force relink under mold (linux-arm64)
         # F-093-P2-001 fix: Cargo fingerprints do not track the system linker
         # identity. The baseline step above already linked all test executables
