@@ -663,7 +663,9 @@ fn compile_inner(
     options: &CompileOptions,
     registry: PluginRegistry,
 ) -> Result<CompiledDeck, error::BuildError> {
-    use slideforge_eval::{EvalConfig, eval_deck_with_variant, thread_fields_to_blocks};
+    use slideforge_eval::{
+        EvalConfig, eval_deck_with_variant, thread_fields_to_blocks, thread_slide_fields_to_blocks,
+    };
     use slideforge_layout::run as layout_run;
     use slideforge_plugin_api::{BrandSource, DiagnosticSeverity, ValidatorOptions};
     use slideforge_syntax::{DiagnosticSink, SourceMap, parse_checked};
@@ -944,17 +946,32 @@ fn compile_inner(
                 }
             }
 
-            // F-094-P9-001 Prong 2: warn-only demotion for user-authoring layout errors.
+            // F-094-P9-001 / F-094-P10-001 Prong 2: warn-only demotion for user-authoring
+            // layout errors.
             //
             // Error taxonomy v2.30 §232: in `--warn-only` mode, `BulletsOnContentlessSlideType`
-            // (E-LAY-008) is demoted to an error-slide placeholder — build continues, exit 0.
+            // (E-LAY-008) is demoted to an error-slide placeholder RENDERED at the affected
+            // slide position — build continues, exit 0.
             //
-            // Implementation: collect all `BulletsOnContentlessSlideType` slide indices from
-            // the error (flat or nested in `Multiple`), substitute each affected `Deck` slide
-            // with an `error_slide_placeholder`, and re-run layout on the modified deck.
+            // Implementation (F-094-P10-001 corrected ordering):
+            //   1. Collect all `BulletsOnContentlessSlideType` slide indices.
+            //   2. Substitute each affected `Deck` slide with an `error_slide_placeholder`
+            //      (carries `title` = "Error: E-LAY-008" and `body` = error message,
+            //      `blocks: vec![]`).
+            //   3. Call `thread_slide_fields_to_blocks` on each substituted placeholder —
+            //      this is the mandatory bridge between field values and layout content
+            //      blocks (ADR-019).  The per-slide variant is used (NOT the whole-deck
+            //      `thread_fields_to_blocks`) to avoid appending duplicate blocks to
+            //      already-threaded non-placeholder slides.  Without this call the
+            //      placeholder's `body` and `title` fields remain unthreaded and layout
+            //      produces `FrameContent::Empty` → blank slide.
+            //   4. Re-run `layout::run` on the modified deck — the `__error_placeholder__`
+            //      region map provides a `RegionRole::Body` frame that absorbs the
+            //      threaded body block → `FrameContent::Body([diagnostic text])`.
             //
-            // This uses the established `error_slide_placeholder` mechanism from
-            // `slideforge-validate` — the same pattern used for eval-stage error demotion.
+            // This ordering (substitute → re-thread → re-layout) mirrors the canonical
+            // pipeline order (eval → thread → layout) and is consistent with the
+            // eval-error demotion precedent (BC-1.11.002 postcondition 3).
             //
             // Condition for demotion: ALL inner errors must be user-authoring layout errors
             // (i.e., `BulletsOnContentlessSlideType`). If any inner error is an internal
@@ -994,8 +1011,34 @@ fn compile_inner(
                     deck.slides[slide_idx] = placeholder;
                 }
             }
+            // F-094-P10-001: re-thread fields to blocks on each newly substituted
+            // placeholder slide.
+            //
+            // Each substituted placeholder carries `title` and `body` fields but
+            // `blocks: vec![]` (the constructor sets no blocks — ADR-019 invariant:
+            // `thread_fields_to_blocks` is the sole block-population site).
+            //
+            // The original `thread_fields_to_blocks` call (Stage 2b above) ran on the
+            // pre-substitution deck, so the placeholder slides were not yet present.
+            // Threading each placeholder slide individually (NOT the whole deck) avoids
+            // appending duplicate blocks to already-threaded non-placeholder slides
+            // (TD-VSDD-060: `thread_fields_to_blocks` appends — a second call on slides
+            // with non-empty blocks would double them).
+            //
+            // This call populates each placeholder with:
+            //   - `body`   → ContentBlock::Text(TextTag::Body)   → FrameContent::Body
+            //   - `title`  → ContentBlock::Text(TextTag::Title)  → FrameContent::Title (phase-3 append)
+            //
+            // Without this call, both fields remain unthreaded; layout::run sees
+            // `slide.blocks = []`, fills no region frame, and the exporter renders
+            // a blank slide — the defect reported in F-094-P10-001.
+            for &slide_idx in &affected_indices {
+                if slide_idx < deck.slides.len() {
+                    thread_slide_fields_to_blocks(&mut deck.slides[slide_idx]);
+                }
+            }
             // Re-run layout on the modified deck (placeholders have a known
-            // region map via `__error_placeholder__` type).
+            // region map via `__error_placeholder__` type and now have blocks).
             match layout_run(&deck, &brand) {
                 Ok(lo) => lo,
                 Err(re_layout_err) => {

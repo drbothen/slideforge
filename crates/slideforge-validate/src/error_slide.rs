@@ -14,10 +14,25 @@
 //! | Field | Description |
 //! |-------|-------------|
 //! | `title` | `"Error: <code>"` — machine-readable error card heading |
+//! | `body` | Same as `error_message` — present so `thread_fields_to_blocks` threads the message into the `RegionRole::Body` frame, making it visible in ALL exporters (F-094-P10-001) |
 //! | `error_code` | The diagnostic code (e.g., `"E-LAY-002"`) |
 //! | `error_message` | Human-readable description of the error |
 //! | `source_location` | Source file location (empty until span support is available) |
 //! | `position` | 1-based slide position in the deck |
+//!
+//! ## Rendering mechanism (F-094-P10-001)
+//!
+//! The `title` and `body` fields are recognised by `thread_fields_to_blocks` and
+//! threaded into `ContentBlock::Text` entries before layout runs.  Layout then fills:
+//!
+//! - `body` → fills the `RegionRole::Body` slot pre-allocated by the
+//!   `__error_placeholder__` region map → `FrameContent::Body([error message])`
+//! - `title` → no `RegionRole::Title` slot in the region map; falls through to the
+//!   Phase-3 append path → `FrameContent::Title("Error: E-LAY-008")` with a clamped
+//!   full-page bbox
+//!
+//! Both variants are rendered by all exporters (PPTX, HTML, PDF, DOCX).  The error
+//! code and message therefore appear in every output format for warn-only builds.
 
 use std::sync::Arc;
 
@@ -51,6 +66,16 @@ pub fn error_slide_placeholder(code: &str, message: &str, position: usize) -> Sl
     fields.insert(
         Arc::from("title"),
         FieldValue::Literal(Value::Str(Arc::from(format!("Error: {code}")))),
+    );
+    // `body` mirrors `error_message` so that `thread_fields_to_blocks` threads
+    // the error message text into the `RegionRole::Body` frame during re-layout.
+    // Without this field the placeholder's region frame remains `FrameContent::Empty`
+    // and all exporters render a blank slide instead of the diagnostic card
+    // (F-094-P10-001 defect chain).  The `body` name is the canonical field name
+    // recognised by the threading pass (ADR-019 §3 — body field maps to TextTag::Body).
+    fields.insert(
+        Arc::from("body"),
+        FieldValue::Literal(Value::Str(Arc::from(message))),
     );
     fields.insert(
         Arc::from("error_code"),
@@ -135,6 +160,33 @@ mod tests {
             slide.fields.contains_key("source_location"),
             "error placeholder must have a 'source_location' field; fields: {:?}",
             slide.fields
+        );
+        // F-094-P10-001: `body` field must be present so thread_fields_to_blocks
+        // threads the error message into FrameContent::Body for all exporters.
+        assert!(
+            slide.fields.contains_key("body"),
+            "error placeholder must have a 'body' field (F-094-P10-001: \
+             thread_fields_to_blocks picks this up as FrameContent::Body so the \
+             diagnostic renders in all exporters); fields: {:?}",
+            slide.fields
+        );
+    }
+
+    /// F-094-P10-001: `body` field value must equal the message passed in.
+    #[test]
+    fn test_f094_p10_001_error_slide_body_field_equals_message() {
+        let message = "Deck contains zero slides";
+        let slide = error_slide_placeholder("E-LAY-002", message, 0);
+        let body_field = slide.fields.get("body");
+        let body_value = match body_field {
+            Some(FieldValue::Literal(Value::Str(s))) => Some(s.as_ref()),
+            _ => None,
+        };
+        assert_eq!(
+            body_value,
+            Some(message),
+            "body field must equal the message argument (F-094-P10-001); \
+             got: {body_field:?}"
         );
     }
 

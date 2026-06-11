@@ -2270,3 +2270,67 @@ fn test_BC_1_15_003_f094_p9_001_lay_008_warn_only_exits_0_output_written() {
         "F-094-P9-001 Prong 2: .pptx output must be non-empty (error-slide placeholder content)"
     );
 }
+
+// ── F-094-P10-001: warn-only placeholder renders diagnostic in output content ─
+
+/// F-094-P10-001: E-LAY-008 warn-only placeholder must render the diagnostic
+/// text ("E-LAY-008") in the exported HTML output at the affected slide position.
+///
+/// Error taxonomy v2.30 §232 (BINDING): warn-only → "error-slide placeholder
+/// RENDERED at the affected slide position" (red border, error code, message).
+///
+/// This test verifies the OUTPUT CONTENT, not merely file existence. The
+/// affirmative claim is that the error code "E-LAY-008" appears somewhere in
+/// the rendered HTML for the affected slide. A blank slide trivially passes the
+/// file_size > 0 check but fails this content check.
+///
+/// RED Gate: fails before the fix because the placeholder slide has no blocks
+/// after `thread_fields_to_blocks` is skipped on the substituted deck, so the
+/// layout produces only `FrameContent::Empty` frames → blank slide → no
+/// diagnostic text in the HTML output.
+#[test]
+fn test_f094_p10_001_lay_008_warn_only_html_contains_error_code() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("lay_008_content.sf");
+    let out_dir = tmp.path().join("dist");
+    write_lay_008_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Html],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-094-P10-001: E-LAY-008 with --warn-only must exit 0; got: {:?}",
+        code
+    );
+
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    let html_path = out_dir.join(format!("{stem}.html"));
+    assert!(
+        html_path.exists(),
+        "F-094-P10-001: .html must be written under --warn-only"
+    );
+
+    let html_content =
+        std::fs::read_to_string(&html_path).expect("F-094-P10-001: failed to read .html output");
+
+    assert!(
+        html_content.contains("E-LAY-008"),
+        "F-094-P10-001: HTML output must contain the error code 'E-LAY-008' \
+         at the affected slide position (error-slide placeholder must be RENDERED, \
+         not blank); html snippet (first 4000 chars): {:.4000}",
+        html_content
+    );
+}
