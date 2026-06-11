@@ -482,11 +482,15 @@ measured or estimated per-key `target/` size from `gh cache list` output (2026-0
 
 ### 9.2 STORY-092 fixes that reduce budget pressure
 
-1. **rust-cache v2.9.1 hash fix** — eliminates spurious cache misses that caused duplicate
-   cache entries with different lockfile-hash suffixes. The 2026-06-11 list shows multiple
-   stale entries per shared-key (e.g., two `clippy` entries, two `bench` entries from different
-   Cargo.lock hashes). After the SHA bump, rust-cache computes keys correctly and stops
-   writing redundant entries.
+1. **rust-cache re-pin to v2.9.1 release commit** — the prior pin
+   (`42dc69e1aa15d09112580998cf2ef0119e2e91ae`) was the annotated tag OBJECT for
+   the floating `v2` tag, not a commit SHA. Annotated tag objects are
+   GC-eligible the moment upstream moves the floating tag to a newer release:
+   `uses:` SHA resolution would fail repo-wide. The prior and new pins both
+   resolve to the v2.9.1 release commit, so there is ZERO behavioral delta —
+   no cache-key format change, no orphaned caches, no cold rebuild caused by
+   this change. The re-pin (`c19371144df3bb44fab255c43d04cbc2ab54d1c4`) is the
+   durable v2.9.1 release commit SHA and will not become unreachable.
 
 2. **`cache-on-failure: "true"` on all 11 jobs** — ensures the arm64 test cache is saved
    even when the job times out. Before this fix, a timeout on the cold arm64 build caused
@@ -510,6 +514,22 @@ gh cache list --repo drbothen/slideforge --limit 100 | grep arm64
 
 # Expected: v0-rust-test-linux-arm64-* present with a recent created_at timestamp.
 # Expected: total active_caches_size_in_bytes < ~8 GiB (~8,589,934,592 bytes).
+```
+
+**Duplicate per-shared-key cache entries are normal and will persist.** Multiple
+entries per shared-key (e.g., two `clippy` entries with different lockfile-hash
+suffixes) are the standard GitHub Actions cache eviction behaviour — newer
+entries coexist with older ones until GitHub LRU-evicts the oldest. The re-pin
+does NOT change cache key computation, so pre-existing stale generation entries
+are not removed automatically. If the total budget pressure requires manual
+cleanup of stale generations, use:
+
+```bash
+# List entries for a specific shared-key:
+gh cache list --repo drbothen/slideforge --key v0-rust-clippy
+
+# Delete a specific stale cache entry by ID:
+gh cache delete --repo drbothen/slideforge <cache-id>
 ```
 
 ### 9.4 Jobs with `cache-on-failure: "true"` (post-STORY-092)

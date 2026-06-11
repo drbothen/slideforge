@@ -149,10 +149,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: stable
-          components: clippy
       - name: Free disk space (Linux only)
         if: runner.os == 'Linux'
         run: |
@@ -166,9 +162,11 @@ jobs:
           sudo docker image prune --all --force || true
           df -h
           # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
-          # Each rm -rf is guarded (|| true) so missing paths on ubuntu-24.04-arm
-          # do not fail the step. Path list is x86_64-derived; arm64 image may
-          # differ — guards prevent errors on absent paths (EC-001).
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
+          components: clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           shared-key: clippy
@@ -217,9 +215,7 @@ jobs:
           sudo docker image prune --all --force || true
           df -h
           # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
-          # Each rm -rf is guarded (|| true) so missing paths on ubuntu-24.04-arm
-          # do not fail the step. Path list is x86_64-derived; arm64 image may
-          # differ — guards prevent errors on absent paths (EC-001).
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
@@ -477,9 +473,7 @@ jobs:
           sudo docker image prune --all --force || true
           df -h
           # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
-          # Each rm -rf is guarded (|| true) so missing paths on ubuntu-24.04-arm
-          # do not fail the step. Path list is x86_64-derived; arm64 image may
-          # differ — guards prevent errors on absent paths (EC-001).
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
@@ -540,9 +534,7 @@ jobs:
           sudo docker image prune --all --force || true
           df -h
           # Frees ~10-15 GB of preinstalled tooling not needed for Rust CI.
-          # Each rm -rf is guarded (|| true) so missing paths on ubuntu-24.04-arm
-          # do not fail the step. Path list is x86_64-derived; arm64 image may
-          # differ — guards prevent errors on absent paths (EC-001).
+          # Each rm -rf is guarded (|| true) so missing paths do not fail the step.
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
@@ -599,10 +591,11 @@ jobs:
         run: |
           set -euo pipefail
           df -h
-          # Narrowed cleanup: remove .NET, Android SDK, GHC, and CodeQL only.
-          # Do NOT remove /usr/local/lib/python* or general apt packages —
-          # LibreOffice and scikit-image depend on them (EC-002: visual-regression
-          # special case; do not strip Python or apt packages this job requires).
+          # Narrowed cleanup: remove .NET, Android SDK, GHC, CodeQL, and prune
+          # Docker images only. Do NOT remove /usr/local/lib/python* or general
+          # apt packages — LibreOffice and scikit-image depend on them (EC-002:
+          # visual-regression special case; do not strip Python or apt packages
+          # this job requires).
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /opt/ghc || true
