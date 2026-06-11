@@ -31,7 +31,11 @@
 #![allow(
     clippy::missing_docs_in_private_items,
     clippy::unwrap_used,
-    clippy::expect_used
+    clippy::expect_used,
+    // doc_markdown: test doc-comments contain bare EMU numeric examples (e.g. x=457_200)
+    // and math expressions that clippy pedantic would require backtick-quoting; this is
+    // intentional in test documentation and does not affect runtime behavior.
+    clippy::doc_markdown
 )]
 
 use std::sync::Arc;
@@ -1681,4 +1685,242 @@ fn test_f094_p6_001_mixed_deck_single_e_lay_008_still_reported() {
         is_e_lay_008,
         "F-094-P6-001(b): error must be or contain BulletsOnContentlessSlideType; got: {err:?}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-094-P15-001 — Bullet width must be clamped to the owning body region right
+// edge, not the page right edge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-094-P15-001 (HIGH) — Two-col slide: every bullet frame must be contained
+/// within the left-column body region.
+///
+/// two_col left-column body bbox (from regions.rs):
+///   x=457_200, y=1_188_720, w=3_886_200, h=3_657_600
+///   → region_right_edge = 457_200 + 3_886_200 = 4_343_400 EMU
+///
+/// DEFECT (pre-fix): `bullet_width = page_width − bullet_x = 9_144_000 − bullet_x`.
+/// At depth-0 on two_col: `9_144_000 − 457_200 = 8_686_800` far exceeds the
+/// column right edge 4_343_400, overlapping the right column by ~4.4 in.
+///
+/// CORRECT: `right_edge = body_bbox.x + body_bbox.width = 4_343_400`
+///          `bullet_width = (right_edge − bullet_x).max(1)`
+///          Depth-0: `4_343_400 − 457_200 = 3_886_200`
+///
+/// RED GATE: with page-relative width the right-containment assertion fails
+/// (`bbox.x + bbox.width > body_right_edge`).
+#[test]
+fn test_f094_p15_001_two_col_bullet_width_contained_in_body_region() {
+    // two_col left-body region constants (from regions.rs — must match exactly).
+    const BODY_X: i64 = 457_200;
+    const BODY_W: i64 = 3_886_200;
+    const BODY_RIGHT_EDGE: i64 = BODY_X + BODY_W; // = 4_343_400
+
+    let items = vec![
+        flat_bullet(vec![InlineNode::Plain(Arc::from("col-left item one"))]),
+        flat_bullet(vec![InlineNode::Plain(Arc::from("col-left item two"))]),
+    ];
+    let slide = bullets_slide("two_col", items);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("F-094-P15-001: layout::run must succeed for two_col slide with bullets");
+
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert_eq!(
+        text_run_frames.len(),
+        2,
+        "F-094-P15-001: two_col slide with 2 bullet items must produce 2 TextRun frames; \
+         got {} (total frames: {})",
+        text_run_frames.len(),
+        result.slides[0].frames.len()
+    );
+
+    for (idx, frame) in text_run_frames.iter().enumerate() {
+        let bbox_x = frame.bbox.x.0;
+        let bbox_w = frame.bbox.width.0;
+        let right_edge = bbox_x.saturating_add(bbox_w);
+
+        // Left containment: bullet must start at or after body_bbox.x.
+        assert!(
+            bbox_x >= BODY_X,
+            "F-094-P15-001: frame {idx} bbox.x ({bbox_x}) must be >= body_bbox.x ({BODY_X}); \
+             bullet starts before the owning body region"
+        );
+        // Right containment: bullet right edge must not exceed body region right edge.
+        assert!(
+            right_edge <= BODY_RIGHT_EDGE,
+            "F-094-P15-001 RED GATE: frame {idx} right edge ({right_edge}) exceeds \
+             body_right_edge ({BODY_RIGHT_EDGE}). \
+             Defect: bullet_width = page_width − bullet_x ({}) instead of \
+             body_right_edge − bullet_x ({}). \
+             This overlaps the right column by {} EMU.",
+            result.page_size.width.0 - bbox_x,
+            BODY_RIGHT_EDGE - bbox_x,
+            right_edge - BODY_RIGHT_EDGE
+        );
+    }
+}
+
+/// F-094-P15-001 (HIGH) — content slide: depth-1 bullet right edge must not
+/// exceed the body region right edge (8_686_800 EMU).
+///
+/// content body bbox: x=457_200, w=8_229_600 → right_edge=8_686_800.
+/// Page width: 9_144_000 EMU (0.5 in past body right edge).
+///
+/// At depth-0 the page-relative formula coincidentally gives the correct answer
+/// for the content slide (both equal 8_686_800). The bug surfaces at depth≥1.
+///
+/// DEFECT (pre-fix): depth-1 bullet_x = 457_200 + 457_200 = 914_400;
+///   page-relative width = 9_144_000 − 914_400 = 8_229_600;
+///   body-relative width = 8_686_800 − 914_400 = 7_772_400.
+///   Overshoot = 457_200 EMU (exactly 0.5 in past body right edge).
+///
+/// RED GATE: right-containment assertion fails for depth-1 on content.
+#[test]
+fn test_f094_p15_001_content_depth1_bullet_width_contained_in_body_region() {
+    // content body bbox (from regions.rs).
+    const BODY_X: i64 = 457_200;
+    const BODY_W: i64 = 8_229_600;
+    const BODY_RIGHT_EDGE: i64 = BODY_X + BODY_W; // = 8_686_800
+
+    // A parent+child bullet: parent at depth-0, child at depth-1.
+    let child = slideforge_types::BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("depth-1 child"))],
+        children: vec![],
+        span: slideforge_types::SourceSpan::default(),
+    };
+    let parent = slideforge_types::BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("depth-0 parent"))],
+        children: vec![child],
+        span: slideforge_types::SourceSpan::default(),
+    };
+    let slide = bullets_slide("content", vec![parent]);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand)
+        .expect("F-094-P15-001: layout::run must succeed for content slide with depth-1 bullets");
+
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    assert_eq!(
+        text_run_frames.len(),
+        2,
+        "F-094-P15-001: parent+child bullet must produce 2 TextRun frames; \
+         got {} (total: {})",
+        text_run_frames.len(),
+        result.slides[0].frames.len()
+    );
+
+    for (idx, frame) in text_run_frames.iter().enumerate() {
+        let bbox_x = frame.bbox.x.0;
+        let bbox_w = frame.bbox.width.0;
+        let right_edge = bbox_x.saturating_add(bbox_w);
+        assert!(
+            right_edge <= BODY_RIGHT_EDGE,
+            "F-094-P15-001 RED GATE (content depth-1): frame {idx} right edge ({right_edge}) \
+             exceeds body_right_edge ({BODY_RIGHT_EDGE}). \
+             page-relative overshoot = {} EMU (0.5 in at depth-1, more at deeper depths).",
+            right_edge - BODY_RIGHT_EDGE
+        );
+    }
+}
+
+/// F-094-P15-001 (HIGH) — deep-indent boundary: near-MAX_BULLET_DEPTH on a narrow
+/// two_col column must still produce BC-3.06.003-valid frames (width >= 1, x < body_right_edge).
+///
+/// At very high depth, bullet_x may approach or exceed body_right_edge.
+/// The `.max(1)` width clamp and the BulletDepthExceeded guard (MAX_BULLET_DEPTH=64)
+/// must produce a valid minimal frame rather than panic or zero-width.
+///
+/// two_col column width = 3_886_200 EMU (≈ 4.25 in).
+/// BULLET_DEPTH_INDENT_EMU = 457_200 (0.5 in).
+/// Depths where bullet_x < body_right_edge: max depth = floor(3_886_200 / 457_200) = 8.
+/// Depth-8: bullet_x = 457_200 + 8*457_200 = 457_200 + 3_657_600 = 4_114_800; still < 4_343_400.
+/// Depth-9: bullet_x = 457_200 + 9*457_200 = 457_200 + 4_114_800 = 4_572_000 > 4_343_400 → clamped.
+///
+/// This test exercises depth-8 (last depth inside the column) and verifies:
+///   - width > 0 (not clamped to 0 by overflow)
+///   - right_edge <= body_right_edge OR width == 1 (clamped-to-minimum case)
+#[test]
+fn test_f094_p15_001_two_col_deep_indent_boundary_produces_valid_frame() {
+    // two_col left-body constants.
+    const BODY_X: i64 = 457_200;
+    const BODY_W: i64 = 3_886_200;
+    const BODY_RIGHT_EDGE: i64 = BODY_X + BODY_W; // 4_343_400
+
+    // Build a bullet nested 8 levels deep to approach the column boundary.
+    let mut item = slideforge_types::BulletItem {
+        inlines: vec![InlineNode::Plain(Arc::from("depth-8 leaf"))],
+        children: vec![],
+        span: slideforge_types::SourceSpan::default(),
+    };
+    // Wrap 8 times: depth-7 → … → depth-0 (top-level).
+    for depth in (0..8u32).rev() {
+        item = slideforge_types::BulletItem {
+            inlines: vec![InlineNode::Plain(Arc::from(
+                format!("depth-{depth}").as_str(),
+            ))],
+            children: vec![item],
+            span: slideforge_types::SourceSpan::default(),
+        };
+    }
+
+    let slide = bullets_slide("two_col", vec![item]);
+    let deck = make_deck(vec![slide]);
+    let brand = make_brand();
+
+    let result = run(&deck, &brand).expect(
+        "F-094-P15-001 deep-indent: layout::run must succeed for two_col with 8-level nesting",
+    );
+
+    let text_run_frames: Vec<_> = result.slides[0]
+        .frames
+        .iter()
+        .filter(|f| matches!(f.content, FrameContent::TextRun(_)))
+        .collect();
+
+    // 9 frames: depth-0 through depth-8.
+    assert_eq!(
+        text_run_frames.len(),
+        9,
+        "F-094-P15-001 deep-indent: 8-level nested bullet must produce 9 TextRun frames"
+    );
+
+    let page_w = result.page_size.width;
+    let page_h = result.page_size.height;
+
+    for (idx, frame) in text_run_frames.iter().enumerate() {
+        // All frames must be BC-3.06.003 valid.
+        assert!(
+            frame.bbox.is_valid(page_w, page_h),
+            "F-094-P15-001 deep-indent: frame {idx} must be BC-3.06.003 valid; got: {:?}",
+            frame.bbox
+        );
+        assert!(
+            frame.bbox.width.0 >= 1,
+            "F-094-P15-001 deep-indent: frame {idx} width must be >= 1 EMU; got {}",
+            frame.bbox.width.0
+        );
+        // Right containment: bullet right edge <= body_right_edge OR width == 1 (clamped minimum).
+        let right_edge = frame.bbox.x.0.saturating_add(frame.bbox.width.0);
+        assert!(
+            right_edge <= BODY_RIGHT_EDGE || frame.bbox.width.0 == 1,
+            "F-094-P15-001 deep-indent: frame {idx} right_edge ({right_edge}) exceeds \
+             body_right_edge ({BODY_RIGHT_EDGE}) and width ({}) != 1 (clamped minimum). \
+             Bullet must be contained within the owning body region.",
+            frame.bbox.width.0
+        );
+    }
 }

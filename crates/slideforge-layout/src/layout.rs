@@ -1208,8 +1208,9 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 /// # Depth indentation (F-094-P2-001)
 ///
 /// Child bullets at `depth > 0` are indented by `BULLET_DEPTH_INDENT_EMU * depth`:
-/// - `x = body_bbox.x + BULLET_DEPTH_INDENT_EMU * depth`
-/// - `width = body_bbox.width - BULLET_DEPTH_INDENT_EMU * depth` (clamped >= 1)
+/// - `x = body_bbox.x + BULLET_DEPTH_INDENT_EMU * depth` (clamped to `[body_bbox.x, body_right_edge − 1]`)
+/// - `body_right_edge = min(page_width, body_bbox.x + body_bbox.width)`
+/// - `width = (body_right_edge − x).max(1)` (clamped >= 1 EMU)
 ///
 /// # Pre-condition
 ///
@@ -1274,8 +1275,9 @@ fn push_bullet_frames_inner(
     for item in items {
         // F-094-P2-001 — compute per-bullet bbox from flow cursor + depth indentation.
         //
-        // x offset: body_bbox.x + BULLET_DEPTH_INDENT_EMU * current_depth.
-        // Width: body_bbox.width minus indent, clamped to >= 1 EMU (BC-3.06.003 width > 0).
+        // x offset: body_bbox.x + BULLET_DEPTH_INDENT_EMU * current_depth (clamped to body region).
+        // Width: (body_right_edge − bullet_x).max(1) — region-relative, not page-relative
+        //        (F-094-P15-001: page-relative formula overlaps sibling columns on two_col).
         // y: current cursor value.
         // height: LINE_HEIGHT_EMU (one visual line per bullet item).
         //
@@ -1288,15 +1290,29 @@ fn push_bullet_frames_inner(
         let depth_as_i64 = i64::try_from(current_depth).unwrap_or(i64::MAX);
         let depth_offset_emu =
             crate::types::Emu(BULLET_DEPTH_INDENT_EMU.saturating_mul(depth_as_i64));
-        // Clamp bullet_x to [body_bbox.x, page_width - 1] so that extreme depth
+        // Bullet right edge is derived from the owning body region, not the page edge.
+        // On multi-column layouts (e.g. two_col) the body region occupies only a portion
+        // of the page width; using the page right edge would cause bullets to overlap
+        // sibling regions (F-094-P15-001).
+        //
+        //   body_right_edge = min(page_width, body_bbox.x + body_bbox.width)
+        //   bullet_right_edge = body_right_edge
+        //   bullet_x         = body_bbox.x + BULLET_DEPTH_INDENT_EMU * depth
+        //   bullet_width      = (bullet_right_edge − bullet_x).max(1)
+        //
+        // Clamp bullet_x to [body_bbox.x, body_right_edge − 1] so that extreme depth
         // indentation never causes is_valid to fail before the structural depth guard
         // can fire (F-094-P2-001, BC-3.06.003). The canvas-overflow validator
         // (E-LAY-001) flags visible clipping separately.
+        let body_right_edge = page_size
+            .width
+            .0
+            .min(body_bbox.x.0.saturating_add(body_bbox.width.0));
         let raw_x = body_bbox.x.0.saturating_add(depth_offset_emu.0);
-        let max_x = page_size.width.0.saturating_sub(1).max(0);
+        let max_x = body_right_edge.saturating_sub(1).max(0);
         let bullet_x = crate::types::Emu(raw_x.min(max_x));
-        // Width: from clamped x to the page right edge, minimum 1 EMU.
-        let bullet_width = crate::types::Emu((page_size.width.0 - bullet_x.0).max(1));
+        // Width: from clamped x to the body region right edge, minimum 1 EMU.
+        let bullet_width = crate::types::Emu((body_right_edge - bullet_x.0).max(1));
 
         // Clamp bullet_y to [0, page_height - 1] so that overflowed y_cursor values
         // (more bullets than fit on the page) still produce a valid minimal frame.
