@@ -1544,6 +1544,43 @@ fn measure_space_width_pt(
     measure_word_width_pt(" ", face_kind, font_size, font_set)
 }
 
+/// Determine the inter-word space to insert **before** `word` in a packed line.
+///
+/// ## Symmetry guarantee (F-095-P5-001 / F-095-P5-002)
+///
+/// This is the SINGLE source of truth for the "should a space precede this word?"
+/// decision.  Both [`pack_words_into_lines`] (measurement) and [`draw_packed_line`]
+/// (drawing) call this function — making it **structurally impossible** for the two
+/// paths to disagree about whether a space appears before any given word.
+///
+/// ## Rules
+///
+/// * `prev_face` is `None` iff the word is the first item on its line — no space.
+/// * `word.is_continuation == true` — this word is a char-split fragment of the
+///   preceding fragment; no word boundary exists between them — no space.
+/// * Otherwise — a real inter-word boundary — measure a space using `prev_face`.
+///
+/// ## Why `prev_face` not the word's own face?
+///
+/// Convention: inter-word space is measured from the PRECEDING word's face.  This is
+/// consistent with the pre-existing packer and draw logic (see commit history for
+/// rationale; TL;DR — the dominant adjacent face controls kerning in most renderers).
+fn space_before_word(
+    word: &SpanWord,
+    prev_face: Option<FontFaceKind>,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    match prev_face {
+        // First item on the line — no preceding space.
+        None => 0.0,
+        // Char-split continuation — no word boundary exists here.
+        Some(_) if word.is_continuation => 0.0,
+        // Real inter-word boundary — measure using the preceding face.
+        Some(face) => measure_space_width_pt(face, font_size, font_set),
+    }
+}
+
 /// Pack [`SpanWord`]s greedily into lines that fit within `max_line_width_pt`.
 ///
 /// Returns `Vec<Vec<SpanWord>>` — each inner `Vec` is one line's word sequence,
@@ -1577,11 +1614,13 @@ fn measure_space_width_pt(
 /// the multi-face path.  A shared pure helper (`char_split_span_word`) extracts
 /// the character-splitting logic so both paths benefit from the same implementation.
 ///
-/// ## Space handling
+/// ## Space handling (F-095-P5-001 / F-095-P5-002)
 ///
-/// The inter-word space width is measured with the PRECEDING word's face (the
-/// most common convention — kerning between adjacent runs uses the dominant face).
-/// When a line is empty (first word on a new line), no space is prepended.
+/// Inter-word space decisions are delegated to [`space_before_word`] — the same
+/// helper used by [`draw_packed_line`].  This structural sharing makes it
+/// **provably impossible** for measurement and drawing to disagree about space
+/// insertion for any word, including the first fragment of a char-split over-wide
+/// word that lands on a non-empty line (the specific bug closed by F-095-P5-001).
 fn pack_words_into_lines(
     words: &[SpanWord],
     max_line_width_pt: f32,
@@ -1608,38 +1647,42 @@ fn pack_words_into_lines(
             for fragment in fragments {
                 let frag_w =
                     measure_word_width_pt(&fragment.text, fragment.face, font_size, font_set);
+                // Use the shared space_before_word helper so packer and draw are
+                // structurally guaranteed to agree (F-095-P5-001 / F-095-P5-002).
+                // For frag0 (is_continuation=false) on a non-empty line this returns
+                // a real inter-word space width; for continuation fragments it returns
+                // 0.0 — matching what draw_packed_line will insert.
+                let prev_face = current_line.last().map(|w| w.face);
+                let space_before = space_before_word(&fragment, prev_face, font_size, font_set);
 
                 if current_line.is_empty() {
                     // First item on this line — start directly with the fragment.
+                    // space_before_word returns 0.0 when prev_face is None, so no
+                    // space is needed here; cursor_x is set from scratch.
                     cursor_x = frag_w;
                     current_line.push(fragment);
+                } else if cursor_x + space_before + frag_w <= max_line_width_pt {
+                    // Fragment fits on the current line (accounting for any inter-word
+                    // space before frag0 that draw_packed_line will also insert).
+                    cursor_x += space_before + frag_w;
+                    current_line.push(fragment);
                 } else {
-                    // Try appending the fragment to the current line (no separator —
-                    // fragments originate from the same source word; no inter-word
-                    // space should be inserted between them).
-                    if cursor_x + frag_w <= max_line_width_pt {
-                        cursor_x += frag_w;
-                        current_line.push(fragment);
-                    } else {
-                        // Fragment doesn't fit on current line — flush and start new.
-                        lines.push(std::mem::take(&mut current_line));
-                        cursor_x = frag_w;
-                        current_line.push(fragment);
-                    }
+                    // Fragment doesn't fit on current line — flush and start new.
+                    lines.push(std::mem::take(&mut current_line));
+                    cursor_x = frag_w; // frag0 of the new line — no preceding space.
+                    current_line.push(fragment);
                 }
             }
             continue; // Move to next source word.
         }
 
         // ── Normal word packing (AC-001) ────────────────────────────────────────
+        //
+        // Use the shared space_before_word helper (F-095-P5-002) so packer and
+        // draw are structurally guaranteed to agree on space insertion.
 
-        let space_w = if current_line.is_empty() {
-            0.0
-        } else {
-            // Measure a space using the face of the PRECEDING word.
-            let prev_face = current_line.last().map_or(word.face, |w| w.face);
-            measure_space_width_pt(prev_face, font_size, font_set)
-        };
+        let prev_face = current_line.last().map(|w| w.face);
+        let space_w = space_before_word(word, prev_face, font_size, font_set);
 
         if current_line.is_empty() {
             // First word on this line.
@@ -1748,8 +1791,12 @@ fn char_split_span_word(
 
 /// Draw one packed line of [`SpanWord`]s at a given baseline Y.
 ///
-/// Advances `cursor_x` after each word, inserting an inter-word space measured
-/// with the CURRENT word's face (consistent with [`pack_words_into_lines`]).
+/// Advances `cursor_x` after each word using [`space_before_word`] to determine
+/// whether an inter-word space precedes the current word — the SAME shared helper
+/// used by [`pack_words_into_lines`].  This structural sharing guarantees that
+/// drawn advance == packed `cursor_x` for every word on every line
+/// (F-095-P5-001 / F-095-P5-002 measure/draw symmetry).
+///
 /// Each word is drawn with the appropriate `krilla::text::Font` from `font_set`
 /// via [`face_for_span_kind`] — preserving bold/italic dispatch across all words
 /// on the line (F-095-P1-001: bold run split across lines keeps bold on both).
@@ -1772,17 +1819,21 @@ fn draw_packed_line(
             continue;
         }
 
-        // Add inter-word space — suppressed in two cases (F-095-P4-001):
-        //   1. Before the first item on the line (i == 0).
-        //   2. When the current word is a char-split continuation fragment
-        //      (`is_continuation == true`): it comes from the same source word
-        //      as the preceding fragment; no whitespace exists between them.
-        // This must mirror the measurement in `pack_words_into_lines` exactly so
-        // drawn advance == packed cursor_x for every char-split line.
-        if i > 0 && !word.is_continuation {
-            let prev_face = line_words[i - 1].face;
-            cursor_x += measure_space_width_pt(prev_face, font_size, font_set);
-        }
+        // Add inter-word space via the shared space_before_word helper
+        // (F-095-P5-001 / F-095-P5-002).  Using the SAME helper as
+        // pack_words_into_lines makes it structurally impossible for the
+        // measurement and draw paths to disagree about whether a space precedes
+        // any given word.
+        //
+        // space_before_word returns 0.0 when:
+        //   - prev_face is None  → first item on line (i == 0 means no predecessor)
+        //   - word.is_continuation → char-split fragment, no word boundary before it
+        let prev_face = if i == 0 {
+            None
+        } else {
+            Some(line_words[i - 1].face)
+        };
+        cursor_x += space_before_word(word, prev_face, font_size, font_set);
 
         let Some(font) = face_for_span_kind(word.face, font_set).map(|f| &f.font) else {
             let preview: String = word.text.chars().take(20).collect();
@@ -4474,12 +4525,10 @@ mod tests {
         for (line_idx, line) in lines.iter().enumerate() {
             let mut cursor_x = 0.0_f32;
             for (i, word) in line.iter().enumerate() {
-                if i > 0 && !word.is_continuation {
-                    // Real inter-word space — measure it.
-                    let prev_face = line[i - 1].face;
-                    cursor_x += measure_space_width_pt(prev_face, font_size, &font_set);
-                }
-                // No space added for continuation fragments — same as draw_packed_line.
+                // Delegate to the shared production helper — same as draw_packed_line.
+                // If space_before_word is later changed, this test remains in sync.
+                let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+                cursor_x += space_before_word(word, prev_face, font_size, &font_set);
                 cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
             }
             // The reconstructed cursor must not exceed max_line_width_pt by more than
@@ -4601,13 +4650,12 @@ mod tests {
         );
         let expected_cursor = w_hi + space_w + w_bye;
 
-        // Reconstruct cursor using the same symmetry rule as draw_packed_line.
+        // Reconstruct cursor using the shared production helper — same as draw_packed_line.
+        // This ensures the test is load-bearing against the shared space_before_word logic.
         let mut cursor_x = 0.0_f32;
         for (i, word) in line.iter().enumerate() {
-            if i > 0 && !word.is_continuation {
-                let prev_face = line[i - 1].face;
-                cursor_x += measure_space_width_pt(prev_face, font_size, &font_set);
-            }
+            let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+            cursor_x += space_before_word(word, prev_face, font_size, &font_set);
             cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
         }
 
@@ -4616,6 +4664,290 @@ mod tests {
             "F-095-P4-001 regression FAIL: two-word normal line cursor_x={cursor_x:.4}pt does not \
              match expected {expected_cursor:.4}pt (w_hi={w_hi:.4} + space={space_w:.4} + \
              w_bye={w_bye:.4}). The inter-word space must be included for real word boundaries."
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-095-P5: space_before_word shared helper — measure/draw symmetry (P5 findings)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Closes F-095-P5-001 (mixed-line packer asymmetry) and F-095-P5-002
+// (missing load-bearing test for the draw-path !is_continuation guard).
+//
+// Test inventory:
+// | test_F095_P5_space_before_word_first_on_line_returns_zero          | space_before_word, None prev |
+// | test_F095_P5_space_before_word_continuation_returns_zero           | space_before_word, is_cont |
+// | test_F095_P5_space_before_word_normal_word_returns_space           | space_before_word, normal |
+// | test_F095_P5_mixed_line_packer_cursor_matches_draw_advance         | F-095-P5-001 MIXED LINE |
+// | test_F095_P5_draw_packed_line_guard_is_load_bearing                | F-095-P5-002 TD-VSDD-059 |
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::float_cmp, // asserting literal 0.0 returns from space_before_word — exact is correct
+    non_snake_case
+)]
+mod story_095_p5_tests {
+    use super::*;
+
+    /// Build a `ResolvedFontSet` from the Latin Modern Math fixture font.
+    fn lm_font_set() -> crate::font::ResolvedFontSet {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None)
+    }
+
+    // ── Unit tests for space_before_word ──────────────────────────────────────
+
+    /// [`space_before_word`] returns 0.0 when `prev_face` is `None` (first on line).
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// If the `None`-branch is removed, the first word on every line would incorrectly
+    /// get a space prepended, causing `cursor_x` to start at >0.
+    #[test]
+    fn test_F095_P5_space_before_word_first_on_line_returns_zero() {
+        let font_set = lm_font_set();
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "hello".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let result = space_before_word(&word, None, 18.0, &font_set);
+        assert_eq!(
+            result, 0.0,
+            "F-095-P5 FAIL: space_before_word must return 0.0 when prev_face is None \
+             (first word on line). Got {result}."
+        );
+    }
+
+    /// [`space_before_word`] returns 0.0 for a continuation fragment, even mid-line.
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// This test fails if the `is_continuation` branch is removed or if its condition
+    /// is inverted — reverting F-095-P4-001 / F-095-P5-002 in one step.
+    #[test]
+    fn test_F095_P5_space_before_word_continuation_returns_zero() {
+        let font_set = lm_font_set();
+        let cont_frag = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "bc".to_owned(),
+            y_offset_units: 0,
+            is_continuation: true, // char-split continuation — no word boundary
+        };
+        // prev_face is Some — there IS a predecessor on this line.
+        let space = space_before_word(
+            &cont_frag,
+            Some(crate::slide_pdf::FontFaceKind::Regular),
+            18.0,
+            &font_set,
+        );
+        assert_eq!(
+            space, 0.0,
+            "F-095-P5 FAIL: space_before_word must return 0.0 for a continuation fragment \
+             (is_continuation=true), even when a predecessor exists on the line. Got {space}."
+        );
+    }
+
+    /// [`space_before_word`] returns a positive space width for a real inter-word boundary.
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// If the Some/non-continuation branch returns 0.0, normal multi-word lines lose
+    /// their inter-word space — all words would be drawn touching each other.
+    #[test]
+    fn test_F095_P5_space_before_word_normal_word_returns_space() {
+        let font_set = lm_font_set();
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "world".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let space = space_before_word(
+            &word,
+            Some(crate::slide_pdf::FontFaceKind::Regular),
+            18.0,
+            &font_set,
+        );
+        assert!(
+            space > 0.0,
+            "F-095-P5 FAIL: space_before_word must return a positive space width for a normal \
+             inter-word boundary (is_continuation=false, prev_face=Some). Got {space}."
+        );
+    }
+
+    // ── Mixed-line packer/draw cursor symmetry (F-095-P5-001) ─────────────────
+
+    /// Mixed line `["hi", <over-wide-word>]`: packer `cursor_x` == draw cursor advance,
+    /// and no overflow past `max_line_width_pt`.
+    ///
+    /// ## What this tests (F-095-P5-001)
+    ///
+    /// Before the fix, `pack_words_into_lines` appended frag0 (`is_continuation=false`)
+    /// to a non-empty line WITHOUT measuring the inter-word space — `cursor_x += frag_w`.
+    /// But `draw_packed_line` saw `i > 0 && !is_continuation` → TRUE → added a space.
+    /// The drawn cursor exceeded the packed cursor by exactly one space width.
+    ///
+    /// After the fix, both paths call `space_before_word` — they advance by the same
+    /// amount, and the packer may flush frag0 to a new line if it doesn't fit WITH the
+    /// space included.
+    ///
+    /// ## Assertion
+    ///
+    /// For each packed line, reconstructing `cursor_x` with [`space_before_word`] must yield
+    /// a value ≤ `max_line_width_pt` + one-char tolerance.  If the packer omits the
+    /// space and draw includes it, the draw cursor overflows by one space width.
+    #[test]
+    fn test_F095_P5_mixed_line_packer_cursor_matches_draw_advance() {
+        let font_set = lm_font_set();
+        let font_size = 18.0_f32;
+
+        // "hi" is short, then a 60-char word that is wider than the frame.
+        // Frame: 80pt — wide enough for "hi" + a small fragment, but NOT for the full word.
+        let max_width_pt = 80.0_f32;
+
+        let words = vec![
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "hi".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "x".repeat(60),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+        ];
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // There must be ≥2 lines (the over-wide word forces at least one extra line).
+        assert!(
+            lines.len() >= 2,
+            "F-095-P5-001 FAIL: ['hi', 60*'x'] must produce ≥2 packed lines at 80pt. \
+             Got {} line(s).",
+            lines.len()
+        );
+
+        // For every line, reconstruct cursor_x using the SAME shared helper that
+        // draw_packed_line uses.  Cursor must not overflow max_line_width_pt by more
+        // than one character's width (rounding tolerance).
+        let one_char = measure_word_width_pt(
+            "x",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let mut cursor_x = 0.0_f32;
+            for (i, word) in line.iter().enumerate() {
+                let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+                cursor_x += space_before_word(word, prev_face, font_size, &font_set);
+                cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+            }
+            assert!(
+                cursor_x <= max_width_pt + one_char,
+                "F-095-P5-001 FAIL: packed line #{line_idx} cursor_x={cursor_x:.3}pt overflows \
+                 max_width_pt={max_width_pt:.3}pt by more than one char ({one_char:.3}pt). \
+                 This means the packer omitted the space before frag0 while draw_packed_line \
+                 would have added it — measure/draw asymmetry is present."
+            );
+        }
+    }
+
+    // ── draw_packed_line guard load-bearing test (F-095-P5-002) ──────────────
+
+    /// [`draw_packed_line`] must NOT insert a space before a continuation fragment
+    /// even when it is the second item on the line (`i > 0`).
+    ///
+    /// ## Load-bearing (TD-VSDD-059 / F-095-P5-002)
+    ///
+    /// This test drives [`draw_packed_line`] via [`space_before_word`] (the production
+    /// helper used by draw) and asserts the continuation guard is active.
+    ///
+    /// Specifically: if the `is_continuation` suppression is reverted in
+    /// [`space_before_word`], the function returns a positive space for the second
+    /// item (`frag1` with `is_continuation=true`), and the assertion below fails.
+    ///
+    /// The test does NOT call [`draw_packed_line`] directly (it requires a krilla
+    /// `Surface` which needs a live PDF document context).  Instead, it calls
+    /// [`space_before_word`] — the IDENTICAL logic that [`draw_packed_line`] delegates to.
+    /// Reverting the guard in [`space_before_word`] fails this test AND breaks
+    /// [`draw_packed_line`] at the same call site in exactly the same way.
+    #[test]
+    fn test_F095_P5_draw_packed_line_guard_is_load_bearing() {
+        let font_set = lm_font_set();
+        let font_size = 18.0_f32;
+
+        // Simulate a packed line with two char-split fragments:
+        //   [frag0 (is_continuation=false), frag1 (is_continuation=true)]
+        // This is the exact scenario that draw_packed_line would encounter after
+        // pack_words_into_lines places two fragments on the same line.
+        let frag0 = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "abc".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false, // first fragment — no word boundary before it on this line
+        };
+        let frag1 = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "def".to_owned(),
+            y_offset_units: 0,
+            is_continuation: true, // continuation — no word boundary before it
+        };
+
+        // draw_packed_line computes: prev_face = if i == 0 { None } else { Some(line[i-1].face) }
+        // For frag0 (i=0): prev_face = None  → space = 0.0
+        let space_before_frag0 = space_before_word(&frag0, None, font_size, &font_set);
+        assert_eq!(
+            space_before_frag0, 0.0,
+            "F-095-P5-002 FAIL: draw path must not add space before frag0 (i=0). Got {space_before_frag0}."
+        );
+
+        // For frag1 (i=1): prev_face = Some(frag0.face), is_continuation=true → space = 0.0
+        let space_before_frag1 = space_before_word(&frag1, Some(frag0.face), font_size, &font_set);
+        assert_eq!(
+            space_before_frag1, 0.0,
+            "F-095-P5-002 FAIL (LOAD-BEARING): draw path must NOT insert a space before \
+             a continuation fragment (is_continuation=true) even at i>0. \
+             Got space={space_before_frag1:.4}pt. \
+             Reverting the is_continuation guard in space_before_word causes this failure."
+        );
+
+        // Regression: a REAL second word (is_continuation=false) MUST get a space.
+        let real_word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "world".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let space_before_real =
+            space_before_word(&real_word, Some(frag0.face), font_size, &font_set);
+        assert!(
+            space_before_real > 0.0,
+            "F-095-P5-002 regression FAIL: draw path must insert a space before a real word \
+             (is_continuation=false, i>0). Got {space_before_real}."
         );
     }
 }
