@@ -74,7 +74,7 @@ env:
 # paths/paths-ignore on any job feeding all-checks-pass (deadlock prevention).
 #
 #   github.event_name == 'merge_group' ||
-#   github.event_name == 'schedule'   ||
+#   github.event_name == 'schedule' ||
 #   github.event_name == 'workflow_dispatch' ||
 #   (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) ||
 #   (github.event_name == 'pull_request' &&
