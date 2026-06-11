@@ -654,6 +654,33 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
         // Blast radius: zero on all existing slide types — no other type produces
         // ContentBlock::ColorBar. The pass is a no-op unless the block list contains
         // a ColorBar block. (Adjudication §4.4.)
+        // F-095-P1-002: Derive alt text for ColorBar from the adjacent
+        // TextTag::ColorLabel block, if present on this slide.  The ColorLabel
+        // block carries the human-readable progress description (e.g. "75%
+        // complete") emitted by Stage 2b for progress_bar / status /
+        // weighted_composite slide types.  We scan all blocks once, extract the
+        // first ColorLabel's inline text, and use it as AltText::Provided so the
+        // PDF exporter tags the bar as a /Figure with descriptive alt text
+        // (WCAG SC 1.1.1 / PDF/UA-1 §7.3).  Falls back to AltText::Unspecified
+        // when no ColorLabel block is present (the PDF exporter emits /Artifact
+        // as the safe-fallback for unlabelled bars — E-A11-001 is raised in
+        // strict mode by the post-layout validator).
+        let color_bar_alt: crate::types::AltText = slide
+            .blocks
+            .iter()
+            .find_map(|b| {
+                if let ContentBlock::Text(tb) = &b.content
+                    && tb.tag == TextTag::ColorLabel
+                {
+                    let text = extract_inline_text_str(&tb.inlines);
+                    if !text.is_empty() {
+                        return Some(crate::types::AltText::Provided(text));
+                    }
+                }
+                None
+            })
+            .unwrap_or(crate::types::AltText::Unspecified);
+
         for block in &slide.blocks {
             if let ContentBlock::ColorBar(spec) = &block.content {
                 // Find the first Empty Generic-role slot (bar-background frame).
@@ -677,6 +704,10 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                         total_width_emu: total_width,
                         percent: spec.percent,
                         color,
+                        // F-095-P1-002: alt derived from TextTag::ColorLabel block
+                        // on this slide (see color_bar_alt derivation above).
+                        // Falls back to Unspecified when no ColorLabel is present.
+                        alt: color_bar_alt.clone(),
                     };
                 }
                 // At most one ColorBar block per slide (progress_bar has one value field).

@@ -828,6 +828,7 @@ impl SlideSerializer {
                     total_width_emu: _,
                     percent: _,
                     color,
+                    alt: _, // STORY-095: alt is for PDF /Figure tagging; PPTX uses shape alt
                 } => {
                     validate_emu(slide_index, frame_idx, &frame.bbox)?;
                     let sp = build_color_bar_shape(

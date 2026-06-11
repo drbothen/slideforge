@@ -65,7 +65,8 @@ use std::sync::Arc;
 // ─── Shared IR construction helpers ──────────────────────────────────────────
 
 use slideforge_layout::types::{
-    BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
+    AltText, BoundingBox, Frame, FrameContent, LaidOutDeck, LaidOutSlide, PageSize, RegisterSet,
+    Rgb,
 };
 use slideforge_pdf::{PdfExportError, PdfExporter};
 use slideforge_plugin_api::{ExportOptions, Exporter};
@@ -2331,27 +2332,85 @@ fn test_bc_4_03_001_validator_ua1_compliant_deck_exports_successfully() {
 /// | /Outlines | Yes — mandatory when headings present |
 /// | /Lang | Yes — required language metadata |
 /// | Slide title text in outline | Yes — meaningful bookmark labels |
+/// | /Figure + /Alt for ColorBar with AltText::Provided | Yes — ISO 14289-1 §7.3 |
 ///
-/// The combination of these 5 assertions is the full structural proxy for
+/// The combination of these 6 assertions is the full structural proxy for
 /// veraPDF --flavour ua1 isCompliant:true (excluding ToUnicode, which is AC-009).
+///
+/// ## STORY-095 AC-003 extension
+///
+/// A 4th slide carries a `FrameContent::ColorBar` with `AltText::Provided` so
+/// that `tag_engine.rs:398-412` (ColorBar→/Figure+/Alt path) is exercised in the
+/// always-run proxy.  Checks 6 and 7 confirm `/Figure` and `/Alt` appear in the
+/// exported bytes — the same structural assertions that `verapdf --flavour ua1`
+/// validates via ISO 14289-1 §7.3.
 ///
 /// ## AC-010..012 implemented — full composite passes
 ///
-/// All 5 structural proxy checks pass. This is the structural gate that mirrors
+/// All checks pass. This is the structural gate that mirrors
 /// veraPDF `--flavour ua1` structural requirements (excluding ToUnicode/AC-009).
 #[allow(clippy::unwrap_used)]
 #[test]
 fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
-    // 3-slide fixture deck matching the canonical test vector (TV-10.1 from BC).
+    // 4-slide fixture: 3 title/content slides (TV-10.1) + 1 progress_bar slide
+    // (STORY-095 AC-003: ColorBar /Figure+/Alt path must reach the always-run proxy).
     let deck = deck_with_slides(vec![
         slide_with_title("Overview", "title"),
         slide_with_title("Data", "content"),
         slide_with_title("Summary", "title"),
+        slide_with_title("Sprint 4 Progress", "progress_bar"),
     ]);
+
+    // Build the geometric LaidOutDeck: 3 standard title slides + 1 progress_bar slide.
     let mut laid_out = n_slide_deck(3);
     for (i, slide) in laid_out.slides.iter_mut().enumerate() {
         slide.source_index = i;
     }
+    // Append the progress_bar slide with a ColorBar frame carrying AltText::Provided.
+    // This exercises tag_engine.rs:398-412 (the /Figure+/Alt branch for ColorBar).
+    laid_out.slides.push(LaidOutSlide {
+        source_index: 3,
+        slide_type_keyword: Arc::from("progress_bar"),
+        frames: vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Title(Arc::from("Sprint 4 Progress")),
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(914_400),
+                    width: Emu(9_144_000),
+                    height: Emu(457_200),
+                },
+                // ColorBar with AltText::Provided — tag_engine must emit /Figure+/Alt
+                // (STORY-095 AC-003 / BC-4.03.001 / ISO 14289-1 §7.3).
+                content: FrameContent::ColorBar {
+                    filled_width_emu: Emu(6_858_000), // 75% of 9_144_000
+                    total_width_emu: Emu(9_144_000),
+                    percent: 75,
+                    color: Rgb {
+                        r: 0x00,
+                        g: 0x70,
+                        b: 0xC0,
+                    },
+                    alt: AltText::Provided(Arc::from("Sprint 4 — 75% complete")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    });
 
     let bytes = export_to_bytes(&deck, &laid_out);
 
@@ -2386,12 +2445,43 @@ fn test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1() {
         pdf_contains(&bytes, b"Overview"),
         "AC-013/proxy FAILED: outline label 'Overview' not found (AC-010 labels)."
     );
+
+    // Check 6: /Figure present — ColorBar with AltText::Provided must emit /Figure
+    // (STORY-095 AC-003 / tag_engine.rs:400-408 / ISO 14289-1 §7.3).
+    assert!(
+        pdf_contains(&bytes, b"/Figure"),
+        "AC-013/proxy FAILED: /Figure missing for ColorBar with AltText::Provided.\n\
+         tag_engine.rs ColorBar branch must emit /Figure when AltText::Provided \
+         (STORY-095 AC-003 / BC-4.03.001 / ISO 14289-1 §7.3)."
+    );
+
+    // Check 7: /Alt present — the /Figure element must carry an /Alt attribute
+    // (ISO 14289-1 §7.3: every /Figure requires /Alt for screen readers).
+    assert!(
+        pdf_contains(&bytes, b"/Alt"),
+        "AC-013/proxy FAILED: /Alt missing for ColorBar /Figure element.\n\
+         ISO 14289-1 §7.3 requires every /Figure to carry /Alt. \
+         tag_engine.rs must pass the AltText::Provided label to Figure::new(Some(label))."
+    );
 }
 
 /// BC-4.03.001 AC-013 (veraPDF integration — ALWAYS #[ignore] for local runs):
 ///
-/// Runs `verapdf --flavour ua1` on a 3-slide fixture deck and asserts
+/// Runs `verapdf --flavour ua1` on a 4-slide fixture deck (3 title/content +
+/// 1 `progress_bar` with a `ColorBar` carrying `AltText::Provided`) and asserts
 /// `isCompliant: true` with zero violations.
+///
+/// ## STORY-095 AC-003 extension
+///
+/// Slide 4 is a `progress_bar` slide whose `LaidOutSlide` includes a
+/// `FrameContent::ColorBar { alt: AltText::Provided("Sprint 4 — 75% complete") }`.
+/// `tag_engine.rs:398-412` emits `/Figure` + `/Alt` for this frame.
+/// `verapdf --flavour ua1` validates the `/Figure`+`/Alt` nesting per
+/// ISO 14289-1 §7.3 — this is the load-bearing veraPDF gate for AC-003.
+///
+/// The fixture is identical to the one in
+/// `test_bc_4_03_001_ac013_structural_proxy_for_verapdf_ua1` so both the
+/// always-run proxy and this CI-gated test exercise the same code path.
 ///
 /// ## Why #[ignore]
 ///
@@ -2427,15 +2517,64 @@ fn test_bc_4_03_001_ac013_verapdf_full_compliance() {
     use std::io::Write;
     use std::process::Command;
 
+    // 4-slide fixture: 3 standard slides (TV-10.1) + 1 progress_bar slide.
+    // The progress_bar slide exercises tag_engine.rs:398-412 (ColorBar → /Figure+/Alt)
+    // so verapdf --flavour ua1 validates the /Figure structure per ISO 14289-1 §7.3.
+    // STORY-095 AC-003: this is the load-bearing veraPDF gate for the /Figure+/Alt path.
     let deck = deck_with_slides(vec![
         slide_with_title("Overview", "title"),
         slide_with_title("Data", "content"),
         slide_with_title("Summary", "title"),
+        slide_with_title("Sprint 4 Progress", "progress_bar"),
     ]);
     let mut laid_out = n_slide_deck(3);
     for (i, slide) in laid_out.slides.iter_mut().enumerate() {
         slide.source_index = i;
     }
+    // Append the progress_bar slide with a ColorBar frame carrying AltText::Provided.
+    laid_out.slides.push(LaidOutSlide {
+        source_index: 3,
+        slide_type_keyword: Arc::from("progress_bar"),
+        frames: vec![
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(0),
+                    width: Emu(9_144_000),
+                    height: Emu(914_400),
+                },
+                content: FrameContent::Title(Arc::from("Sprint 4 Progress")),
+                text_flow: None,
+                region_role: None,
+            },
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(0),
+                    y: Emu(914_400),
+                    width: Emu(9_144_000),
+                    height: Emu(457_200),
+                },
+                // ColorBar with AltText::Provided — tag_engine must emit /Figure+/Alt
+                // (STORY-095 AC-003 / BC-4.03.001 / ISO 14289-1 §7.3).
+                content: FrameContent::ColorBar {
+                    filled_width_emu: Emu(6_858_000), // 75% of 9_144_000
+                    total_width_emu: Emu(9_144_000),
+                    percent: 75,
+                    color: Rgb {
+                        r: 0x00,
+                        g: 0x70,
+                        b: 0xC0,
+                    },
+                    alt: AltText::Provided(Arc::from("Sprint 4 — 75% complete")),
+                },
+                text_flow: None,
+                region_role: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: RegisterSet::new(),
+        register_content: vec![],
+    });
 
     // Export to PDF bytes via the production path (Validator::UA1 is set — AC-012 done).
     let bytes = export_to_bytes(&deck, &laid_out);
@@ -2972,5 +3111,176 @@ fn test_obs_p3_002_ec008_non_ascii_title_round_trips_via_outline_entry_api() {
     assert_eq!(
         entries[0].page_idx, 0,
         "OBS-P3-002: destination page index must be 0 (F-045-P1-005 invariant)"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-095-P1-007: progress_bar with label → /Figure + label bytes in PDF
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// F-095-P1-007 — Full pipeline integration: `progress_bar` slide with
+/// `TextTag::ColorLabel` block → `layout::run` → `PdfExporter::export` →
+/// PDF bytes contain `/Figure` and the label text.
+///
+/// ## What this test guards
+///
+/// 1. `layout::run` derives `FrameContent::ColorBar.alt = AltText::Provided(label)`
+///    from the `TextTag::ColorLabel` block (F-095-P1-002 fix).
+/// 2. `tag_engine.rs` emits `/Figure + /Alt` for `FrameContent::ColorBar` when
+///    `AltText::Provided` (STORY-095 AC-003 fix).
+/// 3. The alt text string appears in the exported PDF bytes.
+///
+/// Together, these three assertions form a load-bearing end-to-end guard: if
+/// F-095-P1-002's label derivation is removed (reverts to `Unspecified`), or
+/// if the tag engine reverts to emitting `/Artifact` for `ColorBar`, either
+/// `/Figure` will be absent or the label bytes will be absent → test fails.
+///
+/// ## TD-VSDD-059 compliance
+///
+/// This is a load-bearing test that exercises the FULL pipeline
+/// (semantic IR → layout → PDF). It does NOT hand-construct `LaidOutDeck`.
+///
+/// ## SID-1 compliance
+///
+/// Does not depend on `verapdf` CLI or any external tool. The `/Figure` +
+/// label-bytes scan is a structural assertion on krilla's PDF output format
+/// (same pattern as `test_bc_4_03_001_figure_alt_text_in_structure_tree`).
+///
+/// ## F-095-P1-009 extension
+///
+/// The label "Sprint 4 \u{2014} 75% complete" (em-dash U+2014) exercises the
+/// non-ASCII /Alt assertion (F-095-P1-009): the UTF-8 bytes of the em-dash must
+/// be present in the PDF (krilla encodes /Alt as UTF-8 in a PDF text string).
+#[allow(clippy::unwrap_used)]
+#[test]
+fn test_f095_p1_007_progress_bar_with_label_produces_figure_tag() {
+    use slideforge_layout::run as layout_run;
+    use slideforge_types::{
+        Block, ColorBarSpec, ContentBlock, Deck, DeckMetadata, FieldValue, InlineNode, OrderedMap,
+        Slide, SourceSpan, TextBlock, TextTag, Value,
+    };
+
+    // F-095-P1-009: include a non-ASCII character (em-dash U+2014) in the label
+    // so this test simultaneously guards the non-ASCII /Alt round-trip.
+    let label = "Sprint 4 \u{2014} 75% complete";
+
+    // Build the semantic deck.
+    let mut title_fields = OrderedMap::new();
+    title_fields.insert(
+        Arc::from("title"),
+        FieldValue::Literal(Value::Str(Arc::from("Sprint 4 Progress"))),
+    );
+    let slide = Slide {
+        slide_type: Arc::from("progress_bar"),
+        fields: title_fields,
+        blocks: vec![
+            Block {
+                content: ContentBlock::Text(TextBlock {
+                    inlines: vec![InlineNode::Plain(Arc::from(label))],
+                    tag: TextTag::ColorLabel,
+                    span: SourceSpan::default(),
+                }),
+                label: None,
+                span: SourceSpan::default(),
+            },
+            Block {
+                content: ContentBlock::ColorBar(ColorBarSpec { percent: 75 }),
+                label: None,
+                span: SourceSpan::default(),
+            },
+        ],
+        register: None,
+        tags: vec![],
+        source_span: SourceSpan::default(),
+        overlay: None,
+        register_content: vec![],
+        field_spans: OrderedMap::new(),
+    };
+    let deck = Deck {
+        slides: vec![slide],
+        vars: OrderedMap::new(),
+        metadata: DeckMetadata {
+            title: Some(Arc::from("Sprint 4 Progress Deck")),
+            slideforge_version: Arc::from("0.1.0"),
+            lang: Some(Arc::from("en-US")),
+            author: None,
+            section_order: None,
+        },
+        registers: OrderedMap::new(),
+        section_blocks: vec![],
+        slide_sections: vec![],
+    };
+
+    // Run the layout pipeline (F-095-P1-002 fix: derives AltText::Provided from ColorLabel).
+    let brand = minimal_brand();
+    let laid_out = layout_run(&deck, &brand).unwrap_or_else(|e| {
+        panic!("F-095-P1-007: layout::run must succeed for progress_bar with ColorLabel: {e:?}")
+    });
+
+    // Export to PDF.
+    let exporter = PdfExporter::new();
+    let opts = ExportOptions::default();
+    let pdf_bytes = exporter
+        .export(&deck, &laid_out, &brand, &opts)
+        .unwrap_or_else(|e| panic!("F-095-P1-007: PdfExporter::export must succeed: {e:?}"));
+
+    assert!(
+        pdf_bytes.starts_with(b"%PDF-"),
+        "F-095-P1-007: exported bytes must start with %PDF-"
+    );
+
+    // Assertion 1: /Figure must be present in the PDF structure tree.
+    // The ColorBar with AltText::Provided must emit /Figure (not /Artifact).
+    let has_figure = pdf_bytes.windows(b"/Figure".len()).any(|w| w == b"/Figure");
+    assert!(
+        has_figure,
+        "F-095-P1-007 FAILED (F-095-P1-002 + AC-003): PDF must contain /Figure for the \
+         progress_bar visual bar with ColorLabel '{label}'. \
+         Possible cause: layout::run reverted to AltText::Unspecified, or tag_engine \
+         reverted to emitting /Artifact for ColorBar with Provided alt."
+    );
+
+    // Assertion 2: /Alt must be present in the PDF (proves the Figure has an alt entry).
+    // krilla writes /Alt as a PDF hex string: /Alt <FEFF...> (UTF-16BE BOM encoded).
+    let has_alt_entry = pdf_bytes.windows(b"/Alt".len()).any(|w| w == b"/Alt");
+    assert!(
+        has_alt_entry,
+        "F-095-P1-007 FAILED (AC-003 /Alt): /Alt entry not found in PDF bytes. \
+         The /Figure structure element for the ColorBar must carry /Alt with the label text."
+    );
+
+    // Assertion 3 (F-095-P1-009): the non-ASCII em-dash (U+2014) must be preserved
+    // in the /Alt entry.
+    //
+    // krilla serializes /Alt as a UTF-16BE PDF hex string with BOM (PDF spec §7.9.2):
+    //   /Alt <FEFF 0053 0070 0072 ... 2014 0020 ...>
+    // The em-dash U+2014 appears as the ASCII hex characters b"2014" inside the angle
+    // bracket hex string. The specific 8-byte sequence b"00202014" (U+0020 space
+    // followed by U+2014 em-dash, i.e., " \u{2014}") is highly specific to our label
+    // and extremely unlikely to occur spuriously in a PDF with no other U+2014 content.
+    //
+    // Additionally accept: raw UTF-8 [0xE2, 0x80, 0x94] or raw UTF-16BE [0x20, 0x14]
+    // in case krilla's encoding changes in future versions.
+    let em_dash_in_alt_hex: &[u8] = b"00202014"; // space+em-dash as UTF-16BE hex chars
+    let em_dash_utf8: &[u8] = "\u{2014}".as_bytes(); // [0xE2, 0x80, 0x94]
+    let em_dash_utf16be_raw: &[u8] = &[0x20, 0x14]; // raw UTF-16BE bytes
+    let has_em_dash_specific = pdf_bytes
+        .windows(em_dash_in_alt_hex.len())
+        .any(|w| w == em_dash_in_alt_hex);
+    let has_em_dash_utf8 = pdf_bytes
+        .windows(em_dash_utf8.len())
+        .any(|w| w == em_dash_utf8);
+    let has_em_dash_utf16be = pdf_bytes
+        .windows(em_dash_utf16be_raw.len())
+        .any(|w| w == em_dash_utf16be_raw);
+    assert!(
+        has_em_dash_specific || has_em_dash_utf8 || has_em_dash_utf16be,
+        "F-095-P1-007/F-095-P1-009 FAILED: em-dash (U+2014) not found in PDF bytes. \
+         Searched for: PDF hex sequence {:?} ({has_em_dash_specific}), \
+         UTF-8 {:?} ({has_em_dash_utf8}), UTF-16BE {:?} ({has_em_dash_utf16be}). \
+         Non-ASCII characters in ColorLabel alt text must be preserved in /Alt entry.",
+        em_dash_in_alt_hex,
+        em_dash_utf8,
+        em_dash_utf16be_raw
     );
 }

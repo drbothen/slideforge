@@ -75,7 +75,7 @@ use slideforge_types::{Brand, Deck, InlineNode};
 
 use crate::coords::emu_to_pt;
 use crate::error::PdfExportError;
-use crate::font::{ResolvedFontSet, measure_text_width_pt, resolve_font_set};
+use crate::font::{ResolvedFace, ResolvedFontSet, measure_text_width_pt, resolve_font_set};
 use crate::outline::{build_krilla_outline, build_outline_entries};
 use crate::slide_pdf::{FontFaceKind, KrillaTextSpan, slide_to_krilla_runs};
 use crate::svg_embed::embed_normalized_svg;
@@ -773,13 +773,17 @@ fn draw_frame(
                     draw_inline_spans(surface, &spans, bbox, font_set, 36.0);
                 }
             } else {
-                let regular_font = font_set.regular.as_ref().map(|f| &f.font);
-                draw_text_at_bbox(surface, text.as_ref(), bbox, 36.0, regular_font);
+                draw_text_at_bbox(
+                    surface,
+                    text.as_ref(),
+                    bbox,
+                    36.0,
+                    font_set.regular.as_ref(),
+                );
             }
         },
         FrameContent::Subtitle(text) => {
-            let regular_font = font_set.regular.as_ref().map(|f| &f.font);
-            draw_text_at_bbox(surface, text, bbox, 28.0, regular_font);
+            draw_text_at_bbox(surface, text, bbox, 28.0, font_set.regular.as_ref());
         },
         // STORY-081 AC-004: SubtitleInlines carries rich inline structure.
         // Render each span with font-face dispatch via slide_to_krilla_runs +
@@ -853,13 +857,21 @@ fn draw_frame(
 
         // ColorBar — PDF filled rectangle (BC-1.17.002 PC-9).
         //
-        // The bar frame is tagged as a PDF Artifact by `tag_engine.rs`
-        // (pushed into `decorative_frame_indices`). At the call-site in the
-        // draw loop, Artifact frames are wrapped with
-        // `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`),
-        // which suppresses the bar from the PDF logical structure tree.
-        // WCAG accessibility co-encoding is satisfied by the adjacent
-        // ColorLabel (Body-role) text frame that renders the percentage label.
+        // Tagging (F-095-P1-002 / STORY-095 AC-003): `tag_engine.rs` dispatches
+        // on the `alt` field at tagging time (before this draw call):
+        //   - AltText::Provided(label): tagged as /Figure with /Alt = label.
+        //   - AltText::Decorative | AltText::Unspecified: pushed to Artifact.
+        //
+        // The DRAW PASS is ALWAYS the same (filled rectangle) regardless of the
+        // alt value. Tagging wraps the content stream region produced by this draw.
+        // When tagged as /Figure, the draw loop's start_tagged(ContentTag::Other)
+        // links this content to the Figure structure element in the tag tree.
+        // When tagged as Artifact, `ContentTag::Artifact(ArtifactType::Other)`
+        // suppresses the rectangle from the logical structure tree.
+        //
+        // WCAG co-encoding: when AltText::Unspecified/Decorative (no label was
+        // provided by the author), the adjacent ColorLabel (Body-role) text frame
+        // still co-encodes the percentage in text for assistive technology.
         //
         // Drawing: uses krilla's PathBuilder to build a rectangle path at the
         // filled sub-width, then sets the brand fill color and calls
@@ -895,11 +907,21 @@ fn draw_frame(
 ///
 /// ## Tagging contract
 ///
-/// The bar is tagged as a PDF Artifact by `tag_engine.rs` (pushed into
-/// `decorative_frame_indices`). The call-site in the draw loop wraps Artifact
-/// frames with `ContentTag::Artifact(ArtifactType::Other)` (`/Artifact BMC … EMC`).
-/// WCAG accessibility co-encoding is provided by the adjacent `ColorLabel`
-/// (Body-role) text frame that renders the percentage label.
+/// `tag_engine.rs` dispatches on the `ColorBar` `alt` field before this draw
+/// function is called. Two outcomes are possible:
+///
+/// - **`AltText::Provided(label)`** — the bar is placed in the structure tree
+///   as `/Figure` with `/Alt = label` (pushed into `frame_child_part_indices`,
+///   drawn under `ContentTag::Other`). The draw loop opens a
+///   `start_tagged(ContentTag::Other)` region that links the rectangle to the
+///   Figure structure element (STORY-095 AC-003 / BC-4.03.001).
+///
+/// - **`AltText::Decorative` or `AltText::Unspecified`** — the bar is excluded
+///   from the structure tree (pushed into `decorative_frame_indices`). The draw
+///   loop wraps the rectangle with `ContentTag::Artifact(ArtifactType::Other)`
+///   (`/Artifact BMC … EMC`), suppressing it from assistive technology (EC-003).
+///   WCAG co-encoding is provided by the adjacent `ColorLabel` (Body-role) text
+///   frame that renders the percentage label in text.
 ///
 /// ## Coordinate policy
 ///
@@ -909,8 +931,9 @@ fn draw_frame(
 ///
 /// ## No-op on empty bar
 ///
-/// When `filled_width_emu.0 == 0` the bar is zero-width; no path is emitted.
-/// This is correct behavior (0% progress = nothing to draw).
+/// When `filled_width_emu.0 <= 0` (zero or negative) the bar is degenerate;
+/// no path is emitted. Emu is `i64`, so negative values are representable and
+/// treated identically to zero (0% progress = nothing to draw).
 fn draw_color_bar_rect(
     surface: &mut krilla::surface::Surface<'_>,
     bbox: &BoundingBox,
@@ -1111,9 +1134,25 @@ fn text_fill_black() -> Fill {
 
 /// Draw text at a bounding box position using krilla Surface (top-left, Y-down) coordinates.
 ///
-/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `font`
+/// Uses [`text_baseline_surface_y`] to compute the baseline position. If `face`
 /// is `None`, logs a debug warning and skips drawing. This is the correct
 /// non-fatal behavior when a brand font is unavailable.
+///
+/// ## Word-wrap (STORY-095 T-006 / AC-001, AC-002)
+///
+/// When `face` is `Some`, the text is wrapped to lines that fit within the frame
+/// width using [`crate::text_layout::wrap_text`]. Each wrapped line is drawn at an
+/// incrementally advanced baseline, using `font_size * BODY_LINE_LEADING` as the
+/// line advance.
+///
+/// When `face` is `None`, the function returns without drawing — we cannot measure
+/// widths without font metrics, and non-fatal degradation is the correct behaviour.
+///
+/// ## Frame-bottom clamp (F-095-P1-005 / BC-4.03.002)
+///
+/// Wrapped lines that overflow the frame height (baseline > frame bottom) are
+/// silently elided.  A `tracing::warn!` is emitted once per invocation when
+/// overflow occurs, with `frame_bottom_pt` and `baseline_y` as structured fields.
 ///
 /// ## Paint-state determinism (OBS-044-22-01 fix)
 ///
@@ -1126,9 +1165,9 @@ fn draw_text_at_bbox(
     text: &str,
     bbox: &BoundingBox,
     font_size: f32,
-    font: Option<&krilla::text::Font>,
+    face: Option<&ResolvedFace>,
 ) {
-    let Some(font) = font else {
+    let Some(face) = face else {
         // Use char-safe truncation to avoid byte-boundary panics on multi-byte
         // UTF-8 text (F-044-001: `&text[..text.len().min(20)]` would panic when
         // the 20th byte is mid-codepoint; `chars().take(20)` is always safe).
@@ -1140,6 +1179,25 @@ fn draw_text_at_bbox(
         return;
     };
     if text.is_empty() {
+        return;
+    }
+
+    // STORY-095 T-006: wrap text to the frame width before drawing.
+    //
+    // Build FontMetrics from the resolved face so that wrap_text uses the SAME
+    // font file and face_index as the draw path. The mock_char_width_pts override
+    // is None in production (Some only in unit-test / Kani paths via text_layout tests).
+    let metrics = crate::text_layout::FontMetrics {
+        font_bytes: &face.raw,
+        face_index: face.face_index,
+        font_size_pts: f64::from(font_size),
+        mock_char_width_pts: None,
+        mock_space_width_pts: None, // production path: real font metrics used for all chars
+    };
+    let max_width_pts = f64::from(emu_to_pt(bbox.width));
+    let lines = crate::text_layout::wrap_text(text, max_width_pts, &metrics);
+
+    if lines.is_empty() {
         return;
     }
 
@@ -1156,17 +1214,36 @@ fn draw_text_at_bbox(
 
     // Surface Y baseline: 80% of box height down from the box top edge.
     // No ir_y_to_pdf_y — krilla handles the PDF Y-flip internally (DIR-044-001).
-    let baseline_y = text_baseline_surface_y(bbox);
+    let mut baseline_y = text_baseline_surface_y(bbox);
 
-    let start = Point::from_xy(surface_x, baseline_y);
-    surface.draw_text(
-        start,
-        font.clone(),
-        font_size,
-        text,
-        false,
-        TextDirection::Auto,
-    );
+    // F-095-P1-005: compute frame bottom to clamp overflow lines.
+    // In krilla's top-left Y-down coordinate system the frame bottom is the
+    // top-edge Y plus the frame height.  Lines whose baseline exceeds this
+    // are emitted off-slide (incorrect) and elided with a structured warning.
+    let frame_bottom_pt = emu_to_pt(bbox.y) + emu_to_pt(bbox.height);
+
+    for line in &lines {
+        // F-095-P1-005: clamp — elide lines that overflow the frame height.
+        if baseline_y > frame_bottom_pt {
+            tracing::warn!(
+                frame_bottom_pt,
+                baseline_y,
+                "draw_text_at_bbox: baseline exceeds frame bottom; \
+                 eliding overflow wrapped lines (F-095-P1-005)"
+            );
+            break;
+        }
+        let start = Point::from_xy(surface_x, baseline_y);
+        surface.draw_text(
+            start,
+            face.font.clone(),
+            font_size,
+            line,
+            false,
+            TextDirection::Auto,
+        );
+        baseline_y += font_size * BODY_LINE_LEADING;
+    }
 }
 
 /// Compute the effective (rendered) font size for a span.
@@ -1223,7 +1300,7 @@ pub fn adjusted_baseline_y(span: &KrillaTextSpan, baseline_y: f32, base_font_siz
 ///
 /// This is the SINGLE authoritative slot-selection function called by BOTH the
 /// measurement path ([`compute_multi_span_x_positions`]) and the draw path
-/// ([`font_for_span`]).  Because both paths call this one function, it is
+/// (`draw_packed_line`).  Because both paths call this one function, it is
 /// **structurally impossible** for measurement and drawing to select different
 /// font slots for the same span kind — eliminating the recurring
 /// measure≠draw divergence (ADV-P06-MED-001 fix).
@@ -1272,7 +1349,7 @@ fn face_for_span_kind(
 /// that the draw path uses — making width-measurement and glyph-drawing
 /// structurally guaranteed to agree.
 ///
-/// Both this function and the draw path (`font_for_span`) delegate slot
+/// Both this function and the draw path (`draw_packed_line`) delegate slot
 /// selection to the single shared `face_for_span_kind` helper.  This makes it
 /// **structurally impossible** for the two paths to select different slots for the
 /// same `FontFaceKind` (ADV-P06-MED-001 fix).
@@ -1326,7 +1403,7 @@ pub fn compute_multi_span_x_positions(
 
         // Delegate slot selection to the single shared face_for_span_kind helper
         // (ADV-P06-MED-001 fix): guarantees identical slot selection between the
-        // measure path (here) and the draw path (font_for_span).
+        // measure path (here) and the draw path (draw_packed_line).
         let resolved_face_opt = face_for_span_kind(span.face, font_set);
 
         let effective_size = effective_span_font_size(span, font_size);
@@ -1343,37 +1420,6 @@ pub fn compute_multi_span_x_positions(
         // If no face at all: cursor stays (graceful degradation; span gets 0 width).
     }
     positions
-}
-
-/// Select the `krilla::text::Font` for a [`KrillaTextSpan`] from a
-/// [`ResolvedFontSet`], applying the fallback chain from ADR-023.
-///
-/// Delegates slot selection to the single shared [`face_for_span_kind`] helper
-/// and extracts the `font` field.  Because both the measurement path
-/// ([`compute_multi_span_x_positions`]) and this draw path call the SAME
-/// [`face_for_span_kind`] function, the measured face and the drawn face are
-/// **structurally guaranteed to agree** for every `FontFaceKind` variant
-/// (ADV-P06-MED-001 fix; extends the ADV-P05-MED-001 `raw`/`face_index` unification).
-///
-/// ## Dispatch table (via [`face_for_span_kind`])
-///
-/// | `FontFaceKind` | Face selected |
-/// |---|---|
-/// | `Regular` | `font_set.regular` |
-/// | `Bold` | `font_set.bold` → fallback to `font_set.regular` |
-/// | `Italic` | `font_set.italic` → fallback to `font_set.regular` |
-/// | `BoldItalic` | `font_set.bold` → `font_set.italic` → `font_set.regular` |
-/// | `Mono` | `font_set.mono` → fallback to `font_set.regular` |
-///
-/// The fallback is silent at this call site (the warn was emitted by
-/// `resolve_font_set` when the styled face was not found).
-fn font_for_span<'a>(
-    span: &KrillaTextSpan,
-    font_set: &'a ResolvedFontSet,
-) -> Option<&'a krilla::text::Font> {
-    // Delegate to the shared slot-selection helper so this draw path and the
-    // measure path in compute_multi_span_x_positions always select the same face.
-    face_for_span_kind(span.face, font_set).map(|f| &f.font)
 }
 
 /// Draw a sequence of [`KrillaTextSpan`]s at a bounding-box baseline position,
@@ -1402,7 +1448,446 @@ fn draw_inline_spans(
     draw_inline_spans_at_y(surface, spans, bbox, baseline_y, font_size, font_set);
 }
 
-/// Draw a sequence of [`KrillaTextSpan`]s at an explicit `baseline_y`.
+/// A single word extracted from a [`KrillaTextSpan`], retaining its font face
+/// and super/subscript offset signal.
+///
+/// Produced by [`expand_spans_to_words`] for the line-packing step in
+/// [`draw_inline_spans_at_y`]. Each `SpanWord` represents one whitespace-delimited
+/// token from a span; together they reconstruct the full text with per-word font
+/// face dispatch.
+///
+/// ## Why `String` and not `Arc<str>`?
+///
+/// The words are transient line-packing artifacts — they are never stored long-
+/// term and do not need reference-counted heap allocation.  Using `String` here
+/// is idiomatic and avoids a spurious `Arc` bump per word.
+///
+/// ## `is_continuation` — measure/draw symmetry (F-095-P4-001)
+///
+/// When an over-wide word is char-split by [`char_split_span_word`], every
+/// fragment after the first carries `is_continuation = true`.  This flag is
+/// the ONLY authoritative signal that a `SpanWord` on a packed line has no
+/// preceding word boundary: both [`pack_words_into_lines`] (measurement) and
+/// [`draw_packed_line`] (drawing) check it and suppress the inter-word space
+/// advance — keeping measure == draw exactly and preventing interior-word space
+/// corruption.
+#[derive(Debug, Clone)]
+struct SpanWord {
+    /// Font face kind for this word (inherits from the parent span).
+    face: FontFaceKind,
+    /// The text of this word (one whitespace-delimited token).
+    text: String,
+    /// Superscript/Subscript signal (non-zero iff the parent span is super/sub).
+    y_offset_units: i32,
+    /// `true` iff this word is a char-split continuation fragment of a preceding
+    /// fragment from the same source word.  When `true`, neither the packer nor
+    /// the draw loop may insert an inter-word space before this token.
+    ///
+    /// Set to `false` for every word produced by [`expand_spans_to_words`] (real
+    /// word boundaries) and for the FIRST fragment from [`char_split_span_word`].
+    /// Set to `true` for every subsequent fragment from [`char_split_span_word`].
+    is_continuation: bool,
+}
+
+/// Expand a slice of [`KrillaTextSpan`]s into individual words with their
+/// associated font face kind.
+///
+/// Splits each span's text on whitespace (consuming the whitespace, which is
+/// correct since line-packing re-adds inter-word space in the horizontal cursor).
+/// The font face and super/subscript signal from the parent span are inherited
+/// by every word extracted from that span.
+///
+/// Empty tokens (consecutive whitespace in the source) are discarded.
+///
+/// ## Why `face` and `y_offset_units` but not `text` from `KrillaTextSpan`?
+///
+/// The `text` of a `KrillaTextSpan` may contain multiple words (e.g., a bold
+/// span wrapping `"word1 word2 word3"`). Splitting on whitespace is necessary
+/// for word-boundary wrapping. The `face` and `y_offset_units` fields are
+/// span-wide attributes — they apply identically to every word in the span.
+fn expand_spans_to_words(spans: &[KrillaTextSpan]) -> Vec<SpanWord> {
+    let mut words = Vec::new();
+    for span in spans {
+        for token in span.text.split_whitespace() {
+            if !token.is_empty() {
+                words.push(SpanWord {
+                    face: span.face,
+                    text: token.to_owned(),
+                    y_offset_units: span.y_offset_units,
+                    // Words from real whitespace boundaries are never continuations.
+                    is_continuation: false,
+                });
+            }
+        }
+    }
+    words
+}
+
+/// Measure the rendered width of a single word in PDF points using the
+/// face from `font_set` that corresponds to `face_kind`.
+///
+/// Returns `0.0` when the face is absent (graceful degradation — consistent
+/// with [`compute_multi_span_x_positions`]'s zero-advance path).
+fn measure_word_width_pt(
+    word: &str,
+    face_kind: FontFaceKind,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    face_for_span_kind(face_kind, font_set).map_or(0.0, |face| {
+        measure_text_width_pt(face.raw.as_ref(), face.face_index, font_size, word)
+    })
+}
+
+/// Measure the rendered width of an inter-word space in PDF points using the
+/// face from `font_set` that corresponds to `face_kind`.
+///
+/// Used by the line-packing step to correctly account for the horizontal space
+/// between adjacent words — critical for accurate line-width measurement.
+///
+/// Returns the width of a single ASCII space character " " for the given face.
+#[allow(clippy::inline_always)]
+#[inline(always)]
+fn measure_space_width_pt(
+    face_kind: FontFaceKind,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    measure_word_width_pt(" ", face_kind, font_size, font_set)
+}
+
+/// Determine the inter-word space to insert **before** `word` in a packed line.
+///
+/// ## Symmetry guarantee (F-095-P5-001 / F-095-P5-002)
+///
+/// This is the SINGLE source of truth for the "should a space precede this word?"
+/// decision.  Both [`pack_words_into_lines`] (measurement) and [`draw_packed_line`]
+/// (drawing) call this function — making it **structurally impossible** for the two
+/// paths to disagree about whether a space appears before any given word.
+///
+/// ## Rules
+///
+/// * `prev_face` is `None` iff the word is the first item on its line — no space.
+/// * `word.is_continuation == true` — this word is a char-split fragment of the
+///   preceding fragment; no word boundary exists between them — no space.
+/// * Otherwise — a real inter-word boundary — measure a space using `prev_face`.
+///
+/// ## Why `prev_face` not the word's own face?
+///
+/// Convention: inter-word space is measured from the PRECEDING word's face.  This is
+/// consistent with the pre-existing packer and draw logic (see commit history for
+/// rationale; TL;DR — the dominant adjacent face controls kerning in most renderers).
+fn space_before_word(
+    word: &SpanWord,
+    prev_face: Option<FontFaceKind>,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> f32 {
+    match prev_face {
+        // First item on the line — no preceding space.
+        None => 0.0,
+        // Char-split continuation — no word boundary exists here.
+        Some(_) if word.is_continuation => 0.0,
+        // Real inter-word boundary — measure using the preceding face.
+        Some(face) => measure_space_width_pt(face, font_size, font_set),
+    }
+}
+
+/// Pack [`SpanWord`]s greedily into lines that fit within `max_line_width_pt`.
+///
+/// Returns `Vec<Vec<SpanWord>>` — each inner `Vec` is one line's word sequence,
+/// ordered left-to-right as they should be drawn.
+///
+/// ## Algorithm (F-095-P1-001 fix + F-095-P2-001 fix — VP-054 analogue for multi-face text)
+///
+/// Maintains a running `cursor_x` for the current line. For each word:
+/// - Measure the word width using the word's face kind (preserving bold/italic
+///   metrics — they differ from regular face metrics).
+/// - If the word fits (`cursor_x + space + word_width ≤ max_line_width_pt`):
+///   append to the current line and advance cursor.
+/// - If the word does NOT fit but is itself narrower than the frame:
+///   flush the current line, start a new one with this word.
+/// - If the word is itself wider than `max_line_width_pt` (AC-002/REND-002):
+///   apply the character-wrap fallback (see below).
+///
+/// ## Character-wrap fallback (AC-002 / F-095-P2-001)
+///
+/// When a single word is wider than `max_line_width_pt`, it is split at character
+/// boundaries into the longest fragments that fit within the frame.  Each fragment
+/// inherits the original word's `FontFaceKind` (e.g., a bold word's fragments are
+/// all bold) and `y_offset_units` (super/subscript signal is preserved).
+///
+/// Termination guarantee: if even a single character does not fit within the frame
+/// (i.e., the frame is narrower than one character's advance), that character is
+/// emitted as a single-character fragment to prevent an infinite loop and to ensure
+/// no text is silently dropped (VP-054 sub-property a: lossless wrapping).
+///
+/// This mirrors the `wrap_text` phase-2 logic in `text_layout.rs`, extending it to
+/// the multi-face path.  A shared pure helper (`char_split_span_word`) extracts
+/// the character-splitting logic so both paths benefit from the same implementation.
+///
+/// ## Space handling (F-095-P5-001 / F-095-P5-002)
+///
+/// Inter-word space decisions are delegated to [`space_before_word`] — the same
+/// helper used by [`draw_packed_line`].  This structural sharing makes it
+/// **provably impossible** for measurement and drawing to disagree about space
+/// insertion for any word, including the first fragment of a char-split over-wide
+/// word that lands on a non-empty line (the specific bug closed by F-095-P5-001).
+fn pack_words_into_lines(
+    words: &[SpanWord],
+    max_line_width_pt: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> Vec<Vec<SpanWord>> {
+    let mut lines: Vec<Vec<SpanWord>> = Vec::new();
+    let mut current_line: Vec<SpanWord> = Vec::new();
+    let mut cursor_x: f32 = 0.0;
+
+    for word in words {
+        let word_w = measure_word_width_pt(&word.text, word.face, font_size, font_set);
+
+        // ── AC-002 / F-095-P2-001: character-wrap fallback for over-wide words ──
+        //
+        // When a word is wider than the entire frame, split it at character
+        // boundaries.  Each character-level fragment inherits the source word's
+        // `face` and `y_offset_units` so that bold/italic/super/subscript signals
+        // are preserved across the split (F-095-P2-001 requirement).
+        if word_w > max_line_width_pt {
+            // Produce char-split fragments from the source word.
+            let fragments = char_split_span_word(word, max_line_width_pt, font_size, font_set);
+
+            for fragment in fragments {
+                let frag_w =
+                    measure_word_width_pt(&fragment.text, fragment.face, font_size, font_set);
+                // Use the shared space_before_word helper so packer and draw are
+                // structurally guaranteed to agree (F-095-P5-001 / F-095-P5-002).
+                // For frag0 (is_continuation=false) on a non-empty line this returns
+                // a real inter-word space width; for continuation fragments it returns
+                // 0.0 — matching what draw_packed_line will insert.
+                let prev_face = current_line.last().map(|w| w.face);
+                let space_before = space_before_word(&fragment, prev_face, font_size, font_set);
+
+                if current_line.is_empty() {
+                    // First item on this line — start directly with the fragment.
+                    // space_before_word returns 0.0 when prev_face is None, so no
+                    // space is needed here; cursor_x is set from scratch.
+                    cursor_x = frag_w;
+                    current_line.push(fragment);
+                } else if cursor_x + space_before + frag_w <= max_line_width_pt {
+                    // Fragment fits on the current line (accounting for any inter-word
+                    // space before frag0 that draw_packed_line will also insert).
+                    cursor_x += space_before + frag_w;
+                    current_line.push(fragment);
+                } else {
+                    // Fragment doesn't fit on current line — flush and start new.
+                    lines.push(std::mem::take(&mut current_line));
+                    cursor_x = frag_w; // frag0 of the new line — no preceding space.
+                    current_line.push(fragment);
+                }
+            }
+            continue; // Move to next source word.
+        }
+
+        // ── Normal word packing (AC-001) ────────────────────────────────────────
+        //
+        // Use the shared space_before_word helper (F-095-P5-002) so packer and
+        // draw are structurally guaranteed to agree on space insertion.
+
+        let prev_face = current_line.last().map(|w| w.face);
+        let space_w = space_before_word(word, prev_face, font_size, font_set);
+
+        if current_line.is_empty() {
+            // First word on this line.
+            current_line.push(word.clone());
+            cursor_x = word_w;
+        } else if cursor_x + space_w + word_w <= max_line_width_pt {
+            // Fits on current line.
+            current_line.push(word.clone());
+            cursor_x += space_w + word_w;
+        } else {
+            // Overflow: flush current line, start new line with this word.
+            lines.push(std::mem::take(&mut current_line));
+            current_line.push(word.clone());
+            cursor_x = word_w;
+        }
+    }
+
+    // Flush the last line (if any).
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    lines
+}
+
+/// Split a single over-wide [`SpanWord`] into character-level fragments that
+/// each fit within `max_line_width_pt`.
+///
+/// ## Purpose (shared helper — F-095-P2-001)
+///
+/// This is a pure helper factored out from [`pack_words_into_lines`] so the
+/// character-splitting logic lives in one place and is independently testable.
+/// It mirrors the phase-2 character-wrap in `text_layout::wrap_text` but
+/// operates on multi-face `SpanWord` tokens instead of plain `String` slices.
+///
+/// ## Face and offset preservation
+///
+/// Each output fragment inherits `face` and `y_offset_units` from the source
+/// `SpanWord`.  A bold, italic, or super/subscript word's fragments must all
+/// retain the same typographic signal — losing it on continuation fragments
+/// would cause a visual regression (bold fragments rendered in regular weight).
+///
+/// ## Termination guarantee (VP-054 sub-property a)
+///
+/// If even a single character is wider than `max_line_width_pt` (extremely narrow
+/// frame), that character is emitted as a one-character fragment.  This guarantees
+/// the loop terminates and no text is silently dropped.
+fn char_split_span_word(
+    word: &SpanWord,
+    max_line_width_pt: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) -> Vec<SpanWord> {
+    let mut fragments: Vec<SpanWord> = Vec::new();
+    let mut remaining: &str = &word.text;
+
+    while !remaining.is_empty() {
+        // Find the longest character prefix of `remaining` that fits.
+        let mut fragment_end_byte: usize = 0;
+        let mut frag_width: f32 = 0.0;
+
+        for ch in remaining.chars() {
+            let mut buf = [0u8; 4];
+            let ch_str = ch.encode_utf8(&mut buf);
+            let ch_w = measure_word_width_pt(ch_str, word.face, font_size, font_set);
+            if frag_width + ch_w > max_line_width_pt && fragment_end_byte > 0 {
+                // Adding this character would overflow — stop here.
+                break;
+            }
+            frag_width += ch_w;
+            fragment_end_byte += ch.len_utf8();
+        }
+
+        // Safety: if even a single character does not fit (max_line_width_pt is
+        // smaller than one char's advance), emit it anyway to guarantee termination
+        // and ensure no text is silently dropped (VP-054 sub-property a / AC-002).
+        if fragment_end_byte == 0 {
+            fragment_end_byte = remaining.chars().next().map_or(0, char::len_utf8);
+        }
+
+        // Guard: if fragment_end_byte is still 0 after the fallback (empty string
+        // edge case — should never occur since we checked `!remaining.is_empty()`
+        // at the top of the loop), break to guarantee termination.
+        if fragment_end_byte == 0 {
+            break;
+        }
+
+        let (fragment_text, rest) = remaining.split_at(fragment_end_byte);
+        remaining = rest;
+
+        // The first fragment of a char-split word sits at a real word boundary
+        // (or the start of the line) — no continuation marker.  Every subsequent
+        // fragment is a continuation: it must not have an inter-word space
+        // prepended by `draw_packed_line` (F-095-P4-001 measure/draw symmetry).
+        let is_continuation = !fragments.is_empty();
+        fragments.push(SpanWord {
+            face: word.face,
+            text: fragment_text.to_owned(),
+            y_offset_units: word.y_offset_units,
+            is_continuation,
+        });
+    }
+
+    fragments
+}
+
+/// Draw one packed line of [`SpanWord`]s at a given baseline Y.
+///
+/// Advances `cursor_x` after each word using [`space_before_word`] to determine
+/// whether an inter-word space precedes the current word — the SAME shared helper
+/// used by [`pack_words_into_lines`].  This structural sharing guarantees that
+/// drawn advance == packed `cursor_x` for every word on every line
+/// (F-095-P5-001 / F-095-P5-002 measure/draw symmetry).
+///
+/// Each word is drawn with the appropriate `krilla::text::Font` from `font_set`
+/// via [`face_for_span_kind`] — preserving bold/italic dispatch across all words
+/// on the line (F-095-P1-001: bold run split across lines keeps bold on both).
+///
+/// Super/subscript signals from [`SpanWord::y_offset_units`] are respected:
+/// reduced font size via [`effective_span_font_size`] and shifted baseline via
+/// [`adjusted_baseline_y`], both computed against the parent `font_size`.
+fn draw_packed_line(
+    surface: &mut krilla::surface::Surface<'_>,
+    line_words: &[SpanWord],
+    start_x: f32,
+    baseline_y: f32,
+    font_size: f32,
+    font_set: &ResolvedFontSet,
+) {
+    let mut cursor_x = start_x;
+
+    for (i, word) in line_words.iter().enumerate() {
+        if word.text.is_empty() {
+            continue;
+        }
+
+        // Add inter-word space via the shared space_before_word helper
+        // (F-095-P5-001 / F-095-P5-002).  Using the SAME helper as
+        // pack_words_into_lines makes it structurally impossible for the
+        // measurement and draw paths to disagree about whether a space precedes
+        // any given word.
+        //
+        // space_before_word returns 0.0 when:
+        //   - prev_face is None  → first item on line (i == 0 means no predecessor)
+        //   - word.is_continuation → char-split fragment, no word boundary before it
+        let prev_face = if i == 0 {
+            None
+        } else {
+            Some(line_words[i - 1].face)
+        };
+        cursor_x += space_before_word(word, prev_face, font_size, font_set);
+
+        let Some(font) = face_for_span_kind(word.face, font_set).map(|f| &f.font) else {
+            let preview: String = word.text.chars().take(20).collect();
+            tracing::debug!(
+                text_preview = %preview,
+                face = ?word.face,
+                "draw_packed_line: skipping word — no resolved font for face"
+            );
+            cursor_x += measure_word_width_pt(&word.text, word.face, font_size, font_set);
+            continue;
+        };
+
+        // Super/subscript: reduced font size + shifted baseline (ADR-023 amendment).
+        // Create a synthetic KrillaTextSpan stub just to reuse the shared helper fns.
+        // (This avoids duplicating the scale/shift arithmetic.)
+        let stub_span = KrillaTextSpan {
+            face: word.face,
+            text: word.text.as_str().into(),
+            y_offset_units: word.y_offset_units,
+        };
+        let effective_size = effective_span_font_size(&stub_span, font_size);
+        let draw_y = adjusted_baseline_y(&stub_span, baseline_y, font_size);
+
+        surface.set_fill(Some(text_fill_black()));
+        surface.set_stroke(None);
+
+        let start = Point::from_xy(cursor_x, draw_y);
+        surface.draw_text(
+            start,
+            font.clone(),
+            effective_size,
+            &word.text,
+            false,
+            TextDirection::Auto,
+        );
+
+        cursor_x += measure_word_width_pt(&word.text, word.face, font_size, font_set);
+    }
+}
+
+/// Draw a sequence of [`KrillaTextSpan`]s at an explicit `baseline_y`,
+/// wrapping to new lines when the combined span width exceeds the frame width.
 ///
 /// Called by [`draw_body_blocks`] and [`draw_body_blocks_tagged`] for
 /// per-item cursor positioning, and by [`draw_inline_spans`] for bbox-derived
@@ -1412,22 +1897,41 @@ fn draw_inline_spans(
 ///
 /// Each span is drawn at a running horizontal cursor position that advances by
 /// the MEASURED width of the preceding span.  Width is computed via
-/// [`compute_multi_span_x_positions`] using real glyph horizontal-advances from
-/// `ttf-parser` (cmap → glyph ID → hmtx advance, scaled by `font_size` / upem).
-/// This eliminates the multi-span overprinting defect where every span was drawn
-/// at `surface_x = emu_to_pt(bbox.x)` with no cursor advance.
+/// per-word glyph horizontal-advances from `ttf-parser`.
+///
+/// ## Word-wrap (F-095-P1-001 fix / BC-4.03.002 postcondition 1)
+///
+/// The inline span path now applies word-boundary wrapping at the frame width
+/// derived from `bbox.width`. The implementation:
+/// 1. [`expand_spans_to_words`]: split all spans into individual word tokens,
+///    preserving each word's font face kind and super/subscript signal.
+/// 2. [`pack_words_into_lines`]: greedy line packing at `emu_to_pt(bbox.width)`.
+///    A word wider than the frame is char-split via [`char_split_span_word`],
+///    preserving the word's `FontFaceKind` on every character fragment (AC-002 /
+///    F-095-P2-001 fix — previously deferred, now implemented).
+/// 3. [`draw_packed_line`]: draw each packed line at the current `baseline_y`,
+///    advancing the cursor with inter-word space using face-accurate metrics.
+/// 4. Advance `baseline_y` by `font_size * BODY_LINE_LEADING` after each line.
+///
+/// ## Frame-bottom clamp (F-095-P1-005 fix)
+///
+/// Lines whose baseline would exceed the frame bottom (`bbox.y + bbox.height`)
+/// are silently elided, with a `tracing::warn!` emitted once per overflow event.
+/// This prevents drawing off-slide and is consistent with the clamp applied in
+/// [`draw_text_at_bbox`].
+///
+/// ## Bold/italic preserved across wrap boundaries (F-095-P1-001)
+///
+/// Each word in a packed line retains its source face kind
+/// (`FontFaceKind::Bold`, `FontFaceKind::Italic`, etc.). A bold run that spans
+/// two lines has bold face on BOTH lines — no face information is lost at the
+/// wrap boundary.
 ///
 /// ## Super/Subscript size reduction (ADV-P04-HIGH-001 fix)
 ///
-/// Super/subscript spans are drawn with `font_size * SUPER_SUB_SCALE` (0.583 ×)
-/// via [`effective_span_font_size`], and their baselines are shifted via
-/// [`adjusted_baseline_y`]:
-/// - Superscript: `baseline_y - (font_size * SUPER_RISE_FRACTION)` (raised).
-/// - Subscript: `baseline_y + (font_size * SUB_DROP_FRACTION)` (lowered).
-///
-/// Both the shift and the scale are computed against the PARENT font size, not
-/// the reduced size — so the shift is proportional to the reading context
-/// (ADR-023 amendment, 2026-06-09).
+/// Unchanged from the single-line path: super/subscript spans use
+/// `font_size * SUPER_SUB_SCALE` (0.583 ×) via [`effective_span_font_size`],
+/// and their baselines are shifted via [`adjusted_baseline_y`].
 fn draw_inline_spans_at_y(
     surface: &mut krilla::surface::Surface<'_>,
     spans: &[KrillaTextSpan],
@@ -1437,44 +1941,44 @@ fn draw_inline_spans_at_y(
     font_set: &ResolvedFontSet,
 ) {
     let start_x = emu_to_pt(bbox.x);
+    let max_line_width_pt = emu_to_pt(bbox.width);
+    let frame_bottom_pt = emu_to_pt(bbox.y) + emu_to_pt(bbox.height);
 
-    // Compute per-span X positions using real glyph-metric widths.
-    // Passes font_set directly so each span's measurement uses the SAME
-    // ResolvedFace (same raw bytes AND same face_index) as the draw path
-    // (ADV-P05-MED-001 fix — eliminates hardcoded face_index=0).
-    let x_positions = compute_multi_span_x_positions(spans, start_x, font_size, font_set);
+    // Step 1: expand all spans to individual word tokens.
+    let words = expand_spans_to_words(spans);
+    if words.is_empty() {
+        return;
+    }
 
-    for (span, &surface_x) in spans.iter().zip(x_positions.iter()) {
-        if span.text.is_empty() {
-            continue;
-        }
-        let Some(font) = font_for_span(span, font_set) else {
-            let preview: String = span.text.chars().take(20).collect();
-            tracing::debug!(
-                text_preview = %preview,
-                face = ?span.face,
-                "skipping span draw: no resolved font for face"
+    // Step 2: pack words into lines that fit within the frame width.
+    let lines = pack_words_into_lines(&words, max_line_width_pt, font_size, font_set);
+
+    // Step 3: draw each line at the appropriate baseline.
+    let mut current_baseline_y = baseline_y;
+
+    for line_words in &lines {
+        // F-095-P1-005: clamp at frame bottom — elide lines that exceed the frame.
+        if current_baseline_y > frame_bottom_pt {
+            tracing::warn!(
+                frame_bottom_pt,
+                current_baseline_y,
+                remaining_lines = lines.len(),
+                "draw_inline_spans_at_y: baseline exceeds frame bottom; \
+                 eliding overflow lines (F-095-P1-005)"
             );
-            continue;
-        };
+            break;
+        }
 
-        // Super/Subscript: reduced font size + point-space baseline shift.
-        // BOTH are computed against the parent font_size (ADR-023 amendment).
-        let effective_size = effective_span_font_size(span, font_size);
-        let draw_y = adjusted_baseline_y(span, baseline_y, font_size);
-
-        surface.set_fill(Some(text_fill_black()));
-        surface.set_stroke(None);
-
-        let start = Point::from_xy(surface_x, draw_y);
-        surface.draw_text(
-            start,
-            font.clone(),
-            effective_size,
-            span.text.as_ref(),
-            false,
-            TextDirection::Auto,
+        draw_packed_line(
+            surface,
+            line_words,
+            start_x,
+            current_baseline_y,
+            font_size,
+            font_set,
         );
+
+        current_baseline_y += font_size * BODY_LINE_LEADING;
     }
 }
 
@@ -3632,6 +4136,830 @@ mod tests {
             "STORY-081 C2: /ActualText 'bold body text' must appear in uncompressed PDF structure.\n\
              This confirms extract_all_inline_text ran on the production path for the Text block.\n\
              PDF excerpt (first 3000 chars): {pdf_str:.3000}"
+        );
+    }
+
+    // ─── F-095-P2-001: char-split fallback in pack_words_into_lines ─────────────
+    //
+    // These tests drive the character-wrap fallback that was deferred (deferral
+    // comments at exporter.rs:1549-1552 and 1688-1690 — now removed).  They are
+    // LOAD-BEARING per TD-VSDD-059: each test exercises the production code path
+    // that was previously missing.
+    //
+    // Test inventory:
+    // | test_F095_P2_001_pack_words_char_split_over_wide_word      | F-095-P2-001 unit      |
+    // | test_F095_P2_001_pack_words_char_split_bold_word_keeps_face | F-095-P2-001 bold face |
+    // | test_F095_P2_001_inline_over_wide_word_export_no_panic     | F-095-P2-001 E2E       |
+
+    /// F-095-P2-001 (AC-002/REND-002 inline path): `pack_words_into_lines` must
+    /// split a single `SpanWord` that is wider than `max_line_width_pt` into ≥2
+    /// lines via character-wrap (not leave it on a single over-wide line).
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Before the fix, `pack_words_into_lines` places an over-wide word alone on
+    /// its line with no further splitting — a single-element `Vec<Vec<SpanWord>>`
+    /// where `lines[0][0].text == original_word`.  The test asserts ≥2 lines.
+    ///
+    /// ## Why a real font?
+    ///
+    /// `measure_word_width_pt` returns 0.0 for absent faces (graceful degradation).
+    /// A mock empty `ResolvedFontSet` makes everything "fit" and never triggers
+    /// the over-wide branch.  We therefore inject a real `ResolvedFace` (LM Math)
+    /// so measurements are non-zero and the 200-char word definitely overflows a
+    /// narrow 50pt frame.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_pack_words_char_split_over_wide_word() {
+        // Load LM Math as the regular face (same fixture used in story_095_red_gate.rs).
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // A 200-char word (no whitespace) with FontFaceKind::Regular.
+        let long_word = "a".repeat(200);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word.clone(),
+            y_offset_units: 0,
+            is_continuation: false,
+        }];
+
+        // Narrow frame: 50pt. At 18pt font size, LM Math 'a' is ~8-10pt wide.
+        // 200 * ~9pt = ~1800pt >> 50pt → over-wide word must trigger char-split.
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Assertion 1 (F-095-P2-001 RED gate): must produce ≥2 lines.
+        assert!(
+            lines.len() >= 2,
+            "F-095-P2-001 FAIL: pack_words_into_lines placed a 200-char word alone on 1 line \
+             (no char-split).  Expected ≥2 lines for a word wider than {max_width_pt}pt. \
+             Without char-split, the word overflows the right margin — AC-002/REND-002 unsatisfied."
+        );
+
+        // Assertion 2 (F-095-P2-001): no content lost — all chars appear in output.
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.iter().map(|w| w.text.as_str()))
+            .collect();
+        assert_eq!(
+            all_text.len(),
+            long_word.len(),
+            "F-095-P2-001 FAIL: char-split must not drop characters. Input: {} chars, output: {} chars.",
+            long_word.len(),
+            all_text.len()
+        );
+        assert_eq!(
+            all_text, long_word,
+            "F-095-P2-001 FAIL: char-split output must equal original word (no chars inserted or dropped)."
+        );
+    }
+
+    /// F-095-P2-001 (bold face preserved): when an over-wide `SpanWord` with
+    /// `FontFaceKind::Bold` is char-split by `pack_words_into_lines`, ALL resulting
+    /// fragment `SpanWord`s must retain `face == FontFaceKind::Bold`.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without this test, a naive implementation could reset the face on char-split
+    /// fragments (e.g., defaulting to `FontFaceKind::Regular`), causing the second
+    /// and subsequent fragments to lose bold rendering — a visual regression.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_pack_words_char_split_bold_word_keeps_face() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        // Use the LM Math face as BOTH regular and bold (same file — bold measurement
+        // is the same as regular; what matters is that the face KIND tag is preserved).
+        let face_regular = crate::font::ResolvedFace {
+            font: font.clone(),
+            raw: raw.clone(),
+            face_index: 0,
+        };
+        let face_bold = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(
+            Some(face_regular),
+            Some(face_bold),
+            None,
+            None,
+        );
+
+        // 150-char word tagged Bold.
+        let long_word = "b".repeat(150);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Bold,
+            text: long_word.clone(),
+            y_offset_units: 0,
+            is_continuation: false,
+        }];
+
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Must split (otherwise the face preservation test is vacuous).
+        assert!(
+            lines.len() >= 2,
+            "F-095-P2-001 bold FAIL: 150-char word must split into ≥2 lines."
+        );
+
+        // Every fragment on every line must retain FontFaceKind::Bold.
+        for (line_idx, line) in lines.iter().enumerate() {
+            for (word_idx, word) in line.iter().enumerate() {
+                assert_eq!(
+                    word.face,
+                    crate::slide_pdf::FontFaceKind::Bold,
+                    "F-095-P2-001 FAIL: char-split fragment at line={line_idx} word={word_idx} \
+                     lost bold face (got {:?}). A char-split BOLD word must keep bold face on \
+                     ALL fragments.",
+                    word.face
+                );
+            }
+        }
+    }
+
+    /// F-095-P2-001 (E2E export path): exporting a `FrameContent::Body` or
+    /// `FrameContent::TextRun` with a 200-char single-word token in a narrow
+    /// frame must NOT panic and the PDF must be valid.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without char-split, the word overflows the frame right margin.  The
+    /// export still completes (overflow is clamped), but this E2E test proves
+    /// the production path is exercised end-to-end — not just the unit function.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P2_001_inline_over_wide_word_export_no_panic() {
+        use slideforge_types::{Emu, InlineNode};
+
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font = krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+        let exporter = PdfExporter::with_resolved_font_set(font_set);
+
+        // 200-char single token — no whitespace — in a very narrow frame (1-inch = ~72pt).
+        let long_token: String = "x".repeat(200);
+        let laid_out = LaidOutDeck {
+            page_size: PageSize::default(),
+            slides: vec![LaidOutSlide {
+                source_index: 0,
+                slide_type_keyword: Arc::from("content"),
+                frames: vec![Frame {
+                    bbox: BoundingBox {
+                        x: Emu(0),
+                        y: Emu(914_400),
+                        width: Emu(914_400),    // 1 inch narrow (~72pt)
+                        height: Emu(7_315_200), // 8 inches — ample vertical space
+                    },
+                    content: FrameContent::TextRun(vec![InlineNode::Plain(Arc::from(
+                        long_token.as_str(),
+                    ))]),
+                    text_flow: None,
+                    region_role: None,
+                }],
+                speaker_notes: None,
+                register_tags: RegisterSet::new(),
+                register_content: vec![],
+            }],
+            sections: vec![],
+            warnings: vec![],
+            slide_sections: vec![],
+        };
+
+        let deck = minimal_deck();
+        let brand = minimal_brand();
+        let opts = slideforge_plugin_api::ExportOptions::default();
+
+        // F-095-P2-001 E2E assertion: export must not panic for over-wide single token.
+        let result = exporter.export_uncompressed(&deck, &laid_out, &brand, &opts);
+        assert!(
+            result.is_ok(),
+            "F-095-P2-001 E2E FAIL: export must succeed for 200-char single-token TextRun \
+             in a narrow frame. Got error: {:?}",
+            result.err()
+        );
+        let pdf_bytes = result.unwrap();
+        assert!(
+            pdf_bytes.starts_with(b"%PDF-"),
+            "F-095-P2-001 E2E: PDF must start with %PDF-"
+        );
+    }
+
+    // ─── F-095-P4-001: measure/draw symmetry for char-split fragments ────────────
+    //
+    // These tests close the adversary P4 finding: `draw_packed_line` previously
+    // inserted an inter-word space before EVERY `SpanWord` at i>0, even for
+    // char-split continuation fragments that carry no word boundary.  The fix adds
+    // `is_continuation: bool` to `SpanWord` and suppresses the space when true —
+    // symmetrically in both packer measurement and draw advance.
+    //
+    // LOAD-BEARING per TD-VSDD-059.  These tests must FAIL if the fix is reverted
+    // (i.e. if `is_continuation` is removed or `draw_packed_line` ignores it).
+    //
+    // Test inventory:
+    // | test_F095_P4_001_char_split_fragments_have_is_continuation_set  | F-095-P4-001 flag |
+    // | test_F095_P4_001_pack_cursor_matches_draw_advance_no_extra_space | F-095-P4-001 math |
+    // | test_F095_P4_001_normal_multi_word_line_no_continuation_suppression | F-095-P4-001 regression |
+
+    /// F-095-P4-001 (flag invariant): `char_split_span_word` must set
+    /// `is_continuation = false` on the FIRST fragment and `is_continuation = true`
+    /// on every subsequent fragment.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Without this invariant, `draw_packed_line` has no way to distinguish
+    /// continuation fragments from real word boundaries — the space-suppression
+    /// path can never be entered, so the fix is a no-op and the bug persists.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_char_split_fragments_have_is_continuation_set() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // 80-char word — wide enough to produce ≥2 fragments at 50pt.
+        let long_word = "x".repeat(80);
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word,
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let fragments = char_split_span_word(&word, max_width_pt, font_size, &font_set);
+
+        // Must produce ≥2 fragments for this to be a meaningful test.
+        assert!(
+            fragments.len() >= 2,
+            "F-095-P4-001 FAIL: char_split_span_word must produce ≥2 fragments for an 80-char \
+             word in a 50pt frame. Got {} fragment(s). Adjust word length or frame width.",
+            fragments.len()
+        );
+
+        // First fragment: NOT a continuation.
+        assert!(
+            !fragments[0].is_continuation,
+            "F-095-P4-001 FAIL: first char-split fragment must have is_continuation=false \
+             (it sits at the word-start position, no preceding fragment on same line). \
+             Got is_continuation=true."
+        );
+
+        // All subsequent fragments: IS a continuation.
+        for (i, frag) in fragments.iter().enumerate().skip(1) {
+            assert!(
+                frag.is_continuation,
+                "F-095-P4-001 FAIL: char-split fragment #{i} must have is_continuation=true \
+                 (it follows another fragment from the same source word — no inter-word space \
+                 should be inserted before it). Got is_continuation=false."
+            );
+        }
+    }
+
+    /// F-095-P4-001 (measure/draw symmetry): the packer's no-space measurement for
+    /// char-split continuation fragments must be mirrored exactly by `draw_packed_line`.
+    ///
+    /// This test verifies the packer accounts for ZERO space before continuation
+    /// fragments (`cursor_x` advances only by fragment width, not space + fragment width).
+    /// Since `draw_packed_line` reads `is_continuation` to apply the same suppression,
+    /// the cursor advance is guaranteed to match if and only if the flag is set correctly.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// Before the fix, `draw_packed_line` unconditionally added a space for every
+    /// i>0 item.  After the fix, packer advance (zero space between fragments) and
+    /// draw advance must be identical.  Reverting the fix causes the draw advance to
+    /// exceed the packer width by (n−1) × `space_width` for n fragments on one line.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_pack_cursor_matches_draw_advance_no_extra_space() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // 80-char word — guaranteed to produce ≥2 char-split fragments in a 50pt frame.
+        let long_word = "m".repeat(80);
+        let words = vec![SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: long_word,
+            y_offset_units: 0,
+            is_continuation: false,
+        }];
+        let font_size = 18.0_f32;
+        let max_width_pt = 50.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Must split into ≥2 lines.
+        assert!(
+            lines.len() >= 2,
+            "F-095-P4-001 FAIL: 80-char word must produce ≥2 packed lines."
+        );
+
+        // For every line that has ≥2 fragments (continuation fragment scenario),
+        // verify that the summed fragment widths equal what the packer would have
+        // measured (no spurious space between fragments — the pack cursor for
+        // continuations adds ONLY fragment_width, not space + fragment_width).
+        //
+        // We reconstruct the packer's cursor_x for each line independently and
+        // assert that cursor_x <= max_width_pt (if it exceeded max_width_pt, the
+        // packer would have split the fragment to the next line, which is correct).
+        // The key invariant checked here: continuation fragments (is_continuation=true)
+        // contribute zero space to cursor_x.
+        for (line_idx, line) in lines.iter().enumerate() {
+            let mut cursor_x = 0.0_f32;
+            for (i, word) in line.iter().enumerate() {
+                // Delegate to the shared production helper — same as draw_packed_line.
+                // If space_before_word is later changed, this test remains in sync.
+                let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+                cursor_x += space_before_word(word, prev_face, font_size, &font_set);
+                cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+            }
+            // The reconstructed cursor must not exceed max_line_width_pt by more than
+            // the width of one char (rounding tolerance: one char's advance).
+            // If the bug were present, cursor_x would exceed by (n_continuations × space_width).
+            let one_char_width = measure_word_width_pt(
+                "m",
+                crate::slide_pdf::FontFaceKind::Regular,
+                font_size,
+                &font_set,
+            );
+            assert!(
+                cursor_x <= max_width_pt + one_char_width,
+                "F-095-P4-001 FAIL: packed line #{line_idx} has cursor_x={cursor_x:.3}pt which \
+                 exceeds max_width_pt={max_width_pt:.3}pt by more than one char ({one_char_width:.3}pt). \
+                 This indicates spurious space was added before a continuation fragment — \
+                 measure/draw symmetry is broken."
+            );
+        }
+    }
+
+    /// F-095-P4-001 (regression guard): a normal multi-word line that does NOT
+    /// involve char-split fragments must still receive exactly one inter-word space
+    /// between adjacent real words.
+    ///
+    /// ## Load-bearing assertion (TD-VSDD-059)
+    ///
+    /// The `is_continuation` fix must ONLY suppress spaces before continuation
+    /// fragments.  If the implementation over-suppresses and skips spaces between
+    /// real word boundaries, this test catches the regression.
+    #[test]
+    #[allow(clippy::unwrap_used, non_snake_case)]
+    fn test_F095_P4_001_normal_multi_word_line_no_continuation_suppression() {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        let font_set = crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None);
+
+        // Two short words that both fit on one line (no char-split needed).
+        // Each must have is_continuation=false after packing.
+        let words = vec![
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "hi".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "bye".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+        ];
+        let font_size = 18.0_f32;
+        // Wide enough to fit both "hi" and "bye" with a space on one line.
+        let max_width_pt = 200.0_f32;
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // Both words must land on the same line (no wrap at 200pt).
+        assert_eq!(
+            lines.len(),
+            1,
+            "F-095-P4-001 regression FAIL: 'hi bye' must pack onto 1 line at 200pt. \
+             Got {} line(s). Check that `pack_words_into_lines` measures space correctly \
+             for real word boundaries.",
+            lines.len()
+        );
+
+        let line = &lines[0];
+        assert_eq!(
+            line.len(),
+            2,
+            "F-095-P4-001 regression FAIL: packed line must have exactly 2 words."
+        );
+
+        // Neither word on this normal line should be marked as a continuation.
+        assert!(
+            !line[0].is_continuation,
+            "F-095-P4-001 regression FAIL: first word 'hi' must have is_continuation=false."
+        );
+        assert!(
+            !line[1].is_continuation,
+            "F-095-P4-001 regression FAIL: second word 'bye' must have is_continuation=false \
+             (it is a real word boundary, not a char-split fragment — no space suppression)."
+        );
+
+        // Verify that the cursor_x accounting for a real two-word line includes the
+        // inter-word space: width("hi") + space + width("bye") must equal cursor_x.
+        let w_hi = measure_word_width_pt(
+            "hi",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let w_bye = measure_word_width_pt(
+            "bye",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let space_w = measure_space_width_pt(
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+        let expected_cursor = w_hi + space_w + w_bye;
+
+        // Reconstruct cursor using the shared production helper — same as draw_packed_line.
+        // This ensures the test is load-bearing against the shared space_before_word logic.
+        let mut cursor_x = 0.0_f32;
+        for (i, word) in line.iter().enumerate() {
+            let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+            cursor_x += space_before_word(word, prev_face, font_size, &font_set);
+            cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+        }
+
+        assert!(
+            (cursor_x - expected_cursor).abs() < 0.01,
+            "F-095-P4-001 regression FAIL: two-word normal line cursor_x={cursor_x:.4}pt does not \
+             match expected {expected_cursor:.4}pt (w_hi={w_hi:.4} + space={space_w:.4} + \
+             w_bye={w_bye:.4}). The inter-word space must be included for real word boundaries."
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-095-P5: space_before_word shared helper — measure/draw symmetry (P5 findings)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Closes F-095-P5-001 (mixed-line packer asymmetry) and F-095-P5-002
+// (missing load-bearing test for the draw-path !is_continuation guard).
+//
+// Test inventory:
+// | test_F095_P5_space_before_word_first_on_line_returns_zero          | space_before_word, None prev |
+// | test_F095_P5_space_before_word_continuation_returns_zero           | space_before_word, is_cont |
+// | test_F095_P5_space_before_word_normal_word_returns_space           | space_before_word, normal |
+// | test_F095_P5_mixed_line_packer_cursor_matches_draw_advance         | F-095-P5-001 MIXED LINE |
+// | test_F095_P5_draw_packed_line_guard_is_load_bearing                | F-095-P5-002 TD-VSDD-059 |
+
+#[cfg(test)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    clippy::float_cmp, // asserting literal 0.0 returns from space_before_word — exact is correct
+    non_snake_case
+)]
+mod story_095_p5_tests {
+    use super::*;
+
+    /// Build a `ResolvedFontSet` from the Latin Modern Math fixture font.
+    fn lm_font_set() -> crate::font::ResolvedFontSet {
+        let font_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/slideforge-math/fonts/latinmodern-math.otf")
+            .canonicalize()
+            .expect("Latin Modern Math OTF must be accessible");
+        let bytes = std::fs::read(&font_path)
+            .unwrap_or_else(|e| panic!("cannot read LM Math fixture: {e}"));
+        let raw: std::sync::Arc<[u8]> = bytes.clone().into();
+        let data: krilla::Data = bytes.into();
+        let font =
+            krilla::text::Font::new(data, 0).expect("krilla::Font::new must succeed for LM Math");
+        let face = crate::font::ResolvedFace {
+            font,
+            raw,
+            face_index: 0,
+        };
+        crate::font::ResolvedFontSet::from_faces(Some(face), None, None, None)
+    }
+
+    // ── Unit tests for space_before_word ──────────────────────────────────────
+
+    /// [`space_before_word`] returns 0.0 when `prev_face` is `None` (first on line).
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// If the `None`-branch is removed, the first word on every line would incorrectly
+    /// get a space prepended, causing `cursor_x` to start at >0.
+    #[test]
+    fn test_F095_P5_space_before_word_first_on_line_returns_zero() {
+        let font_set = lm_font_set();
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "hello".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let result = space_before_word(&word, None, 18.0, &font_set);
+        assert_eq!(
+            result, 0.0,
+            "F-095-P5 FAIL: space_before_word must return 0.0 when prev_face is None \
+             (first word on line). Got {result}."
+        );
+    }
+
+    /// [`space_before_word`] returns 0.0 for a continuation fragment, even mid-line.
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// This test fails if the `is_continuation` branch is removed or if its condition
+    /// is inverted — reverting F-095-P4-001 / F-095-P5-002 in one step.
+    #[test]
+    fn test_F095_P5_space_before_word_continuation_returns_zero() {
+        let font_set = lm_font_set();
+        let cont_frag = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "bc".to_owned(),
+            y_offset_units: 0,
+            is_continuation: true, // char-split continuation — no word boundary
+        };
+        // prev_face is Some — there IS a predecessor on this line.
+        let space = space_before_word(
+            &cont_frag,
+            Some(crate::slide_pdf::FontFaceKind::Regular),
+            18.0,
+            &font_set,
+        );
+        assert_eq!(
+            space, 0.0,
+            "F-095-P5 FAIL: space_before_word must return 0.0 for a continuation fragment \
+             (is_continuation=true), even when a predecessor exists on the line. Got {space}."
+        );
+    }
+
+    /// [`space_before_word`] returns a positive space width for a real inter-word boundary.
+    ///
+    /// ## Load-bearing (TD-VSDD-059)
+    ///
+    /// If the Some/non-continuation branch returns 0.0, normal multi-word lines lose
+    /// their inter-word space — all words would be drawn touching each other.
+    #[test]
+    fn test_F095_P5_space_before_word_normal_word_returns_space() {
+        let font_set = lm_font_set();
+        let word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "world".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let space = space_before_word(
+            &word,
+            Some(crate::slide_pdf::FontFaceKind::Regular),
+            18.0,
+            &font_set,
+        );
+        assert!(
+            space > 0.0,
+            "F-095-P5 FAIL: space_before_word must return a positive space width for a normal \
+             inter-word boundary (is_continuation=false, prev_face=Some). Got {space}."
+        );
+    }
+
+    // ── Mixed-line packer/draw cursor symmetry (F-095-P5-001) ─────────────────
+
+    /// Mixed line `["hi", <over-wide-word>]`: packer `cursor_x` == draw cursor advance,
+    /// and no overflow past `max_line_width_pt`.
+    ///
+    /// ## What this tests (F-095-P5-001)
+    ///
+    /// Before the fix, `pack_words_into_lines` appended frag0 (`is_continuation=false`)
+    /// to a non-empty line WITHOUT measuring the inter-word space — `cursor_x += frag_w`.
+    /// But `draw_packed_line` saw `i > 0 && !is_continuation` → TRUE → added a space.
+    /// The drawn cursor exceeded the packed cursor by exactly one space width.
+    ///
+    /// After the fix, both paths call `space_before_word` — they advance by the same
+    /// amount, and the packer may flush frag0 to a new line if it doesn't fit WITH the
+    /// space included.
+    ///
+    /// ## Assertion
+    ///
+    /// For each packed line, reconstructing `cursor_x` with [`space_before_word`] must yield
+    /// a value ≤ `max_line_width_pt` + one-char tolerance.  If the packer omits the
+    /// space and draw includes it, the draw cursor overflows by one space width.
+    #[test]
+    fn test_F095_P5_mixed_line_packer_cursor_matches_draw_advance() {
+        let font_set = lm_font_set();
+        let font_size = 18.0_f32;
+
+        // "hi" is short, then a 60-char word that is wider than the frame.
+        // Frame: 80pt — wide enough for "hi" + a small fragment, but NOT for the full word.
+        let max_width_pt = 80.0_f32;
+
+        let words = vec![
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "hi".to_owned(),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+            SpanWord {
+                face: crate::slide_pdf::FontFaceKind::Regular,
+                text: "x".repeat(60),
+                y_offset_units: 0,
+                is_continuation: false,
+            },
+        ];
+
+        let lines = pack_words_into_lines(&words, max_width_pt, font_size, &font_set);
+
+        // There must be ≥2 lines (the over-wide word forces at least one extra line).
+        assert!(
+            lines.len() >= 2,
+            "F-095-P5-001 FAIL: ['hi', 60*'x'] must produce ≥2 packed lines at 80pt. \
+             Got {} line(s).",
+            lines.len()
+        );
+
+        // For every line, reconstruct cursor_x using the SAME shared helper that
+        // draw_packed_line uses.  Cursor must not overflow max_line_width_pt by more
+        // than one character's width (rounding tolerance).
+        let one_char = measure_word_width_pt(
+            "x",
+            crate::slide_pdf::FontFaceKind::Regular,
+            font_size,
+            &font_set,
+        );
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let mut cursor_x = 0.0_f32;
+            for (i, word) in line.iter().enumerate() {
+                let prev_face = if i == 0 { None } else { Some(line[i - 1].face) };
+                cursor_x += space_before_word(word, prev_face, font_size, &font_set);
+                cursor_x += measure_word_width_pt(&word.text, word.face, font_size, &font_set);
+            }
+            assert!(
+                cursor_x <= max_width_pt + one_char,
+                "F-095-P5-001 FAIL: packed line #{line_idx} cursor_x={cursor_x:.3}pt overflows \
+                 max_width_pt={max_width_pt:.3}pt by more than one char ({one_char:.3}pt). \
+                 This means the packer omitted the space before frag0 while draw_packed_line \
+                 would have added it — measure/draw asymmetry is present."
+            );
+        }
+    }
+
+    // ── draw_packed_line guard load-bearing test (F-095-P5-002) ──────────────
+
+    /// [`draw_packed_line`] must NOT insert a space before a continuation fragment
+    /// even when it is the second item on the line (`i > 0`).
+    ///
+    /// ## Load-bearing (TD-VSDD-059 / F-095-P5-002)
+    ///
+    /// This test drives [`draw_packed_line`] via [`space_before_word`] (the production
+    /// helper used by draw) and asserts the continuation guard is active.
+    ///
+    /// Specifically: if the `is_continuation` suppression is reverted in
+    /// [`space_before_word`], the function returns a positive space for the second
+    /// item (`frag1` with `is_continuation=true`), and the assertion below fails.
+    ///
+    /// The test does NOT call [`draw_packed_line`] directly (it requires a krilla
+    /// `Surface` which needs a live PDF document context).  Instead, it calls
+    /// [`space_before_word`] — the IDENTICAL logic that [`draw_packed_line`] delegates to.
+    /// Reverting the guard in [`space_before_word`] fails this test AND breaks
+    /// [`draw_packed_line`] at the same call site in exactly the same way.
+    #[test]
+    fn test_F095_P5_draw_packed_line_guard_is_load_bearing() {
+        let font_set = lm_font_set();
+        let font_size = 18.0_f32;
+
+        // Simulate a packed line with two char-split fragments:
+        //   [frag0 (is_continuation=false), frag1 (is_continuation=true)]
+        // This is the exact scenario that draw_packed_line would encounter after
+        // pack_words_into_lines places two fragments on the same line.
+        let frag0 = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "abc".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false, // first fragment — no word boundary before it on this line
+        };
+        let frag1 = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "def".to_owned(),
+            y_offset_units: 0,
+            is_continuation: true, // continuation — no word boundary before it
+        };
+
+        // draw_packed_line computes: prev_face = if i == 0 { None } else { Some(line[i-1].face) }
+        // For frag0 (i=0): prev_face = None  → space = 0.0
+        let space_before_frag0 = space_before_word(&frag0, None, font_size, &font_set);
+        assert_eq!(
+            space_before_frag0, 0.0,
+            "F-095-P5-002 FAIL: draw path must not add space before frag0 (i=0). Got {space_before_frag0}."
+        );
+
+        // For frag1 (i=1): prev_face = Some(frag0.face), is_continuation=true → space = 0.0
+        let space_before_frag1 = space_before_word(&frag1, Some(frag0.face), font_size, &font_set);
+        assert_eq!(
+            space_before_frag1, 0.0,
+            "F-095-P5-002 FAIL (LOAD-BEARING): draw path must NOT insert a space before \
+             a continuation fragment (is_continuation=true) even at i>0. \
+             Got space={space_before_frag1:.4}pt. \
+             Reverting the is_continuation guard in space_before_word causes this failure."
+        );
+
+        // Regression: a REAL second word (is_continuation=false) MUST get a space.
+        let real_word = SpanWord {
+            face: crate::slide_pdf::FontFaceKind::Regular,
+            text: "world".to_owned(),
+            y_offset_units: 0,
+            is_continuation: false,
+        };
+        let space_before_real =
+            space_before_word(&real_word, Some(frag0.face), font_size, &font_set);
+        assert!(
+            space_before_real > 0.0,
+            "F-095-P5-002 regression FAIL: draw path must insert a space before a real word \
+             (is_continuation=false, i>0). Got {space_before_real}."
         );
     }
 }

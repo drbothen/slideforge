@@ -42,6 +42,7 @@ pub mod outline;
 pub mod slide_pdf;
 pub mod svg_embed;
 pub mod tag_engine;
+pub mod text_layout;
 
 pub use coords::{
     SLIDE_HEIGHT_EMU, SLIDE_HEIGHT_PT, SLIDE_WIDTH_EMU, SLIDE_WIDTH_PT, emu_to_pt, ir_y_to_pdf_y,

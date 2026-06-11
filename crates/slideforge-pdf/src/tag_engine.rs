@@ -15,8 +15,11 @@
 //!     Table → TR → TH/TD  ← for table frames
 //! ```
 //!
-//! Decorative elements (`AltText::Decorative`) are NOT wrapped in a `Tag` group —
-//! they will be marked as PDF Artifacts by the exporter during content drawing.
+//! Decorative/unspecified elements (`AltText::Decorative` or `AltText::Unspecified`
+//! on ColorBar/Image/Shape/Diagram/Chart frames) are NOT wrapped in a `Tag` group —
+//! they are marked as PDF Artifacts by the exporter during content drawing.
+//! `ColorBar` frames with `AltText::Provided` are an exception: they are placed in the
+//! structure tree as `/Figure` with an `/Alt` attribute (STORY-095 AC-003).
 //!
 //! ## Actual krilla 0.6.0 API (verified against local source)
 //!
@@ -80,10 +83,11 @@ pub struct PartResult {
     /// Per-frame, per-block child indices into `part.children` for MCID linkage.
     ///
     /// `frame_child_part_indices[frame_idx]` is:
-    /// - `None` for empty or decorative frames (no tagged groups in the Part).
+    /// - `None` for empty or decorative/unspecified frames (no tagged groups in the Part).
     /// - `Some(vec![child_idx])` for single-block frames (`Title`, `Subtitle`,
-    ///   `TextRun`, `Image` with alt, `Shape` with alt, `ErrorSlidePlaceholder`): one
-    ///   child index pointing to the single group pushed into `part.children`.
+    ///   `TextRun`, `Image` with alt, `Shape` with alt, `ColorBar` with
+    ///   `AltText::Provided`, `ErrorSlidePlaceholder`): one child index pointing to
+    ///   the single group pushed into `part.children`.
     /// - `Some(vec![idx_0, idx_1, ..., idx_N])` for Body frames with N content
     ///   blocks that each push a group: each element is the `part.children`
     ///   index for the corresponding block's structure group.
@@ -128,14 +132,15 @@ impl SlideTagEngine {
     ///   H2          ← for Subtitle frames
     ///   P           ← for body paragraph blocks and TextRun frames
     ///   L (Disc)    ← for body bullet-list blocks, with LI+LBody children
-    ///   Figure+Alt  ← for Image, Diagram, Chart frames (alt from frame content)
+    ///   Figure+Alt  ← for Image, Diagram, Chart frames and ColorBar with AltText::Provided
     ///   Table→TR→TH/TD ← for Table frames
     ///   P           ← for Shape, ErrorSlidePlaceholder, and unknown frames
     /// ```
     ///
-    /// Decorative frames (frames containing `FrameContent::Image { alt: AltText::Decorative }`
-    /// or `FrameContent::Shape` with `AltText::Decorative`)
-    /// are NOT added to the Part group.
+    /// Decorative/unspecified frames — `FrameContent::Image`, `FrameContent::Shape`,
+    /// `FrameContent::Diagram`, `FrameContent::Chart` with `AltText::Decorative`, and
+    /// `FrameContent::ColorBar` with `AltText::Decorative` or `AltText::Unspecified` —
+    /// are NOT added to the Part group (they go into `decorative_frame_indices`).
     ///
     /// Empty frames (`FrameContent::Empty`) are skipped.
     ///
@@ -381,28 +386,48 @@ impl SlideTagEngine {
                     frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
                 },
 
-                // ColorBar — marked as PDF Artifact (decorative shape).
+                // ColorBar — dispatch to /Figure or /Artifact based on alt field.
                 //
-                // The bar frame carries no text and no alt text; WCAG accessibility
-                // co-encoding is satisfied by the adjacent ColorLabel (Body-role) text
-                // frame which renders the percentage label. Marking the bar as an
-                // Artifact suppresses it from the PDF logical structure tree, avoiding
-                // a spurious unmarked-content finding without falsely claiming it as
-                // a tagged Figure.
+                // STORY-095 AC-003 / BC-4.03.001 / ISO 14289-1 §7.3:
+                // - AltText::Provided(label): emit /Figure with /Alt = label so
+                //   assistive technology can reach the progress_bar information.
+                // - AltText::Decorative or AltText::Unspecified: mark as /Artifact
+                //   (EC-003: decorative bars are intentionally excluded from structure tree).
                 //
-                // The draw pass in exporter.rs renders the bar as a filled rectangle
-                // wrapped in `/Artifact BMC … EMC` (BC-1.17.002 PC-9 / STORY-087).
-                // Upgrading to a full PDF/UA-1 Figure structure element with `/Alt`
-                // text (e.g., "75% filled bar") is a future enhancement; the current
-                // Artifact tagging satisfies PDF/UA-1 for decorative visual elements.
-                FrameContent::ColorBar { .. } => {
-                    tracing::debug!(
-                        frame_idx,
-                        "FrameContent::ColorBar marked as PDF Artifact; \
-                         filled rectangle drawn by exporter draw_color_bar_rect; \
-                         label text is in adjacent ColorLabel frame (BC-1.17.002 PC-9)"
-                    );
-                    decorative_frame_indices.push(frame_idx);
+                // WCAG co-encoding: when the bar is /Artifact, the adjacent ColorLabel
+                // (Body-role) text frame co-encodes the information in text. When the bar
+                // is /Figure, the /Alt attribute provides the accessible description.
+                //
+                // The draw pass in exporter.rs renders the bar as a filled rectangle;
+                // the tag here determines how it is wrapped in the content stream.
+                FrameContent::ColorBar { alt, .. } => {
+                    match alt {
+                        AltText::Provided(label) => {
+                            // Emit /Figure with /Alt = label (BC-4.03.001 AC-003 / EC-004).
+                            let fig_group =
+                                TagGroup::new(Tag::<krilla::tagging::kind::Figure>::Figure(Some(
+                                    label.as_ref().to_owned(),
+                                )));
+                            let child_idx = part_group.children.len();
+                            part_group.push(fig_group);
+                            frame_child_part_indices[frame_idx] = Some(vec![child_idx]);
+                            tracing::debug!(
+                                frame_idx,
+                                label = label.as_ref(),
+                                "FrameContent::ColorBar tagged as /Figure with /Alt (STORY-095 AC-003)"
+                            );
+                        },
+                        AltText::Decorative | AltText::Unspecified => {
+                            // Mark as Artifact — no structure tree entry (EC-003).
+                            decorative_frame_indices.push(frame_idx);
+                            tracing::debug!(
+                                frame_idx,
+                                ?alt,
+                                "FrameContent::ColorBar marked as PDF Artifact \
+                                 (decorative or unspecified alt — EC-003)"
+                            );
+                        },
+                    }
                 },
             }
         }
