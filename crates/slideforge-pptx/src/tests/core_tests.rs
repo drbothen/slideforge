@@ -1952,3 +1952,360 @@ fn test_sec039_001_valid_bcp47_lang_passes_through_lossless() {
         );
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-094 — REND-003 Red Gate tests
+//
+// T-002: test_BC_4_01_001_nvgrpsppr_slide_serializer
+//   AC-003 / BC-4.01.001 postcondition 2
+//   The first child of <p:spTree> in slide1.xml must be <p:nvGrpSpPr> with
+//   structure <p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>.
+//   Defect: SlideSerializer::build_shape_tree sets
+//   non_visual_group_shape_properties: None in the ShapeTree.
+//
+// T-002 companion: test_BC_4_01_001_nvgrpsppr_notes_slide_serializer
+//   AC-004 / BC-4.01.001 postcondition 2 / EC-003
+//   The first child of <p:spTree> in notesSlide1.xml must be <p:nvGrpSpPr>.
+//   Slides with NO notes content must still emit nvGrpSpPr as first spTree child.
+//
+// T-003: test_BC_4_01_001_no_duplicate_ph_body_idx
+//   AC-002 / BC-4.01.001 postcondition 2
+//   A content slide with a body placeholder must emit <p:ph type="body" idx="1"/>
+//   exactly once in slide1.xml.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── STORY-094 fixture helpers ────────────────────────────────────────────────
+
+/// Build a notes-bearing `LaidOutDeck` with `n` title slides where slide 0
+/// has notes content (so `notesSlide1.xml` is produced).
+fn make_laid_out_deck_with_notes(n: usize) -> LaidOutDeck {
+    use slideforge_types::register::RegisteredContent;
+    use slideforge_types::{InlineNode, Register};
+
+    LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: (0..n)
+            .map(|i| {
+                let (speaker_notes, register_content) = if i == 0 {
+                    let notes_text = Arc::from("Speaker notes for slide 1");
+                    (
+                        Some(Arc::clone(&notes_text)),
+                        vec![RegisteredContent {
+                            register: Register::Notes,
+                            content: vec![InlineNode::Plain(Arc::clone(&notes_text))],
+                        }],
+                    )
+                } else {
+                    (None, vec![])
+                };
+                LaidOutSlide {
+                    source_index: i,
+                    slide_type_keyword: Arc::from("title"),
+                    frames: vec![Frame {
+                        bbox: title_bbox(),
+                        content: FrameContent::Title(Arc::from(format!("Slide {}", i + 1))),
+                        text_flow: None,
+                        region_role: None,
+                    }],
+                    speaker_notes,
+                    register_tags: vec![],
+                    register_content,
+                }
+            })
+            .collect(),
+        sections: vec![],
+        warnings: vec![],
+        slide_sections: vec![],
+    }
+}
+
+/// Parse a simple XML string and find the first child element name inside
+/// `parent_tag`. Returns the element name of the first child (e.g., "p:nvGrpSpPr").
+///
+/// This is a targeted string-scan helper that avoids a full XML library dependency
+/// in the test. It finds `<parent_tag` in the XML, then searches forward for the
+/// next `<` that is not `</` (not a closing tag), and returns the element name up
+/// to the first whitespace or `>`.
+///
+/// Returns `None` if `parent_tag` is not found or has no child elements.
+fn first_child_element_name(xml: &str, parent_tag: &str) -> Option<String> {
+    // Find the opening tag of the parent element.
+    let search = format!("<{parent_tag}");
+    let parent_pos = xml.find(&search)?;
+    // Advance past the parent's opening tag (to its `>` close).
+    let after_open = &xml[parent_pos..];
+    let tag_end = after_open.find('>')?;
+    let after_parent = &after_open[tag_end + 1..];
+
+    // Skip whitespace and find the next `<`.
+    let next_lt = after_parent.find('<')?;
+    let after_lt = &after_parent[next_lt + 1..];
+
+    // Skip if it's a closing tag (`</`).
+    if after_lt.starts_with('/') {
+        return None;
+    }
+
+    // Extract the element name: everything up to the first space, `>`, or `/`.
+    let end = after_lt.find([' ', '>', '/']).unwrap_or(after_lt.len());
+    Some(after_lt[..end].to_owned())
+}
+
+/// Count how many times `needle` appears as a complete token in `haystack`.
+///
+/// Uses `matches().count()` for simplicity. Only counts non-overlapping occurrences.
+fn count_occurrences(haystack: &str, needle: &str) -> usize {
+    let mut count = 0;
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(needle) {
+        count += 1;
+        start += pos + needle.len();
+    }
+    count
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-094 T-002: nvGrpSpPr as first spTree child in slide1.xml
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// STORY-094 T-002 / BC-4.01.001 AC-003 (REND-003 Red Gate):
+/// Every `<p:spTree>` in `slideN.xml` must have `<p:nvGrpSpPr>` as its FIRST
+/// child element (CT_GroupShape mandatory first-child schema rule, ECMA-376).
+///
+/// DEFECT (REND-003): `SlideSerializer::build_shape_tree` constructs `ShapeTree`
+/// with `non_visual_group_shape_properties: None`. The `ooxmlsdk` serializer
+/// therefore omits `<p:nvGrpSpPr>` entirely, making `<p:grpSpPr>` the first
+/// child. PowerPoint issues a repair prompt when opening such files.
+///
+/// This test MUST FAIL against the unfixed code (non_visual_group_shape_properties: None).
+/// It will pass only after T-005 sets a populated `NonVisualGroupShapeProperties`
+/// as the first child of `<p:spTree>`.
+///
+/// Load-bearing (LESSON-14): the test parses the actual `slide1.xml` bytes and
+/// asserts the FIRST child element name — not mere presence of the substring
+/// `"nvGrpSpPr"` somewhere in the file.
+#[test]
+fn test_BC_4_01_001_nvgrpsppr_slide_serializer() {
+    let laid_out = make_laid_out_deck(1);
+    let pptx_bytes = build_pptx(&laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // T-002 assertion 1: <p:spTree> must exist.
+    assert!(
+        slide_xml.contains("<p:spTree"),
+        "slide1.xml must contain <p:spTree>; got excerpt: {}",
+        &slide_xml[..slide_xml.len().min(500)]
+    );
+
+    // T-002 assertion 2: the FIRST child element of <p:spTree> must be <p:nvGrpSpPr>.
+    // DEFECT: current code emits <p:grpSpPr> as the first child (non_visual_group_shape_properties: None).
+    let first_child = first_child_element_name(&slide_xml, "p:spTree")
+        .expect("p:spTree must have at least one child element in slide1.xml");
+    assert_eq!(
+        first_child,
+        "p:nvGrpSpPr",
+        "STORY-094 T-002 Red Gate: first child of <p:spTree> in slide1.xml must be \
+         <p:nvGrpSpPr> (CT_GroupShape schema requirement, ECMA-376); \
+         got first child: {first_child:?}\n\
+         slide1.xml excerpt:\n{}",
+        &slide_xml[..slide_xml.len().min(1000)]
+    );
+
+    // T-002 assertion 3: nvGrpSpPr must contain the mandatory sub-elements.
+    // Required structure: <p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>
+    assert!(
+        slide_xml.contains("<p:cNvGrpSpPr"),
+        "slide1.xml <p:nvGrpSpPr> must contain <p:cNvGrpSpPr> child; \
+         slide1.xml excerpt: {}",
+        &slide_xml[..slide_xml.len().min(1000)]
+    );
+    assert!(
+        slide_xml.contains("<p:nvPr"),
+        "slide1.xml <p:nvGrpSpPr> must contain <p:nvPr> child; \
+         slide1.xml excerpt: {}",
+        &slide_xml[..slide_xml.len().min(1000)]
+    );
+}
+
+/// STORY-094 T-002 companion / BC-4.01.001 AC-004 / EC-003 (REND-003 Red Gate):
+/// Every `<p:spTree>` in `notesSlideN.xml` must also have `<p:nvGrpSpPr>` as its
+/// first child element, including notes slides for slides WITH no notes content
+/// (EC-003: zero-content case).
+///
+/// DEFECT (REND-003): `NotesSlideSerializer::build_xml` in `notes_slide.rs` uses
+/// string XML construction and emits `<p:grpSpPr>` before any `<p:nvGrpSpPr>`,
+/// violating the CT_GroupShape mandatory first-child constraint.
+///
+/// This test MUST FAIL against the unfixed code.
+/// It will pass only after T-006 adds `<p:nvGrpSpPr>` as the first spTree child
+/// in `notes_slide.rs`.
+///
+/// Load-bearing (LESSON-14 / AC-004 / EC-003): two sub-tests:
+///   a) slide WITH notes content → notesSlide1.xml must have nvGrpSpPr first
+///   b) Verified via direct `NotesSlideSerializer::build` with empty register_content
+///      → the notes XML bytes (which would be `notesSlide1.xml`) must start with
+///      nvGrpSpPr as the first spTree child even when no notes content is present.
+#[test]
+fn test_BC_4_01_001_nvgrpsppr_notes_slide_serializer() {
+    // ── Sub-test A: slide with notes content ──────────────────────────────────
+    let laid_out = make_laid_out_deck_with_notes(1);
+    let pptx_bytes = build_pptx(&laid_out);
+
+    // Verify notesSlide1.xml is present.
+    let entry_names: Vec<String> = {
+        let cursor = std::io::Cursor::new(&pptx_bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("valid ZIP");
+        (0..archive.len())
+            .map(|i| archive.by_index(i).expect("valid index").name().to_owned())
+            .collect()
+    };
+    assert!(
+        entry_names
+            .iter()
+            .any(|e| e == "ppt/notesSlides/notesSlide1.xml"),
+        "notesSlide1.xml must be present when slide 0 has notes content; entries: {entry_names:?}"
+    );
+
+    let notes_xml = zip_read_entry(&pptx_bytes, "ppt/notesSlides/notesSlide1.xml");
+
+    // AC-004 assertion: <p:spTree> exists.
+    assert!(
+        notes_xml.contains("<p:spTree"),
+        "notesSlide1.xml must contain <p:spTree>; got excerpt: {}",
+        &notes_xml[..notes_xml.len().min(500)]
+    );
+
+    // AC-004 assertion: the FIRST child of <p:spTree> must be <p:nvGrpSpPr>.
+    // DEFECT: current notes_slide.rs emits <p:grpSpPr> first (string-based XML).
+    let first_child_notes = first_child_element_name(&notes_xml, "p:spTree")
+        .expect("p:spTree in notesSlide1.xml must have at least one child element");
+    assert_eq!(
+        first_child_notes,
+        "p:nvGrpSpPr",
+        "STORY-094 T-002 companion Red Gate: first child of <p:spTree> in notesSlide1.xml \
+         must be <p:nvGrpSpPr> (CT_GroupShape schema requirement, ECMA-376); \
+         got first child: {first_child_notes:?}\n\
+         notesSlide1.xml excerpt:\n{}",
+        &notes_xml[..notes_xml.len().min(1000)]
+    );
+
+    // ── Sub-test B: EC-003 — empty notes content still emits nvGrpSpPr ───────
+    // Direct call to NotesSlideSerializer::build with no Register::Notes content.
+    // Even when the notes slide has no text content, <p:nvGrpSpPr> must be present.
+    let empty_output = crate::notes_slide::NotesSlideSerializer::build(1, &[])
+        .expect("NotesSlideSerializer::build must succeed for empty notes content");
+    let empty_xml =
+        String::from_utf8(empty_output.xml_bytes).expect("notes XML must be valid UTF-8");
+
+    assert!(
+        empty_xml.contains("<p:spTree"),
+        "EC-003: notes XML with no content must still contain <p:spTree>; got: {empty_xml}"
+    );
+
+    let first_child_empty = first_child_element_name(&empty_xml, "p:spTree")
+        .expect("p:spTree in EC-003 empty notes XML must have at least one child");
+    assert_eq!(
+        first_child_empty, "p:nvGrpSpPr",
+        "EC-003 Red Gate: first child of <p:spTree> in empty notes slide XML must be \
+         <p:nvGrpSpPr>; got: {first_child_empty:?}\n\
+         notes XML: {empty_xml}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STORY-094 T-003: no duplicate <p:ph type="body" idx="1"/> in slide1.xml
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// STORY-094 T-003 / BC-4.01.001 AC-002 (REND-001 secondary defect Red Gate):
+/// A PPTX slide with both a `FrameContent::Body` frame AND a `FrameContent::TextRun`
+/// frame must emit `idx="1"` exactly ONCE in `slide1.xml`.
+///
+/// DEFECT (REND-001 secondary): `build_body_shape_with_runs()` in `slide_serializer.rs`
+/// is called for BOTH `FrameContent::Body` AND `FrameContent::TextRun` frames. Both
+/// call `body_shape_kind()` which returns `ShapeKind::Body` when `with_layout` is
+/// called and the layout has `idx=1`. This results in TWO `<p:sp>` shapes on the same
+/// slide each containing `<p:ph type="body" idx="1"/>`, which is a schema violation per
+/// ECMA-376 §19.3.1.33 (placeholder `idx` must be unique within a slide).
+///
+/// Trigger: a slide with `slide_type_keyword: "content"` that has both a Body frame
+/// AND a TextRun frame. The "content" type maps to the "obj" layout (SL-02) via
+/// `find_layout_index`, which has `idx=1`. Both frames emit the same ph descriptor.
+///
+/// Load-bearing (LESSON-14 / FU-EXIT-GATE-DISTINGUISHING-OUTPUT):
+/// the assertion `== 1` fails on 2 occurrences (duplicate). The fix must deduplicate
+/// so only one body/TextRun frame per slide emits the `idx=1` descriptor.
+#[test]
+fn test_BC_4_01_001_no_duplicate_ph_body_idx() {
+    use slideforge_types::InlineNode;
+
+    // Build a content slide with BOTH FrameContent::Body AND FrameContent::TextRun.
+    // Both call build_body_shape_with_runs() → body_shape_kind() → ShapeKind::Body
+    // when with_layout is called (happens automatically via "content" → SL-02 layout).
+    // DEFECT: both frames emit <p:ph type="body" idx="1"/> — two occurrences.
+    let slide_with_body_and_textrun = LaidOutSlide {
+        source_index: 0,
+        slide_type_keyword: Arc::from("content"),
+        frames: vec![
+            Frame {
+                bbox: title_bbox(),
+                content: FrameContent::Title(Arc::from("T-003 Duplicate PH Test")),
+                text_flow: None,
+                region_role: None,
+            },
+            // Frame 1: Body frame — emits <p:ph type="body" idx="1"/> (ShapeKind::Body)
+            Frame {
+                bbox: body_bbox(),
+                content: FrameContent::Body(vec![]),
+                text_flow: None,
+                region_role: None,
+            },
+            // Frame 2: TextRun frame — ALSO emits <p:ph type="body" idx="1"/> (same ShapeKind)
+            // This is the defect: two shapes with identical ph idx on the same slide.
+            Frame {
+                bbox: BoundingBox {
+                    x: Emu(457_200),
+                    y: Emu(2_743_200),
+                    width: Emu(4_114_800),
+                    height: Emu(1_600_200),
+                },
+                content: FrameContent::TextRun(vec![InlineNode::Plain(Arc::from("Bullet text"))]),
+                text_flow: None,
+                region_role: None,
+            },
+        ],
+        speaker_notes: None,
+        register_tags: vec![],
+        register_content: vec![],
+    };
+
+    let laid_out = LaidOutDeck {
+        page_size: PageSize::default(),
+        slides: vec![slide_with_body_and_textrun],
+        sections: vec![],
+        warnings: vec![],
+        slide_sections: vec![],
+    };
+
+    let pptx_bytes = build_pptx(&laid_out);
+    let slide_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // T-003: count occurrences of idx="1" which identifies body placeholder shapes.
+    // With the defect: Body frame emits it + TextRun frame emits it → 2 occurrences.
+    // After the fix: only one of the two frames emits the body ph descriptor → 1 occurrence.
+    let ph_body_count = count_occurrences(&slide_xml, r#"type="body""#);
+    let ph_idx1_count = count_occurrences(&slide_xml, r#"idx="1""#);
+
+    // Assertion: idx="1" must appear EXACTLY ONCE in the slide.
+    // FAILS against current code because both Body and TextRun emit it (idx="1" × 2).
+    // PASSES after the fix deduplicates ph emission (only one body frame emits idx=1).
+    assert_eq!(
+        ph_idx1_count,
+        1,
+        "STORY-094 T-003 Red Gate: <p:ph idx=\"1\"/> must appear EXACTLY ONCE in \
+         slide1.xml when the slide has both Body and TextRun frames \
+         (REND-001 secondary: duplicate ph idx per ECMA-376 §19.3.1.33); \
+         found {ph_idx1_count} occurrences (type=\"body\" count: {ph_body_count})\n\
+         slide1.xml excerpt:\n{}",
+        &slide_xml[..slide_xml.len().min(2000)]
+    );
+}

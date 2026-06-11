@@ -46,6 +46,7 @@ use ooxmlsdk::schemas::a::{
 use ooxmlsdk::schemas::p::{
     ApplicationNonVisualDrawingProperties, BlipFill, BlipFillChoice, ColorMapOverride,
     ColorMapOverrideChoice, CommonSlideData, GroupShapeProperties, NonVisualDrawingProperties,
+    NonVisualGroupShapeDrawingProperties, NonVisualGroupShapeProperties,
     NonVisualPictureDrawingProperties, NonVisualPictureProperties, NonVisualShapeDrawingProperties,
     NonVisualShapeProperties, Picture, PlaceholderShape, PlaceholderValues, Shape, ShapeProperties,
     ShapePropertiesChoice, ShapePropertiesChoice2, ShapeTree, ShapeTreeChoice, Slide, TextBody,
@@ -408,8 +409,28 @@ impl SlideSerializer {
                 }
             })?;
 
+        // STORY-094 T-005 / BC-4.01.001 AC-003 — CT_GroupShape mandatory first child.
+        //
+        // REND-003 fix: `<p:nvGrpSpPr>` must be the FIRST child of `<p:spTree>`.
+        // The ooxmlsdk `ShapeTree.non_visual_group_shape_properties` field serialises
+        // before `group_shape_properties`, satisfying ECMA-376 CT_GroupShape ordering.
+        // Structure: <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>
+        // </p:nvGrpSpPr>
+        let nvgrpsppr = NonVisualGroupShapeProperties {
+            non_visual_drawing_properties: Box::new(NonVisualDrawingProperties {
+                id: 1,
+                name: String::new(),
+                ..NonVisualDrawingProperties::default()
+            }),
+            non_visual_group_shape_drawing_properties: Box::new(
+                NonVisualGroupShapeDrawingProperties::default(),
+            ),
+            application_non_visual_drawing_properties: Box::new(
+                ApplicationNonVisualDrawingProperties::default(),
+            ),
+        };
         let mut shape_tree = ShapeTree {
-            non_visual_group_shape_properties: None,
+            non_visual_group_shape_properties: Some(Box::new(nvgrpsppr)),
             group_shape_properties: Some(Box::new(GroupShapeProperties::default())),
             shape_tree_choice: Vec::new(),
             p_ext_lst: None,
@@ -418,6 +439,17 @@ impl SlideSerializer {
         };
 
         let mut shape_id: u32 = 1;
+        // STORY-094 T-007 / BC-4.01.001 AC-002 — deduplicate body placeholder (REND-001).
+        //
+        // ECMA-376 §19.3.1.33: placeholder `idx` must be unique within a slide. Both
+        // `FrameContent::Body` and `FrameContent::TextRun` call `body_shape_kind()`
+        // which returns `ShapeKind::Body` (idx=1) when the layout has `idx=1`.
+        // When a slide has BOTH frame types, two shapes emit `<p:ph idx="1"/>` —
+        // a schema violation. This flag tracks whether the body ph descriptor has been
+        // emitted so that TextRun frames defer to `ShapeKind::BodyNoPlaceholder` once
+        // a Body frame has already claimed the idx=1 slot. Body frames always claim
+        // the slot first (they are authoritative carriers of the body placeholder).
+        let mut body_ph_emitted: bool = false;
 
         for (frame_idx, frame) in slide.frames.iter().enumerate() {
             // Look up the alt decision for this frame (visual frames only).
@@ -543,6 +575,12 @@ impl SlideSerializer {
                         .shape_tree_choice
                         .push(ShapeTreeChoice::PSp(Box::new(sp)));
                     shape_id += 1;
+                    // STORY-094 T-007: Body frames are the authoritative carrier of the
+                    // body placeholder (idx=1). Mark it claimed so TextRun frames on the
+                    // same slide do not emit a second idx=1 descriptor (REND-001 secondary).
+                    if matches!(self.body_shape_kind(), ShapeKind::Body) {
+                        body_ph_emitted = true;
+                    }
                 },
 
                 FrameContent::TextRun(nodes) => {
@@ -552,16 +590,53 @@ impl SlideSerializer {
                     // bold/italic/strikethrough in the PPTX output. The old
                     // extract_inline_text path (plain text only) is no longer used.
                     let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map);
+                    // STORY-094 T-007 / BC-4.01.001 AC-002 — deduplicate body ph idx.
+                    //
+                    // TextRun frames must NOT emit <p:ph idx="1"/> when a Body frame has
+                    // already claimed the body placeholder on this slide. Determine the
+                    // effective shape kind: use BodyNoPlaceholder if body_ph_emitted,
+                    // otherwise delegate to the standard body_shape_kind() check.
+                    // This is the root-cause fix: no post-filter, no XML manipulation —
+                    // we suppress the ph descriptor at the source (ShapeKind selection).
+                    let textrun_kind = if body_ph_emitted {
+                        ShapeKind::BodyNoPlaceholder
+                    } else {
+                        // First TextRun on a slide with no Body frame: may claim idx=1.
+                        let kind = self.body_shape_kind();
+                        if matches!(kind, ShapeKind::Body) {
+                            body_ph_emitted = true;
+                        }
+                        kind
+                    };
                     // AC-011 / ADR-015 §7 item 3: same idx-chain check as Body frames
                     // via the shared helper (F-038-P12-M1: single warn site, no drift).
-                    let sp = self.build_body_shape_with_runs(
-                        shape_id,
-                        slide_index,
-                        frame_idx,
-                        "TextRun",
-                        frame,
-                        runs,
-                    );
+                    let sp = {
+                        if matches!(textrun_kind, ShapeKind::BodyNoPlaceholder)
+                            && self.layout_placeholder_idxs.is_some()
+                            && body_ph_emitted
+                        {
+                            // body_ph_emitted means a Body frame already took idx=1;
+                            // TextRun does not warn for this case (it is by design).
+                        } else if matches!(textrun_kind, ShapeKind::BodyNoPlaceholder)
+                            && self.layout_placeholder_idxs.is_some()
+                        {
+                            tracing::warn!(
+                                slide_index,
+                                frame_idx,
+                                "TextRun frame: resolved layout has no idx=1 placeholder; \
+                                 emitting shape without <p:ph> (warn+omit per ADR-015 §7)"
+                            );
+                        }
+                        build_shape_with_runs(
+                            shape_id,
+                            textrun_kind,
+                            frame.bbox.x.0,
+                            frame.bbox.y.0,
+                            frame.bbox.width.0,
+                            frame.bbox.height.0,
+                            runs,
+                        )
+                    };
                     shape_tree
                         .shape_tree_choice
                         .push(ShapeTreeChoice::PSp(Box::new(sp)));

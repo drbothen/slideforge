@@ -165,6 +165,16 @@ impl NotesSlideSerializer {
         xml.push_str(">\n");
         xml.push_str("  <p:cSld>\n");
         xml.push_str("    <p:spTree>\n");
+        // STORY-094 T-006 / BC-4.01.001 AC-004 — CT_GroupShape mandatory first child.
+        //
+        // REND-003 fix: `<p:nvGrpSpPr>` must be the FIRST child of `<p:spTree>`.
+        // This satisfies ECMA-376 CT_GroupShape schema ordering for notesSlideN.xml.
+        // The structure mirrors master/layout serializers (STORY-094 spec §AC-004).
+        xml.push_str("      <p:nvGrpSpPr>");
+        xml.push_str("<p:cNvPr id=\"1\" name=\"\"/>");
+        xml.push_str("<p:cNvGrpSpPr/>");
+        xml.push_str("<p:nvPr/>");
+        xml.push_str("</p:nvGrpSpPr>\n");
         // Schema-valid grpSpPr: CT_GroupShapeProperties allows only <a:xfrm> (and
         // a few others) — there is NO child element named <a:grpSpPr> in that type.
         // Emit a single <a:xfrm> with all four required children (off/ext/chOff/chExt).

@@ -458,12 +458,53 @@ pub fn run(deck: &Deck, brand: &Brand) -> Result<LaidOutDeck, LayoutError> {
                     }
                 },
                 ContentBlock::Bullets(items) => {
+                    // STORY-094 T-004 / BC-3.06.003 AC-001 — finalize placeholder bbox.
+                    //
+                    // REND-001 fix: consume the Body-role Empty region slot so that bullet
+                    // TextRun frames inherit its correct bbox (x > 0, y > 0) instead of
+                    // being pushed with the hardcoded (0, 0) fallback. The slot is removed
+                    // from `all_frames` before the bullet frames are appended, ensuring no
+                    // duplicate Empty slot appears in the output alongside the TextRun frames.
+                    //
+                    // Slot search: Phase 1 — exact Body-role match (same logic as
+                    // `fill_region_slot_or_append`). Phase 2 — Generic/None fallback.
+                    // Phase 3 — None (no slot): use the clamped page-size bbox (fallback
+                    // matching legacy behaviour for custom slide types with no body slot).
+                    let body_bbox: Option<crate::types::BoundingBox> = {
+                        // Phase 1: exact Body-role match.
+                        let exact_idx = all_frames.iter().position(|f| {
+                            matches!(f.content, crate::types::FrameContent::Empty)
+                                && f.region_role == Some(crate::types::RegionRole::Body)
+                        });
+                        if let Some(idx) = exact_idx {
+                            let bbox = all_frames[idx].bbox;
+                            all_frames.remove(idx);
+                            Some(bbox)
+                        } else {
+                            // Phase 2: Generic/None fallback (mirrors fill_region_slot_or_append).
+                            let generic_idx = all_frames.iter().position(|f| {
+                                matches!(f.content, crate::types::FrameContent::Empty)
+                                    && matches!(
+                                        f.region_role,
+                                        Some(crate::types::RegionRole::Generic) | None
+                                    )
+                            });
+                            if let Some(idx) = generic_idx {
+                                let bbox = all_frames[idx].bbox;
+                                all_frames.remove(idx);
+                                Some(bbox)
+                            } else {
+                                // Phase 3: no Empty slot — fall back to page-size bbox.
+                                None
+                            }
+                        }
+                    };
                     // STORY-073 / AC-001 — produce one FrameContent::TextRun per
                     // BulletItem, recursively visiting children depth-first.
                     // Source order is preserved: parent frame before child frames.
                     // The inline content (BulletItem.inlines) is carried verbatim —
                     // no inline processing occurs at layout time (BC-3.05.001 invariant 6).
-                    push_bullet_frames(items, &mut all_frames, page_size, source_index)?;
+                    push_bullet_frames(items, &mut all_frames, page_size, source_index, body_bbox)?;
                 },
                 // Other ContentBlock variants (Chart, Diagram, Shape, Math, Image, Table)
                 // are handled elsewhere (shape pass above) or do not carry InlineNode
@@ -1030,15 +1071,16 @@ fn collect_plain_text(nodes: &[slideforge_types::InlineNode]) -> String {
 ///
 /// - `Err(LayoutError::BulletDepthExceeded { depth })` — the `BulletItem.children`
 ///   chain exceeds [`MAX_BULLET_DEPTH`] structural levels (F-P1-MED-001).
-/// - `Err(LayoutError::InvalidBoundingBox)` — the clamped placeholder bbox
-///   violates BC-3.06.003 invariants (should never trigger in practice).
+/// - `Err(LayoutError::InvalidBoundingBox)` — the finalized placeholder bbox
+///   violates BC-3.06.003 invariants (STORY-094: fires for invalid region coordinates).
 fn push_bullet_frames(
     items: &[BulletItem],
     frames: &mut Vec<crate::types::Frame>,
     page_size: PageSize,
     source_slide_index: usize,
+    body_bbox: Option<crate::types::BoundingBox>,
 ) -> Result<(), LayoutError> {
-    push_bullet_frames_inner(items, frames, page_size, source_slide_index, 0)
+    push_bullet_frames_inner(items, frames, page_size, source_slide_index, body_bbox, 0)
 }
 
 /// Inner recursive implementation for [`push_bullet_frames`] with an explicit
@@ -1048,6 +1090,7 @@ fn push_bullet_frames_inner(
     frames: &mut Vec<crate::types::Frame>,
     page_size: PageSize,
     source_slide_index: usize,
+    body_bbox: Option<crate::types::BoundingBox>,
     current_depth: usize,
 ) -> Result<(), LayoutError> {
     // F-P1-MED-001: reject structural nesting deeper than MAX_BULLET_DEPTH BEFORE
@@ -1061,16 +1104,27 @@ fn push_bullet_frames_inner(
     }
 
     for item in items {
-        // Clamp placeholder height to page height — same rule as ContentBlock::Text
-        // (F-P4-LOW-001 / BC-3.06.003).
-        let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
-        let bbox = crate::types::BoundingBox {
-            x: crate::types::Emu(0),
-            y: crate::types::Emu(0),
-            width: page_size.width,
-            height: placeholder_height,
+        // STORY-094 T-004 / BC-3.06.003 AC-001 — finalized bbox from region slot.
+        //
+        // Use the body_bbox extracted from the Body-role region slot when available
+        // (non-zero x, y coordinates from the region map). Fall back to the clamped
+        // full-page-size bbox ONLY when no region slot was found (custom slide types
+        // with no pre-allocated body placeholder). The fallback bbox is validated
+        // below; an invalid result triggers Err(InvalidBoundingBox) per BC-3.06.003.
+        let bbox = if let Some(b) = body_bbox {
+            b
+        } else {
+            // Fallback: clamped full-width placeholder (legacy path for slide
+            // types with no Body-role region slot). Clamp height per F-P4-LOW-001.
+            let placeholder_height = crate::types::Emu(914_400).min(page_size.height);
+            crate::types::BoundingBox {
+                x: crate::types::Emu(0),
+                y: crate::types::Emu(0),
+                width: page_size.width,
+                height: placeholder_height,
+            }
         };
-        // BC-3.06.003 defensive check.
+        // BC-3.06.003 defensive check: reject invalid bounding boxes regardless of source.
         let frame_index = frames.len();
         if !bbox.is_valid(page_size.width, page_size.height) {
             return Err(LayoutError::InvalidBoundingBox {
@@ -1092,6 +1146,7 @@ fn push_bullet_frames_inner(
             frames,
             page_size,
             source_slide_index,
+            body_bbox,
             current_depth + 1,
         )?;
     }
