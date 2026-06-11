@@ -2972,7 +2972,10 @@ mod tests {
         };
 
         // Extract the file field from the diagnostic.
-        // E-LAY-008 surfaces through ValidationFailed (via the layout validator path).
+        // E-LAY-008 surfaces in two ways depending on whether strict mode is active:
+        //   - strict:true  → BuildError::ValidationFailed (pre-layout validator catches it)
+        //   - strict:false → BuildError::Layout (LayoutError passes through lib.rs:908 directly)
+        // Both arms are handled below.
         let file_name = match &err {
             crate::error::BuildError::ValidationFailed { diagnostics, .. } => {
                 diagnostics.first().map_or_else(

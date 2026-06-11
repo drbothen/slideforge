@@ -227,7 +227,8 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
         InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold"))]),
     ]);
     let item2 = flat_bullet(vec![InlineNode::Plain(Arc::from("second item"))]);
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008).
     let slide = bullets_slide("content", vec![item1.clone(), item2.clone()]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -267,7 +268,8 @@ fn test_bc_3_05_001_story073_ac_int1_text_run_carries_inlines_verbatim() {
 /// no warning in LaidOutDeck.warnings → assertion fails.
 #[test]
 fn test_bc_3_05_001_story073_ac_int1_unknown_xref_in_bullet_warns() {
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008
     // before inline validation can fire, masking the XrefTargetNotFound warning).
     let slide = bullets_slide(
         "content",
@@ -319,7 +321,8 @@ fn test_bc_3_05_001_story073_ac_int1_depth_65_bullet_is_hard_error() {
     for _ in 0..=MAX_INLINE_DEPTH {
         node = InlineNode::Bold(vec![node]);
     }
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008
     // before inline validation runs, masking the InlineDepthExceeded error).
     let slide = bullets_slide("content", vec![flat_bullet(vec![node])]);
     let deck = make_deck(vec![slide]);
@@ -392,8 +395,9 @@ fn test_bc_3_05_001_story073_ec001_empty_bullets_no_frames_no_error_no_warning()
 #[test]
 fn test_bc_3_05_001_story073_ec002_empty_bullet_item_inlines_one_frame_no_error() {
     let empty_item = flat_bullet(vec![]);
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
-    // even for empty-inlines items because the bbox check fires before inlines are read).
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008
+    // even for empty-inlines items because the contentless check fires before inlines are read).
     let slide = bullets_slide("content", vec![empty_item]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -429,7 +433,8 @@ fn test_bc_3_05_001_story073_ec003_nested_bullet_produces_frame_per_item() {
         children: vec![child],
         span: SourceSpan::default(),
     };
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008).
     let slide = bullets_slide("content", vec![parent]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -503,7 +508,8 @@ fn test_bc_3_05_001_story073_ec003_integration_frame_order_parent_before_child()
         children: vec![child],
         span: SourceSpan::default(),
     };
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)).
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008).
     let slide = bullets_slide("content", vec![parent]);
     let deck = make_deck(vec![slide]);
     let brand = make_brand();
@@ -590,7 +596,8 @@ fn test_bc_3_05_001_story073_ec003_integration_frame_order_parent_before_child()
 #[test]
 fn test_bc_3_05_001_story073_ec004_deep_nested_xref_in_bullet_layout_run() {
     let unknown = Arc::from("__ec004_deep_xref__");
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008
     // before inline validation runs, masking the XrefTargetNotFound warning).
     let slide = bullets_slide(
         "content",
@@ -643,7 +650,8 @@ fn test_bc_3_05_001_story073_ec005_multiple_depth_exceeded_bullets_returns_error
         flat_bullet(vec![make_deep_node()]),
         flat_bullet(vec![make_deep_node()]),
     ];
-    // F-094-P1-002: use "content" (has Body slot; "title" returns Err(InvalidBoundingBox)
+    // F-094-P1-002: use "content" (has Body slot; "title" returns
+    // Err(LayoutError::BulletsOnContentlessSlideType) / E-LAY-008
     // before inline validation runs, masking the InlineDepthExceeded error).
     let slide = bullets_slide("content", items);
     let deck = make_deck(vec![slide]);
@@ -890,22 +898,18 @@ fn test_bc_3_05_001_story073_bullet_text_run_bboxes_are_valid() {
 /// F-094-P1-002 (MED) / BC-3.06.003 postcondition 2:
 /// When bullets appear on a slide type that has no Body or Generic Empty slot
 /// (`title`, `closing`, `section_break`, `blank`), `layout::run()` must return
-/// `Err(LayoutError::InvalidBoundingBox)` rather than silently placing frames
-/// at (0,0).
+/// `Err(LayoutError::BulletsOnContentlessSlideType)` (E-LAY-008) rather than
+/// silently placing frames at (0,0).
 ///
-/// DEFECT: current code hits Phase 3 (no Empty slot) and returns `None` →
-/// uses the clamped `(x=0, y=0, width=page_width, height=914_400)` fallback,
-/// which passes `is_valid` because x=0 is `>= 0`. This is a silent wrong
-/// positioning that violates the "no silent fallback to ANY position not a
-/// defined region" rule.
+/// Current behavior (post-fix): the layout engine detects that the slide type
+/// has no Body region and returns `Err(LayoutError::BulletsOnContentlessSlideType)`
+/// carrying the slide type name, source slide index, and correction hint
+/// (use `bullets_only` slide type instead).
 ///
-/// This test MUST FAIL against the unfixed code (run succeeds instead of erring).
-/// It will pass only after the Phase-3 fallback is replaced with
-/// `Err(LayoutError::InvalidBoundingBox)`.
-///
-/// Load-bearing: `.is_err()` fails when `run` returns `Ok(...)` with (0,0) frames.
+/// Load-bearing: `.is_err()` fails when `run` returns `Ok(...)` with (0,0) frames;
+/// the variant match pins the specific E-LAY-008 error kind.
 #[test]
-fn test_f094_p1_002_bullets_on_title_slide_returns_invalid_bbox_error() {
+fn test_f094_p1_002_bullets_on_title_slide_returns_contentless_slide_error() {
     let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
     let slide = bullets_slide("title", items);
     let deck = make_deck(vec![slide]);
@@ -928,7 +932,7 @@ fn test_f094_p1_002_bullets_on_title_slide_returns_invalid_bbox_error() {
 
 /// F-094-P1-002 / BC-3.06.003 — closing slide type (no Body slot).
 #[test]
-fn test_f094_p1_002_bullets_on_closing_slide_returns_invalid_bbox_error() {
+fn test_f094_p1_002_bullets_on_closing_slide_returns_contentless_slide_error() {
     let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
     let slide = bullets_slide("closing", items);
     let deck = make_deck(vec![slide]);
@@ -952,7 +956,7 @@ fn test_f094_p1_002_bullets_on_closing_slide_returns_invalid_bbox_error() {
 
 /// F-094-P1-002 / BC-3.06.003 — `section_break` slide type (no Body slot).
 #[test]
-fn test_f094_p1_002_bullets_on_section_break_returns_invalid_bbox_error() {
+fn test_f094_p1_002_bullets_on_section_break_returns_contentless_slide_error() {
     let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
     let slide = bullets_slide("section_break", items);
     let deck = make_deck(vec![slide]);
@@ -975,7 +979,7 @@ fn test_f094_p1_002_bullets_on_section_break_returns_invalid_bbox_error() {
 
 /// F-094-P1-002 / BC-3.06.003 — blank slide type (zero regions, no Body slot).
 #[test]
-fn test_f094_p1_002_bullets_on_blank_slide_returns_invalid_bbox_error() {
+fn test_f094_p1_002_bullets_on_blank_slide_returns_contentless_slide_error() {
     let items = vec![flat_bullet(vec![InlineNode::Plain(Arc::from("item"))])];
     let slide = bullets_slide("blank", items);
     let deck = make_deck(vec![slide]);
