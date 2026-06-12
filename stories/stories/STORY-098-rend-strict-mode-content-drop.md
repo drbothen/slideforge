@@ -9,8 +9,11 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.4"
+spec_version: "1.5"
 # Changelog:
+# v1.5 (2026-06-11): F-098-P9-001 story-table half — BC-1.11.002 row title updated to
+#   match BC H1 v1.2: "Chart with Empty or Missing Data Produces Error-Slide Placeholder
+#   Not a Crash" (was: "Chart with Empty Data Produces Error-Slide Placeholder").
 # v1.4 (2026-06-11): Adversary pass-8 micro fix-burst F-098-P8-001/002.
 #   F-098-P8-001: AC-002 trace corrected — BC-4.01.001 v1.3 → v1.2 (v1.3 never existed;
 #     pass-7 version sweep over-caught this label).
@@ -296,7 +299,7 @@ same assertions.
 | BC ID | Title | Covering ACs |
 |-------|-------|-------------|
 | BC-3.03.002 | Strict Mode Produces No Output on Validation Error | AC-001, AC-002, AC-003 |
-| BC-1.11.002 | Chart with Empty Data Produces Error-Slide Placeholder | AC-004, AC-005 |
+| BC-1.11.002 | Chart with Empty or Missing Data Produces Error-Slide Placeholder Not a Crash | AC-004, AC-005 |
 | BC-4.01.001 | Serialize LaidOutDeck to Valid .pptx with Correct Placeholder Inheritance | AC-002 (PC-11: body placeholder rendering) |
 
 ## Test Strategy
