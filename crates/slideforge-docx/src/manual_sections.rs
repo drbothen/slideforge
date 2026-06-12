@@ -19,8 +19,8 @@
 //! `Register::Notes` is excluded per BC-4.02.001 invariant 1 / DI-012.
 
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    BodyChoice, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
-    Text,
+    BodyChoice, Languages, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run,
+    RunChoice, RunProperties, Text,
 };
 use slideforge_layout::sections::GeneratedSection;
 use slideforge_types::InlineNode;
@@ -33,13 +33,21 @@ use crate::xml_escape::strip_xml10_invalid_chars;
 ///
 /// Emits a `Heading1` paragraph using the section's `heading` field, followed
 /// by one paragraph per item in `register_content` (Report and Detail only).
-pub struct ManualSectionSerializer;
+pub struct ManualSectionSerializer {
+    /// BCP-47 language tag threaded to every emitted run (BC-5.01.005 PC-4).
+    lang: String,
+}
 
 impl ManualSectionSerializer {
-    /// Create a new serializer.
+    /// Create a new serializer with the given BCP-47 language tag.
+    ///
+    /// The `lang` value is placed in `<w:rPr><w:lang w:val="..."/>` on every
+    /// run emitted by this serializer (BC-5.01.005 PC-4 universality).
     #[must_use]
-    pub fn new() -> Self {
-        Self
+    pub fn new(lang: &str) -> Self {
+        Self {
+            lang: lang.to_owned(),
+        }
     }
 
     /// Serialize one manually-authored section into a list of [`BodyChoice`] elements.
@@ -64,6 +72,7 @@ impl ManualSectionSerializer {
         output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
             "Heading1",
             section.heading.as_ref(),
+            &self.lang,
         ))));
 
         // Emit one Normal paragraph per Report/Detail entry in register_content.
@@ -74,7 +83,7 @@ impl ManualSectionSerializer {
             }
             let text = collect_plain_text(&rc.content);
             output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                "Normal", &text,
+                "Normal", &text, &self.lang,
             ))));
         }
 
@@ -84,14 +93,19 @@ impl ManualSectionSerializer {
 
 impl Default for ManualSectionSerializer {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::DEFAULT_DECK_LANG)
     }
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 /// Build a paragraph with the given style containing a single plain-text run.
-fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
+///
+/// The run carries `<w:rPr><w:lang w:val="LANG"/></w:rPr>` so that every run
+/// emitted by this serializer satisfies the BC-5.01.005 PC-4 universality
+/// requirement (all runs must have lang — mirrors `make_lang_run` in
+/// `document_body.rs`).
+fn make_styled_paragraph(style: &str, text: &str, lang: &str) -> Paragraph {
     let sanitized = strip_xml10_invalid_chars(text);
     let needs_preserve = sanitized.starts_with(' ')
         || sanitized.ends_with(' ')
@@ -106,6 +120,13 @@ fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
             ..ParagraphProperties::default()
         })),
         paragraph_choice: vec![ParagraphChoice::WR(Box::new(Run {
+            run_properties: Some(Box::new(RunProperties {
+                languages: Some(Languages {
+                    val: Some(lang.to_owned()),
+                    ..Languages::default()
+                }),
+                ..RunProperties::default()
+            })),
             run_choice: vec![RunChoice::WT(Box::new(Text {
                 xml_content: Some(sanitized),
                 space: if needs_preserve {

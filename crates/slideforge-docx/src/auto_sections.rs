@@ -29,9 +29,10 @@
 //! concatenation for dynamic content.
 
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
-    BodyChoice, GridColumn, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run,
-    RunChoice, Table, TableCell, TableCellChoice, TableChoice2, TableGrid, TableProperties,
-    TableRow, TableRowChoice, TableStyle, TableWidth, TableWidthUnitValues, Text,
+    BodyChoice, GridColumn, Languages, Paragraph, ParagraphChoice, ParagraphProperties,
+    ParagraphStyleId, Run, RunChoice, RunProperties, Table, TableCell, TableCellChoice,
+    TableChoice2, TableGrid, TableProperties, TableRow, TableRowChoice, TableStyle, TableWidth,
+    TableWidthUnitValues, Text,
 };
 use slideforge_layout::sections::{GeneratedSection, SectionItem, SectionKind};
 
@@ -43,13 +44,21 @@ use crate::xml_escape::strip_xml10_invalid_chars;
 /// Dispatches on [`slideforge_layout::sections::SectionKind`] to select the
 /// appropriate rendering helper. Returns an empty `Vec` for sections with no
 /// items (BC-4.02.002 invariant 2).
-pub struct AutoSectionSerializer;
+pub struct AutoSectionSerializer {
+    /// BCP-47 language tag threaded to every emitted run (BC-5.01.005 PC-4).
+    lang: String,
+}
 
 impl AutoSectionSerializer {
-    /// Create a new serializer.
+    /// Create a new serializer with the given BCP-47 language tag.
+    ///
+    /// The `lang` value is placed in `<w:rPr><w:lang w:val="..."/>` on every
+    /// run emitted by this serializer (BC-5.01.005 PC-4 universality).
     #[must_use]
-    pub fn new() -> Self {
-        Self
+    pub fn new(lang: &str) -> Self {
+        Self {
+            lang: lang.to_owned(),
+        }
     }
 
     /// Serialize one auto-generated section into a list of [`BodyChoice`] elements.
@@ -69,12 +78,12 @@ impl AutoSectionSerializer {
         }
 
         match &section.kind {
-            SectionKind::RiskRegister => serialize_risk_register(section),
+            SectionKind::RiskRegister => serialize_risk_register(section, &self.lang),
             // ExecutiveSummary and ManualSection both render as heading + bullet list.
             // ManualSection should not normally be dispatched here (ManualSectionSerializer
             // handles it), but for robustness the fallback mirrors ExecutiveSummary rendering.
             SectionKind::ExecutiveSummary | SectionKind::ManualSection(_) => {
-                serialize_executive_summary(section)
+                serialize_executive_summary(section, &self.lang)
             },
         }
     }
@@ -82,7 +91,7 @@ impl AutoSectionSerializer {
 
 impl Default for AutoSectionSerializer {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::DEFAULT_DECK_LANG)
     }
 }
 
@@ -96,6 +105,7 @@ impl Default for AutoSectionSerializer {
 /// Returns [`ExportError::OoxmlError`] on OOXML construction failure.
 pub fn serialize_executive_summary(
     section: &GeneratedSection,
+    lang: &str,
 ) -> Result<Vec<BodyChoice>, ExportError> {
     if section.items.is_empty() {
         return Ok(vec![]);
@@ -107,6 +117,7 @@ pub fn serialize_executive_summary(
     output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
         "Heading1",
         section.heading.as_ref(),
+        lang,
     ))));
 
     // One Normal paragraph per TakeawayBullet item.
@@ -115,6 +126,7 @@ pub fn serialize_executive_summary(
             output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
                 "Normal",
                 text.as_ref(),
+                lang,
             ))));
         }
     }
@@ -133,7 +145,10 @@ pub fn serialize_executive_summary(
 /// # Errors
 ///
 /// Returns [`ExportError::OoxmlError`] on OOXML construction failure.
-pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyChoice>, ExportError> {
+pub fn serialize_risk_register(
+    section: &GeneratedSection,
+    lang: &str,
+) -> Result<Vec<BodyChoice>, ExportError> {
     if section.items.is_empty() {
         return Ok(vec![]);
     }
@@ -144,10 +159,11 @@ pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyCho
     output.push(BodyChoice::WP(Box::new(make_styled_paragraph(
         "Heading1",
         section.heading.as_ref(),
+        lang,
     ))));
 
     // Build the risk register table.
-    let table = build_risk_register_table(section);
+    let table = build_risk_register_table(section, lang);
     output.push(BodyChoice::WTbl(Box::new(table)));
 
     Ok(output)
@@ -161,15 +177,14 @@ pub fn serialize_risk_register(section: &GeneratedSection) -> Result<Vec<BodyCho
 ///   Columns: Risk | Severity | Description (3 columns, equal auto width)
 /// - Header row: Risk | Severity | Description (using `TableHeader` paragraph style)
 /// - Data rows: one per `SectionItem::RiskRow`
-fn build_risk_register_table(section: &GeneratedSection) -> Table {
+fn build_risk_register_table(section: &GeneratedSection, lang: &str) -> Table {
     let mut table_rows: Vec<TableChoice2> = Vec::new();
 
     // Header row.
-    table_rows.push(TableChoice2::WTr(Box::new(build_table_row(&[
-        ("Risk", true),
-        ("Severity", true),
-        ("Description", true),
-    ]))));
+    table_rows.push(TableChoice2::WTr(Box::new(build_table_row(
+        &[("Risk", true), ("Severity", true), ("Description", true)],
+        lang,
+    ))));
 
     // Data rows — one per RiskRow item.
     for item in &section.items {
@@ -180,11 +195,14 @@ fn build_risk_register_table(section: &GeneratedSection) -> Table {
             ..
         } = item
         {
-            table_rows.push(TableChoice2::WTr(Box::new(build_table_row(&[
-                (title.as_ref(), false),
-                (severity.as_ref(), false),
-                (description.as_ref(), false),
-            ]))));
+            table_rows.push(TableChoice2::WTr(Box::new(build_table_row(
+                &[
+                    (title.as_ref(), false),
+                    (severity.as_ref(), false),
+                    (description.as_ref(), false),
+                ],
+                lang,
+            ))));
         }
     }
 
@@ -222,12 +240,12 @@ fn build_risk_register_table(section: &GeneratedSection) -> Table {
 ///
 /// Each cell is given a paragraph with text. When `is_header` is `true`, the
 /// paragraph uses the `TableHeader` style; otherwise it uses `Normal`.
-fn build_table_row(cells: &[(&str, bool)]) -> TableRow {
+fn build_table_row(cells: &[(&str, bool)], lang: &str) -> TableRow {
     let row_cells: Vec<TableRowChoice> = cells
         .iter()
         .map(|(text, is_header)| {
             let style = if *is_header { "TableHeader" } else { "Normal" };
-            let para = make_styled_paragraph(style, text);
+            let para = make_styled_paragraph(style, text, lang);
             let cell = TableCell {
                 table_cell_choice: vec![TableCellChoice::WP(Box::new(para))],
                 ..TableCell::default()
@@ -245,7 +263,12 @@ fn build_table_row(cells: &[(&str, bool)]) -> TableRow {
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 /// Build a paragraph with the given style containing a single plain-text run.
-fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
+///
+/// The run carries `<w:rPr><w:lang w:val="LANG"/></w:rPr>` so that every run
+/// emitted by this serializer satisfies the BC-5.01.005 PC-4 universality
+/// requirement (all runs must have lang — mirrors `make_lang_run` in
+/// `document_body.rs`).
+fn make_styled_paragraph(style: &str, text: &str, lang: &str) -> Paragraph {
     let sanitized = strip_xml10_invalid_chars(text);
     let needs_preserve = sanitized.starts_with(' ')
         || sanitized.ends_with(' ')
@@ -260,6 +283,13 @@ fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
             ..ParagraphProperties::default()
         })),
         paragraph_choice: vec![ParagraphChoice::WR(Box::new(Run {
+            run_properties: Some(Box::new(RunProperties {
+                languages: Some(Languages {
+                    val: Some(lang.to_owned()),
+                    ..Languages::default()
+                }),
+                ..RunProperties::default()
+            })),
             run_choice: vec![RunChoice::WT(Box::new(Text {
                 xml_content: Some(sanitized),
                 space: if needs_preserve {

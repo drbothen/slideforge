@@ -54,10 +54,21 @@ pub mod content_types;
 pub mod document_body;
 pub mod error;
 pub mod manual_sections;
+pub mod numbering;
 pub mod section_order;
 pub mod styles;
 pub mod xml_escape;
 pub mod zip_assembler;
+
+/// Default BCP-47 language tag when the deck carries no `lang` declaration.
+///
+/// Re-exported from [`slideforge_types::DEFAULT_DECK_LANG`] — the canonical
+/// shared source of truth (BC-5.01.004 / BC-5.01.005 / TD-VSDD-060).
+///
+/// The value is `"en"` — NOT `"en-US"`. All DOCX surfaces (`word/document.xml`
+/// run `<w:lang>`, `docProps/core.xml` `<dc:language>`) use this constant so
+/// that a single edit propagates everywhere.
+pub use slideforge_types::DEFAULT_DECK_LANG;
 
 #[cfg(test)]
 #[allow(
@@ -69,7 +80,7 @@ mod tests;
 
 use slideforge_layout::LaidOutDeck;
 use slideforge_plugin_api::{ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck};
+use slideforge_types::{Brand, Deck, validate_xml_lang};
 use tracing::instrument;
 
 use crate::document_body::DocumentBodySerializer;
@@ -124,10 +135,32 @@ impl Exporter for DocxExporter {
 /// Separated from the trait impl so errors use the richer local
 /// [`ExportError`] type until the final conversion.
 ///
+/// ## XML-1.0 control-character validation (SEC-099-001 / CWE-116)
+///
+/// The deck's `lang` value is validated against the XML-1.0 legal character
+/// set BEFORE any ZIP part is assembled. A lang value containing U+0000–U+0008,
+/// U+000B, U+000C, U+000E–U+001F, U+FFFE, or U+FFFF returns
+/// [`ExportError::InvalidLanguageTag`] immediately (fail-fast). Valid BCP-47
+/// tags (ASCII alphanumeric + hyphen) pass through unchanged (lossless —
+/// BC-5.01.005 invariant 1). The shared validator lives in `slideforge-types`
+/// so the same logic covers every exporter (SEC-099-001 / SEC-039-001).
+///
 /// # Errors
 ///
 /// Returns [`ExportError`] on any assembly failure.
 fn build_docx(deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand) -> Result<Vec<u8>, ExportError> {
+    // SEC-099-001 / CWE-116: validate lang at export entry — before any XML part
+    // is assembled. The shared `validate_xml_lang` (slideforge-types) returns the
+    // first illegal char on failure; wrap it into the DOCX-specific error variant.
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
+    validate_xml_lang(lang_raw).map_err(|ch| {
+        let code = ch as u32;
+        ExportError::InvalidLanguageTag {
+            lang: lang_raw.to_owned(),
+            reason: format!("contains XML-1.0-illegal control character U+{code:04X}"),
+        }
+    })?;
+
     let mut asm = DocxZipAssembler::new();
 
     // ── `[Content_Types].xml` ─────────────────────────────────────────────
@@ -150,8 +183,9 @@ fn build_docx(deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand) -> Result<Vec<
     let styles_xml = styles::build_styles(Some(brand))?;
     asm.add_part("word/styles.xml", styles_xml);
 
-    // ── `word/numbering.xml` (minimal empty stub) ─────────────────────────
-    asm.add_part("word/numbering.xml", build_numbering_xml());
+    // ── `word/numbering.xml` — abstract + concrete bullet definitions ──────
+    let numbering_xml = numbering::build_numbering_xml()?;
+    asm.add_part("word/numbering.xml", numbering_xml);
 
     // ── `word/settings.xml` (minimal stub) ───────────────────────────────
     asm.add_part("word/settings.xml", build_settings_xml());
@@ -226,15 +260,6 @@ fn build_document_rels(hyperlinks: &[document_body::HyperlinkRel]) -> Vec<u8> {
     xml.into_bytes()
 }
 
-/// Build `word/numbering.xml` — minimal empty stub.
-fn build_numbering_xml() -> Vec<u8> {
-    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>
-"#
-    .as_bytes()
-    .to_vec()
-}
-
 /// Build `word/settings.xml` — minimal stub.
 fn build_settings_xml() -> Vec<u8> {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -248,7 +273,7 @@ fn build_settings_xml() -> Vec<u8> {
 
 /// Build `docProps/core.xml` with `dc:language` from the deck metadata.
 fn build_core_xml(deck: &Deck) -> Vec<u8> {
-    let lang = deck.metadata.lang.as_deref().unwrap_or("en-US");
+    let lang = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
 
     // Declare only the namespaces that are actually used: cp: and dc:.
     // xmlns:dcterms and xmlns:xsi are omitted — no dcterms:created/modified

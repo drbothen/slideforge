@@ -43,6 +43,25 @@ pub enum ExportError {
         /// Description of the validation failure.
         message: String,
     },
+
+    /// The resolved `dc:language` / `<w:lang>` value contains an XML-1.0-illegal
+    /// control character (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE,
+    /// U+FFFF) and cannot be safely embedded in any DOCX XML part.
+    ///
+    /// A valid BCP-47 tag (ASCII alphanumeric + hyphen) is always accepted
+    /// unchanged (lossless pass-through per BC-5.01.005 invariant 1). This error
+    /// fires only for lang values that would produce malformed XML-1.0 output
+    /// (CWE-116 / SEC-099-001).
+    ///
+    /// `lang` is the offending value; `reason` names the specific violation.
+    #[error("dc:language / w:lang value {lang:?} is not safe for XML-1.0 embedding: {reason}")]
+    InvalidLanguageTag {
+        /// The lang value that failed validation.
+        lang: String,
+        /// A human-readable description of the XML-1.0 violation (includes the
+        /// code point as `U+XXXX` per FU-DIAGNOSTIC-FIELD-PINNING).
+        reason: String,
+    },
 }
 
 impl From<ExportError> for slideforge_plugin_api::ExportError {
@@ -54,9 +73,11 @@ impl From<ExportError> for slideforge_plugin_api::ExportError {
             ExportError::OoxmlError { message } => {
                 slideforge_plugin_api::ExportError::RenderError { message }
             },
-            ExportError::ValidationError { message } => {
-                slideforge_plugin_api::ExportError::ValidationError { message }
-            },
+            ExportError::ValidationError { message }
+            | ExportError::InvalidLanguageTag {
+                lang: _,
+                reason: message,
+            } => slideforge_plugin_api::ExportError::ValidationError { message },
         }
     }
 }
