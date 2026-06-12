@@ -23,7 +23,7 @@
 //! | `test_BC_4_01_005_ac009_card_rows_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_horizontal_timeline_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_status_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
-//! | `test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0` | AC-002/STORY-096 | postcondition 5 | GREEN (STORY-096 AC-002 fix) |
+//! | `test_BC_4_01_005_ac009_progress_bar_maps_to_index_30` | AC-002/STORY-096 | postcondition 5 | GREEN (STORY-096 AC-002 fix) |
 //! | `test_BC_4_01_005_ac009_metric_tree_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_formula_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_weighted_composite_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
@@ -800,7 +800,7 @@ fn test_BC_4_01_005_ac009_status_maps_to_index_1_not_0() {
 /// with `slide_type_keyword = Some("progress_bar")`, so Phase 1 keyword lookup
 /// resolves it to index 30 instead of falling back to 1.
 #[test]
-fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0() {
+fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_30() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "progress_bar");
     assert_ne!(

@@ -171,8 +171,8 @@ impl PptxExporter {
             .collect();
 
         // Extract page size once for master and slide serializers.
-        // Both build_master_parts (sldSz in slideMaster1.xml) and the slide
-        // serializer (lang on rPr) derive their values from the deck at this point.
+        // build_master_parts uses page_size_emu for placeholder geometry; the slide
+        // serializer (lang on rPr) derives its lang from the deck at this point.
         let page_size_emu = (laid_out.page_size.width.0, laid_out.page_size.height.0);
         let deck_lang: std::sync::Arc<str> = deck
             .metadata
@@ -631,14 +631,16 @@ fn build_presentation_xml(
 /// Build `slideMaster1.xml` and its `.rels`.
 ///
 /// ADR-015 §2: uses `serialize_master_to_xml` from `slideforge-brand` to
-/// produce a schema-valid master with `<p:sldSz>`, `<a:clrMap>`, `<p:sldLayoutIdLst>`,
+/// produce a schema-valid master with `<a:clrMap>`, `<p:sldLayoutIdLst>`,
 /// `<p:txStyles>`, 5 master placeholder shapes, and `<p:hf>` flags.
+/// `CT_SlideMaster` does not include `<p:sldSz>` (ECMA-376 §19.3.1.42);
+/// slide size is carried exclusively by `presentation.xml` (STORY-096 AC-001 v1.2).
 ///
-/// ## Slide size threading (STORY-096 AC-001)
+/// ## Page size threading
 ///
 /// `page_size_emu` is `(width_emu, height_emu)` sourced from `LaidOutDeck.page_size`
-/// in `export_inner`. It is threaded here to ensure `slideMaster1.xml` emits a
-/// `<p:sldSz>` that matches `presentation.xml` (BC-4.01.001 postcondition 2).
+/// in `export_inner`. It is threaded here so that footer and slide-number placeholder
+/// positions remain within the declared page bounds (BC-4.01.001 postcondition 4 / AC-004).
 ///
 /// The master `.rels` file references:
 /// - rId1: the theme

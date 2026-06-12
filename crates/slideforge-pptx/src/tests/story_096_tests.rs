@@ -9,8 +9,8 @@
 //!
 //! | Test function | AC/EC | BC clause | Red Gate status |
 //! |---|---|---|---|
-//! | `test_BC_4_01_001_master_sldsz_matches_16x9_deck` | AC-001 | BC-4.01.001 postcondition 2 | RED |
-//! | `test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size` | AC-001/EC-001 | BC-4.01.001 postcondition 2 | RED |
+//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_16x9` | AC-001 | BC-4.01.001 postcondition 2 | RED |
+//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_custom_page_size` | AC-001/EC-001 | BC-4.01.001 postcondition 2 | RED |
 //! | `test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds` | AC-004 | BC-4.01.001 postcondition 4 | RED |
 //! | `test_BC_4_01_005_progress_bar_has_named_layout` | AC-002 | BC-4.01.005 postcondition 4/5 | RED |
 //! | `test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback` | AC-002/EC-004 | BC-4.01.005 postcondition 5 | RED |
@@ -315,84 +315,109 @@ fn collect_rpr_lang_values(xml: &str) -> Vec<String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-001 + AC-004: slideMaster1.xml sldSz must match deck page size
+// AC-001: slideMaster1.xml must NOT contain <p:sldSz>; presentation.xml must.
 // Traces to BC-4.01.001 postcondition 2 (valid .pptx with correct geometry)
+// STORY-096 spec v1.2: ECMA-376 §19.3.1.42 — CT_SlideMaster has no sldSz field.
+// sldSz belongs exclusively to CT_Presentation (presentation.xml).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-4.01.001 postcondition 2 / STORY-096 AC-001:
+/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 (spec v1.2):
 ///
-/// Verifies that `slideMaster1.xml` declares `<p:sldSz cx="9144000" cy="5143500"/>`
-/// when the deck uses the default 16:9 page size (BC-4.01.001 postcondition 2).
+/// Verifies that `slideMaster1.xml` contains NO `<p:sldSz>` element (schema
+/// correctness: `CT_SlideMaster` does not define a `sldSz` field per
+/// ECMA-376 §19.3.1.42), and that `presentation.xml` carries the correct
+/// `<p:sldSz cx="9144000" cy="5143500"/>` for the default 16:9 page size.
 ///
-/// `serialize_master_to_xml` must derive `cx`/`cy` from the deck's `page_size`
-/// (9,144,000 × 5,143,500 EMU for 16:9). Footer and date placeholders must be
-/// positioned within those bounds.
+/// The `page_size_emu` parameter continues to be threaded through to
+/// `serialize_master_to_xml` so footer/date/slideNum placeholder geometry
+/// remains derived from the deck page size (AC-004 / BC-4.01.001 postcondition 4).
+/// Only the invalid `<p:sldSz>` emission is removed.
 ///
-/// Asserts the EXACT EMU values (LESSON-14), not mere element presence.
+/// Asserts EXACT EMU values in presentation.xml (LESSON-14).
 #[test]
-fn test_BC_4_01_001_master_sldsz_matches_16x9_deck() {
-    // Default page size = 16:9: cx=9,144,000 cy=5,143,500 (slideforge-layout defaults)
+fn test_BC_4_01_001_master_has_no_sldsz_presentation_carries_16x9() {
+    // Default page size: 16:9 = cx=9,144,000 cy=5,143,500 EMU.
     let laid_out = make_laid_out_deck(1);
     let pptx_bytes = build_pptx(&laid_out);
-    let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
 
-    let (cx, cy) = parse_sldsz_cx_cy(&master_xml).unwrap_or_else(|| {
+    let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
+    let presentation_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
+
+    // Contract (i): slideMaster1.xml must contain NO <p:sldSz> element.
+    assert!(
+        !master_xml.contains("<p:sldSz"),
+        "AC-001 v1.2: slideMaster1.xml must NOT contain <p:sldSz> — \
+         CT_SlideMaster has no such field (ECMA-376 §19.3.1.42). \
+         Found a <p:sldSz> element.\nmaster_xml excerpt:\n{}",
+        &master_xml[..master_xml.len().min(1500)]
+    );
+
+    // Contract (ii): presentation.xml must carry <p:sldSz cx="9144000" cy="5143500"/>.
+    let (cx, cy) = parse_sldsz_cx_cy(&presentation_xml).unwrap_or_else(|| {
         panic!(
-            "AC-001 Red Gate: slideMaster1.xml must contain a <p:sldSz> element \
-             declaring the deck page dimensions. None found.\n\
-             master_xml excerpt:\n{}",
-            &master_xml[..master_xml.len().min(1500)]
+            "AC-001 v1.2: presentation.xml must contain <p:sldSz> with 16:9 dimensions. \
+             None found.\npresentation_xml excerpt:\n{}",
+            &presentation_xml[..presentation_xml.len().min(1500)]
         )
     });
-
-    // 16:9 canonical values: 9,144,000 × 5,143,500 EMU (DEFAULT_PAGE_WIDTH × DEFAULT_PAGE_HEIGHT)
     assert_eq!(
         cx, 9_144_000,
-        "AC-001: slideMaster1.xml <p:sldSz cx> must be 9144000 (16:9 default width); \
-         got cx={cx}. The master sldSz must be derived from the deck page_size, \
-         NOT hardcoded to 4:3 (6858000 × 5143500)."
+        "AC-001 v1.2: presentation.xml <p:sldSz cx> must be 9144000 (16:9 default width); \
+         got cx={cx}."
     );
     assert_eq!(
         cy, 5_143_500,
-        "AC-001: slideMaster1.xml <p:sldSz cy> must be 5143500 (16:9 default height); \
+        "AC-001 v1.2: presentation.xml <p:sldSz cy> must be 5143500 (16:9 default height); \
          got cy={cy}."
     );
 }
 
-/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 / EC-001:
+/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 / EC-001 (spec v1.2):
 ///
-/// Verifies that when the brand configures a 4:3 custom page size
-/// (`cx=6858000 cy=5143500`), `slideMaster1.xml` declares
-/// `<p:sldSz cx="6858000" cy="5143500"/>` (BC-4.01.001 postcondition 2).
+/// Verifies that for a 4:3 custom brand page size (`cx=6858000 cy=5143500`):
+/// (i) `slideMaster1.xml` still contains NO `<p:sldSz>` element.
+/// (ii) `presentation.xml` carries `<p:sldSz cx="6858000" cy="5143500"/>`.
 ///
-/// EC-001: custom brand page size — `serialize_master_to_xml` must use the
-/// `LaidOutDeck.page_size` dimensions, not the 16:9 default and not hardcoded 4:3.
+/// EC-001: custom brand page size — `serialize_master_to_xml` uses `page_size_emu`
+/// for placeholder geometry only; the `<p:sldSz>` element is never emitted in master.
+/// `presentation.xml` derives its `SlideSize` from `LaidOutDeck.page_size` directly.
 #[test]
-fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
+fn test_BC_4_01_001_master_has_no_sldsz_presentation_carries_custom_page_size() {
     // 4:3 custom page: width=6,858,000 height=5,143,500
     let custom_page_width: i64 = 6_858_000;
     let custom_page_height: i64 = 5_143_500;
     let laid_out = make_laid_out_deck_with_page_size(custom_page_width, custom_page_height);
     let pptx_bytes = build_pptx(&laid_out);
-    let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
 
-    let (cx, cy) = parse_sldsz_cx_cy(&master_xml).unwrap_or_else(|| {
+    let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
+    let presentation_xml = zip_read_entry(&pptx_bytes, "ppt/presentation.xml");
+
+    // Contract (i): slideMaster1.xml must contain NO <p:sldSz> element.
+    assert!(
+        !master_xml.contains("<p:sldSz"),
+        "AC-001/EC-001 v1.2: slideMaster1.xml must NOT contain <p:sldSz> — \
+         CT_SlideMaster has no such field (ECMA-376 §19.3.1.42). \
+         Found a <p:sldSz> element.\nmaster_xml excerpt:\n{}",
+        &master_xml[..master_xml.len().min(1500)]
+    );
+
+    // Contract (ii): presentation.xml must carry the custom-brand page dimensions.
+    let (cx, cy) = parse_sldsz_cx_cy(&presentation_xml).unwrap_or_else(|| {
         panic!(
-            "AC-001/EC-001 Red Gate: slideMaster1.xml must contain <p:sldSz> for custom \
-             brand page size. None found.\nmaster_xml excerpt:\n{}",
-            &master_xml[..master_xml.len().min(1500)]
+            "AC-001/EC-001 v1.2: presentation.xml must contain <p:sldSz> for custom \
+             brand page size. None found.\npresentation_xml excerpt:\n{}",
+            &presentation_xml[..presentation_xml.len().min(1500)]
         )
     });
-
     assert_eq!(
         cx, custom_page_width,
-        "AC-001 EC-001: slideMaster1.xml <p:sldSz cx> must be {custom_page_width} \
-         (brand-configured custom width); got cx={cx}"
+        "AC-001 EC-001 v1.2: presentation.xml <p:sldSz cx> must be {custom_page_width} \
+         (brand-configured custom width); got cx={cx}."
     );
     assert_eq!(
         cy, custom_page_height,
-        "AC-001 EC-001: slideMaster1.xml <p:sldSz cy> must be {custom_page_height} \
-         (brand-configured custom height); got cy={cy}"
+        "AC-001 EC-001 v1.2: presentation.xml <p:sldSz cy> must be {custom_page_height} \
+         (brand-configured custom height); got cy={cy}."
     );
 }
 
@@ -418,8 +443,7 @@ fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
 /// `serialize_master_to_xml`, so their tops stay within bounds; this test
 /// verifies BOTH top-edge AND bottom-edge invariants for ALL master shapes.
 ///
-/// LESSON-14: asserts ACTUAL coordinate arithmetic, not merely that the
-/// master XML contains `<p:sldSz>`.
+/// LESSON-14: asserts ACTUAL coordinate arithmetic, not merely element presence.
 /// F-096-003: strengthened to check `off.y + ext.cy <= page_height`
 /// (bottom-edge invariant) in addition to the pre-existing top-edge check.
 #[test]

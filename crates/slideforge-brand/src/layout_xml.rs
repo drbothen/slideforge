@@ -622,10 +622,8 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 ///
 /// The returned `Vec<u8>` is a valid `slideMaster1.xml` document containing:
 /// - `<p:sldMaster>` root with `PresentationML` + `DrawingML` namespace declarations.
-/// - `<p:sldSz cx="W" cy="H"/>` derived from `page_size_emu` — must match `presentation.xml`
-///   (STORY-096 AC-001, BC-4.01.001 postcondition 2).
 /// - `<p:cSld><p:spTree>` with 5 master placeholder shapes (title, body, dt, ftr, sldNum)
-///   positioned within the page bounds declared by `page_size_emu`.
+///   positioned within the page bounds derived from `page_size_emu`.
 /// - `<a:clrMap>` with all 12 OOXML color-map tokens (ECMA-376 §19.3.1.14).
 /// - `<p:sldLayoutIdLst>` with one `<p:sldLayoutId>` per layout in `template.layouts`
 ///   (IDs from `template.master_ids.layout_id_start` onwards).
@@ -635,13 +633,19 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 /// Element order follows ECMA-376 §19.3.1.42 `CT_SlideMaster` sequence model:
 /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles` (ADR-015 §A.3).
 ///
-/// ## Page size parameter (STORY-096 AC-001)
+/// ## Schema note: no `<p:sldSz>` in master
 ///
-/// `page_size_emu` is `(width_emu, height_emu)` sourced from the `LaidOutDeck.page_size`
-/// at export time. The PPTX exporter threads this from `export_inner` through
-/// `build_master_parts`. Footer and slide-number placeholder positions are scaled so
-/// they remain within the page bounds for both 16:9 (9,144,000 × 5,143,500) and
-/// custom brand page sizes (BC-4.01.001 postcondition 4 / STORY-096 AC-004).
+/// `CT_SlideMaster` (ECMA-376 §19.3.1.42) does not define a `sldSz` field.
+/// Slide size belongs exclusively to `CT_Presentation` (`presentation.xml`),
+/// where `slideforge-pptx` emits it via the typed `SlideSize` builder.
+/// This function does NOT emit `<p:sldSz>` (STORY-096 AC-001 v1.2 / F-096-A001).
+///
+/// ## Page size parameter
+///
+/// `page_size_emu` is `(width_emu, height_emu)` sourced from `LaidOutDeck.page_size`
+/// at export time. It is used exclusively to derive footer and slide-number placeholder
+/// positions so they remain within the page bounds for both 16:9 (9,144,000 × 5,143,500)
+/// and custom brand page sizes (BC-4.01.001 postcondition 4 / STORY-096 AC-004).
 ///
 /// # Panics
 ///
@@ -672,21 +676,6 @@ pub fn serialize_master_to_xml(
     writer
         .write_event(Event::Start(root))
         .expect("write sldMaster start");
-
-    // <p:sldSz cx="W" cy="H"/> — must match presentation.xml sldSz (STORY-096 AC-001).
-    // Derived from the LaidOutDeck.page_size threaded in from the PPTX exporter.
-    // Emitted before <p:cSld> so it is visible at the sldMaster level.
-    {
-        let (master_width, master_height) = page_size_emu;
-        let width_attr = master_width.to_string();
-        let height_attr = master_height.to_string();
-        let mut sld_sz = BytesStart::new("p:sldSz");
-        sld_sz.push_attribute(("cx", width_attr.as_str()));
-        sld_sz.push_attribute(("cy", height_attr.as_str()));
-        writer
-            .write_event(Event::Empty(sld_sz))
-            .expect("write sldSz");
-    }
 
     // <p:cSld>
     writer
