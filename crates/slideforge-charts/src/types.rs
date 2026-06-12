@@ -224,15 +224,16 @@ pub enum ChartError {
     /// In strict mode: this error causes the build to fail (exit code 2, no output).
     /// In warn-only mode: the caller produces a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`.
     ///
-    /// ## Canonical Display format (HIGH-004)
+    /// ## Canonical Display format (error-taxonomy v2.32, BC-1.11.002 PC-1)
     ///
-    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
+    /// The `[E-LAY-003]` self-prefix is the canonical bracketed form (taxonomy v2.32 / F-098-P4-001).
     /// The `expression` field is available to callers that need it (e.g., for building
     /// diagnostics), but is NOT inlined in the Display string — miette renders the
     /// `span` source pointer separately.
     #[error(
-        "E-LAY-003: Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+        "[E-LAY-003] Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
     )]
     EmptyData {
         /// The title of the chart slide where empty data was detected.
@@ -362,8 +363,8 @@ mod tests {
     ///
     /// Traceability anchor: the named test for test vector 19 in STORY-032.
     ///
-    /// HIGH-004 (adversarial pass): the canonical Display format is:
-    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    /// Canonical Display format (error-taxonomy v2.32, F-098-P4-001):
+    /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
     /// The `expression` field is NOT inlined in the message body; it is available on
     /// the variant for callers that need it. Miette renders the `span` source pointer

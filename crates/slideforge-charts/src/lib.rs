@@ -25,9 +25,8 @@
 //!   `slideforge-syntax`, or `slideforge-eval`.
 //! - **Empty-data guard (STORY-032)**: `dispatch_and_process` returns
 //!   `ChartError::EmptyData` when `spec.data` is empty, BEFORE any renderer
-//!   is invoked. The `validation::data_is_empty(&Value)` helper provides
-//!   a precondition check at the raw `Value` layer; pipeline-level detection
-//!   is handled by `ChartEmptyDataValidator` in `slideforge-validate`.
+//!   is invoked. Pipeline-level detection (Stage 5) is handled by
+//!   `ChartEmptyDataValidator` in `slideforge-validate`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -45,7 +44,6 @@ pub(crate) mod safety;
 pub(crate) mod scatter;
 pub(crate) mod stacked_bar;
 pub mod types;
-pub mod validation;
 
 use std::sync::Arc;
 
@@ -1580,14 +1578,10 @@ mod tests {
                 );
                 let svg = crate::placeholder::build_error_slide_placeholder_svg(
                     &slide_title,
-                    crate::validation::E_LAY_003,
+                    "E-LAY-003",
                     &message,
                 );
-                (
-                    svg,
-                    slide_title,
-                    Arc::<str>::from(crate::validation::E_LAY_003),
-                )
+                (svg, slide_title, Arc::<str>::from("E-LAY-003"))
             },
             other => panic!("expected ChartError::EmptyData, got: {other:?}"),
         };
