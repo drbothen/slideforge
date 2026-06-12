@@ -9,8 +9,24 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.3"
+spec_version: "1.4"
 # Changelog:
+# v1.4 (2026-06-11): Adversary pass-8 micro fix-burst F-098-P8-001/002.
+#   F-098-P8-001: AC-002 trace corrected — BC-4.01.001 v1.3 → v1.2 (v1.3 never existed;
+#     pass-7 version sweep over-caught this label).
+#   F-098-P8-002: STORY-INDEX historical record annotated with version-bump parenthetical
+#     (orchestrator-adjudicated: historical record preserved, not falsified).
+# v1.3 (2026-06-11): Adversary pass-7 fix-burst F-098-P7-001..004.
+#   F-098-P7-001: source_findings + closes_findings: REND-010 → REND-010a (compound
+#     finding; 010b owned by STORY-102).
+#   F-098-P7-002: BC-3.03.001 removed from behavioral_contracts (false comment — that BC
+#     is Canvas Overflow, unrelated to schema drift; it had no body table row or AC trace).
+#   F-098-P7-003: BC-4.01.001 added to behavioral_contracts (house convention: all BCs
+#     cited in AC traces must appear in frontmatter + body table; "see also" pattern not
+#     used in sibling stories — STORY-094, STORY-096, STORY-097 all include every traced
+#     BC in frontmatter). AC-002 trace rewording matches convention.
+#   F-098-P7-004: Stale version labels swept: BC-3.03.002 v1.2 → v1.3 (all occurrences);
+#     error-taxonomy v2.29 → v2.32 (all occurrences).
 # v1.1 (2026-06-11): Fix path mis-anchor F-098-P1-006 — body/content drift site is
 #   crates/slideforge-eval/src/field_to_block.rs (thread_one_slide ~188-203), NOT
 #   crates/slideforge-validate/src/field_to_block.rs:135. Also synced AC-004/AC-005
@@ -176,7 +192,7 @@ Verified by: unit test in `slideforge-validate`; build a deck with `shape:` on a
 that does not support it; assert exit 2; assert W-VAL-103 message in stderr with unchanged format.
 
 ### AC-002: body field on content slide renders prose content (schema-VALID — PO adjudication F-098-ADJ-BODY-CONTENT)
-(traces to BC-3.03.002 v1.3 EC-007 REVERSED + BC-4.01.001 v1.3 PC-11 — body placeholder rendering contract: where body prose lands in .pptx)
+(traces to BC-3.03.002 v1.3 EC-007 REVERSED + BC-4.01.001 v1.2 PC-11 — body placeholder rendering contract: where body prose lands in .pptx)
 
 `slideforge build deck.sf` (strict mode) where a `content:` slide has a `body:` field
 builds successfully: exit 0, output written, NO W-VAL-103 emitted. The `body` prose text
