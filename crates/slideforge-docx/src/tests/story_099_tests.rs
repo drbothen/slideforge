@@ -17,6 +17,8 @@
 //! | `test_BC_4_02_001_ec001_no_bullets_no_numpr_no_crash` | BC-4.02.001 | EC-001 |
 //! | `test_BC_4_02_001_ec002_nested_bullets_correct_levels` | BC-4.02.001 postcondition 7 | EC-002 |
 //! | `test_BC_4_02_001_ec005_empty_bullet_string_preserved` | BC-4.02.001 postcondition 7 | EC-005 |
+//! | `test_BC_5_01_005_section_runs_have_lang_universality` | BC-5.01.005 PC-4 universality incl. sections | adversary F-099-001 [HIGH] |
+//! | `test_BC_5_01_005_no_lang_docprops_default_en_cross_surface` | BC-5.01.005 PC-6 cross-surface default | adversary OBS-099-001 [MED] |
 //!
 //! # Twips arithmetic for AC-003
 //!
