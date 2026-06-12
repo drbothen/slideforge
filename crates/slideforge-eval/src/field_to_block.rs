@@ -1173,4 +1173,66 @@ mod tests {
              use thread_slide_fields_to_blocks for selective threading)"
         );
     }
+
+    // ── F-098-P3-004: eval gate `slide_type_supports_body` for color-coded types ─
+
+    /// F-098-P3-004 (STORY-098 adversary pass-3):
+    ///
+    /// A `progress_bar` slide carrying a `body:` field must NOT produce a
+    /// `TextTag::Body` block. `progress_bar` does not declare `body` in its
+    /// known-fields set (BC-1.17.002 / STORY-087), so the eval gate
+    /// `slide_type_supports_body` (`field_to_block.rs`) must return `false` and
+    /// the body field must be silently suppressed.
+    ///
+    /// Load-bearing: if the gate is removed or if `known_fields("progress_bar")`
+    /// erroneously includes `"body"`, this assertion fails (a Body block is present).
+    /// Mutation-survivable without this test.
+    #[test]
+    fn test_f098_p3_004_progress_bar_body_field_not_threaded() {
+        use slideforge_types::ContentBlock;
+
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Status Update"))),
+        );
+        fields.insert(
+            Arc::from("label"),
+            FieldValue::Literal(Value::Str(Arc::from("On Track"))),
+        );
+        fields.insert(Arc::from("value"), FieldValue::Literal(Value::Int(75)));
+        // This field must NOT produce a TextTag::Body block — progress_bar has no body.
+        fields.insert(
+            Arc::from("body"),
+            FieldValue::Literal(Value::Str(Arc::from("This should be suppressed"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("progress_bar"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        };
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+
+        // F-098-P3-004: no TextTag::Body block must be present for progress_bar.
+        let has_body_block = deck.slides[0].blocks.iter().any(|b| {
+            matches!(
+                &b.content,
+                ContentBlock::Text(tb) if tb.tag == TextTag::Body
+            )
+        });
+        assert!(
+            !has_body_block,
+            "F-098-P3-004: progress_bar slide must NOT thread a TextTag::Body block \
+             (progress_bar does not declare 'body' per BC-1.17.002); \
+             blocks: {:?}",
+            deck.slides[0].blocks
+        );
+    }
 }

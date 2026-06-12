@@ -353,6 +353,12 @@ pub use slideforge_types::SourceSpan;
 /// via the structured layout-error rendering path.
 pub use slideforge_layout::LayoutError;
 
+/// Re-export of [`slideforge_layout::FrameContent`].
+///
+/// Integration tests (and the CLI, if needed) can inspect `CompiledDeck.laid_out`
+/// frames without a direct dependency on `slideforge-layout`.
+pub use slideforge_layout::FrameContent;
+
 // ── Sort-key utilities for cross-stage source-order rendering ─────────────────
 
 /// Extract the source sort key `(file, line, col)` from a
@@ -602,6 +608,58 @@ pub fn export_format(
         bytes,
         extension: file_extension,
     })
+}
+
+// ── F-098-P3-001 / BC-1.11.002 PC-3: warn-only E-LAY-003 demotion helpers ────
+
+/// Collect the zero-based slide indices of all `chart` slides in `deck` that
+/// have empty or absent `data:` field values (E-LAY-003 condition).
+///
+/// This function re-inspects the deck in the same way `ChartEmptyDataValidator`
+/// does, so that warn-only demotion can identify WHICH slides need placeholder
+/// substitution without carrying indices through the `Diagnostic` struct.
+///
+/// Returns an empty `Vec` if no chart slides qualify.
+fn collect_e_lay_003_chart_indices(deck: &slideforge_types::Deck) -> Vec<usize> {
+    use slideforge_types::{FieldValue, Value};
+
+    deck.slides
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, slide)| {
+            if slide.slide_type.as_ref() != "chart" {
+                return None;
+            }
+            let is_empty_or_absent = match slide.fields.get("data") {
+                Some(FieldValue::Literal(Value::List(items))) => items.is_empty(),
+                Some(FieldValue::Literal(Value::Map(m))) => m.is_empty(),
+                None => true, // absent data field — BC-1.11.002 v1.2 EC-005
+                _ => false,
+            };
+            if is_empty_or_absent { Some(idx) } else { None }
+        })
+        .collect()
+}
+
+/// Build the canonical per-slide E-LAY-003 diagnostic message for a chart slide.
+///
+/// The message is embedded in the placeholder `body` field so it appears in
+/// all export formats at the affected slide position.
+///
+/// Format: `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+fn e_lay_003_placeholder_message(deck: &slideforge_types::Deck, slide_idx: usize) -> String {
+    use slideforge_types::{FieldValue, Value};
+    let title = if let Some(slide) = deck.slides.get(slide_idx) {
+        match slide.fields.get("title") {
+            Some(FieldValue::Literal(Value::Str(s))) => s.as_ref().to_owned(),
+            _ => slide.slide_type.as_ref().to_owned(),
+        }
+    } else {
+        "chart".to_owned()
+    };
+    format!(
+        "[E-LAY-003] Chart data is empty for slide '{title}'. Rendering error-slide placeholder."
+    )
 }
 
 // ── F-094-P9-001 Prong 2: warn-only layout-error demotion helpers ─────────────
@@ -1036,6 +1094,57 @@ fn compile_inner(
     // AFTER the validator loop so LangValidator can correctly detect absent lang.
     tracing::info!("compile_inner: injecting lang default (post-validate)");
     slideforge_validate::inject_lang_default(&mut deck);
+
+    // F-098-P3-001 / BC-1.11.002 PC-3: warn-only E-LAY-003 pre-layout demotion.
+    //
+    // The `ChartEmptyDataValidator` (Stage 5) emits E-LAY-003 with Error severity
+    // for every chart slide whose `data:` field is absent or empty.  In STRICT mode
+    // those errors will hit the combined gate (Stage 6c) and return
+    // `BuildError::ValidationFailed`.  In WARN-ONLY mode the gate is skipped, but
+    // Stage 6 layout would still produce `FrameContent::Chart` for the affected
+    // slides — violating BC-1.11.002 invariant 2 ("ChartRenderer is NEVER called
+    // with empty data") and emitting no visible error to the user.
+    //
+    // Fix: before Stage 6 layout, if we are in warn-only mode and ANY E-LAY-003
+    // diagnostics were emitted, substitute the affected chart slides with
+    // `error_slide_placeholder` (same IR type used by E-LAY-008), re-thread their
+    // fields, then let layout run normally on the substituted deck.
+    //
+    // This mirrors the E-LAY-008 demotion ordering exactly (substitute → re-thread
+    // → re-layout) and satisfies the same architectural contract (ADR-019: fields
+    // must be threaded to blocks before layout can produce non-empty frames).
+    if !options.strict {
+        let has_e_lay_003 = all_validator_diagnostics
+            .iter()
+            .any(|d| d.code.as_ref() == "E-LAY-003");
+        if has_e_lay_003 {
+            let e_lay_003_indices = collect_e_lay_003_chart_indices(&deck);
+            if !e_lay_003_indices.is_empty() {
+                tracing::warn!(
+                    count = e_lay_003_indices.len(),
+                    "compile_inner: warn-only mode — demoting E-LAY-003 \
+                     (empty-data chart) to error-slide placeholders \
+                     on slides {e_lay_003_indices:?}"
+                );
+                for &slide_idx in &e_lay_003_indices {
+                    if slide_idx < deck.slides.len() {
+                        let per_slide_msg = e_lay_003_placeholder_message(&deck, slide_idx);
+                        let placeholder = slideforge_validate::error_slide_placeholder(
+                            "E-LAY-003",
+                            &per_slide_msg,
+                            slide_idx + 1,
+                        );
+                        deck.slides[slide_idx] = placeholder;
+                    }
+                }
+                for &slide_idx in &e_lay_003_indices {
+                    if slide_idx < deck.slides.len() {
+                        thread_slide_fields_to_blocks(&mut deck.slides[slide_idx]);
+                    }
+                }
+            }
+        }
+    }
 
     // Stage 6: lay out the Deck.
     //
