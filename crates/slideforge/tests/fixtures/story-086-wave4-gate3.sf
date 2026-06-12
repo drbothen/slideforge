@@ -13,7 +13,7 @@ slide title:
 
 slide content:
   title "Key Findings"
-  body "Performance exceeded targets across all regions."
+  bullets "Performance exceeded targets across all regions."
 
 slide chart:
   title "Regional Breakdown"

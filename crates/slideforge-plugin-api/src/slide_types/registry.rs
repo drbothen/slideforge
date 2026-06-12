@@ -201,6 +201,13 @@ impl Default for SlideTypeRegistry {
     }
 }
 
+/// BC-3.03.002 v1.2 Invariant 4 (Route A): unknown fields in this set promote
+/// `W-VAL-103` to Error severity (broken/exit-2 in strict mode) because they cause
+/// authored content to be silently dropped. Fields NOT in this set retain Warning
+/// (cosmetic/exit-0). Message format and code are UNCHANGED (no new E-VAL-105).
+/// STORY-098 AC-001/AC-002.
+const CONTENT_DROP_KEYS: &[&str] = &["shape", "body"];
+
 /// Validate a slide's fields against a slide type's schema.
 ///
 /// Accumulates **all** diagnostics before returning — does not stop at the
@@ -353,10 +360,17 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     let mut known_list: Vec<&str> = known.iter().map(std::convert::AsRef::as_ref).collect();
     known_list.sort_unstable();
     let known_list_str = known_list.join(", ");
+    // BC-3.03.002 v1.2 Invariant 4 (Route A): severity promoted to Error for
+    // content-drop keys — see module-level `CONTENT_DROP_KEYS` for the set.
     for key in slide.fields.keys() {
         if !known.contains(key.as_ref()) {
+            let severity = if CONTENT_DROP_KEYS.contains(&key.as_ref()) {
+                DiagnosticSeverity::Error
+            } else {
+                DiagnosticSeverity::Warning
+            };
             diags.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
+                severity,
                 code: Arc::from("W-VAL-103"),
                 message: Arc::from(format!(
                     "Unknown field '{key}' for slide type '{type_id}'. \
@@ -396,7 +410,11 @@ fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Ar
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case // BC-traceability IDs: test_BC_S_SS_NNN_xxx
+)]
 mod tests {
     use super::*;
     use slideforge_types::{FieldValue, OrderedMap, Slide, SourceSpan, Value};
@@ -1069,14 +1087,17 @@ mod tests {
     /// `{"shape", "body"}` in `validate_fields` (registry.rs).
     ///
     /// Message format is UNCHANGED (per postcondition 3 / Route A):
-    /// `"Unknown field 'shape' for slide type 'title'. Known fields: [...]."
+    /// `Unknown field 'shape' for slide type 'title'. Known fields: [...]`
     #[test]
     fn test_BC_3_03_002_shape_content_drop_strict_exits_2() {
         let reg = SlideTypeRegistry::default();
         let slide_type = reg.lookup_by_keyword("title").unwrap();
         // title slide has required `title` field + known optional fields.
         // `shape:` is NOT in the schema — it would cause authored content to be silently dropped.
-        let slide = make_slide("title", vec![("title", "My Title"), ("shape", "some shape spec")]);
+        let slide = make_slide(
+            "title",
+            vec![("title", "My Title"), ("shape", "some shape spec")],
+        );
         let diags = validate_fields(&slide, slide_type);
 
         // There must be a W-VAL-103 diagnostic for the unknown `shape` field.
@@ -1145,7 +1166,7 @@ mod tests {
     ///
     /// This also closes the body/content schema drift (AC-002/AC-003): after this story,
     /// `body` on `content` is consistently rejected by BOTH `validate_fields` AND the
-    /// threading pass (field_to_block.rs:135 fix).
+    /// threading pass (`field_to_block.rs:135` fix).
     #[test]
     fn test_BC_3_03_002_body_on_content_strict_exits_2() {
         let reg = SlideTypeRegistry::default();

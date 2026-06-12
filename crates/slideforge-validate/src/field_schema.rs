@@ -283,7 +283,7 @@ mod tests {
     ///
     /// RED: Currently `validate_fields` emits Warning for `body` on `content` slide.
     /// The Error assertion FAILS before implementation. This drives AC-003 resolution (b):
-    /// consistent rejection by both validate_fields AND field_to_block.rs.
+    /// consistent rejection by both `validate_fields` AND `field_to_block.rs`.
     #[test]
     #[allow(non_snake_case)]
     fn test_BC_3_03_002_body_content_schema_consistency() {
@@ -293,7 +293,10 @@ mod tests {
             "content",
             vec![
                 ("title", Value::Str(Arc::from("My Content Slide"))),
-                ("body", Value::Str(Arc::from("body text that should be rejected"))),
+                (
+                    "body",
+                    Value::Str(Arc::from("body text that should be rejected")),
+                ),
             ],
         );
         let deck = make_deck(vec![slide]);

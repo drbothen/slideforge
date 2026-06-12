@@ -6,7 +6,7 @@
 //!
 //! ## Architecture (BC-1.11.002 invariant 2)
 //!
-//! BC-1.11.002 invariant 2: "The ChartRenderer plugin is never called with empty
+//! BC-1.11.002 invariant 2: "The `ChartRenderer` plugin is never called with empty
 //! data — the validator intercepts before plugin invocation." This validator is the
 //! interception point. It inspects each `chart` slide's `data` field value. If the
 //! value is a `Value::List([])` or `Value::Map({})` (empty collection), it emits
@@ -30,43 +30,112 @@
 //! - BC-3.03.002 v1.2 (strict mode exits non-zero on validation error)
 //! - STORY-098 AC-004, AC-005
 
-use slideforge_plugin_api::{Diagnostic, Validator, ValidatorOptions};
-use slideforge_types::Deck;
+use std::sync::Arc;
+
+use slideforge_plugin_api::{Diagnostic, DiagnosticSeverity, Validator, ValidatorOptions};
+use slideforge_types::{Deck, FieldValue, Value};
 
 /// Stage-5 validator that intercepts empty chart data before `ChartRenderer` is called.
 ///
 /// Emits `E-LAY-003` with `Error` severity for any `chart` slide whose evaluated
 /// `data` field is an empty collection (`Value::List([])` or `Value::Map({})`).
 ///
-/// ## STORY-098: Stub — not yet implemented
+/// ## Architecture (BC-1.11.002 invariant 2)
 ///
-/// This implementation is a compilable stub that returns no diagnostics. Tests
-/// asserting E-LAY-003 emission will FAIL at assertion time (Red Gate for AC-004/005).
+/// The validator fires before any export or chart-rendering stage. When it emits
+/// `E-LAY-003` (Error), the strict-mode pipeline gate aborts with exit code 2
+/// before `ChartRenderer::render` is ever called. In warn-only mode the gate is
+/// skipped and the exporter renders an `ErrorSlidePlaceholder` at the chart's
+/// position. In both cases the validator always emits Error — mode handling is
+/// the pipeline gate's responsibility (DI-017).
+///
+/// ## Error accumulation (DI-018)
+///
+/// All chart slides are inspected before returning. No bail-on-first.
 pub struct ChartEmptyDataValidator;
+
+/// The canonical error code for an empty-data chart (BC-1.11.002).
+const E_LAY_003: &str = "E-LAY-003";
+
+/// Return `true` when `data` represents an empty collection (BC-1.11.002 precondition).
+///
+/// A `Value` triggers E-LAY-003 when it is:
+/// - `Value::List` with zero elements
+/// - `Value::Map` with zero entries
+///
+/// Non-collection values (`Str`, `Int`, `Bool`, `Null`) are NOT flagged here; those
+/// type mismatches are caught earlier by the eval-stage type checker.
+fn chart_data_is_empty(data: &Value) -> bool {
+    match data {
+        Value::List(items) => items.is_empty(),
+        Value::Map(m) => m.is_empty(),
+        _ => false,
+    }
+}
+
+/// Build the canonical E-LAY-003 diagnostic for an empty-data chart slide.
+///
+/// Message format: `"Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+/// Hint: `"Ensure '<expression>' contains at least one row."`
+///
+/// Severity is always `Error`. The pipeline gate (not this function) handles warn-only demotion.
+fn build_e_lay_003(slide_title: &str, span: slideforge_types::SourceSpan) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        code: Arc::from(E_LAY_003),
+        message: Arc::from(format!(
+            "Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+        )),
+        span,
+        hint: Some(Arc::from(
+            "Ensure the chart data binding contains at least one row.",
+        )),
+    }
+}
 
 impl Validator for ChartEmptyDataValidator {
     fn id(&self) -> &'static str {
         "chart-empty-data"
     }
 
-    /// Validate all `chart` slides for empty data binding.
+    /// Pre-layout pass: inspect every `chart` slide for an empty `data` field.
     ///
-    /// ## STORY-098: Stub — not yet implemented
+    /// For each slide whose `slide_type == "chart"`, reads the `data` field value.
+    /// When the value is `FieldValue::Literal(Value::List([]))` or
+    /// `FieldValue::Literal(Value::Map({}))`, emits `E-LAY-003` with Error severity.
     ///
-    /// Currently returns `vec![]` (no diagnostics). This causes test assertions for
-    /// E-LAY-003 to fail — which is the Red Gate for AC-004 and AC-005.
-    ///
-    /// The implementer must replace this stub with a production implementation that:
-    /// 1. Iterates over `deck.slides`.
-    /// 2. For each slide with `slide_type == "chart"`, reads the `data` field value.
-    /// 3. If the value is `FieldValue::Literal(Value::List([]))` or
-    ///    `FieldValue::Literal(Value::Map({}))`, emits `E-LAY-003` with Error severity.
-    /// 4. Uses `slideforge_charts::validation::build_empty_data_diagnostic` to construct
-    ///    the canonical `E-LAY-003` diagnostic (canonical message format, hint text, span).
-    fn validate(&self, _deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
-        // STORY-098 STUB: returns no diagnostics — Red Gate for AC-004/AC-005.
-        // Tests asserting E-LAY-003 will FAIL at assertion time until implemented.
-        vec![]
+    /// All chart slides are checked (DI-018: no bail-on-first).
+    fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
+        let mut diags: Vec<Diagnostic> = Vec::new();
+
+        for slide in &deck.slides {
+            if slide.slide_type.as_ref() != "chart" {
+                continue;
+            }
+
+            // Read the evaluated `data` field from the slide.
+            let data_is_empty = match slide.fields.get("data") {
+                Some(FieldValue::Literal(value)) => chart_data_is_empty(value),
+                // No `data` field or non-Literal binding: empty by default.
+                // (A missing data binding is an eval-stage error; we treat it as
+                // empty here so the validator catches it before the renderer does.)
+                None => true,
+                // Unevaluated expressions (Expr, Interpolated) are skipped;
+                // they should be resolved by the eval stage before validators run.
+                _ => false,
+            };
+
+            if data_is_empty {
+                // Extract slide title for the diagnostic message.
+                let title = match slide.fields.get("title") {
+                    Some(FieldValue::Literal(Value::Str(s))) => s.as_ref().to_owned(),
+                    _ => slide.slide_type.as_ref().to_owned(),
+                };
+                diags.push(build_e_lay_003(&title, slide.source_span.clone()));
+            }
+        }
+
+        diags
     }
 }
 
@@ -323,15 +392,15 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 invariant 2 — ChartRenderer NEVER called with empty data.
+    /// BC-1.11.002 invariant 2 — `ChartRenderer` NEVER called with empty data.
     ///
     /// The validator fires at Stage 5 (pre-layout). It emits E-LAY-003 with Error severity
     /// for empty data. In strict mode, the pipeline gate aborts BEFORE the export stage
-    /// where ChartRenderer would be invoked.
+    /// where `ChartRenderer` would be invoked.
     ///
     /// This test verifies the validator's side of invariant 2:
     ///   - Validator emits E-LAY-003 Error severity for empty data.
-    ///   - Pipeline gate (strict mode) sees Error → exits 2 → ChartRenderer never called.
+    ///   - Pipeline gate (strict mode) sees Error → exits 2 → `ChartRenderer` never called.
     ///
     /// Full end-to-end invariant 2 proof is in Phase 6 cargo-fuzz (BC-1.11.002 VP-TBD).
     ///
