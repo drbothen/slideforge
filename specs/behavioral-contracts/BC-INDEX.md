@@ -117,7 +117,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
 | BC-1.11.001 | slide chart: renders bar/line/pie/scatter/area/histogram/stacked-bar as SVG | P1 | active | [BC-1.11.001.md](BC-1.11.001.md) |
-| BC-1.11.002 | Chart with empty data produces error-slide placeholder not a crash | P1 | active | [BC-1.11.002.md](BC-1.11.002.md) |
+| BC-1.11.002 | Chart with empty or missing data produces error-slide placeholder not a crash | P1 | active | [BC-1.11.002.md](BC-1.11.002.md) |
 
 ### 1.12 — Diagram Rendering / Mermaid (CAP-014)
 
@@ -220,7 +220,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC ID | Title | Priority | Status | File |
 |-------|-------|----------|--------|------|
 | BC-3.03.001 | Canvas overflow produces CanvasOverflow warning with EMU estimate | P0 | active | [BC-3.03.001.md](BC-3.03.001.md) |
-| BC-3.03.002 | Strict Mode Produces No Output on Validation Error (incl. W-VAL-103 Content-Drop) | P0 | active | [BC-3.03.002.md](BC-3.03.002.md) |
+| BC-3.03.002 | Strict mode produces no output on validation error | P0 | active | [BC-3.03.002.md](BC-3.03.002.md) |
 | BC-3.03.003 | Warn-only mode renders error-slide placeholders and continues | P0 | active | [BC-3.03.003.md](BC-3.03.003.md) |
 | BC-3.03.004 | Zero-slide deck produces validation error | P0 | active | [BC-3.03.004.md](BC-3.03.004.md) |
 
