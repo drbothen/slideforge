@@ -1,4 +1,4 @@
-//! STORY-099 Red Gate tests for BC-4.02.001 and BC-3.05.001 (DOCX surface).
+//! STORY-099 Red Gate tests for BC-4.02.001 and BC-5.01.005 (DOCX surface).
 //!
 //! Covers REND-006: bullet run content, numbering.xml abstract definitions,
 //! sectPr page dimensions, and `<w:lang>` on every run.
@@ -10,10 +10,10 @@
 //! | `test_BC_4_02_001_bullets_have_run_content` | BC-4.02.001 postcondition 7 | AC-001 |
 //! | `test_BC_4_02_001_numbering_xml_has_abstract_num` | BC-4.02.001 postcondition 2 | AC-002 |
 //! | `test_BC_4_02_001_document_xml_has_secpr` | BC-4.02.001 postcondition 2 | AC-003 |
-//! | `test_BC_3_05_001_runs_have_lang_attribute_default_en` | BC-3.05.001 PC-3 / BC-5.01.005 PC-4 | AC-004 / EC-003 |
-//! | `test_BC_3_05_001_runs_have_lang_attribute_fr_fr` | BC-3.05.001 PC-3 / BC-5.01.005 PC-4 | AC-004 |
-//! | `test_BC_3_05_001_runs_have_lang_attribute_all_runs` | BC-3.05.001 PC-3 / BC-5.01.005 PC-4 | AC-004 (universality) |
-//! | `test_BC_3_05_001_runs_have_lang_attribute_de_de` | BC-5.01.005 EC-004 | EC-004 |
+//! | `test_BC_5_01_005_runs_have_lang_attribute_default_en` | BC-5.01.005 PC-4 / BC-5.01.004 default | AC-004 / EC-003 |
+//! | `test_BC_5_01_005_runs_have_lang_attribute_fr_fr` | BC-5.01.005 PC-4 | AC-004 |
+//! | `test_BC_5_01_005_runs_have_lang_attribute_all_runs` | BC-5.01.005 PC-4 | AC-004 (universality) |
+//! | `test_BC_5_01_005_runs_have_lang_attribute_de_de` | BC-5.01.005 EC-004 | EC-004 |
 //! | `test_BC_4_02_001_ec001_no_bullets_no_numpr_no_crash` | BC-4.02.001 | EC-001 |
 //! | `test_BC_4_02_001_ec002_nested_bullets_correct_levels` | BC-4.02.001 postcondition 7 | EC-002 |
 //! | `test_BC_4_02_001_ec005_empty_bullet_string_preserved` | BC-4.02.001 postcondition 7 | EC-005 |
@@ -498,7 +498,7 @@ fn test_BC_4_02_001_document_xml_has_secpr() {
 
 // ─── T-004: AC-004 / BC-5.01.005 — every run carries <w:lang> ────────────────
 
-/// BC-3.05.001 PC-3 / BC-5.01.005 PC-4 / AC-004:
+/// BC-5.01.005 PC-4 / BC-5.01.004 default / AC-004:
 ///
 /// A deck with no `lang` declaration produces `<w:lang w:val="en"/>` on every
 /// `<w:rPr>` in `word/document.xml`. The default is `"en"` per BC-5.01.004 —
@@ -507,7 +507,7 @@ fn test_BC_4_02_001_document_xml_has_secpr() {
 /// Contract: every `<w:rPr>` must carry a `<w:lang>` child element with
 /// the deck's declared language (or the default `"en"` when none is declared).
 #[test]
-fn test_BC_3_05_001_runs_have_lang_attribute_default_en() {
+fn test_BC_5_01_005_runs_have_lang_attribute_default_en() {
     // No lang declared → must default to "en" on all runs (BC-5.01.005 EC-003).
     let deck = deck_with_lang(None);
     let slide = {
@@ -543,13 +543,13 @@ fn test_BC_3_05_001_runs_have_lang_attribute_default_en() {
     );
 }
 
-/// BC-3.05.001 PC-3 / BC-5.01.005 / AC-004 — fr-FR round-trip:
+/// BC-5.01.005 PC-4 / AC-004 — fr-FR round-trip:
 ///
 /// A deck declaring `lang "fr-FR"` produces `<w:lang w:val="fr-FR"/>` on every
 /// `<w:rPr>` in `word/document.xml`. The exact BCP-47 tag is preserved verbatim
 /// (BC-5.01.005 invariant 1 — no truncation, normalization, or case change).
 #[test]
-fn test_BC_3_05_001_runs_have_lang_attribute_fr_fr() {
+fn test_BC_5_01_005_runs_have_lang_attribute_fr_fr() {
     let deck = deck_with_lang(Some("fr-FR"));
     let rc = RegisteredContent::plain(Register::Report, Arc::from("Texte de rapport"));
     let mut slide = make_slide_with_bullets("French Slide", &["Élément de liste"]);
@@ -568,7 +568,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_fr_fr() {
     );
 }
 
-/// BC-3.05.001 PC-3 / BC-5.01.005 / AC-004 — universality assertion:
+/// BC-5.01.005 PC-4 / AC-004 — universality assertion:
 ///
 /// Every `<w:r>` in `word/document.xml` must have a corresponding `<w:rPr>`
 /// that carries `<w:lang>`. The count of `<w:r>` open-elements must equal
@@ -577,7 +577,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_fr_fr() {
 /// This test rejects partial coverage ("sampled" lang) — it is the STORY-096
 /// lesson L-a universality check applied to the DOCX surface.
 #[test]
-fn test_BC_3_05_001_runs_have_lang_attribute_all_runs() {
+fn test_BC_5_01_005_runs_have_lang_attribute_all_runs() {
     let deck = deck_with_lang(Some("en"));
     // Build a slide with several runs across different inline variants to exercise
     // multiple code paths: heading run, body run, bullet run, bold run.
@@ -621,7 +621,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_all_runs() {
 /// A deck declaring `lang "de-DE"` produces `<w:lang w:val="de-DE"/>` on all
 /// `<w:rPr>` elements (BC-5.01.005 invariant 1 lossless propagation).
 #[test]
-fn test_BC_3_05_001_runs_have_lang_attribute_de_de() {
+fn test_BC_5_01_005_runs_have_lang_attribute_de_de() {
     let deck = deck_with_lang(Some("de-DE"));
     let rc = RegisteredContent::plain(Register::Report, Arc::from("Berichtstext"));
     let mut slide = make_slide_with_bullets("German Slide", &[]);

@@ -577,7 +577,7 @@ impl DocumentBodySerializer {
     /// This is the single run-construction entry point for all text runs
     /// emitted within this serializer. Having lang on every run satisfies
     /// BC-5.01.005 PC-4 and the universality assertion in
-    /// `test_BC_3_05_001_runs_have_lang_attribute_all_runs`.
+    /// `test_BC_5_01_005_runs_have_lang_attribute_all_runs`.
     fn make_lang_run(&self, text: &str) -> Run {
         Run {
             run_properties: Some(Box::new(RunProperties {
