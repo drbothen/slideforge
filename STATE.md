@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-06-11
+last_updated: 2026-06-11T23:59:00
 demo_review: "DEMO-REVIEW-2026-06-11 — 10 product defects (3 CRIT/4 HIGH/3 MED). Rendering-fix wave READY (STORY-094..102 created+indexed; BCs authored; delivery begins next session). See .factory/reviews/demo-deep-review-2026-06-11.md."
 state_version: "1.8"
 phase_1_approved: 2026-05-25
@@ -123,28 +123,36 @@ PR #80 squash-merged → develop `433b3c01` (84 PRs). Slide-level inline markup 
 All branches are on origin (durable, machine-independent):
 
 - `origin/factory-artifacts` — all `.factory/` state; ADR-023/024; VP-054 v1.2.1; STORY-094+095+098 cascade summaries + lessons; demo evidence through STORY-098. (Run `git -C .factory log -1` for current HEAD.)
-- develop `14272e75` (87 merged PRs, 0 open PRs). **No active worktrees.**
+- develop `14272e75` (87 merged PRs, 0 open PRs). **1 active worktree: `.worktrees/STORY-096` on `feature/STORY-096` (no story commits yet).**
 
 **Same-machine resume:**
 1. Run `vsdd-factory:factory-worktree-health`
-2. Read STATE.md — STORY-098 MERGED. NEXT: STORY-096. 0 active worktrees, 0 open PRs.
+2. Read STATE.md — STORY-096 KICKED OFF. Worktree exists at `.worktrees/STORY-096`. NEXT: dispatch test-writer (Step 2.1).
 3. CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 + STORY-095 + STORY-098 MERGED. **Human action required: enable merge queue UI toggle.**
-4. Delivery order: STORY-096 → 099 → 100 → 101 → 097 → 102 → remaining Wave-5 feature stories.
+4. Delivery order: STORY-096 (in progress) → 099 → 100 → 101 → 097 → 102 → remaining Wave-5 feature stories.
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
 git clone https://github.com/drbothen/slideforge.git && cd slideforge
 git fetch origin factory-artifacts
 git worktree add .factory factory-artifacts
-git rev-parse develop   # must equal origin/develop == 6c27fcf3
+git rev-parse develop   # must equal origin/develop == 14272e75d25f5037c791b341c218ef0f2ef6d5e3
+git worktree add .worktrees/STORY-096 feature/STORY-096
 ```
-Then read `.factory/STATE.md` → STORY-096 kickoff runbook below.
+Then read `.factory/STATE.md` → STORY-096 KICKOFF RUNBOOK → Step 2.1.
 
 ---
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**0 active worktrees. 0 open PRs. `.worktrees/` EMPTY.**
+**1 active worktree. 0 open PRs. STORY-096 KICKED OFF — Red Gate next.**
+
+### STORY-096 — REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang on runs — WORKTREE CREATED, DELIVERY NOT YET STARTED
+
+- Worktree: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096` on `feature/STORY-096`
+- HEAD == develop == `14272e75d25f5037c791b341c218ef0f2ef6d5e3` (87 merged PRs, 0 open PRs). ZERO story commits yet.
+- Workspace warm-built. Story spec verified: `.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md` v1.0
+- **NEXT ACTION:** Dispatch test-writer for Red Gate (3 failing tests T-001..T-003 + EC coverage). See STORY-096 KICKOFF RUNBOOK below.
 
 ### STORY-098 — REND-005+REND-010a strict-mode content drop + chart no-data — MERGED PR #87 → develop `14272e75` 2026-06-11
 
@@ -167,26 +175,97 @@ Then read `.factory/STATE.md` → STORY-096 kickoff runbook below.
 - `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.01.001.md`
 - `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.01.005.md`
 - `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-5.01.005.md`
+**No VPs.**
 **Depends on:** STORY-037, STORY-038, STORY-023 (all MERGED)
 **Closes:** REND-007 (PPTX master 4:3 geometry on 16:9 deck; no progress_bar layout; run lang dropped)
-**Target crates:** `slideforge-pptx`
+**Target crates:** `slideforge-pptx` (SS-06)
 
-**Pre-flight checklist:**
-- [ ] Verify: `git rev-parse develop` == `git rev-parse origin/develop` == `14272e75d25f5037c791b341c218ef0f2ef6d5e3`
-- [ ] Verify: `git -C .worktrees status` (dir should be empty or not exist)
-- [ ] Confirm 0 open PRs: `gh pr list --state open`
-- [ ] Create worktree: `git worktree add .worktrees/STORY-096 -b feature/STORY-096`
+**Acceptance Criteria (from spec v1.0):**
+- AC-001: master sldSz derived from `brand.page_size`, NOT hardcoded 4:3
+- AC-002: `progress_bar` gets a named layout in slideLayouts
+- AC-003: `lang` attribute on every `a:rPr` with en-US default + fr-FR round-trip test
+- AC-004: footer/date placeholders positioned within 16:9 bounds
 
-**Delivery steps:**
-1. Dispatch **implementer** — red-gate tests first (TDD), then implementation. EXIT GATE preamble mandatory.
-2. LOCAL adversary cascade — sequential passes per BC-5.39.001. Strict criterion: ANY finding incl. OBS resets streak. Need 3 consecutive strict-CLEAN.
-3. Demo-recorder per-AC after convergence.
-4. Push feature branch → pr-manager 9-step PR cycle.
-5. Orchestrator dispatches security-reviewer + pr-reviewer (LESSON-5).
-6. STANDING MERGE AUTH: CI-green + security CLEAN + pr-reviewer APPROVE → squash-merge.
-7. Post-merge state burst (this runbook pattern).
+**Error contracts:** EC-001..EC-004
 
-**Delivery order after STORY-096:** 099 → 100 → 101 → 097 → 102.
+**Tasks:** T-001..T-008 (T-001..T-003 are Red Gate failing tests; T-004..T-006 are TDD green; T-007..T-008 are verification)
+
+**Pre-flight checklist (ALREADY DONE — worktree exists):**
+- [x] Verify: `git rev-parse develop` == `git rev-parse origin/develop` == `14272e75d25f5037c791b341c218ef0f2ef6d5e3`
+- [x] Confirm 0 open PRs: `gh pr list --state open`
+- [x] Create worktree: `git worktree add .worktrees/STORY-096 -b feature/STORY-096` — **DONE**
+- [x] Workspace warm-built in worktree
+
+**DELIVERY STEPS (execute in order; zero-context session follows this exactly):**
+
+**Step 2.1 — Dispatch test-writer (Red Gate)**
+Dispatch `vsdd-factory:test-writer` to write 3 failing tests (T-001..T-003) + EC coverage.
+Include in dispatch: SID-1 (no `#[should_panic]` as placeholder), LESSON-14 (presence-vs-content tests assert content and validity), LESSON-17 (no `#[should_panic]`), FU-DIAGNOSTIC-FIELD-PINNING (tests must pin field names/values, not just structure).
+Worktree: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096`. Include PATH DISCIPLINE preamble.
+Confirm tests are FAILING (Red Gate) before proceeding to Step 2.2.
+
+**Step 2.2 — Dispatch implementer (TDD green)**
+Dispatch `vsdd-factory:implementer` to implement T-004..T-006 (TDD green pass).
+Include in dispatch: IMPLEMENTER GUARD preamble + EXIT GATE preamble (both verbatim from MANDATORY DISPATCH PREAMBLES section).
+ADR-001 constraint: no raw XML string builders — use ooxmlsdk types throughout.
+NOTE: FU-NOTES-SLIDE-RAW-XML-ADR001 is an OPEN pre-existing deviation in `notes_slide.rs` + `notes_master.rs` — do NOT extend it; flag if STORY-096 scope touches those files.
+Exit gate MUST run ALL 5 commands (fmt --check, pedantic clippy, nextest, cargo test, rustdoc).
+Verify fmt-clean ON the commit (run fmt --check after staging, not just in working tree).
+Include LESSON-2 and LESSON-21 guidance verbatim.
+
+**Step 2.3 — Proactive STALE-PROSE SWEEP (NEW — run BEFORE cascade start)**
+Immediately after TDD green, BEFORE dispatching first adversary pass, run this grep on the diff surface:
+```bash
+cd /Users/jmagady/Dev/slideforge/.worktrees/STORY-096
+git diff develop..HEAD -- '*.rs' | grep -iE "current(ly| code)|stub|always|will be|not yet implemented|TODO|FIXME"
+```
+Also grep for hardcoded counts and cross-crate `file:line` references in comments:
+```bash
+git diff develop..HEAD -- '*.rs' | grep -E ":[0-9]+\b" | grep -v "test::" | head -30
+```
+Fix ALL stale-prose violations BEFORE dispatching cascade. This class caused 12 of 24 STORY-098 findings.
+
+**Step 3 — LOCAL adversary cascade (3-CLEAN per BC-5.39.001)**
+Sequential passes only (LESSON-7). Include PATH DISCIPLINE + ADVERSARY REPORT FORMAT preambles from MANDATORY DISPATCH PREAMBLES section in EVERY pass dispatch.
+STRICT criterion: ZERO findings of ANY severity (including OBS) — orchestrator-enforced precedent from STORY-095 P11.
+Carry standing adjudications forward in each dispatch (list from prior pass).
+Include LESSON-20: pass absolute `.factory/` spec paths — story file + all 3 traced BCs.
+Need 3 consecutive strict-CLEAN passes for convergence.
+
+**Step 4 — Demo-recorder per-AC**
+Dispatch `vsdd-factory:demo-recorder` after cascade converges. Record all 4 ACs (AC-001..AC-004).
+Evidence goes to `.factory/demos/STORY-096-demo-evidence.md`.
+
+**Step 5 — pr-manager prep**
+Dispatch `vsdd-factory:pr-manager` for 9-step PR cycle.
+pr-manager MUST NOT open PR (IMPLEMENTER GUARD applies here too). Orchestrator runs `gh pr create`.
+
+**Step 6 — Security-reviewer THEN pr-reviewer (sequential, LESSON-5)**
+Orchestrator dispatches `vsdd-factory:security-reviewer` first, then `vsdd-factory:pr-reviewer` after security CLEAN.
+Sequential, not parallel (LESSON-5: pr-manager cannot spawn sub-agents; orchestrator dispatches independently).
+If either reviewer returns findings, fix → re-run both → wait CI per LESSON-9.
+
+**Step 7 — CI green**
+Verify CI green on PR before merge. Fast tier ~6-10 min.
+
+**Step 8 — STANDING MERGE AUTH squash-merge**
+CI-green + security-reviewer CLEAN + pr-reviewer APPROVE → squash-merge.
+MERGE WITHOUT `--delete-branch` (devops cleanup handles branches because the worktree holds the feature branch).
+
+**Step 9 — Devops cleanup**
+Dispatch `vsdd-factory:devops-engineer` to: delete remote branch, clean worktree (`git worktree remove .worktrees/STORY-096`), sync develop.
+
+**Step 10 — State-manager post-merge burst (TD-VSDD-053: ONE atomic commit)**
+Update STATE.md: mark STORY-096 MERGED, update develop SHA + PR count, move worktree to MERGED section, update CURRENT POSITION + Session Resume Checkpoint.
+
+**Delivery order after STORY-096:** 099 → 100 → 101 → 097 → 102. Then 10 remaining Wave-5 feature stories (T6).
+
+**PROCESS LESSONS TO APPLY (from STORY-095/098 cascades — hardened into runbook):**
+- (a) STALE-PROSE SWEEP (Step 2.3 above) — grep diff surface for "current(ly)|stub|always|will be|not yet implemented" + stale version labels BEFORE cascade start. 12 of 24 STORY-098 findings were this class.
+- (b) Comments must NOT contain hardcoded counts or cross-crate `file:line` numbers — cite crate+module instead.
+- (c) Ambiguous spec conflicts route to PO BEFORE implementing (LESSON-22: orchestrator verifies upstream claims before routing deferral).
+- (d) Implementer dispatches include IMPLEMENTER GUARD + EXIT GATE preambles verbatim from MANDATORY DISPATCH PREAMBLES section.
+- (e) OBS findings count under BC-5.39.001 strict-CLEAN criterion — orchestrator-enforced precedent from STORY-095 P11. Do not re-litigate.
 
 ---
 
@@ -247,8 +326,8 @@ Then read `.factory/STATE.md` → STORY-096 kickoff runbook below.
 
 Phase 3, **Wave 5 IN PROGRESS** (develop `14272e75`, 87 merged PRs). 18 of 34 done. 16 remain (6 rendering-fix P0 + 10 feature). **STORY-098 MERGED. CI INITIATIVE COMPLETE. STORY-081 MERGED. Workstream B CLOSED.**
 
-- **NEXT:** STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang, 5 pts).
-- Active worktrees: 0. Open PRs: 0.
+- **IN FLIGHT:** STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang, 5 pts). Worktree created. Red Gate (test-writer) NEXT.
+- Active worktrees: 1 (`.worktrees/STORY-096`). Open PRs: 0.
 - Workspace (develop `14272e75`): ~4214+ pass / 20 skip / 0 fail. CI STABILIZATION CONFIRMED.
 
 ---
@@ -343,19 +422,20 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. STORY-098 MERGED PR #87 → develop `14272e75`. 0 active worktrees. 0 open PRs. NEXT: STORY-096. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
+**Wave 5 IN PROGRESS. STORY-096 KICKED OFF — worktree created, Red Gate (test-writer) NEXT. 1 active worktree. 0 open PRs. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
 
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-06-11 |
 | **develop SHA** | `14272e75` (87 merged PRs; origin/develop; 0 open PRs) |
-| **Active worktrees** | 0 — `.worktrees/` EMPTY |
+| **Active worktrees** | 1 — `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096` on `feature/STORY-096`. HEAD == `14272e75`. ZERO story commits yet. |
+| **STORY-096 state** | KICKED OFF. Worktree created. Story spec READ and verified (v1.0). Workspace warm-built. Delivery NOT yet started. NEXT: dispatch test-writer for Red Gate (Step 2.1 in STORY-096 KICKOFF RUNBOOK). |
 | **STORY-098 state** | MERGED PR #87 → `14272e75`. 19-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 17-18-19). REND-005+REND-010a CLOSED. 2 PO adjudications. Cascade archived: `.factory/cycles/STORY-098/cascade-summary.md`. |
 | **STORY-095 state** | MERGED PR #86 → `6c27fcf3`. 16-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 14-15-16). REND-002+REND-008-pdf CLOSED. |
 | **CI initiative** | COMPLETE. Run `27323925653` SUCCESS — arm64 13m32s; full matrix ~17 min; per-PR fast tier ~6-10 min. |
 | **Workspace tests** | develop `14272e75`: ~4214+ pass / 20 skip / 0 fail. |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | Start STORY-096: see STORY-096 KICKOFF RUNBOOK section. Pre-flight: verify `git rev-parse develop` == `14272e75d25f5037c791b341c218ef0f2ef6d5e3` (87 PRs, 0 open). Create worktree: `git worktree add .worktrees/STORY-096 -b feature/STORY-096`. Spec: `.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md`. Traced BCs: BC-4.01.001, BC-4.01.005, BC-5.01.005. Delivery order after 096: 099→100→101→097→102. |
+| **RESUME INSTRUCTION** | STORY-096 worktree ALREADY EXISTS at `.worktrees/STORY-096`. DO NOT re-create it. Go directly to STORY-096 KICKOFF RUNBOOK → Step 2.1 (dispatch test-writer). Spec: `.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md`. Traced BCs (absolute): BC-4.01.001, BC-4.01.005, BC-5.01.005. 4 ACs: AC-001 sldSz from brand.page_size; AC-002 progress_bar named layout; AC-003 lang on every a:rPr w/ en-US default + fr-FR test; AC-004 footer/date placeholders within 16:9 bounds. Delivery order after 096: 099→100→101→097→102. |
 
 ---
 
