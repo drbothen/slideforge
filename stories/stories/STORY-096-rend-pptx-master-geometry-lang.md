@@ -9,7 +9,7 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.2"
 created: "2026-06-11"
 source_findings: [REND-007]
 behavioral_contracts: [BC-4.01.001, BC-4.01.005, BC-5.01.005]
@@ -44,7 +44,8 @@ run-level lang attribute. All fixes are in `slideforge-pptx`. EPIC-08 is the own
 - `depends_on: [STORY-038]` — Layout compliance and the `find_layout_index` map that
   drives layout lookup for each slide type.
 - `depends_on: [STORY-023]` — Brand synthesis produces the 31 layout hierarchy including
-  page size; the master sldSz must match `brand.page_size`.
+  page size; master placeholder geometry (footer_y, body_cy) is derived from `brand.page_size`
+  to ensure placeholders remain within slide bounds.
 
 ## Narrative
 
@@ -66,22 +67,28 @@ been propagated to `<a:rPr lang="..."/>`.
 - Per BC-4.01.001 postcondition 4: .pptx openable in PowerPoint 365 without error
   dialogs. A 4:3 master on a 16:9 deck causes PowerPoint layout warnings.
 - Per BC-4.01.005: all 31 slide types must have a corresponding named layout.
-- Per BC-5.01.005: lang declaration propagates to `<a:rPr lang="en-US"/>` (or the deck's
-  declared lang value) on all PPTX text runs.
+- Per BC-5.01.005: lang declaration propagates to `<a:rPr lang="en"/>` (or the deck's
+  declared lang value) on all PPTX text runs. The default when no lang is declared is "en"
+  (per BC-5.01.004), not "en-US".
 - Per ADR-001: no raw XML strings; use ooxmlsdk types.
-- The `sldSz` element in `slideMaster1.xml` must match the `sldSz` in `presentation.xml`
-  (derived from `brand.page_size`).
+- `<p:sldSz>` is NOT a valid child of `CT_SlideMaster` (ECMA-376 §19.3.1.42); it MUST NOT
+  appear in `slideMaster1.xml`. It belongs exclusively in `presentation.xml`.
+- `presentation.xml` `<p:sldSz>` derives from `brand.page_size` (already implemented via the
+  `SlideSize` type; AC-001 verifies the value and verifies master absence).
 
 ## Library & Framework Requirements
 
 - `ooxmlsdk` 0.6.1 — `RunProperties` type carries a `lang` field (confirm field name from
-  ooxmlsdk source). `PresentationSlideSize` or equivalent for master sldSz.
+  ooxmlsdk source). `PresentationPr` or `PresentationSlideSize` in ooxmlsdk governs
+  `presentation.xml` `<p:sldSz>`; `SlideMaster` struct has NO slide_size field (schema
+  correct — do not add one).
 
 ## File Structure Requirements
 
 Files to modify:
-- `crates/slideforge-pptx/src/master_serializer.rs` (or equivalent) — fix `sldSz` to use
-  `brand.page_size` instead of hardcoded 4:3 values.
+- `crates/slideforge-pptx/src/master_serializer.rs` (or equivalent) — ensure NO `<p:sldSz>`
+  is emitted (remove if present; schema-invalid in CT_SlideMaster). Derive placeholder geometry
+  (footer_y, body_cy) from `brand.page_size` so all placeholders remain within slide bounds.
 - `crates/slideforge-pptx/src/slide_serializer.rs` — propagate `lang` from deck metadata
   to `<a:rPr lang="..."/>` on every text run.
 - `crates/slideforge-pptx/src/layout_serializer.rs` (or brand-to-layouts module) — add
@@ -101,15 +108,28 @@ Files to modify:
 
 ## Acceptance Criteria
 
-### AC-001: Slide master sldSz matches deck page size
-(traces to BC-4.01.001 postcondition 2)
+### AC-001: Slide master contains NO sldSz; presentation.xml sldSz matches brand.page_size
+(traces to BC-4.01.001 PC-2 — OOXML schema validity; PC-4 — openable without error dialogs)
 
-When the deck uses default 16:9 page size (`cx="9144000" cy="5143500"`), `slideMaster1.xml`
-declares `<p:sldSz cx="9144000" cy="5143500"/>` — not the 4:3 values. For custom brand page
-sizes, the master sldSz uses the brand's configured width and height.
+`<p:sldSz>` is NOT a valid child of `CT_SlideMaster` (ECMA-376 §19.3.1.42). This AC has
+two testable assertions:
 
-Verified by: unit test building a 16:9 deck; unzip .pptx; parse `slideMaster1.xml`;
-assert sldSz attributes match `presentation.xml` sldSz.
+**(i) Master absence:** `slideMaster1.xml` contains NO `<p:sldSz>` element. Emitting it
+would produce a schema-invalid document that triggers a PowerPoint repair dialog (violates
+BC-4.01.001 PC-2 and PC-4).
+
+**(ii) Presentation.xml correctness:** `presentation.xml` `<p:sldSz>` has `cx` and `cy`
+matching `brand.page_size`. For the default 16:9 page size the values are
+`cx="9144000" cy="5143500"`. For a custom brand page size, the values equal the brand's
+configured width and height (see EC-001).
+
+Verified by:
+- Unit test A: build a 16:9 deck; unzip .pptx; parse `slideMaster1.xml`; assert no
+  `<p:sldSz>` element is present anywhere in the document.
+- Unit test B: parse `presentation.xml` from the same .pptx; assert `<p:sldSz
+  cx="9144000" cy="5143500"/>`.
+- EC-001 test: build with a custom 4:3 brand (`cx="6858000" cy="5143500"`); assert
+  `presentation.xml` carries those values; assert master still has no `<p:sldSz>`.
 
 ### AC-002: progress_bar slide type has a named layout in the layout hierarchy
 (traces to BC-4.01.005 postcondition — all 31 slide types have named layouts)
@@ -126,30 +146,38 @@ is present and the slide's `r:id` relationship points to it.
 (traces to BC-5.01.005 postcondition — lang propagates to PPTX rPr)
 
 Every `<a:rPr>` element in every `slideN.xml` carries a `lang` attribute whose value
-matches the deck's declared `lang` field (default `"en-US"` when not specified). Runs with
-no explicit lang currently emit no attribute — after this fix they emit `lang="en-US"`.
+matches the deck's declared `lang` field (default `"en"` when not specified, per
+BC-5.01.004). Runs with no explicit lang currently emit no attribute — after this fix they
+emit `lang="en"` when no lang is declared, or the deck's declared lang otherwise.
 
 Verified by: unit test serializing a slide with body text; parse the resulting slide XML;
 assert every `<a:rPr>` has `lang` attribute. Second test with an explicit `lang "fr-FR"`
 deck declaration; assert `lang="fr-FR"` on runs.
 
-### AC-004: Footer and date placeholders stay within slide bounds in 16:9
-(traces to BC-4.01.001 postcondition 4 — openable without error dialogs)
+### AC-004: Footer and date placeholders stay within slide bounds for the configured page size
+(traces to BC-4.01.001 PC-4 — openable without error dialogs)
 
-With the master sldSz corrected to 16:9, footer and date placeholder positions inherited
-from the master are within the 9144000 × 5143500 bounds. No placeholder is positioned
-off-slide.
+Master placeholder positions (footer_y, body_cy) are derived from `brand.page_size`
+(height_emu) so that every placeholder is positioned within the deck's configured slide
+area. For the default 16:9 page size (height 5143500 EMU), no placeholder y-coordinate
+plus height exceeds 5143500. For custom page sizes, the bounds are the brand's
+configured height.
 
 Verified by: snapshot test of `slideMaster1.xml` comparing placeholder positions against
-known-good 16:9 master reference.
+the configured page bounds; assert footer `<p:sp>` `off y` + `ext cy` ≤ `brand.page_size.height_emu`.
 
 ## Tasks
 
-- [ ] **T-001 (RED):** Write `test_master_sldSz_matches_deck()` in `slideforge-pptx`.
+- [ ] **T-001 (RED):** Write `test_master_has_no_sldSz_and_presentation_sldSz_matches_page_size()` in
+  `slideforge-pptx`: unzip a built 16:9 .pptx; assert (a) `slideMaster1.xml` has no `<p:sldSz>`
+  element; (b) `presentation.xml` has `<p:sldSz cx="9144000" cy="5143500"/>`.
 - [ ] **T-002 (RED):** Write `test_progress_bar_has_named_layout()`.
 - [ ] **T-003 (RED):** Write `test_run_has_lang_attribute()`.
-- [ ] **T-004 (GREEN):** Replace hardcoded 4:3 sldSz in master serializer with
-  `brand.page_size.width_emu` / `brand.page_size.height_emu`.
+- [ ] **T-004 (GREEN):** In `master_serializer.rs`, remove any emission of `<p:sldSz>`
+  (it is schema-invalid in CT_SlideMaster). Confirm `presentation.xml` builder already
+  emits `<p:sldSz>` from `brand.page_size` (verify, do not duplicate). Derive placeholder
+  geometry (footer_y, body_cy) from `brand.page_size.height_emu` so bounds hold for all
+  page sizes.
 - [ ] **T-005 (GREEN):** Add `progress_bar` named layout to the layout synthesis path.
 - [ ] **T-006 (GREEN):** Propagate deck `lang` to `RunProperties.lang` on all text runs
   in `slide_serializer.rs`.
@@ -160,8 +188,8 @@ known-good 16:9 master reference.
 
 | ID | Description | Expected Behavior |
 |----|-------------|-------------------|
-| EC-001 | Custom brand page size (4:3 brand) | Master sldSz = brand's configured dimensions |
-| EC-002 | Deck with no explicit lang declaration | Default `lang="en-US"` on all runs |
+| EC-001 | Custom brand page size (4:3 brand: cx=6858000, cy=5143500) | `slideMaster1.xml` has NO `<p:sldSz>`; `presentation.xml` `<p:sldSz cx="6858000" cy="5143500"/>`; master placeholder positions within cy=5143500 bounds |
+| EC-002 | Deck with no explicit lang declaration | Default `lang="en"` on all runs (per BC-5.01.004) |
 | EC-003 | Slide with no text content | No rPr emitted; no error |
 | EC-004 | progress_bar slide with label field | Named layout renders correctly |
 
@@ -177,3 +205,11 @@ known-good 16:9 master reference.
 
 TDD strict mode. Three failing tests first. These are mechanical fixes in the PPTX
 serializer; no architecture changes required.
+
+## Changelog
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0 | 2026-06-11 | story-writer | Initial draft |
+| 1.1 | 2026-06-11 | story-writer | Clarified AC-001 test verification steps |
+| 1.2 | 2026-06-12 | product-owner | CRITICAL schema fix (F-096-A001): AC-001 rewritten — `<p:sldSz>` is schema-invalid in CT_SlideMaster (ECMA-376 §19.3.1.42); contract now asserts master ABSENCE + presentation.xml CORRECTNESS. AC-004 rephrased to remove "master sldSz corrected" language; placeholder bounds derived from page_size. T-001/T-004 rewritten to match. EC-001 corrected. Architecture Compliance Rules updated. LESSON-19 sweep: no other stories/specs carried this claim. |

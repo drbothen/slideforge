@@ -304,7 +304,7 @@ traces_to: domain-spec/L2-INDEX.md
 | BC-5.01.002 | decorative: true opts out of alt requirement; emits empty alt in all formats | P0 | active | [BC-5.01.002.md](BC-5.01.002.md) |
 | BC-5.01.003 | Missing label on color-coded element is compile error | P0 | active | [BC-5.01.003.md](BC-5.01.003.md) |
 | BC-5.01.004 | Missing deck lang declaration produces lint warning; default is "en" | P0 | active | [BC-5.01.004.md](BC-5.01.004.md) |
-| BC-5.01.005 | lang declaration propagates to PPTX Core Properties, PDF /Lang, HTML lang attr | P0 | active | [BC-5.01.005.md](BC-5.01.005.md) |
+| BC-5.01.005 | lang Declaration Propagates to PPTX Core Properties, PPTX Run rPr, PDF /Lang, HTML lang Attr | P0 | active | [BC-5.01.005.md](BC-5.01.005.md) |
 
 ### 5.02 — Plugin Architecture (CAP-021)
 

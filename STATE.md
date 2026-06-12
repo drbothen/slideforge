@@ -4,7 +4,7 @@ mode: greenfield
 created: 2026-05-23
 current_phase: phase-3-tdd-implementation
 status: IN_PROGRESS
-last_updated: 2026-06-11T23:59:00
+last_updated: 2026-06-12T00:00:00
 demo_review: "DEMO-REVIEW-2026-06-11 — 10 product defects (3 CRIT/4 HIGH/3 MED). Rendering-fix wave READY (STORY-094..102 created+indexed; BCs authored; delivery begins next session). See .factory/reviews/demo-deep-review-2026-06-11.md."
 state_version: "1.8"
 phase_1_approved: 2026-05-25
@@ -31,12 +31,12 @@ wave_3_gate: "PASSED 2026-05-31 — PR #38 (7d266ad7); adversary pass 8 strict-C
 wave_4_gate: "PASSED 2026-06-07 — Gate 1 PASS; Gate 2 SKIP (no DTU); Gate 3 PASS (all 4 original findings closed; NEW-INT-001 image-alt RESOLVED PR #64); Gate 5 PASS (mean 1.00, min_critical 1.00; trajectory 0.56->0.86->1.00). BLK-002 CLOSED. develop 02d484cf (64 merged PRs)."
 wave_4_merged: 23
 wave_5_dep_prep: "MERGED PR #69 (3e3a978f) — [workspace.dependencies] centralized + ADR-022 major-version migrations: toml 1.1.2, sha2 0.11.0, criterion 0.8.2, notify 8.2.0, indexmap 2.14. INERT Wave-5 catalog entries added. Security CLEAN; CI green."
-wave_5_status: "18 of 34 Wave-5 stories MERGED. 16 remain (6 rendering-fix [STORY-096..102 excl 098, P0] + 10 feature [P1/P2]). STORY-098 MERGED PR #87 14272e75. NEXT: STORY-096."
-develop_sha: "14272e75"
-develop_pr_count: 87
+wave_5_status: "19 of 34 Wave-5 stories MERGED. 15 remain (5 rendering-fix [STORY-099..102+097, P0] + 10 feature [P1/P2]). STORY-096 MERGED PR #88 2a873a5d. NEXT: STORY-099."
+develop_sha: "2a873a5d"
+develop_pr_count: 88
 open_prs: 0
 error_taxonomy_version: "v2.33"
-workspace_tests: "~4214+ pass / 20 skip / 0 fail (develop 14272e75)"
+workspace_tests: "~4214+ pass / 20 skip / 0 fail (develop 2a873a5d)"
 workspace_test_failures: 0
 ---
 
@@ -48,11 +48,11 @@ workspace_test_failures: 0
 **Repository:** https://github.com/drbothen/slideforge (public) | **Default branch:** `main` | **Dev branch:** `develop`
 **Workspace:** /Users/jmagady/Dev/slideforge
 
-**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop` must equal `14272e75d25f5037c791b341c218ef0f2ef6d5e3` (87 merged PRs, 0 open PRs). If the short SHA `14272e75` does not match, STOP — do not create worktrees or dispatch agents.
+**Verify dev branch:** `git rev-parse develop` must equal `git rev-parse origin/develop` must equal `2a873a5d65d22a2c1b59e3c2ff8dd440a76066f8` (88 merged PRs, 0 open PRs). If the short SHA `2a873a5d` does not match, STOP — do not create worktrees or dispatch agents.
 
 **Factory worktree:** `.factory/` on branch `factory-artifacts`. Pushed to origin (human-authorized 2026-06-04; ongoing pushes authorized).
 
-**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 18 of 34 done (102 stories / 642 pts). 16 remain (6 rendering-fix P0 + 10 feature). **STORY-098 MERGED PR #87 → `14272e75` (REND-005+REND-010a CLOSED). NEXT: STORY-096.**
+**Current position:** Phase 3, **Wave 5 IN PROGRESS**. 19 of 34 done (102 stories / 642 pts). 15 remain (5 rendering-fix P0 + 10 feature). **STORY-096 MERGED PR #88 → `2a873a5d` (REND-007 CLOSED). NEXT: STORY-099.**
 
 **STANDING MERGE AUTH:** Orchestrator MAY squash-merge any PR that is CI-green + security-reviewer CLEAN + pr-reviewer APPROVE, without re-asking human.
 
@@ -122,156 +122,45 @@ PR #80 squash-merged → develop `433b3c01` (84 PRs). Slide-level inline markup 
 
 All branches are on origin (durable, machine-independent):
 
-- `origin/factory-artifacts` — all `.factory/` state; ADR-023/024; VP-054 v1.2.1; STORY-094+095+098 cascade summaries + lessons; demo evidence through STORY-098. (Run `git -C .factory log -1` for current HEAD.)
-- develop `14272e75` (87 merged PRs, 0 open PRs). **1 active worktree: `.worktrees/STORY-096` on `feature/STORY-096` (no story commits yet).**
+- `origin/factory-artifacts` — all `.factory/` state; ADR-023/024; VP-054 v1.2.1; STORY-094+095+098+096 cascade summaries + lessons; demo evidence through STORY-096. (Run `git -C .factory log -1` for current HEAD.)
+- develop `2a873a5d` (88 merged PRs, 0 open PRs). **0 active worktrees.**
 
 **Same-machine resume:**
 1. Run `vsdd-factory:factory-worktree-health`
-2. Read STATE.md — STORY-096 KICKED OFF. Worktree exists at `.worktrees/STORY-096`. NEXT: dispatch test-writer (Step 2.1).
-3. CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 + STORY-095 + STORY-098 MERGED. **Human action required: enable merge queue UI toggle.**
-4. Delivery order: STORY-096 (in progress) → 099 → 100 → 101 → 097 → 102 → remaining Wave-5 feature stories.
+2. Read STATE.md — STORY-096 MERGED. NEXT: create STORY-099 worktree + kick off delivery.
+3. CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 + STORY-095 + STORY-098 + STORY-096 MERGED. **Human action required: enable merge queue UI toggle.**
+4. Delivery order: STORY-099 → 100 → 101 → 097 → 102 → remaining Wave-5 feature stories.
 
 **Fresh-clone (different machine) resume — exact commands:**
 ```
 git clone https://github.com/drbothen/slideforge.git && cd slideforge
 git fetch origin factory-artifacts
 git worktree add .factory factory-artifacts
-git rev-parse develop   # must equal origin/develop == 14272e75d25f5037c791b341c218ef0f2ef6d5e3
-git worktree add .worktrees/STORY-096 feature/STORY-096
+git rev-parse develop   # must equal origin/develop == 2a873a5d65d22a2c1b59e3c2ff8dd440a76066f8
+git worktree add .worktrees/STORY-099 -b feature/STORY-099
 ```
-Then read `.factory/STATE.md` → STORY-096 KICKOFF RUNBOOK → Step 2.1.
+Then read `.factory/STATE.md` → NEXT ACTIONS → kick off STORY-099.
 
 ---
 
 ## IN-FLIGHT WORKTREES — EXACT RESUME STATE
 
-**1 active worktree. 0 open PRs. STORY-096 KICKED OFF — Red Gate next.**
+**0 active worktrees. 0 open PRs. STORY-096 MERGED — ready to kick off STORY-099.**
 
-### STORY-096 — REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang on runs — WORKTREE CREATED, DELIVERY NOT YET STARTED
+### STORY-096 — REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang — MERGED PR #88 → develop `2a873a5d` 2026-06-12
 
-- Worktree: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096` on `feature/STORY-096`
-- HEAD == develop == `14272e75d25f5037c791b341c218ef0f2ef6d5e3` (87 merged PRs, 0 open PRs). ZERO story commits yet.
-- Workspace warm-built. Story spec verified: `.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md` v1.0
-- **NEXT ACTION:** Dispatch test-writer for Red Gate (3 failing tests T-001..T-003 + EC coverage). See STORY-096 KICKOFF RUNBOOK below.
-
-### STORY-098 — REND-005+REND-010a strict-mode content drop + chart no-data — MERGED PR #87 → develop `14272e75` 2026-06-11
-
-- PR #87 squash-merged → develop `14272e75` (87 merged PRs). REND-005 + REND-010a CLOSED.
-- LOCAL adversary cascade: 19 passes, 24 findings closed, CONVERGED 3/3 strict-CLEAN (passes 17-18-19).
-- 2 PO adjudications: body-on-content REVERSED (BC-3.03.002 EC-007); missing data==empty-data for E-LAY-003.
-- Delivered: W-VAL-103 Route A; taxonomy v2.33; known_fields 31→34 + coherence test; ChartEmptyDataValidator; pre-layout warn-only placeholder; e2e exit-code suite.
-- Reviews: security CLEAN (3 LOW); pr-reviewer APPROVE (5 nits).
-- Worktree/branches deleted; `.worktrees/` EMPTY. Cascade archived: `.factory/cycles/STORY-098/cascade-summary.md`.
-- Workspace tests on develop `14272e75`: ~4214+ pass / 20 skip / 0 fail.
-
----
-
-## STORY-096 KICKOFF RUNBOOK
-
-**Story:** STORY-096 — REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang on runs
-**Epic:** EPIC-08 | **Wave:** 5 | **Points:** 5 | **Priority:** P0
-**Spec:** `/Users/jmagady/Dev/slideforge/.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md`
-**Traced BCs (ABSOLUTE paths — pass in every dispatch per LESSON-20):**
-- `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.01.001.md`
-- `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-4.01.005.md`
-- `/Users/jmagady/Dev/slideforge/.factory/specs/behavioral-contracts/BC-5.01.005.md`
-**No VPs.**
-**Depends on:** STORY-037, STORY-038, STORY-023 (all MERGED)
-**Closes:** REND-007 (PPTX master 4:3 geometry on 16:9 deck; no progress_bar layout; run lang dropped)
-**Target crates:** `slideforge-pptx` (SS-06)
-
-**Acceptance Criteria (from spec v1.0):**
-- AC-001: master sldSz derived from `brand.page_size`, NOT hardcoded 4:3
-- AC-002: `progress_bar` gets a named layout in slideLayouts
-- AC-003: `lang` attribute on every `a:rPr` with en-US default + fr-FR round-trip test
-- AC-004: footer/date placeholders positioned within 16:9 bounds
-
-**Error contracts:** EC-001..EC-004
-
-**Tasks:** T-001..T-008 (T-001..T-003 are Red Gate failing tests; T-004..T-006 are TDD green; T-007..T-008 are verification)
-
-**Pre-flight checklist (ALREADY DONE — worktree exists):**
-- [x] Verify: `git rev-parse develop` == `git rev-parse origin/develop` == `14272e75d25f5037c791b341c218ef0f2ef6d5e3`
-- [x] Confirm 0 open PRs: `gh pr list --state open`
-- [x] Create worktree: `git worktree add .worktrees/STORY-096 -b feature/STORY-096` — **DONE**
-- [x] Workspace warm-built in worktree
-
-**DELIVERY STEPS (execute in order; zero-context session follows this exactly):**
-
-**Step 2.1 — Dispatch test-writer (Red Gate)**
-Dispatch `vsdd-factory:test-writer` to write 3 failing tests (T-001..T-003) + EC coverage.
-Include in dispatch: SID-1 (no `#[should_panic]` as placeholder), LESSON-14 (presence-vs-content tests assert content and validity), LESSON-17 (no `#[should_panic]`), FU-DIAGNOSTIC-FIELD-PINNING (tests must pin field names/values, not just structure).
-Worktree: `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096`. Include PATH DISCIPLINE preamble.
-Confirm tests are FAILING (Red Gate) before proceeding to Step 2.2.
-
-**Step 2.2 — Dispatch implementer (TDD green)**
-Dispatch `vsdd-factory:implementer` to implement T-004..T-006 (TDD green pass).
-Include in dispatch: IMPLEMENTER GUARD preamble + EXIT GATE preamble (both verbatim from MANDATORY DISPATCH PREAMBLES section).
-ADR-001 constraint: no raw XML string builders — use ooxmlsdk types throughout.
-NOTE: FU-NOTES-SLIDE-RAW-XML-ADR001 is an OPEN pre-existing deviation in `notes_slide.rs` + `notes_master.rs` — do NOT extend it; flag if STORY-096 scope touches those files.
-Exit gate MUST run ALL 5 commands (fmt --check, pedantic clippy, nextest, cargo test, rustdoc).
-Verify fmt-clean ON the commit (run fmt --check after staging, not just in working tree).
-Include LESSON-2 and LESSON-21 guidance verbatim.
-
-**Step 2.3 — Proactive STALE-PROSE SWEEP (NEW — run BEFORE cascade start)**
-Immediately after TDD green, BEFORE dispatching first adversary pass, run this grep on the diff surface:
-```bash
-cd /Users/jmagady/Dev/slideforge/.worktrees/STORY-096
-git diff develop..HEAD -- '*.rs' | grep -iE "current(ly| code)|stub|always|will be|not yet implemented|TODO|FIXME"
-```
-Also grep for hardcoded counts and cross-crate `file:line` references in comments:
-```bash
-git diff develop..HEAD -- '*.rs' | grep -E ":[0-9]+\b" | grep -v "test::" | head -30
-```
-Fix ALL stale-prose violations BEFORE dispatching cascade. This class caused 12 of 24 STORY-098 findings.
-
-**Step 3 — LOCAL adversary cascade (3-CLEAN per BC-5.39.001)**
-Sequential passes only (LESSON-7). Include PATH DISCIPLINE + ADVERSARY REPORT FORMAT preambles from MANDATORY DISPATCH PREAMBLES section in EVERY pass dispatch.
-STRICT criterion: ZERO findings of ANY severity (including OBS) — orchestrator-enforced precedent from STORY-095 P11.
-Carry standing adjudications forward in each dispatch (list from prior pass).
-Include LESSON-20: pass absolute `.factory/` spec paths — story file + all 3 traced BCs.
-Need 3 consecutive strict-CLEAN passes for convergence.
-
-**Step 4 — Demo-recorder per-AC**
-Dispatch `vsdd-factory:demo-recorder` after cascade converges. Record all 4 ACs (AC-001..AC-004).
-Evidence goes to `.factory/demos/STORY-096-demo-evidence.md`.
-
-**Step 5 — pr-manager prep**
-Dispatch `vsdd-factory:pr-manager` for 9-step PR cycle.
-pr-manager MUST NOT open PR (IMPLEMENTER GUARD applies here too). Orchestrator runs `gh pr create`.
-
-**Step 6 — Security-reviewer THEN pr-reviewer (sequential, LESSON-5)**
-Orchestrator dispatches `vsdd-factory:security-reviewer` first, then `vsdd-factory:pr-reviewer` after security CLEAN.
-Sequential, not parallel (LESSON-5: pr-manager cannot spawn sub-agents; orchestrator dispatches independently).
-If either reviewer returns findings, fix → re-run both → wait CI per LESSON-9.
-
-**Step 7 — CI green**
-Verify CI green on PR before merge. Fast tier ~6-10 min.
-
-**Step 8 — STANDING MERGE AUTH squash-merge**
-CI-green + security-reviewer CLEAN + pr-reviewer APPROVE → squash-merge.
-MERGE WITHOUT `--delete-branch` (devops cleanup handles branches because the worktree holds the feature branch).
-
-**Step 9 — Devops cleanup**
-Dispatch `vsdd-factory:devops-engineer` to: delete remote branch, clean worktree (`git worktree remove .worktrees/STORY-096`), sync develop.
-
-**Step 10 — State-manager post-merge burst (TD-VSDD-053: ONE atomic commit)**
-Update STATE.md: mark STORY-096 MERGED, update develop SHA + PR count, move worktree to MERGED section, update CURRENT POSITION + Session Resume Checkpoint.
-
-**Delivery order after STORY-096:** 099 → 100 → 101 → 097 → 102. Then 10 remaining Wave-5 feature stories (T6).
-
-**PROCESS LESSONS TO APPLY (from STORY-095/098 cascades — hardened into runbook):**
-- (a) STALE-PROSE SWEEP (Step 2.3 above) — grep diff surface for "current(ly)|stub|always|will be|not yet implemented" + stale version labels BEFORE cascade start. 12 of 24 STORY-098 findings were this class.
-- (b) Comments must NOT contain hardcoded counts or cross-crate `file:line` numbers — cite crate+module instead.
-- (c) Ambiguous spec conflicts route to PO BEFORE implementing (LESSON-22: orchestrator verifies upstream claims before routing deferral).
-- (d) Implementer dispatches include IMPLEMENTER GUARD + EXIT GATE preambles verbatim from MANDATORY DISPATCH PREAMBLES section.
-- (e) OBS findings count under BC-5.39.001 strict-CLEAN criterion — orchestrator-enforced precedent from STORY-095 P11. Do not re-litigate.
+- PR #88 squash-merged → develop `2a873a5d` (88 merged PRs). REND-007 CLOSED.
+- LOCAL adversary cascade: 9 passes, 11 findings + SEC-096-001 closed, CONVERGED 3/3 strict-CLEAN (passes 7-8-9).
+- 2 PO adjudications: (a) no-lang default "en" ALL surfaces — BC-5.01.005 v1.3; (b) AC-001 rewritten — sldSz in presentation.xml ONLY, master asserts ABSENCE.
+- Reviews: security CLEAN; pr-reviewer APPROVE (3 nits).
+- Worktree/branches deleted; `.worktrees/` EMPTY. Cascade archived: `.factory/cycles/STORY-096/cascade-summary.md`.
+- Workspace tests on develop `2a873a5d`: ~4214+ pass / 20 skip / 0 fail.
 
 ---
 
 ## WAVE 5 DELIVERY SUMMARY
 
-**18 of 34 done (develop 14272e75, 87 PRs). CI INITIATIVE COMPLETE. Workstream B CLOSED. RENDERING-FIX WAVE IN PROGRESS (3/9).**
+**19 of 34 done (develop 2a873a5d, 88 PRs). CI INITIATIVE COMPLETE. Workstream B CLOSED. RENDERING-FIX WAVE IN PROGRESS (4/9).**
 
 - **STORY-089 MERGED** PR #68 (c722c28b): field-value type validation.
 - **STORY-046 MERGED** PR #70 (fa85d113): Static HTML exporter.
@@ -293,8 +182,9 @@ Update STATE.md: mark STORY-096 MERGED, update develop SHA + PR count, move work
 - **STORY-094 MERGED** PR #85 (c72bd2f6): REND-001+REND-003 (EPIC-08, 8 pts). CONVERGED 3/3 (passes 18-19-20). SEC-001 in-scope.
 - **STORY-095 MERGED** PR #86 (6c27fcf3): REND-002+REND-008-pdf (EPIC-13, BC-4.03.001+BC-4.03.002, VP-054 NEW, 8 pts). CONVERGED 3/3 (passes 14-15-16). OBS-precedent at P11.
 - **STORY-098 MERGED** PR #87 (14272e75): REND-005+REND-010a (EPIC-04, BC-3.03.002 v1.3+BC-1.11.002 v1.2+BC-4.01.001, 5 pts). CONVERGED 3/3 (passes 17-18-19). 2 PO adjudications: body-on-content REVERSED; missing data==empty-data for E-LAY-003.
+- **STORY-096 MERGED** PR #88 (2a873a5d): REND-007 (EPIC-08, BC-4.01.001+BC-4.01.005+BC-5.01.005 v1.3, 5 pts). CONVERGED 3/3 (passes 7-8-9). 2 PO adjudications: (a) no-lang default "en" ALL surfaces; (b) AC-001 rewritten — sldSz in presentation.xml ONLY, master asserts ABSENCE (ECMA-376 §19.3.1.42).
 
-**16 stories remain (6 rendering-fix P0 + 10 feature). NEXT: STORY-096.**
+**15 stories remain (5 rendering-fix P0 + 10 feature). NEXT: STORY-099.**
 
 **HELD (after rendering-fix wave):**
 - STORY-057/058/064 (slideforge-cli same-crate conflict — serialize after in-flight batch)
@@ -302,6 +192,9 @@ Update STATE.md: mark STORY-096 MERGED, update develop SHA + PR count, move work
 - STORY-060/061 (FU-SEC-001-GIT2-OPENSSL must resolve FIRST)
 
 **OPEN FOLLOW-UPS:**
+- **FU-096-43-DOC-NOTE** [nit]: `layout_xml.rs` — "4:3 same height" doc phrasing imprecise (pr-reviewer N-1, PR #88). Logged; non-blocking.
+- **FU-096-DEAD-STATIC-CY** [nit]: `MASTER_PLACEHOLDER_DEFS` body entry idx==1 has a static `cy` value that is dead (not referenced in the geometry derivation path) — no compile-time signal it is unused (pr-reviewer N-2, PR #88). Candidate for follow-up cleanup story.
+- **FU-096-PROCESS-GAP-OOXML-PLACEMENT** [process-gap]: OOXML-element-placement claims in specs/stories must be validated against ECMA-376 typed schema at story-authoring time. L-c in `.factory/cycles/STORY-096/lessons.md`. No current story vehicle — pending next spec-authoring cycle (story-writer/PO dispatch template update).
 - **FU-098-SHARED-EMPTY-PREDICATE** [nit]: `chart_data_is_empty` duplicated in `collect_e_lay_003_chart_indices` — extract shared predicate. Source: PR #87 pr-reviewer nit 1.
 - **FU-098-UNEVALUATED-DATA-DIAG** [SEC-003+nit]: `Expr`/`Interpolated` chart data silently skipped — add internal invariant diagnostic. Source: SEC-003 + pr-reviewer nit 2.
 - **FU-098-ELAY003-HINT-SPECIFICITY** [nit]: hint lost binding-expression specificity. Source: PR #87 pr-reviewer nit 5.
@@ -324,11 +217,11 @@ Update STATE.md: mark STORY-096 MERGED, update develop SHA + PR count, move work
 
 ## CURRENT POSITION
 
-Phase 3, **Wave 5 IN PROGRESS** (develop `14272e75`, 87 merged PRs). 18 of 34 done. 16 remain (6 rendering-fix P0 + 10 feature). **STORY-098 MERGED. CI INITIATIVE COMPLETE. STORY-081 MERGED. Workstream B CLOSED.**
+Phase 3, **Wave 5 IN PROGRESS** (develop `2a873a5d`, 88 merged PRs). 19 of 34 done. 15 remain (5 rendering-fix P0 + 10 feature). **STORY-096 MERGED. CI INITIATIVE COMPLETE. STORY-081 MERGED. Workstream B CLOSED.**
 
-- **IN FLIGHT:** STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang, 5 pts). Worktree created. Red Gate (test-writer) NEXT.
-- Active worktrees: 1 (`.worktrees/STORY-096`). Open PRs: 0.
-- Workspace (develop `14272e75`): ~4214+ pass / 20 skip / 0 fail. CI STABILIZATION CONFIRMED.
+- **NEXT: STORY-099** (HIGH: DOCX bullets/numbering/sectPr/lang, 8 pts). No active worktree yet. Create worktree + kick off delivery.
+- Active worktrees: 0. Open PRs: 0.
+- Workspace (develop `2a873a5d`): ~4214+ pass / 20 skip / 0 fail. CI STABILIZATION CONFIRMED.
 
 ---
 
@@ -341,8 +234,9 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `14272e75`, 87 merged PRs). 18 of 34 do
 **STORY-094 MERGED** PR #85 → develop `c72bd2f6`. REND-001 + REND-003 CLOSED.
 **STORY-095 MERGED** PR #86 → develop `6c27fcf3`. REND-002 + REND-008-pdf CLOSED.
 **STORY-098 MERGED** PR #87 → develop `14272e75`. REND-005 + REND-010a CLOSED.
+**STORY-096 MERGED** PR #88 → develop `2a873a5d`. REND-007 CLOSED.
 
-**NEXT: STORY-096** (MED: PPTX master 16:9 + progress_bar layout + run lang, 5 pts). See STORY-096 KICKOFF RUNBOOK section above.
+**NEXT: STORY-099** (HIGH: DOCX bullets/numbering/sectPr/lang, 8 pts). Spec: `.factory/stories/stories/STORY-099-rend-docx-bullets-secpr-lang.md` v1.1. Create worktree + kick off delivery (same runbook pattern as STORY-096).
 
 | ID | Sev | Summary | Crates |
 |----|-----|---------|--------|
@@ -352,17 +246,17 @@ Phase 3, **Wave 5 IN PROGRESS** (develop `14272e75`, 87 merged PRs). 18 of 34 do
 | REND-004 | HIGH | `takeaway` field never renders on-slide | `slideforge-eval`, `slideforge-layout`, all renderers |
 | ~~REND-005~~ | HIGH | CLOSED (PR #87) — W-VAL-103 Route A strict-mode exit | |
 | REND-006 | HIGH | DOCX: bullets empty `<w:p/>`; numbering.xml stub; no sectPr; lang dropped | `slideforge-docx` |
-| REND-007 | MED | PPTX: master 4:3 on 16:9 deck; progress_bar no layout; run lang dropped | `slideforge-pptx` |
+| ~~REND-007~~ | MED | CLOSED (PR #88) — master sldSz absence + 16:9 geometry + progress_bar layout + lang on rPr | |
 | ~~REND-008-pdf~~ | (part) | CLOSED (PR #86) — bold font subset + progress_bar /Artifact | |
 | REND-008-html | MED | HTML: chart SVG empty + EMU/px mismatch; image empty; bullets as `<p>` not `<ul>/<li>` | `slideforge-html` |
 | REND-009 | HIGH | CLI: bare-path `Path::parent()` yields "" — brand I/O error | `slideforge-cli` |
 | ~~REND-010a~~ | MED | CLOSED (PR #87) — ChartEmptyDataValidator registered (E-LAY-003) | |
 
-**T5 checklist (3/9 done):**
+**T5 checklist (4/9 done):**
 - [x] STORY-094 — DONE (PR #85, c72bd2f6) — REND-001+REND-003 CLOSED
 - [x] STORY-095 — DONE (PR #86, 6c27fcf3) — REND-002+REND-008-pdf CLOSED
 - [x] STORY-098 — DONE (PR #87, 14272e75) — REND-005+REND-010a CLOSED
-- [ ] STORY-096 (MED: PPTX master 16:9 + progress_bar layout + run lang) — 5 pts
+- [x] STORY-096 — DONE (PR #88, 2a873a5d) — REND-007 CLOSED
 - [ ] STORY-099 (HIGH: DOCX bullets/numbering/sectPr/lang) — 8 pts
 - [ ] STORY-100 (MED: HTML EMU/px + ul/li + image placeholder) — 5 pts
 - [ ] STORY-101 (HIGH: CLI path normalization + chart SVG embed) — 8 pts
@@ -383,7 +277,7 @@ STORY-056/048 (UNBLOCKED), STORY-057/058/064 (cli serialized), STORY-060/061 (FU
 | T2 | Deliver STORY-092 — CI cache reliability + disk headroom | DONE | PR #83 merged 2026-06-11 |
 | T3 | Deliver STORY-093 — CI arm64 build-time (mold + profile.ci) | DONE | PR #84 merged 2026-06-11 |
 | T4 | Merge STORY-081 PR #80 | DONE | merged 2026-06-11, develop 433b3c01 |
-| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — STORY-094 DONE (PR #85); STORY-095 DONE (PR #86, 6c27fcf3); STORY-098 DONE (PR #87, 14272e75); 3/9. Next: STORY-096 | see checklist above |
+| T5 | Rendering-fix wave — fix ALL REND-001..010 (human directive: none deferred) | IN PROGRESS — STORY-094 DONE (PR #85); STORY-095 DONE (PR #86, 6c27fcf3); STORY-098 DONE (PR #87, 14272e75); STORY-096 DONE (PR #88, 2a873a5d); 4/9. Next: STORY-099 | see checklist above |
 
 OPEN HUMAN ACTIONS: (1) FU-MERGE-QUEUE-UI-TOGGLE — Settings → Branches → develop rule → "Require merge queue". (2) FU-NOTES-SLIDE-RAW-XML-ADR001 — adjudicate whether `notes_slide.rs` + `notes_master.rs` raw-string XML builders constitute an ADR-001 violation.
 
@@ -415,27 +309,26 @@ adversary LOCAL 3-CLEAN (sequential) → demo-recorder per-AC → rebase onto de
 | Planning (25 DSL decisions) | DONE 2026-05-24 | q1-q25 docs + 14 research threads + 7/7 spikes resolved |
 | Phase 1: Spec Crystallization | DONE — APPROVED 2026-05-25 | PRD (116 BCs, 15 HS, 4 supplements) + arch (18 ADRs, 15 VPs, 20 crates) + UX spec. 17 passes, 69 findings, 3/3 clean. |
 | Phase 2: Story Decomposition | DONE — APPROVED 2026-05-25 | 89 stories, 21 epics, 6 waves, 553 pts (baseline). Now 102 stories / 642 pts after CI initiative +3 + rendering-fix wave +9. 22 passes, 96+ findings, 3/3 clean. |
-| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **18/34 done**. 16 remain (6 rendering-fix P0 + 10 feature). CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094 MERGED (PR #85 → `c72bd2f6`). STORY-095 MERGED (PR #86 → `6c27fcf3`). **STORY-098 MERGED** (PR #87 → `14272e75`; REND-005+REND-010a CLOSED). **NEXT: STORY-096.** | Per-story delivery |
+| Phase 3: TDD Implementation | IN PROGRESS — Waves 1/2/3/4 GATE PASSED. Wave 5: **19/34 done**. 15 remain (5 rendering-fix P0 + 10 feature). CI INITIATIVE COMPLETE. STORY-081 MERGED. STORY-094/095/098/096 MERGED. **STORY-096 MERGED** (PR #88 → `2a873a5d`; REND-007 CLOSED). **NEXT: STORY-099.** | Per-story delivery |
 | Phases 4-7 | NOT STARTED | Holdout / Adversarial / Formal Hardening / Convergence |
 
 ---
 
 ## Session Resume Checkpoint
 
-**Wave 5 IN PROGRESS. STORY-096 KICKED OFF — worktree created, Red Gate (test-writer) NEXT. 1 active worktree. 0 open PRs. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION.**
+**Wave 5 IN PROGRESS. STORY-096 MERGED. 0 active worktrees. 0 open PRs. STANDING MERGE AUTH active. Merge-queue UI toggle PENDING HUMAN ACTION. NEXT: STORY-099.**
 
 | Field | Value |
 |-------|-------|
-| **Date** | 2026-06-11 |
-| **develop SHA** | `14272e75` (87 merged PRs; origin/develop; 0 open PRs) |
-| **Active worktrees** | 1 — `/Users/jmagady/Dev/slideforge/.worktrees/STORY-096` on `feature/STORY-096`. HEAD == `14272e75`. ZERO story commits yet. |
-| **STORY-096 state** | KICKED OFF. Worktree created. Story spec READ and verified (v1.0). Workspace warm-built. Delivery NOT yet started. NEXT: dispatch test-writer for Red Gate (Step 2.1 in STORY-096 KICKOFF RUNBOOK). |
-| **STORY-098 state** | MERGED PR #87 → `14272e75`. 19-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 17-18-19). REND-005+REND-010a CLOSED. 2 PO adjudications. Cascade archived: `.factory/cycles/STORY-098/cascade-summary.md`. |
-| **STORY-095 state** | MERGED PR #86 → `6c27fcf3`. 16-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 14-15-16). REND-002+REND-008-pdf CLOSED. |
-| **CI initiative** | COMPLETE. Run `27323925653` SUCCESS — arm64 13m32s; full matrix ~17 min; per-PR fast tier ~6-10 min. |
-| **Workspace tests** | develop `14272e75`: ~4214+ pass / 20 skip / 0 fail. |
+| **Date** | 2026-06-12 |
+| **develop SHA** | `2a873a5d` (88 merged PRs; origin/develop; 0 open PRs) |
+| **Active worktrees** | 0 — `.worktrees/` empty. |
+| **STORY-096 state** | MERGED PR #88 → `2a873a5d`. REND-007 CLOSED. 9-pass LOCAL cascade CONVERGED 3/3 strict-CLEAN (passes 7-8-9). 2 PO adjudications: (a) no-lang default "en"; (b) AC-001 sldSz master absence. Demo 4/4 ACs PASS. Cascade + lessons archived. |
+| **STORY-098 state** | MERGED PR #87 → `14272e75`. REND-005+REND-010a CLOSED. Cascade archived. |
+| **CI initiative** | COMPLETE. Per-PR fast tier ~6-10 min confirmed. |
+| **Workspace tests** | develop `2a873a5d`: ~4214+ pass / 20 skip / 0 fail. |
 | **factory-artifacts** | Pushed to origin. Fresh sessions: clone + `git fetch origin factory-artifacts` + `git worktree add .factory factory-artifacts`. |
-| **RESUME INSTRUCTION** | STORY-096 worktree ALREADY EXISTS at `.worktrees/STORY-096`. DO NOT re-create it. Go directly to STORY-096 KICKOFF RUNBOOK → Step 2.1 (dispatch test-writer). Spec: `.factory/stories/stories/STORY-096-rend-pptx-master-geometry-lang.md`. Traced BCs (absolute): BC-4.01.001, BC-4.01.005, BC-5.01.005. 4 ACs: AC-001 sldSz from brand.page_size; AC-002 progress_bar named layout; AC-003 lang on every a:rPr w/ en-US default + fr-FR test; AC-004 footer/date placeholders within 16:9 bounds. Delivery order after 096: 099→100→101→097→102. |
+| **RESUME INSTRUCTION** | STORY-096 MERGED. NO active worktree. **Kick off STORY-099:** spec `.factory/stories/stories/STORY-099-rend-docx-bullets-secpr-lang.md` v1.1 (DOCX bullets/numbering/sectPr/lang, 8 pts, EPIC-08, REND-006). Run pre-flight: `git rev-parse develop` == `2a873a5d65d22a2c1b59e3c2ff8dd440a76066f8`; confirm 0 open PRs; create worktree `git worktree add .worktrees/STORY-099 -b feature/STORY-099`; dispatch test-writer (Red Gate). Delivery order: 099→100→101→097→102. |
 
 ---
 
@@ -488,6 +381,7 @@ _Wave-5 per-story pass logs archived to `.factory/cycles/wave-5-merges-archive.m
 
 | Date | ID | Decision |
 |------|-----|---------|
+| 2026-06-12 | STORY-096-MERGE | PR #88 squash-merged → develop `2a873a5d` (88 merged PRs). REND-007 CLOSED. EPIC-08, BC-4.01.001+BC-4.01.005+BC-5.01.005 v1.3, 5 pts. LOCAL adversary cascade: 9 passes, 11 findings + SEC-096-001 closed, CONVERGED 3/3 strict-CLEAN (passes 7-8-9). PO adjudications: (a) no-lang default "en" ALL surfaces — BC-5.01.005 v1.2→v1.3; story swept v1.0→v1.2; STORY-099 v1.1 + STORY-100 v1.1 swept (STORY-100 gained AC-006/EC-005 + T-008/T-009 + BC-5.01.005 frontmatter); (b) AC-001 rewritten — sldSz in presentation.xml ONLY, master asserts ABSENCE (ECMA-376 §19.3.1.42). Delivered: master placeholder geometry from brand.page_size + .max(0) clamps; schema-invalid master sldSz REMOVED; progress_bar named layout (CL-20 "SF Progress Bar" idx 30 → slideLayout31.xml, rels-verified); lang on every a:rPr + universality test; DEFAULT_DECK_LANG="en" cross-surface identity; SEC-096-001 fail-fast validate_lang_for_xml. Reviews: security CLEAN (re-verify 9c8e1e1e); pr-reviewer APPROVE (3 nits). Demo evidence: `.factory/demos/STORY-096-demo-evidence.md` (4/4 ACs PASS). Workspace tests: 4214 pass / 20 skip / 0 fail. Worktree/branches deleted. Cascade archived: `.factory/cycles/STORY-096/cascade-summary.md`. Lessons: `.factory/cycles/STORY-096/lessons.md` (L-a timeless prose, L-b traceability sweep, L-c [process-gap] OOXML-element-placement). Open follow-ups: FU-096-43-DOC-NOTE, FU-096-DEAD-STATIC-CY. NEXT: STORY-099. |
 | 2026-06-11 | STORY-098-MERGE | PR #87 squash-merged → develop `14272e75` (87 merged PRs). REND-005 + REND-010a CLOSED. EPIC-04, BC-3.03.002 v1.3 + BC-1.11.002 v1.2 + BC-4.01.001, 5 pts. 26 files, +2989/−529. LOCAL adversary cascade: 19 passes, 24 findings closed, CONVERGED 3/3 strict-CLEAN (passes 17-18-19). PO adjudications: (1) BC-3.03.002 EC-007 REVERSED — `body` is VALID on `content` (known_fields() is the authority; ratified post-hoc); (2) missing `data:` == empty-evaluating `data:` for E-LAY-003. Delivered: CONTENT_DROP_KEYS W-VAL-103 context-sensitive severity (Route A); taxonomy v2.29→v2.33 incl. summary-row; body-on-content end-to-end; known_fields 31→34 + registry↔known_fields coherence test; ChartEmptyDataValidator (E-LAY-003); pre-layout warn-only placeholder + mixed-deck selectivity tests; e2e exit-code suite; charts dead-code module deleted. Spec: story v1.0→v1.5; BC-3.03.002 →v1.3; BC-1.11.002 →v1.2; error-taxonomy →v2.33; BC-INDEX title sync; STORY-INDEX de-versioned. Security CLEAN (3 LOW); pr-reviewer APPROVE (5 nits). CI green fast-tier. Demo evidence: `.factory/demos/STORY-098-demo-evidence.md` (5/5 ACs PASS). Worktree/branches deleted. Cascade archived: `.factory/cycles/STORY-098/cascade-summary.md`. Lessons archived: `.factory/cycles/STORY-098/lessons.md`. Open follow-ups: FU-098-SHARED-EMPTY-PREDICATE, FU-098-UNEVALUATED-DATA-DIAG, FU-098-ELAY003-HINT-SPECIFICITY, FU-COLD-BUDGET-LOAD-FLAKE. NEXT: STORY-096. |
 | 2026-06-11 | STORY-095-MERGE | PR #86 squash-merged → develop `6c27fcf3` (86 merged PRs). REND-002 + REND-008-pdf CLOSED. EPIC-13, BC-4.03.001+BC-4.03.002, VP-054 (NEW v1.2.1), 8 pts. LOCAL adversary cascade: 16 passes, 25 findings closed, CONVERGED 3/3 strict-CLEAN (passes 14-15-16). OBS-strict-precedent enforced at P11 (streak reset; orchestrator ruling: OBS counts under BC-5.39.001). Delivered: pure word-wrap engine text_layout.rs (word-boundary + char-fallback + frag0 boundary space, VP-054 Kani-amenable); wrap wired into BOTH PDF draw paths (shared space_before_word helper; SpanWord.is_continuation; measure==draw by construction); frame-bottom clamp + tracing::warn; ColorBar /Figure+/Alt end-to-end from ColorLabel-derived label (layout.rs threading; decorative stays /Artifact); bold subset preserved across wrap; veraPDF fixtures extended (pdf-ua1-verapdf CI job PASSED on PR with new /Figure fixture); FontMetrics mock_char/space_width_pts. Security CLEAN (0 crit/0 important; 2 suggestions: FU-095-ALT-LENGTH-CAP, FU-095-WRAP-PRECONDITION-DOC logged). pr-reviewer APPROVE (5 non-blocking nits; nit-5 description inaccuracy fixed pre-merge). CI green fast tier ~6min. 4180/20/0 workspace tests on develop 6c27fcf3. Worktree/branches deleted; `.worktrees/` EMPTY. Cascade archived: `.factory/cycles/STORY-095/cascade-summary.md`. Lessons archived: `.factory/cycles/STORY-095/lessons.md`. Demo evidence: `.factory/demos/STORY-095-demo-evidence.md` (5/5 ACs PASS, commit ad983606). OPEN FOLLOW-UPS added: FU-095-NONPDF-COLORBAR-ALT, FU-095-WRAP-ENGINE-CONSOLIDATION, FU-095-ALT-LENGTH-CAP, FU-095-WRAP-PRECONDITION-DOC, FU-095-WHITESPACE-PATH-NOTE. NEXT: STORY-098. |
 | 2026-06-11 | STORY-094-MERGE | PR #85 squash-merged → develop `c72bd2f6` (85 merged PRs). REND-001+REND-003 CLOSED. EPIC-08, BC-3.06.003+BC-4.01.001, 8 pts. LOCAL adversary cascade: 20 passes, 24 findings closed, CONVERGED 3/3 strict-CLEAN (passes 18-19-20). P4 VOIDED (reviewer path error) and re-run. Key deliverables: region-relative two_col bullet width, body+bullets region split, post-layout geometric validation, nvGrpSpPr first-child sweep, E-LAY-008 w/ SourceMap+exit-codes+warn-only, Slide.field_spans IR threading, SEC-001 RESOLVED in-scope (CWE-116). Security re-review CLEAN; pr-reviewer APPROVE. CI green `a5384c92`. 4142/20/0. Cascade archived `.factory/cycles/STORY-094/cascade-summary.md`. |

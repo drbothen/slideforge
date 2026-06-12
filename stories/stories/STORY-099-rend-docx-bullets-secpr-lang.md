@@ -9,7 +9,7 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.1"
 created: "2026-06-11"
 source_findings: [REND-006]
 behavioral_contracts: [BC-4.02.001, BC-3.05.001]
@@ -155,12 +155,14 @@ Verified by: unit test; unzip .docx; parse `word/document.xml`; assert final ele
 ### AC-004: All DOCX text runs carry lang attribute
 (traces to BC-3.05.001 postcondition — lang propagates correctly for PC-3 DOCX surface)
 
-Every `<w:rPr>` in `word/document.xml` carries `<w:lang w:val="en-US"/>` (or the deck's
-configured lang value). Runs with no existing `rPr` element get one created with the
-lang child.
+Every `<w:rPr>` in `word/document.xml` carries `<w:lang w:val="LANG"/>` (or the deck's
+configured lang value) where LANG defaults to "en" when no lang is declared (per
+BC-5.01.004, canonical default is "en" — NOT "en-US"). Runs with no existing `rPr`
+element get one created with the lang child.
 
 Verified by: unit test serializing a slide with body text; parse `word/document.xml`;
-assert every `<w:r>` has `<w:rPr><w:lang w:val="en-US"/></w:rPr>`.
+assert every `<w:r>` has `<w:rPr><w:lang w:val="en"/></w:rPr>` (no-lang-declared deck).
+Second test with explicit `lang "fr-FR"` deck; assert `<w:lang w:val="fr-FR"/>` on runs.
 
 ### AC-005: DOCX file opens in Word 365 and LibreOffice Writer without errors
 (traces to BC-4.02.001 postcondition 2)
@@ -190,7 +192,7 @@ Verified by: existing integration test in STORY-041/042 + new schema validation 
 |----|-------------|-------------------|
 | EC-001 | Slide with no bullets | No numbering reference; clean paragraph; no crash |
 | EC-002 | Nested bullets (2 levels) | Both levels reference correct abstract numId levels |
-| EC-003 | Deck with no lang declaration | Default `en-US` on runs |
+| EC-003 | Deck with no lang declaration | Default `"en"` on runs (per BC-5.01.004 — NOT "en-US") |
 | EC-004 | Deck with explicit lang "de-DE" | All runs carry `<w:lang w:val="de-DE"/>` |
 | EC-005 | Empty bullet string | Empty `<w:t/>` run (not dropped); consistent with Word behavior |
 

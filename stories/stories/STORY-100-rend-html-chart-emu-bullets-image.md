@@ -9,10 +9,10 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.0"
+spec_version: "1.1"
 created: "2026-06-11"
 source_findings: [REND-008]
-behavioral_contracts: [BC-4.03.003, BC-3.05.001]
+behavioral_contracts: [BC-4.03.003, BC-3.05.001, BC-5.01.005]
 # BC status: BC-4.03.003 (HTML WCAG AA — bullet items as <p> instead of <ul>/<li> is a
 # WCAG 1.3.1 Info and Relationships failure; axe-core flags this). BC-3.05.001 (inline
 # formats correct for HTML surface — EMU/px mismatch in chart SVG unit conversion is a
@@ -171,6 +171,23 @@ violation; the image alt fix closes the img alt violation.
 
 Verified by: CI integration test green.
 
+### AC-006: HTML `lang` attribute carries the deck lang value; no-lang default is "en" not "en-US"
+(traces to BC-5.01.005 v1.3 postcondition 5 and postcondition 6 — HTML `<html lang="LANG">` must
+carry the identical lang string as all other formats; default when no lang is declared is "en",
+never "en-US")
+
+The HTML exporter's `map_or("en-US", ...)` (or equivalent hardcoded "en-US" fallback) is replaced
+with `map_or("en", ...)` sourced from `deck.metadata.lang` via the `Exporter` trait's `deck: &Deck`
+parameter — the single source of truth per BC-5.01.005 Invariant 2. The `<html lang="LANG">`
+attribute in all static HTML output carries:
+- The exact BCP-47 tag from the deck's `lang "..."` declaration when one is present, OR
+- `"en"` (two-letter default, NOT `"en-US"`) when no lang is declared.
+
+This surface must be cross-surface identical with PPTX, PDF, and DOCX (PC-6 of BC-5.01.005).
+
+Verified by: unit test building a no-lang deck → parse HTML → assert `<html lang="en">` (not
+"en-US"). Second unit test with explicit `lang "fr-FR"` deck → assert `<html lang="fr-FR">`.
+
 ## Tasks
 
 - [ ] **T-001 (RED):** Write `test_chart_svg_pixel_scale()` in `slideforge-html`.
@@ -181,8 +198,13 @@ Verified by: CI integration test green.
 - [ ] **T-006 (GREEN):** Change bullet frame emission from `<p>` to `<ul>/<li>`.
 - [ ] **T-007 (GREEN):** Fix image src emission to include `data-image-embedding` attribute
   citing STORY-101.
-- [ ] **T-008:** Run `cargo nextest run -p slideforge-html --no-fail-fast`.
-- [ ] **T-009:** Run `just check` before declaring done.
+- [ ] **T-008 (RED):** Write `test_html_lang_no_declaration_defaults_to_en()` in `slideforge-html`
+  — assert `<html lang="en">` (not "en-US") when deck carries no lang.
+- [ ] **T-009 (GREEN):** Replace `map_or("en-US", ...)` (or equivalent hardcoded fallback) in the
+  HTML exporter with `map_or("en", ...)` sourced from `deck.metadata.lang`. Add second test with
+  `lang "fr-FR"` deck asserting `<html lang="fr-FR">`.
+- [ ] **T-010:** Run `cargo nextest run -p slideforge-html --no-fail-fast`.
+- [ ] **T-011:** Run `just check` before declaring done.
 
 ## Edge Cases
 
@@ -192,6 +214,7 @@ Verified by: CI integration test green.
 | EC-002 | Nested bullet items | Nested `<ul>` inside `<li>` — proper nesting |
 | EC-003 | Chart with 1 data point | Renders at correct scale; not invisible |
 | EC-004 | Image with decorative: true | `alt=""` on img element; accessible opt-out per BC-5.01.002 |
+| EC-005 | Deck with no `lang` declaration | `<html lang="en">` — default is "en" not "en-US"; cross-surface identity required (BC-5.01.005 v1.3 PC-6) |
 
 ## Behavioral Contracts Table
 
@@ -199,9 +222,17 @@ Verified by: CI integration test green.
 |-------|-------|-------------|
 | BC-4.03.003 | HTML WCAG AA | AC-003, AC-004, AC-005 |
 | BC-3.05.001 | Inline formats correct per format | AC-001, AC-002 |
+| BC-5.01.005 | lang Declaration Propagates to All Surfaces (v1.3) | AC-006 |
 
 ## Test Strategy
 
-TDD strict mode. Four failing tests first. The EMU/px fix and bullet fix are independent
-and straightforward. Image src deferral is an explicit observable placeholder, not a
-silent drop.
+TDD strict mode. Five failing tests first (four original + T-008 for HTML lang). The
+EMU/px fix, bullet fix, and lang default fix are independent and straightforward. Image
+src deferral is an explicit observable placeholder, not a silent drop.
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.0 | 2026-06-11 | story-writer | Initial draft — chart EMU/px, image src placeholder, bullet `<ul>/<li>` |
+| 1.1 | 2026-06-12 | product-owner | BC-5.01.005 v1.3 follow-through: added AC-006 (HTML lang "en" default, cross-surface identity), EC-005, T-008/T-009, and BC-5.01.005 to behavioral_contracts and BC table. The HTML exporter's `map_or("en-US", ...)` fallback is divergent from BC-5.01.005 v1.3 PC-6; this AC closes that gap in the same wave as STORY-099 DOCX AC-004. |
