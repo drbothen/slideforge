@@ -117,18 +117,19 @@ fn test_f098_p1_004_ac001_body_on_unsupporting_type_strict_exits_2() {
     );
 }
 
-// ── AC-002: body on non-supporting slide — warn-only mode → exit 0 ───────────
+// ── AC-001 warn-only: body on non-supporting slide — warn-only mode → exit 0 ──
 
-/// AC-002 / BC-3.03.002 v1.3 Route A: `body` on a slide type that does NOT
-/// declare it MUST return `Ok(_)` in warn-only mode — W-VAL-103 is non-blocking.
+/// AC-001 warn-only / BC-3.03.002 v1.3 Invariant 4 warn-only branch: `body` on a
+/// slide type that does NOT declare it MUST return `Ok(_)` in warn-only mode —
+/// W-VAL-103 is non-blocking in warn-only mode regardless of field key.
 /// Body must NOT be threaded into the output slide blocks.
 ///
 /// Note: `content` slides now declare `body` as an optional field, so this test
 /// uses `chart` slides (which do NOT support `body`).
 ///
-/// Traceability: F-098-P1-004; BC-3.03.002 Route A; STORY-098 AC-002.
+/// Traceability: F-098-P1-004; BC-3.03.002 Invariant 4 warn-only branch; STORY-098 AC-001.
 #[test]
-fn test_f098_p1_004_ac002_body_on_unsupporting_type_warn_only_exits_0() {
+fn test_f098_p1_004_ac001_body_on_unsupporting_type_warn_only_exits_0() {
     let brand = BrandTmpDir::new("s098_body_chart_warn");
 
     let source = concat!(
@@ -148,8 +149,9 @@ fn test_f098_p1_004_ac002_body_on_unsupporting_type_warn_only_exits_0() {
 
     assert!(
         result.is_ok(),
-        "AC-002 / F-098-P1-004: `body` on `chart` slide in warn-only mode must return \
-         Ok — W-VAL-103 is non-blocking (BC-3.03.002 Route A). Got: {result:?}"
+        "AC-001 warn-only / F-098-P1-004: `body` on `chart` slide in warn-only mode must \
+         return Ok — W-VAL-103 is non-blocking in warn-only mode (BC-3.03.002 Invariant 4 \
+         warn-only branch). Got: {result:?}"
     );
 }
 
