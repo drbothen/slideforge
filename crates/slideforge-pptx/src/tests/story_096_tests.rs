@@ -1,22 +1,26 @@
 //! Red Gate failing tests for STORY-096: REND-007 — PPTX Master 16:9 Geometry +
 //! progress_bar Layout + Run lang.
 //!
-//! All tests in this file MUST FAIL before the STORY-096 implementation begins.
-//! Per BC-5.39.001 / VSDD TDD discipline, every test here drives a behaviorally
+//! Tests in this file were introduced RED (failing against the pre-fix behavior)
+//! and driven GREEN per TDD, except the EC-003 guard which passes by design
+//! (empty slide emits zero `<a:rPr>` elements — no lang tag needed); see per-row
+//! notes. Per BC-5.39.001 / VSDD TDD discipline, every test drives a behaviorally
 //! meaningful assertion (LESSON-14: content/value tests, not mere presence tests).
 //!
 //! ## Traceability
 //!
 //! | Test function | AC/EC | BC clause | Red Gate status |
 //! |---|---|---|---|
-//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_16x9` | AC-001 | BC-4.01.001 postcondition 2 | RED |
-//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_custom_page_size` | AC-001/EC-001 | BC-4.01.001 postcondition 2 | RED |
-//! | `test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds` | AC-004 | BC-4.01.001 postcondition 4 | RED |
-//! | `test_BC_4_01_005_progress_bar_has_named_layout` | AC-002 | BC-4.01.005 postcondition 4/5 | RED |
-//! | `test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback` | AC-002/EC-004 | BC-4.01.005 postcondition 5 | RED |
-//! | `test_BC_5_01_005_run_has_lang_attribute_explicit_en_us` | AC-003/EC-002 | BC-5.01.005 postcondition 1 | RED |
-//! | `test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip` | AC-003 | BC-5.01.005 postcondition 1 | RED |
-//! | `test_BC_5_01_005_ec003_empty_slide_no_rpr_emitted_no_error` | AC-003/EC-003 | BC-5.01.005 postcondition 1 | RED (LESSON-17: NOT #[should_panic]) |
+//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_16x9` | AC-001 | BC-4.01.001 postcondition 2 | RED → GREEN |
+//! | `test_BC_4_01_001_master_has_no_sldsz_presentation_carries_custom_page_size` | AC-001/EC-001 | BC-4.01.001 postcondition 2 | RED → GREEN |
+//! | `test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds` | AC-004 | BC-4.01.001 postcondition 4 | RED → GREEN |
+//! | `test_BC_4_01_001_footer_y_saturating_on_tiny_page` | AC-004 / F-096-004 | BC-4.01.001 postcondition 4 | RED → GREEN (tiny-page clamp edge case) |
+//! | `test_BC_4_01_005_progress_bar_has_named_layout` | AC-002 | BC-4.01.005 postcondition 4/5 | RED → GREEN |
+//! | `test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback` | AC-002/EC-004 | BC-4.01.005 postcondition 5 | RED → GREEN |
+//! | `test_BC_5_01_005_run_has_lang_attribute_explicit_en_us` | AC-003/EC-002 | BC-5.01.005 postcondition 1 | RED → GREEN |
+//! | `test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip` | AC-003 | BC-5.01.005 postcondition 1 | RED → GREEN |
+//! | `test_BC_5_01_005_ac003_all_rpr_carry_lang_universality` | AC-003 / F-096-001 | BC-5.01.005 postcondition 1 | RED → GREEN (universality: both code paths) |
+//! | `test_BC_5_01_005_ec003_empty_slide_no_rpr_error` | AC-003/EC-003 | BC-5.01.005 postcondition 1 | GREEN by design (empty slide → zero rPr → no lang needed; LESSON-17: NOT #[should_panic]) |
 //! | `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface` | F-096-002 | BC-5.01.005 v1.3 | RED → GREEN |
 
 #![allow(non_snake_case)]
