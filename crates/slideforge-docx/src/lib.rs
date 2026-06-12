@@ -54,10 +54,19 @@ pub mod content_types;
 pub mod document_body;
 pub mod error;
 pub mod manual_sections;
+pub mod numbering;
 pub mod section_order;
 pub mod styles;
 pub mod xml_escape;
 pub mod zip_assembler;
+
+/// Default BCP-47 language tag when the deck carries no `lang` declaration.
+///
+/// The canonical default is `"en"` per BC-5.01.004 — NOT `"en-US"`. This
+/// constant is the single source of truth for the no-lang default across all
+/// DOCX surfaces: `word/document.xml` run `<w:lang>`, `docProps/core.xml`
+/// `<dc:language>`, and any future DOCX surfaces that require a language tag.
+pub const DEFAULT_DECK_LANG: &str = "en";
 
 #[cfg(test)]
 #[allow(
@@ -150,8 +159,9 @@ fn build_docx(deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand) -> Result<Vec<
     let styles_xml = styles::build_styles(Some(brand))?;
     asm.add_part("word/styles.xml", styles_xml);
 
-    // ── `word/numbering.xml` (minimal empty stub) ─────────────────────────
-    asm.add_part("word/numbering.xml", build_numbering_xml());
+    // ── `word/numbering.xml` — abstract + concrete bullet definitions ──────
+    let numbering_xml = numbering::build_numbering_xml()?;
+    asm.add_part("word/numbering.xml", numbering_xml);
 
     // ── `word/settings.xml` (minimal stub) ───────────────────────────────
     asm.add_part("word/settings.xml", build_settings_xml());
@@ -226,15 +236,6 @@ fn build_document_rels(hyperlinks: &[document_body::HyperlinkRel]) -> Vec<u8> {
     xml.into_bytes()
 }
 
-/// Build `word/numbering.xml` — minimal empty stub.
-fn build_numbering_xml() -> Vec<u8> {
-    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>
-"#
-    .as_bytes()
-    .to_vec()
-}
-
 /// Build `word/settings.xml` — minimal stub.
 fn build_settings_xml() -> Vec<u8> {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -248,7 +249,7 @@ fn build_settings_xml() -> Vec<u8> {
 
 /// Build `docProps/core.xml` with `dc:language` from the deck metadata.
 fn build_core_xml(deck: &Deck) -> Vec<u8> {
-    let lang = deck.metadata.lang.as_deref().unwrap_or("en-US");
+    let lang = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
 
     // Declare only the namespaces that are actually used: cp: and dc:.
     // xmlns:dcterms and xmlns:xsi are omitted — no dcterms:created/modified

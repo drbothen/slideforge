@@ -25,9 +25,10 @@
 use ooxmlsdk::common::XmlNamespaceDecl;
 use ooxmlsdk::schemas::schemas_openxmlformats_org_wordprocessingml_2006_main::{
     Body, BodyChoice, Bold, Document, Highlight, HighlightColorValues, Hyperlink, HyperlinkChoice,
-    Italic, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId, Run, RunChoice,
-    RunFonts, RunProperties, Shading, ShadingPatternValues, Strike, Text, VerticalPositionValues,
-    VerticalTextAlignment,
+    Italic, Languages, NumberingId, NumberingLevelReference, NumberingProperties,
+    PageSize as OoxmlPageSize, Paragraph, ParagraphChoice, ParagraphProperties, ParagraphStyleId,
+    Run, RunChoice, RunFonts, RunProperties, SectionProperties, Shading, ShadingPatternValues,
+    Strike, Text, VerticalPositionValues, VerticalTextAlignment,
 };
 use ooxmlsdk::sdk::SdkType;
 use slideforge_layout::LaidOutDeck;
@@ -78,6 +79,19 @@ pub struct HyperlinkRel {
     pub target: String,
 }
 
+/// Left x-coordinate (in EMU) of the body content area.
+///
+/// Bullet frames produced by the layout engine start at this x-position for
+/// depth-0 (ilvl=0) items. Each additional nesting level adds one
+/// `BULLET_DEPTH_INDENT_EMU` to the left edge.
+const BULLET_BODY_LEFT_EMU: i64 = 457_200;
+
+/// EMU added per bullet nesting level.
+///
+/// Depth = `(frame.bbox.x - BULLET_BODY_LEFT_EMU) / BULLET_DEPTH_INDENT_EMU`.
+/// Clamped to 0 for frames whose x is at or left of the body edge.
+const BULLET_DEPTH_INDENT_EMU: i64 = 457_200;
+
 /// Serializes a [`LaidOutDeck`] into the `word/document.xml` body XML and
 /// accumulates hyperlink relationships.
 pub struct DocumentBodySerializer {
@@ -92,6 +106,12 @@ pub struct DocumentBodySerializer {
     ///
     /// Hyperlink IDs must not collide with these fixed relationship IDs.
     next_rel_id: u32,
+    /// BCP-47 language tag for `<w:lang w:val="..."/>` on every run.
+    ///
+    /// Set from `DeckMetadata.lang` at the start of each `serialize` call.
+    /// Falls back to [`crate::DEFAULT_DECK_LANG`] when the deck carries no `lang`
+    /// declaration (BC-5.01.004 / BC-5.01.005).
+    lang: String,
 }
 
 impl DocumentBodySerializer {
@@ -99,6 +119,8 @@ impl DocumentBodySerializer {
     ///
     /// Hyperlink `rId` allocation begins at `rId4` so it cannot collide with
     /// the three fixed document-relationship IDs (styles, numbering, settings).
+    /// The `lang` field is set to [`crate::DEFAULT_DECK_LANG`] and overwritten at the
+    /// start of each [`Self::serialize`] call.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -106,6 +128,7 @@ impl DocumentBodySerializer {
             // rId1..=rId3 are reserved for fixed document relationships
             // (styles.xml, numbering.xml, settings.xml) in build_document_rels.
             next_rel_id: 4,
+            lang: crate::DEFAULT_DECK_LANG.to_owned(),
         }
     }
 
@@ -145,6 +168,14 @@ impl DocumentBodySerializer {
         self.relationships.clear();
         // rId1..=rId3 are reserved for styles/numbering/settings (see build_document_rels).
         self.next_rel_id = 4;
+        // Capture the deck language for run-level <w:lang> emission.
+        // The canonical default is "en" per BC-5.01.004 / BC-5.01.005.
+        semantic_deck
+            .metadata
+            .lang
+            .as_deref()
+            .unwrap_or(crate::DEFAULT_DECK_LANG)
+            .clone_into(&mut self.lang);
 
         let mut body_paragraphs: Vec<BodyChoice> = Vec::new();
         let mut detail_paragraphs: Vec<BodyChoice> = Vec::new();
@@ -199,9 +230,9 @@ impl DocumentBodySerializer {
                 body_paragraphs.push(BodyChoice::WP(Box::new(para)));
             } else {
                 // Plain title path (no inline markup, or no shadow field).
-                body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                    "Heading1", title,
-                ))));
+                body_paragraphs.push(BodyChoice::WP(Box::new(
+                    self.make_styled_lang_paragraph("Heading1", title),
+                )));
             }
 
             // ── Subtitle (FrameContent::Subtitle / SubtitleInlines → Heading2) ───
@@ -211,10 +242,9 @@ impl DocumentBodySerializer {
             for frame in &slide.frames {
                 match &frame.content {
                     slideforge_layout::types::FrameContent::Subtitle(t) => {
-                        body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                            "Heading2",
-                            t.as_ref(),
-                        ))));
+                        body_paragraphs.push(BodyChoice::WP(Box::new(
+                            self.make_styled_lang_paragraph("Heading2", t.as_ref()),
+                        )));
                     },
                     slideforge_layout::types::FrameContent::SubtitleInlines(nodes) => {
                         let para = self.make_inline_paragraph("Heading2", nodes).map_err(|e| {
@@ -252,23 +282,40 @@ impl DocumentBodySerializer {
                 }
             }
 
-            // ── TextRun (FrameContent::TextRun → Normal paragraphs for bullets) ──
+            // ── TextRun (FrameContent::TextRun → bullet list paragraphs) ──────
             // BC-4.02.001 v1.2: STORY-073 — the layout stage converts each
             // BulletItem in ContentBlock::Bullets to a FrameContent::TextRun frame
-            // (one per bullet item). The DOCX exporter must render each TextRun as
-            // a Normal-styled paragraph so that bullet items are visible in DOCX.
+            // (one per bullet item). The DOCX exporter renders each TextRun as a
+            // list-style paragraph with `<w:numPr>` for Word 365 list recognition.
+            //
+            // Nesting depth (ilvl) is derived from the frame's bbox x-coordinate:
+            //   ilvl = (x - BULLET_BODY_LEFT_EMU) / BULLET_DEPTH_INDENT_EMU
+            // clamped to [0, 2].
+            //
+            // An empty InlineNode slice (`inlines.is_empty()`) means an empty bullet
+            // string (EC-005). The paragraph is emitted with numPr anyway so the list
+            // position is preserved; the run carries an empty `<w:t/>`.
             //
             // STORY-081×STORY-088: TextRun frames from markup-bearing list-literal
-            // bullets carry InlineNode::Bold / Italic etc. — render with
-            // make_inline_paragraph so markup is preserved (not stripped to plain
-            // text). This is the DOCX half of the list-form bullets fix.
+            // bullets carry InlineNode::Bold / Italic etc. — rendered with
+            // make_inline_paragraph so markup is preserved (not stripped to plain text).
             for frame in &slide.frames {
-                if let slideforge_layout::types::FrameContent::TextRun(inlines) = &frame.content
-                    && !inlines.is_empty()
-                {
-                    let para = self.make_inline_paragraph("Normal", inlines).map_err(|e| {
+                if let slideforge_layout::types::FrameContent::TextRun(inlines) = &frame.content {
+                    // Derive nesting level from x-coordinate.
+                    // `depth` is i64 in [0, 2] after the min() clamp; i32::try_from
+                    // will always succeed because the value is bounded to ≤2.
+                    let raw_x = frame.bbox.x.0;
+                    let ilvl: i32 = if raw_x <= BULLET_BODY_LEFT_EMU {
+                        0
+                    } else {
+                        let depth = (raw_x - BULLET_BODY_LEFT_EMU) / BULLET_DEPTH_INDENT_EMU;
+                        // Clamp to OOXML max ilvl=2; result fits i32 trivially.
+                        i32::try_from(depth.min(2)).unwrap_or(2)
+                    };
+
+                    let para = self.make_bullet_paragraph(ilvl, inlines).map_err(|e| {
                         ExportError::OoxmlError {
-                            message: format!("TextRun frame inline paragraph: {e}"),
+                            message: format!("TextRun bullet paragraph: {e}"),
                         }
                     })?;
                     body_paragraphs.push(BodyChoice::WP(Box::new(para)));
@@ -294,10 +341,9 @@ impl DocumentBodySerializer {
                     // integer floor produces an off-by-one error when total_width_emu
                     // is not divisible by 100.
                     let percent_text = format!("{percent}%");
-                    body_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                        "Normal",
-                        &percent_text,
-                    ))));
+                    body_paragraphs.push(BodyChoice::WP(Box::new(
+                        self.make_styled_lang_paragraph("Normal", &percent_text),
+                    )));
                 }
             }
 
@@ -344,10 +390,9 @@ impl DocumentBodySerializer {
             if !detail_entries.is_empty() {
                 // One Heading2 per slide, hoisted out of the per-entry loop.
                 let heading2_text = format!("Appendix: {title}");
-                detail_paragraphs.push(BodyChoice::WP(Box::new(make_styled_paragraph(
-                    "Heading2",
-                    &heading2_text,
-                ))));
+                detail_paragraphs.push(BodyChoice::WP(Box::new(
+                    self.make_styled_lang_paragraph("Heading2", &heading2_text),
+                )));
 
                 for rc in detail_entries {
                     let para = self.make_inline_paragraph("Normal", &rc.content)?;
@@ -376,8 +421,27 @@ impl DocumentBodySerializer {
             body_paragraphs.extend(section_elements);
         }
 
+        // ── sectPr: page dimensions from the layout page size ────────────────
+        // BC-4.02.001 postcondition 2: the DOCX body must end with <w:sectPr>
+        // carrying <w:pgSz w:w="W" w:h="H"/> so Word 365 knows the page canvas.
+        // Dimensions are converted from EMU to twentieths-of-a-point (twips):
+        //   twips = EMU × 1440 / 914_400 = EMU / 635  (exact for standard sizes)
+        // EMU values are always positive (validated by the layout engine), so
+        // the try_from conversion from i64 to u32 is always successful in practice.
+        let width_twips = u32::try_from(deck.page_size.width.0 / 635).unwrap_or(14_400);
+        let height_twips = u32::try_from(deck.page_size.height.0 / 635).unwrap_or(8_100);
+        let sect_pr = SectionProperties {
+            w_pg_sz: Some(OoxmlPageSize {
+                width: Some(width_twips),
+                height: Some(height_twips),
+                ..OoxmlPageSize::default()
+            }),
+            ..SectionProperties::default()
+        };
+
         let body = Body {
             body_choice: body_paragraphs,
+            w_sect_pr: Some(Box::new(sect_pr)),
             ..Body::default()
         };
 
@@ -444,6 +508,90 @@ impl DocumentBodySerializer {
         Ok(para)
     }
 
+    /// Build a bullet list paragraph for a `FrameContent::TextRun` frame.
+    ///
+    /// Produces a `Normal`-styled paragraph with `<w:numPr>` carrying the
+    /// supplied `ilvl` and `numId=BULLET_NUM_ID`. Run content is emitted via
+    /// [`Self::inline_node_to_paragraph_choices`] so inline markup (Bold,
+    /// Italic, etc.) is preserved. An empty `inlines` slice yields a paragraph
+    /// with numPr but no run content (EC-005: empty bullet string preserved).
+    fn make_bullet_paragraph(
+        &mut self,
+        ilvl: i32,
+        inlines: &[InlineNode],
+    ) -> Result<Paragraph, ExportError> {
+        let num_pr = NumberingProperties {
+            numbering_level_reference: Some(NumberingLevelReference { val: ilvl }),
+            numbering_id: Some(NumberingId {
+                val: crate::numbering::BULLET_NUM_ID,
+            }),
+            ..NumberingProperties::default()
+        };
+
+        let mut para = Paragraph {
+            paragraph_properties: Some(Box::new(ParagraphProperties {
+                paragraph_style_id: Some(ParagraphStyleId {
+                    val: "Normal".to_owned(),
+                }),
+                numbering_properties: Some(Box::new(num_pr)),
+                ..ParagraphProperties::default()
+            })),
+            ..Paragraph::default()
+        };
+
+        for node in inlines {
+            let choices = self.inline_node_to_paragraph_choices(node)?;
+            para.paragraph_choice.extend(choices);
+        }
+
+        // EC-005: if the inlines slice was empty, emit a single empty run so the
+        // list item is structurally complete and not a bare <w:p/>.
+        if inlines.is_empty() {
+            para.paragraph_choice
+                .push(ParagraphChoice::WR(Box::new(self.make_lang_run(""))));
+        }
+
+        Ok(para)
+    }
+
+    /// Build a styled paragraph with a single plain-text run carrying `<w:lang>`.
+    ///
+    /// Replaces the free-function `make_styled_paragraph` at all call sites
+    /// inside the serializer so that heading and normal paragraphs also carry
+    /// the deck language on their runs (BC-5.01.005 PC-4 universality).
+    fn make_styled_lang_paragraph(&self, style: &str, text: &str) -> Paragraph {
+        Paragraph {
+            paragraph_properties: Some(Box::new(ParagraphProperties {
+                paragraph_style_id: Some(ParagraphStyleId {
+                    val: style.to_owned(),
+                }),
+                ..ParagraphProperties::default()
+            })),
+            paragraph_choice: vec![ParagraphChoice::WR(Box::new(self.make_lang_run(text)))],
+            ..Paragraph::default()
+        }
+    }
+
+    /// Build a plain-text run with `<w:lang w:val="LANG"/>` in `<w:rPr>`.
+    ///
+    /// This is the single run-construction entry point for all text runs
+    /// emitted within this serializer. Having lang on every run satisfies
+    /// BC-5.01.005 PC-4 and the universality assertion in
+    /// `test_BC_3_05_001_runs_have_lang_attribute_all_runs`.
+    fn make_lang_run(&self, text: &str) -> Run {
+        Run {
+            run_properties: Some(Box::new(RunProperties {
+                languages: Some(Languages {
+                    val: Some(self.lang.clone()),
+                    ..Languages::default()
+                }),
+                ..RunProperties::default()
+            })),
+            run_choice: vec![RunChoice::WT(Box::new(make_text(text)))],
+            ..Run::default()
+        }
+    }
+
     /// Convert an [`InlineNode`] into one or more [`ParagraphChoice`] elements.
     ///
     /// Most variants produce `ParagraphChoice::WR` items. `InlineNode::Link`
@@ -454,9 +602,9 @@ impl DocumentBodySerializer {
         node: &InlineNode,
     ) -> Result<Vec<ParagraphChoice>, ExportError> {
         match node {
-            InlineNode::Plain(text) => {
-                Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(text)))])
-            },
+            InlineNode::Plain(text) => Ok(vec![ParagraphChoice::WR(Box::new(
+                self.make_lang_run(text),
+            ))]),
 
             InlineNode::Bold(children) => {
                 let mut choices = Vec::new();
@@ -492,6 +640,10 @@ impl DocumentBodySerializer {
                             ascii: Some("Courier New".to_owned()),
                             high_ansi: Some("Courier New".to_owned()),
                             ..RunFonts::default()
+                        }),
+                        languages: Some(Languages {
+                            val: Some(self.lang.clone()),
+                            ..Languages::default()
                         }),
                         ..RunProperties::default()
                     })),
@@ -600,17 +752,19 @@ impl DocumentBodySerializer {
                 Ok(choices)
             },
             // For unsupported inline variants (Math, Footnote, Xref),
-            // fall back to plain text extraction.
-            InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(
-                math_node.latex.as_ref(),
-            )))]),
+            // fall back to plain text extraction (BC-3.05.001 PC-3 degraded path).
+            InlineNode::Math(math_node) => Ok(vec![ParagraphChoice::WR(Box::new(
+                self.make_lang_run(math_node.latex.as_ref()),
+            ))]),
             InlineNode::Footnote(children) => {
                 let text = collect_plain_text(children);
-                Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(&text)))])
+                Ok(vec![ParagraphChoice::WR(Box::new(
+                    self.make_lang_run(&text),
+                ))])
             },
-            InlineNode::Xref(target) => Ok(vec![ParagraphChoice::WR(Box::new(make_plain_run(
-                target.as_ref(),
-            )))]),
+            InlineNode::Xref(target) => Ok(vec![ParagraphChoice::WR(Box::new(
+                self.make_lang_run(target.as_ref()),
+            ))]),
         }
     }
 
@@ -684,6 +838,10 @@ impl DocumentBodySerializer {
                             val: "Hyperlink".to_owned(),
                         },
                     ),
+                    languages: Some(Languages {
+                        val: Some(self.lang.clone()),
+                        ..Languages::default()
+                    }),
                     ..RunProperties::default()
                 })),
                 run_choice: vec![RunChoice::WT(Box::new(make_text("")))],
@@ -746,23 +904,6 @@ where
     }
 }
 
-/// Build a paragraph with the given style containing a single plain-text run.
-fn make_styled_paragraph(style: &str, text: &str) -> Paragraph {
-    Paragraph {
-        paragraph_properties: Some(Box::new(ParagraphProperties {
-            paragraph_style_id: Some(ParagraphStyleId {
-                val: style.to_owned(),
-            }),
-            ..ParagraphProperties::default()
-        })),
-        paragraph_choice: vec![ParagraphChoice::WR(Box::new(Run {
-            run_choice: vec![RunChoice::WT(Box::new(make_text(text)))],
-            ..Run::default()
-        }))],
-        ..Paragraph::default()
-    }
-}
-
 /// Build an empty paragraph (no runs, no style).
 fn make_empty_paragraph() -> Paragraph {
     Paragraph::default()
@@ -801,14 +942,6 @@ fn make_gradient_solid_fallback_paragraph(from: slideforge_layout::types::Rgb) -
         paragraph_properties: Some(Box::new(ppr)),
         paragraph_choice: vec![],
         ..Paragraph::default()
-    }
-}
-
-/// Build a plain-text run with no run properties.
-fn make_plain_run(text: &str) -> Run {
-    Run {
-        run_choice: vec![RunChoice::WT(Box::new(make_text(text)))],
-        ..Run::default()
     }
 }
 

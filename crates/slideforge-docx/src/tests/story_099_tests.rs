@@ -86,7 +86,7 @@ fn deck_with_lang(lang: Option<&str>) -> Deck {
         metadata: DeckMetadata {
             title: Some(Arc::from("Test Deck")),
             slideforge_version: Arc::from("0.1.0"),
-            lang: lang.map(|s| Arc::from(s)),
+            lang: lang.map(Arc::from),
             author: None,
             section_order: None,
         },
@@ -292,7 +292,8 @@ fn test_BC_4_02_001_bullets_have_run_content() {
     // This is the pre-fix defect: the bullet text was never emitted.
     let empty_para_count = doc_xml.matches("<w:p/>").count();
     assert_eq!(
-        empty_para_count, 0,
+        empty_para_count,
+        0,
         "AC-001 RED GATE: word/document.xml must NOT contain empty <w:p/> self-closing \
          elements for bullet content; found {empty_para_count} empty paragraphs. \
          Got (first 3000 chars):\n{}",
@@ -437,7 +438,8 @@ fn test_BC_4_02_001_document_xml_has_secpr() {
     // The pgSz element must carry both attributes with these exact values.
     // We assert both the w:w and w:h attribute presence in the same string
     // fragment that contains "<w:pgSz".
-    let pgsz_start = doc_xml.find("<w:pgSz")
+    let pgsz_start = doc_xml
+        .find("<w:pgSz")
         .expect("AC-003: <w:pgSz> must exist in word/document.xml after sectPr fix");
     let pgsz_end = doc_xml[pgsz_start..]
         .find('>')
@@ -502,8 +504,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_default_en() {
 
     // <w:lang w:val="en"/> must appear at least once.
     assert!(
-        doc_xml.contains("<w:lang w:val=\"en\"")
-            || doc_xml.contains("<w:lang w:val='en'"),
+        doc_xml.contains("<w:lang w:val=\"en\"") || doc_xml.contains("<w:lang w:val='en'"),
         "AC-004 / EC-003 RED GATE: word/document.xml must carry <w:lang w:val=\"en\"/> \
          (NOT \"en-US\") when no lang is declared (BC-5.01.005 PC-4 / BC-5.01.004 \
          default). Current implementation omits <w:lang> from all <w:rPr> blocks. \
@@ -540,8 +541,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_fr_fr() {
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
 
     assert!(
-        doc_xml.contains("<w:lang w:val=\"fr-FR\"")
-            || doc_xml.contains("<w:lang w:val='fr-FR'"),
+        doc_xml.contains("<w:lang w:val=\"fr-FR\"") || doc_xml.contains("<w:lang w:val='fr-FR'"),
         "AC-004 RED GATE: word/document.xml must carry <w:lang w:val=\"fr-FR\"/> \
          when deck declares lang \"fr-FR\" (BC-5.01.005 PC-4 / invariant 1). \
          Got (first 3000 chars):\n{}",
@@ -587,7 +587,8 @@ fn test_BC_3_05_001_runs_have_lang_attribute_all_runs() {
         "AC-004 universality precondition: at least one <w:r> must exist in document.xml"
     );
     assert_eq!(
-        run_count, lang_count,
+        run_count,
+        lang_count,
         "AC-004 RED GATE: every <w:r> must carry <w:lang> in its <w:rPr>. \
          Found {run_count} <w:r> elements but only {lang_count} <w:lang> elements. \
          Per STORY-096 LESSON L-a: assert ALL runs carry lang — not just a sample. \
@@ -612,8 +613,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_de_de() {
     let doc_xml = read_zip_member(&docx_bytes, "word/document.xml");
 
     assert!(
-        doc_xml.contains("<w:lang w:val=\"de-DE\"")
-            || doc_xml.contains("<w:lang w:val='de-DE'"),
+        doc_xml.contains("<w:lang w:val=\"de-DE\"") || doc_xml.contains("<w:lang w:val='de-DE'"),
         "EC-004 RED GATE: word/document.xml must carry <w:lang w:val=\"de-DE\"/> \
          when deck declares lang \"de-DE\" (BC-5.01.005 EC-004). \
          Got (first 3000 chars):\n{}",
