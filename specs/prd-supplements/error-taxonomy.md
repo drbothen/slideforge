@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.31"
+version: "2.32"
 status: active
 producer: product-owner
 timestamp: 2026-06-11T00:00:00
@@ -508,16 +508,22 @@ W-VAL-103 has TWO severity contexts — the message format is unchanged but the 
 used at accumulation time differs:
 
 1. **Content-drop sub-case — broken/exit-2 in strict mode:**
-   When the unknown field key is `"shape"` or `"body"` on a slide type that does not
-   support that field (i.e., the field is unknown AND would cause authored user content
-   to be silently dropped), W-VAL-103 is promoted to `broken` severity in strict mode.
-   In strict mode, `validate_fields` adds this diagnostic to the error accumulator with
-   `broken` severity. The build exits 2 and produces no output (per BC-3.03.002 invariant 4).
-   In `--warn-only` mode, the severity is `cosmetic` (exit 0) and the field is dropped
-   with a warning.
+   When the unknown field key is `"shape"` or `"body"` AND the slide type's
+   `known_fields()` does NOT include that key (i.e., the field is unknown AND would
+   cause authored user content to be silently dropped), W-VAL-103 is promoted to
+   `broken` severity in strict mode. In strict mode, `validate_fields` adds this
+   diagnostic to the error accumulator with `broken` severity. The build exits 2 and
+   produces no output (per BC-3.03.002 invariant 4). In `--warn-only` mode, the
+   severity is `cosmetic` (exit 0) and the field is dropped with a warning.
    Rationale: CLAUDE.md production-grade default principle — silent dropping of authored
    content in the default build mode is a build failure, not a lint. "No silent fallback"
    (CLAUDE.md Rule 1) and DI-017 (all-or-nothing in strict mode) both mandate this.
+   **Critical boundary (PO adjudication F-098-ADJ-BODY-CONTENT, v2.32):** If the
+   field key IS in the slide type's `known_fields()`, it is NOT an unknown field and
+   W-VAL-103 is not emitted at all — regardless of whether the key is `"body"` or
+   `"shape"`. Concretely: `body` on the `content` slide type does not trigger W-VAL-103
+   because `content`'s `known_fields()` includes `"body"`. `body` on `quote`, `title`,
+   `stat_callout`, and other types that do NOT declare `body` still triggers exit-2.
 
 2. **Non-content sub-case — cosmetic/exit-0 (unchanged):**
    When the unknown field key is any key OTHER than `"shape"` or `"body"` (i.e., a
@@ -532,18 +538,26 @@ redundant; (b) the content-drop check is a two-key set (`{"shape", "body"}`) and
 require a new code prefix; (c) adding a new code would require updating all test fixtures
 and consuming code without providing additional user value.
 
-**Implementer action (STORY-098):** In `validate_fields` in
-`crates/slideforge-plugin-api/src/slide_types/registry.rs`, when a W-VAL-103 diagnostic
-is about to be accumulated, check whether `key` is `"shape"` or `"body"`. If yes AND the
-build mode is `strict`, accumulate as `broken` severity (which causes the output gate in
-`slideforge-cli` to exit 2). If `--warn-only`, accumulate as `cosmetic` regardless of key.
-All other unknown-field keys: accumulate as `cosmetic` always.
+**Implementer action (STORY-098, updated per F-098-ADJ-BODY-CONTENT):** In `validate_fields`
+in `crates/slideforge-plugin-api/src/slide_types/registry.rs`, when a W-VAL-103 diagnostic
+is about to be accumulated (i.e., when a field key is not in the slide type's known fields),
+check whether `key` is `"shape"` or `"body"`. If yes AND the build mode is `strict`,
+accumulate as `broken` severity (which causes the output gate in `slideforge-cli` to exit 2).
+If `--warn-only`, accumulate as `cosmetic` regardless of key. All other unknown-field keys:
+accumulate as `cosmetic` always. **Note:** By definition, if the field reached this path it
+is already unknown (not in `known_fields()`), so the `content` type with `body` declared in
+its `known_fields()` will never reach this code path for that field — the gate fires only
+for genuinely unknown fields.
 
 **Pre-registration collision check (2026-06-07):** W-VAL-103 confirmed not present in
 error-taxonomy.md prior to v2.20 (the W-VAL warning namespace was empty). Confirmed
 present at the W-VAL-103 emission site in `validate_fields`
 (`crates/slideforge-plugin-api/src/slide_types/registry.rs`) with `code: Arc::from("W-VAL-103")`.
 v2.29: content-drop severity promotion added per BC-3.03.002 v1.2 Invariant 4 (STORY-098).
+v2.32: PO binding adjudication F-098-ADJ-BODY-CONTENT (2026-06-11) — clarified that the
+  content-drop gate fires only when the field is UNKNOWN (not in known_fields()). `body`
+  on `content` slide type is VALID (content declares body in known_fields()); it never
+  reaches the W-VAL-103 accumulation path. BC-3.03.002 updated to v1.3. See changelog v2.32.
 
 Note (E-VAL-104): NEW — schema-driven field-value type validation. Emitted by the new
 type-check arm in `validate_fields` (to be added by STORY-089) when a field's runtime
@@ -717,3 +731,4 @@ Per DI-018 and BC-1.15.002:
 | 2.29 | 2026-06-11 | product-owner | STORY-094 rendering-fix wave (REND-005, W-VAL-103 Route A): **W-VAL-103 content-drop severity promotion documented.** W-VAL-103 (`validate_fields` unknown-field warning) gains a context-sensitive severity path: when the unknown field key is `"shape"` or `"body"` on a slide type that does not support it (causing authored content to be silently dropped), W-VAL-103 is promoted from cosmetic to broken in strict mode (exit 2, no output). Non-content unknown fields remain cosmetic/exit-0 (unchanged). This aligns with the CLAUDE.md production-grade default (no silent dropping of authored content in strict mode) and DI-017 (all-or-nothing). Implementer action: STORY-098 (content-drop severity promotion in `validate_fields` for `"shape"` and `"body"` keys in strict mode). No new taxonomy code allocated. |
 | 2.30 | 2026-06-11 | product-owner | STORY-094 rendering-fix wave, F-094-P2-003: **E-LAY-008 allocated** (`LayoutError::BulletsOnContentlessSlideType`) — user-authoring error fired at layout time when a `bullets:` field targets a slide type whose region map defines no Body or Generic Empty region (e.g., `title`, `closing`, `section_break`, `blank`). Severity: broken. Exit: 2 (strict mode). Source span required: points at the `bullets:` keyword in the authored .sf file. Message template: `[E-LAY-008] Slide '<slide_type>' at <file>:<line>:<col> has no content region for 'bullets'. Slide type '<slide_type>' defines no Body or Generic Empty region. Use a slide type with a body region (e.g. 'content', 'detail', 'bullets_only') or remove the 'bullets:' field.` Correction hint embedded in message. Distinction from `LayoutError::InvalidBoundingBox` (internal invariant breach) and E-VAL-101/W-VAL-103 (schema validation, Stage 5) documented in Note. Pre-registration collision check: E-LAY-008 confirmed free — highest existing E-LAY code was E-LAY-007 (v2.5). Traces to CAP-022. |
 | 2.31 | 2026-06-11 | product-owner | STORY-098 adversary Pass-1 F-098-P1-003 (HIGH) + F-098-P1-007 (OBS adjudication): **E-LAY-003 reclassified `degraded` → `broken`; exit gate changed `strict-overflow` → `--warn-only`; trigger scope widened to cover missing `data:` field.** (1) Severity corrected from `degraded` to `broken` — BC-1.11.002 postcondition 2 specifies blocking error on empty data in default strict mode; DiagnosticSeverity::Error in STORY-098 implementation; the degraded/strict-overflow classification was incorrect and contradicted both the BC and the code. (2) Exit gate corrected: E-LAY-003 is NOT controlled by `[build].strict_overflow`; it is controlled by `--warn-only`. `strict-overflow` applies exclusively to canvas overflow (E-LAY-001). (3) Trigger scope widened (F-098-P1-007 adjudication, PO decision BINDING): a `slide chart:` block with NO `data:` field (missing data source) NOW triggers E-LAY-003 in addition to a `data:` binding that evaluates empty. Both conditions are equally broken — the chart cannot render meaningful content and previously rendered silently empty (the REND-010 defect class). The layout-preview allowance in `chart.rs` docs is INCORRECT and must be corrected by the implementer; layout previews must use `--warn-only`. Message template updated to add `[E-LAY-003]` self-prefix. Explanatory Note (E-LAY-003) added after E-LAY table. BC-1.11.002 updated to v1.2 in same burst (precondition 1 widened, description updated, new EC-005, version bump). |
+| 2.32 | 2026-06-11 | product-owner | PO binding adjudication F-098-ADJ-BODY-CONTENT (STORY-098 three-way spec conflict): **W-VAL-103 content-drop scope clarified — `body` on `content` slide type is NOT a content-drop case.** The W-VAL-103 content-drop promotion (v2.29) fires only when the field key is genuinely UNKNOWN (not in the slide type's `known_fields()`). The `content` slide type now declares `body` in its `known_fields()` and `ContentSlideType::optional` — `body` on `content` is schema-valid and renders as prose in the content area (PPTX body placeholder / DOCX Normal). It never reaches the W-VAL-103 accumulation path. `body` on other types that do NOT declare `body` (e.g., `quote`, `title`, `stat_callout`) still triggers W-VAL-103 broken/exit-2 in strict mode (unchanged). W-VAL-103 Note section updated with "Critical boundary" paragraph. BC-3.03.002 updated to v1.3 (EC-007 reversed, Invariant 4 and postcondition 3 clarified). STORY-098 story spec updated to v1.2 (AC-002 and AC-003 revised). |

@@ -9,13 +9,20 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 # Changelog:
 # v1.1 (2026-06-11): Fix path mis-anchor F-098-P1-006 — body/content drift site is
 #   crates/slideforge-eval/src/field_to_block.rs (thread_one_slide ~188-203), NOT
 #   crates/slideforge-validate/src/field_to_block.rs:135. Also synced AC-004/AC-005
 #   to BC-1.11.002 v1.2 per PO adjudication of F-098-P1-007 (missing `data:` field
 #   treated identically to empty-evaluating binding; E-LAY-003 message self-prefixed).
+# v1.2 (2026-06-11): PO binding adjudication F-098-ADJ-BODY-CONTENT — resolution (a)
+#   confirmed: `body` is a valid optional field on `content` slide type. AC-002 and
+#   AC-003 updated to reflect decision (a). BC-3.03.002 v1.3 is the updated spec.
+#   The exit-2 test for body-on-content (T-004) is REPLACED by a render-success test.
+#   AC-002 now verifies that body prose renders on a content slide (no W-VAL-103 emitted).
+#   AC-003 now verifies consistent schema-valid behavior (both validator and eval accept
+#   body on content).
 created: "2026-06-11"
 source_findings: [REND-005, REND-010]
 behavioral_contracts: [BC-3.03.002, BC-1.11.002, BC-3.03.001]
@@ -101,12 +108,13 @@ Two post-merge defects remain:
 - Per BC-1.11.002 invariant 2: the ChartRenderer plugin MUST NOT be called with empty
   data. The validator intercepts before plugin invocation.
 - `slideforge-validate` MUST NOT bypass the existing error-accumulation model (DI-018).
-- body/content schema drift fix: reconcile `crates/slideforge-eval/src/field_to_block.rs`
-  (`thread_one_slide`, ~lines 188-203) with `content.rs` schema. Per BC-3.03.002 EC-007,
-  `body` on `content` slide type is schema-invalid — treat as W-VAL-103 content-drop
-  sub-case → broken in strict mode. (F-098-P1-006: previous citation
-  `slideforge-validate/src/field_to_block.rs:135` was wrong — the actual site is the
-  eval crate.)
+- body/content schema drift resolution (PO adjudication F-098-ADJ-BODY-CONTENT, 2026-06-11):
+  `body` on `content` slide type is schema-VALID — resolution (a) confirmed. `body` is
+  declared in `ContentSlideType.optional` (content.rs), in `known_fields("content")`
+  (known_fields.rs), and `thread_one_slide`'s `slide_type_supports_body` gate allows
+  threading when known_fields includes "body". No W-VAL-103 is emitted for body on content.
+  BC-3.03.002 v1.3 EC-007 has been reversed. (F-098-P1-006 path correction: site is eval
+  crate's field_to_block.rs, not slideforge-validate.)
 
 ## Library & Framework Requirements
 
@@ -155,33 +163,47 @@ No new error code E-VAL-105 is introduced (Route B was rejected — see error-ta
 Verified by: unit test in `slideforge-validate`; build a deck with `shape:` on a slide type
 that does not support it; assert exit 2; assert W-VAL-103 message in stderr with unchanged format.
 
-### AC-002: Strict mode exits non-zero when body field silently dropped on content slide
-(traces to BC-3.03.002 v1.2 postcondition 3 + Invariant 4 + EC-007 — Route A: W-VAL-103 {body} sub-case = broken/exit-2 in strict mode)
+### AC-002: body field on content slide renders prose content (schema-VALID — PO adjudication F-098-ADJ-BODY-CONTENT)
+(traces to BC-3.03.002 v1.3 EC-007 REVERSED + BC-4.01.001 v1.2 PC-11)
 
 `slideforge build deck.sf` (strict mode) where a `content:` slide has a `body:` field
-(schema-invalid for `content` type per `content.rs` schema, body/content schema drift fix)
-exits with code 2, NOT code 0. The W-VAL-103 message format is unchanged:
-`Unknown field 'body' for slide type 'content'...`. Severity `broken` because key is
-`"body"` in the content-drop set. This also closes the eval/schema drift —
-after this story, `body` on `content` type is consistently rejected by both
-`crates/slideforge-eval/src/field_to_block.rs` (`thread_one_slide`, ~lines 188-203)
-and `slideforge-plugin-api/registry.rs::validate_fields`.
+builds successfully: exit 0, output written, NO W-VAL-103 emitted. The `body` prose text
+appears in the slide's content area (PPTX body placeholder / DOCX Normal paragraph) per
+BC-4.01.001 PC-11. `body` is a declared known field on the `content` type — it is NOT
+an unknown field and does NOT trigger the W-VAL-103 content-drop path.
 
-Verified by: unit test with a `content:` slide carrying `body:` field in strict mode;
-assert exit 2; W-VAL-103 message citing the dropped content field in stderr.
+This closes the body/content schema drift (F-098-P1-006): after this story, `body` on
+`content` type is consistently ACCEPTED by both `crates/slideforge-eval/src/field_to_block.rs`
+(`thread_one_slide`, F-098-P1-002 `slide_type_supports_body` gate) and
+`slideforge-plugin-api/registry.rs::validate_fields` (body in known_fields, no W-VAL-103).
 
-### AC-003: Reconcile body/content schema drift
-(traces to BC-3.03.002 invariant 2 — strict mode is the default)
+Verified by: unit test with a `content:` slide carrying `body: "Prose text"` in strict mode;
+assert exit 0; assert NO W-VAL-103 in stderr; assert LaidOutDeck contains a Body-tagged frame
+with the prose text.
 
-The behavior of `body` on `content` slide type is consistent between `field_to_block.rs`
-and `content.rs` schema. Either: (a) `body` is schema-valid for `content` (validator
-allows it, eval processes it) — in which case the schema is extended; or (b) `body` is
-schema-invalid (validator and eval both reject it consistently). The PO must confirm the
-intended behavior. If (b), AC-002 covers this. Document the chosen resolution in the
-story's commit message.
+Note: `body` on slide types that do NOT declare `body` in their known_fields (e.g., `quote`,
+`title`, `stat_callout`) still triggers W-VAL-103 broken/exit-2 in strict mode — that
+behavior is unchanged and tested by AC-001 (shape: case) and the separate known-bad-field
+test required by this story.
 
-Verified by: add a unit test asserting consistent behavior; the test passes in both
-validator and eval codepaths.
+### AC-003: body field on content slide is consistent across validator and eval — resolution (a) confirmed
+(traces to BC-3.03.002 v1.3 Invariant 4 — known_fields() is the authority)
+
+PO adjudication F-098-ADJ-BODY-CONTENT resolves this to option (a): `body` is
+schema-valid for `content`. Both codepaths now accept `body` on `content`:
+- `crates/slideforge-plugin-api/src/slide_types/content.rs` declares `body` in
+  `ContentSlideType::optional` fields.
+- `crates/slideforge-syntax/src/known_fields.rs` includes `"body"` in the `content` arm.
+- `crates/slideforge-eval/src/field_to_block.rs` (`thread_one_slide`) gates body
+  threading on `slide_type_supports_body` (uses `known_fields()`), so body is threaded
+  for `content` and NOT threaded for types that do not declare `body`.
+- `slideforge-plugin-api/registry.rs::validate_fields` does not emit W-VAL-103 for
+  `body` on `content` because `body` is in `content`'s known_fields.
+
+Verified by: unit test asserting that a content slide with `body:` field passes
+validation (no W-VAL-103) AND that the threaded LaidOutDeck contains a Body-tagged
+frame. Also: unit test asserting that `body:` on a type that does NOT declare it (e.g.,
+`quote`) still triggers W-VAL-103 broken/exit-2 (regression guard for AC-001 logic).
 
 ### AC-004: Chart with no data emits E-LAY-003 and non-zero exit in strict mode
 (traces to BC-1.11.002 v1.2 postcondition 2 — PO adjudication F-098-P1-007)
@@ -220,12 +242,12 @@ same assertions.
 - [ ] **T-001:** Read error-taxonomy.md to understand W-VAL-103 vs E-VAL-105 routing decision.
 - [ ] **T-002:** Read BC-3.03.002 and BC-1.11.002 in full before writing any code.
 - [ ] **T-003 (RED):** Write `test_shape_content_drop_strict_exits_2()` in slideforge-validate.
-- [ ] **T-004 (RED):** Write `test_body_on_content_strict_exits_2()`.
+- [ ] **T-004 (RED):** Write `test_body_on_content_renders_and_exits_0()` — asserts body prose renders on content slide, exit 0, no W-VAL-103. (REPLACED from original exit-2 test per PO adjudication F-098-ADJ-BODY-CONTENT.)
 - [ ] **T-005 (RED):** Write `test_chart_empty_data_strict_exits_2()`.
 - [ ] **T-006 (RED):** Write `test_chart_empty_data_warn_only_placeholder()`.
 - [ ] **T-007 (GREEN):** Promote W-VAL-103 to exit-2 for content-drop cases in strict mode
   (or register E-VAL-105 if reclassification is rejected).
-- [ ] **T-008 (GREEN):** Reconcile `body`/`content` schema drift.
+- [ ] **T-008 (GREEN):** Confirm `body`/`content` schema drift is resolved via resolution (a): `body` declared in ContentSlideType.optional, known_fields("content"), and thread_one_slide gated on slide_type_supports_body. Verify no W-VAL-103 emitted for body-on-content. (PO adjudication F-098-ADJ-BODY-CONTENT.)
 - [ ] **T-009 (GREEN):** Wire E-LAY-003 emission and validator interception before
   ChartRenderer invocation for empty-data charts.
 - [ ] **T-010:** Update error-taxonomy.md if E-VAL-105 is added.

@@ -1,7 +1,7 @@
 ---
 document_type: behavioral-contract
 level: L3
-version: "1.2"
+version: "1.3"
 status: active
 producer: product-owner
 timestamp: 2026-06-11T00:00:00
@@ -14,7 +14,9 @@ subsystem: SS-TBD
 capability: CAP-022
 lifecycle_status: active
 introduced: v1.0.0
-modified: ["v1.2 — rendering-fix wave (REND-005/STORY-098): W-VAL-103 content-drop sub-case promoted to broken/exit-2 in strict mode. Precondition 2 expanded. Postcondition 3 rewritten to cover content-drop promotion. Invariant 4 added. EC-006 added. Route A selected (reclassify sub-case within W-VAL-103 as context-sensitive severity; no new E-VAL-105 code)."]
+modified:
+  - "v1.2 — rendering-fix wave (REND-005/STORY-098): W-VAL-103 content-drop sub-case promoted to broken/exit-2 in strict mode. Precondition 2 expanded. Postcondition 3 rewritten to cover content-drop promotion. Invariant 4 added. EC-006 added. Route A selected (reclassify sub-case within W-VAL-103 as context-sensitive severity; no new E-VAL-105 code)."
+  - "v1.3 — PO binding adjudication F-098-ADJ-BODY-CONTENT (2026-06-11): EC-007 REVERSED. `body` on `content` slide type is VALID (resolution a). The Python reference does not define a `body` DSL field — but slideforge's `content` type maps to the 'Title and Content' OOXML layout (a body-placeholder layout), BC-4.01.001 PC-11 already contracts TextTag::Body routing for content slides, and user expectation is that a 'general-purpose body slide' accepts body prose. EC-007 updated to reflect that `body` on `content` is schema-valid and renders correctly. Invariant 4 content-drop key set clarified: `body` is a content-drop key only when used on a slide type that does NOT declare `body` in its known_fields; `content` type declares `body` as a known field so W-VAL-103 does not fire. The check in validate_fields uses known_fields() as the authority, not a hardcoded type list."
 deprecated: null
 deprecated_by: null
 replacement: null
@@ -38,7 +40,8 @@ shared as if it were correct.
 1. The `slideforge build` command is run WITHOUT the `--warn-only` flag.
 2. The deck has at least one **blocking** diagnostic: either (a) a validation error
    (E-EVL-*, E-DAT-*, E-A11-*, E-LAY-002, or E-LAY-003), or (b) a W-VAL-103
-   **content-drop** sub-case (see Invariant 4).
+   **content-drop** sub-case (see Invariant 4) — that is, a `shape:` or `body` field
+   used on a slide type whose `known_fields()` does NOT include that field.
 3. The parse stage has succeeded (no E-PAR-* errors — this BC covers the validation phase).
 
 ## Postconditions
@@ -47,9 +50,12 @@ shared as if it were correct.
 2. All blocking diagnostics are reported with their source spans.
 3. **Exit code 2** (EXIT_VALIDATION_ERROR) is returned. This includes the W-VAL-103
    content-drop sub-case (see Invariant 4): when W-VAL-103 is emitted because an
-   authored content field (`shape:` or `body` on a slide type that does not support it)
-   would be silently dropped, it is promoted to a **broken** diagnostic in strict mode
-   and triggers exit 2. W-VAL-103 on purely non-content unknown fields (metadata-only
+   authored content field would be silently dropped (specifically: `shape:` on a slide
+   type that does not support shapes, or `body` on a slide type whose `known_fields()`
+   does NOT include `"body"`), it is promoted to a **broken** diagnostic in strict mode
+   and triggers exit 2. Note: `body` on the `content` slide type does NOT trigger this
+   path because `content`'s schema declares `body` as a valid field (per PO adjudication
+   F-098-ADJ-BODY-CONTENT). W-VAL-103 on purely non-content unknown fields (metadata-only
    fields with no content impact) retains its cosmetic/exit-0 classification.
 4. The output directory is NOT created if it did not previously exist (no empty directory left behind).
 5. If the output directory DID previously exist, it is NOT modified (no partial output).
@@ -62,21 +68,29 @@ shared as if it were correct.
 4. **W-VAL-103 content-drop sub-case (Route A — context-sensitive severity):** W-VAL-103
    has TWO severity contexts:
    - **Content-drop context** (broken/exit-2 in strict mode): W-VAL-103 is emitted for an
-     unknown field whose presence would cause authored content to be silently dropped
-     (specifically: `shape:` on a slide type that does not support custom shapes, or `body`
-     on a slide type whose schema rejects `body`). In strict mode, this IS a build failure
-     (exit 2, no output). In `--warn-only`, the field is dropped with a warning and the
-     build continues. Silent content dropping in default strict mode is prohibited per
-     CLAUDE.md "no silent fallback" and the production-grade default principle.
+     unknown field whose presence would cause authored content to be silently dropped.
+     The content-drop fields are those that carry user-visible content in the DSL:
+     `shape:` on a slide type that does not support custom shapes, or `body` on a slide
+     type whose `known_fields()` does NOT include `"body"`. In strict mode, this IS a
+     build failure (exit 2, no output). In `--warn-only`, the field is dropped with a
+     warning and the build continues. Silent content dropping in default strict mode is
+     prohibited per CLAUDE.md "no silent fallback" and the production-grade default
+     principle.
    - **Non-content context** (cosmetic/exit-0): W-VAL-103 is emitted for an unknown field
      that has no content impact (e.g., a metadata annotation not recognized by the slide
      type). This remains cosmetic and does not trigger exit 2.
    The implementer in `validate_fields` distinguishes the two contexts by checking whether
-   the unknown field key is in the set `{"shape", "body"}` (content-bearing DSL fields
-   on unsupported types). All other unknown fields remain cosmetic. **No new error code
+   the unknown field key is in the set `{"shape", "body"}` AND the slide type's
+   `known_fields()` does NOT include that key. A field in `{"shape", "body"}` that IS
+   declared in the slide type's `known_fields()` is NOT a content-drop case — it is a
+   valid field and W-VAL-103 is not emitted at all. **Concretely: `body` on the `content`
+   slide type does NOT trigger W-VAL-103** because `content`'s `known_fields()` includes
+   `"body"` (per PO adjudication F-098-ADJ-BODY-CONTENT). `body` on `quote`, `title`,
+   `stat_callout`, and other types that do NOT declare `body` in `known_fields()` still
+   triggers the content-drop path (exit 2 in strict mode). **No new error code
    E-VAL-105 is introduced** — Route A is chosen (reclassification of the sub-case, not
    a new code). The W-VAL-103 message format is UNCHANGED; the diagnostic severity is
-   determined at accumulation time by the field-key check.
+   determined at accumulation time by the field-key check against `known_fields()`.
 
 ## Edge Cases
 
@@ -88,7 +102,7 @@ shared as if it were correct.
 | EC-004 | Zero-slide deck (E-LAY-002) | Zero output; exit 2 (E-LAY-002 is a validation error) |
 | EC-005 | --warn-only flag present | This BC does not apply. See BC-3.03.003 for warn-only behavior. |
 | EC-006 | W-VAL-103 for `shape:` on a slide type that does not support shapes (e.g., `slide title:` with a `shape:` field) in strict mode | Exit 2; "Unknown field 'shape' for slide type 'title'..."; zero output (content-drop sub-case, broken severity in strict mode) |
-| EC-007 | W-VAL-103 for `body` on `content` slide type (schema-invalid combination) in strict mode | Exit 2; "Unknown field 'body' for slide type 'content'..."; zero output (content-drop sub-case per body/content schema drift fix in STORY-098) |
+| EC-007 | `body` field on `content` slide type (schema-VALID per PO adjudication F-098-ADJ-BODY-CONTENT) | `body` prose content renders in the content area; no W-VAL-103 emitted; exit 0 (body is a declared known field on content type). REVERSED from v1.2 which incorrectly classified this as schema-invalid. |
 | EC-008 | W-VAL-103 for an unknown metadata annotation (non-content field) in strict mode | Exit 0; cosmetic warning emitted; output produced (non-content sub-case, cosmetic severity) |
 
 ## Canonical Test Vectors
