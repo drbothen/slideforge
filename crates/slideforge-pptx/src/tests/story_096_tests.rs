@@ -241,7 +241,7 @@ fn parse_sldsz_cx_cy(xml: &str) -> Option<(i64, i64)> {
     let pos = xml.find("<p:sldSz")?;
     let after = &xml[pos..];
     let end = after.find('>')?;
-    let attrs_str = &after[..end + 1];
+    let attrs_str = &after[..=end];
 
     let cx = extract_attr_i64(attrs_str, "cx")?;
     let cy = extract_attr_i64(attrs_str, "cy")?;
@@ -261,9 +261,9 @@ fn extract_attr_i64(attrs: &str, attr_name: &str) -> Option<i64> {
         }
     }
     // Try single-quoted form: attr='value'
-    let search_sq = format!("{attr_name}='");
-    if let Some(pos) = attrs.find(&search_sq) {
-        let rest = &attrs[pos + search_sq.len()..];
+    let single_quoted_prefix = format!("{attr_name}='");
+    if let Some(pos) = attrs.find(&single_quoted_prefix) {
+        let rest = &attrs[pos + single_quoted_prefix.len()..];
         if let Some(end) = rest.find('\'') {
             return rest[..end].parse().ok();
         }
@@ -283,7 +283,7 @@ fn collect_rpr_lang_values(xml: &str) -> Vec<String> {
         let after = &rest[pos..];
         // Find the closing `>` or `/>` of the rPr element opening tag.
         let end = after.find('>').unwrap_or(after.len());
-        let tag_content = &after[..end + 1];
+        let tag_content = &after[..=end];
 
         // Extract lang="..." from this rPr tag's attributes.
         let search = r#"lang=""#;
@@ -361,10 +361,10 @@ fn test_BC_4_01_001_master_sldsz_matches_16x9_deck() {
 /// RED: `serialize_master_to_xml` currently produces no `<p:sldSz>` at all.
 #[test]
 fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
-    // 4:3 custom page: cx=6,858,000 cy=5,143,500
-    let custom_cx: i64 = 6_858_000;
-    let custom_cy: i64 = 5_143_500;
-    let laid_out = make_laid_out_deck_with_page_size(custom_cx, custom_cy);
+    // 4:3 custom page: width=6,858,000 height=5,143,500
+    let custom_page_width: i64 = 6_858_000;
+    let custom_page_height: i64 = 5_143_500;
+    let laid_out = make_laid_out_deck_with_page_size(custom_page_width, custom_page_height);
     let pptx_bytes = build_pptx(&laid_out);
     let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
 
@@ -377,13 +377,13 @@ fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
     });
 
     assert_eq!(
-        cx, custom_cx,
-        "AC-001 EC-001: slideMaster1.xml <p:sldSz cx> must be {custom_cx} \
+        cx, custom_page_width,
+        "AC-001 EC-001: slideMaster1.xml <p:sldSz cx> must be {custom_page_width} \
          (brand-configured custom width); got cx={cx}"
     );
     assert_eq!(
-        cy, custom_cy,
-        "AC-001 EC-001: slideMaster1.xml <p:sldSz cy> must be {custom_cy} \
+        cy, custom_page_height,
+        "AC-001 EC-001: slideMaster1.xml <p:sldSz cy> must be {custom_page_height} \
          (brand-configured custom height); got cy={cy}"
     );
 }
@@ -428,12 +428,12 @@ fn test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds() {
     while let Some(pos) = rest.find("<a:off") {
         let after = &rest[pos..];
         let end = after.find('>').unwrap_or(after.len());
-        let tag_content = &after[..end + 1];
+        let tag_content = &after[..=end];
 
-        if let Some(y_val) = extract_attr_i64(tag_content, "y") {
-            if y_val > MAX_Y_EMU {
-                violations.push(y_val);
-            }
+        if let Some(y_val) = extract_attr_i64(tag_content, "y")
+            && y_val > MAX_Y_EMU
+        {
+            violations.push(y_val);
         }
         rest = &rest[pos + "<a:off".len()..];
     }
@@ -493,7 +493,7 @@ fn test_BC_4_01_005_progress_bar_has_named_layout() {
         let entry = archive.by_index(i).expect("index in range");
         let name = entry.name().to_owned();
         if name.starts_with("ppt/slideLayouts/slideLayout")
-            && name.ends_with(".xml")
+            && name.to_ascii_lowercase().ends_with(".xml")
             && !name.contains("_rels")
         {
             drop(entry);

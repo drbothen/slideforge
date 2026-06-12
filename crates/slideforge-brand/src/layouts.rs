@@ -21,7 +21,7 @@
 //! | 11 | SL-11 | Vertical Text | `vertTx` |
 //! | 12 | CL-01 | SF Section Divider | — (dark layout) |
 //! | … | … | … | … |
-//! | 31 | CL-20 | SF Appendix | — |
+//! | 31 | CL-20 | SF Progress Bar | — |
 
 use std::sync::Arc;
 
@@ -272,6 +272,7 @@ fn dark_layout(
 /// - `result.len() == 31` always (BC-2.01.005 postcondition 1)
 /// - `result[0..11]` all have `ooxml_type = Some(...)` (BC-2.01.005 postcondition 2)
 /// - `result[11..31]` all have names starting with `"SF "` (BC-2.01.005 postcondition 3)
+/// - `result[30].slide_type_keyword == Some("progress_bar")` (STORY-096 AC-002)
 /// - `result[6].placeholders.is_empty()` (Blank layout — AC-010)
 /// - `result[11].has_color_override && result[21].has_color_override` (AC-009)
 // The body is a declarative data initialiser for 31 layout definitions.
@@ -824,17 +825,17 @@ pub fn generate_all_layouts(_config: &BrandConfig) -> Vec<SlideLayoutDef> {
                 body_ph(1, "Methodology Steps"),
             ],
         ),
-        // CL-20: SF Appendix — no dedicated Q2 DSL keyword; uses generic content fallback.
-        // This layout slot serves appendix/overflow content. `find_layout_index` in
-        // slideforge-pptx falls back to layout index 1 ("Title and Content") for
-        // unmapped DSL keywords. If a future story adds an `appendix` keyword, add it here.
+        // CL-20: SF Progress Bar — DSL keyword: progress_bar (Q2 built-in type).
+        // Shows a visual progress indicator with a title label and a proportional
+        // fill bar. `find_layout_index` in slideforge-pptx matches this layout by
+        // the "progress_bar" DSL keyword (Phase 1 keyword match).
         custom_layout(
             31,
-            "SF Appendix",
-            "appendix",
+            "SF Progress Bar",
+            "progress_bar",
             vec![
-                title_ph("title", "Appendix Title"),
-                body_ph(1, "Appendix Content"),
+                title_ph("title", "Progress Bar Label"),
+                body_ph(1, "Progress Content"),
             ],
         ),
     ]
@@ -960,7 +961,7 @@ mod tests {
             "SF Executive Summary",
             "SF Two Column",
             "SF Methodology",
-            "SF Appendix",
+            "SF Progress Bar",
         ];
         assert_eq!(
             layouts[11..].len(),
@@ -1262,7 +1263,7 @@ mod tests {
             (27, "highlight_boxes", "SF Executive Summary"),
             (28, "stats_summary", "SF Two Column"),
             (29, "numbered_actions", "SF Methodology"),
-            (30, "appendix", "SF Appendix"),
+            (30, "progress_bar", "SF Progress Bar"),
         ];
         for &(idx, expected_keyword, expected_name) in spot_checks {
             assert_eq!(

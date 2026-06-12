@@ -162,13 +162,29 @@ impl PptxExporter {
             })
             .collect();
 
-        build_slide_parts(laid_out, &brand_template, &slides_with_notes, &mut parts)?;
+        // Extract page size once for master and slide serializers.
+        // Both build_master_parts (sldSz in slideMaster1.xml) and the slide
+        // serializer (lang on rPr) derive their values from the deck at this point.
+        let page_size_emu = (laid_out.page_size.width.0, laid_out.page_size.height.0);
+        let deck_lang: std::sync::Arc<str> = deck
+            .metadata
+            .lang
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::from("en-US"));
+
+        build_slide_parts(
+            laid_out,
+            &brand_template,
+            &slides_with_notes,
+            &deck_lang,
+            &mut parts,
+        )?;
         build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
         parts.push(ZipPart {
             path: "ppt/_rels/presentation.xml.rels".to_string(),
             bytes: prs_rels_bytes,
         });
-        build_master_parts(&brand_template, &mut parts)?;
+        build_master_parts(&brand_template, page_size_emu, &mut parts)?;
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
         build_notes_handout_masters(&brand_template, &mut parts)?;
@@ -241,10 +257,17 @@ impl PptxExporter {
 /// For each slide in `slides_with_notes`, a `rel_types::NOTES_SLIDE` relationship
 /// is added to the slide's `.rels` file so `PowerPoint` can discover the slide's
 /// notesSlide part. Without this the notesSlide is orphaned even if it exists.
+///
+/// ## Run language threading (STORY-096 AC-003)
+///
+/// `deck_lang` is the BCP-47 language tag from `deck.metadata.lang` (defaulting to
+/// `"en-US"`). It is threaded into `SlideSerializer` so every `<a:rPr>` element
+/// in every slide XML carries `lang="..."` (BC-5.01.005 postcondition 1).
 fn build_slide_parts(
     laid_out: &LaidOutDeck,
     brand_template: &BrandTemplate,
     slides_with_notes: &std::collections::HashSet<usize>,
+    deck_lang: &std::sync::Arc<str>,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
     let mut media_idx = 1_usize;
@@ -311,10 +334,13 @@ fn build_slide_parts(
         // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
         // AC-011: thread the resolved layout's placeholder info into the serializer
         // so it can perform idx-chain verification (ADR-015 §7).
+        // STORY-096 AC-003: thread deck_lang so every <a:rPr> carries lang="...".
         let serializer = if let Some(layout) = brand_template.layouts.get(layout_index) {
-            SlideSerializer::new(is_dark_layout, layout_index).with_layout(layout)
-        } else {
             SlideSerializer::new(is_dark_layout, layout_index)
+                .with_layout(layout)
+                .with_lang(deck_lang)
+        } else {
+            SlideSerializer::new(is_dark_layout, layout_index).with_lang(deck_lang)
         };
         let (slide_xml_bytes, _warnings) =
             serializer.build(slide, i, &layout_rel_id, &diagram_rids, &hlink_map)?;
@@ -596,8 +622,14 @@ fn build_presentation_xml(
 /// Build `slideMaster1.xml` and its `.rels`.
 ///
 /// ADR-015 §2: uses `serialize_master_to_xml` from `slideforge-brand` to
-/// produce a schema-valid master with `<a:clrMap>`, `<p:sldLayoutIdLst>`,
+/// produce a schema-valid master with `<p:sldSz>`, `<a:clrMap>`, `<p:sldLayoutIdLst>`,
 /// `<p:txStyles>`, 5 master placeholder shapes, and `<p:hf>` flags.
+///
+/// ## Slide size threading (STORY-096 AC-001)
+///
+/// `page_size_emu` is `(width_emu, height_emu)` sourced from `LaidOutDeck.page_size`
+/// in `export_inner`. It is threaded here to ensure `slideMaster1.xml` emits a
+/// `<p:sldSz>` that matches `presentation.xml` (BC-4.01.001 postcondition 2).
 ///
 /// The master `.rels` file references:
 /// - rId1: the theme
@@ -607,11 +639,12 @@ fn build_presentation_xml(
 /// (which use r:id="rId2".."rId32").
 fn build_master_parts(
     brand_template: &BrandTemplate,
+    page_size_emu: (i64, i64),
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
     parts.push(ZipPart {
         path: "ppt/slideMasters/slideMaster1.xml".to_string(),
-        bytes: serialize_master_to_xml(brand_template),
+        bytes: serialize_master_to_xml(brand_template, page_size_emu),
     });
 
     let mut master_rels = RelsBuilder::new();

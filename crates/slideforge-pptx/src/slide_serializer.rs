@@ -95,6 +95,14 @@ pub struct SlideSerializer {
     /// Use `with_layout` to populate this from `BrandTemplate.layouts[layout_index]`
     /// in the full export pipeline (`build_slide_parts` always calls `with_layout`).
     layout_placeholder_idxs: Option<std::collections::BTreeSet<u32>>,
+
+    /// BCP-47 language tag to set on every `<a:rPr lang="...">` (STORY-096 AC-003).
+    ///
+    /// Populated by `with_lang` from `deck.metadata.lang` (defaulting to `"en-US"`).
+    /// When `None` (default from `new()`), `<a:rPr>` elements are emitted without
+    /// a `lang` attribute (pre-STORY-096 behavior preserved for backward compatibility
+    /// in any test that does not call `with_lang`).
+    lang: Option<std::sync::Arc<str>>,
 }
 
 impl SlideSerializer {
@@ -108,13 +116,29 @@ impl SlideSerializer {
     /// Call `with_layout` on the returned serializer to enable AC-011
     /// placeholder idx-chain verification. Without it, Body/TextRun frames
     /// are emitted as non-placeholder shapes (no `<p:ph>` element).
+    ///
+    /// Call `with_lang` to set the BCP-47 language tag on all `<a:rPr>` elements
+    /// (STORY-096 AC-003 / BC-5.01.005 postcondition 1).
     #[must_use]
     pub fn new(is_dark_layout: bool, layout_index: usize) -> Self {
         Self {
             is_dark_layout,
             layout_index,
             layout_placeholder_idxs: None,
+            lang: None,
         }
+    }
+
+    /// Set the BCP-47 language tag to emit on every `<a:rPr lang="...">` element.
+    ///
+    /// Called by `build_slide_parts` with `deck.metadata.lang` (defaulting to
+    /// `"en-US"` when unset) so every text run in the PPTX carries the correct
+    /// language attribute for spell-check and accessibility (STORY-096 AC-003,
+    /// BC-5.01.005 postcondition 1).
+    #[must_use]
+    pub fn with_lang(mut self, lang: &std::sync::Arc<str>) -> Self {
+        self.lang = Some(std::sync::Arc::clone(lang));
+        self
     }
 
     /// Set the placeholder idx values from the resolved slide layout definition.
@@ -541,7 +565,7 @@ impl SlideSerializer {
                         );
                     }
                     // ADR-024: use unified engine via nodes_to_body_runs.
-                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map);
+                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map, self.lang.as_deref());
                     let sp = build_shape_with_runs(
                         shape_id,
                         subtitle_kind,
@@ -565,7 +589,7 @@ impl SlideSerializer {
                     // text only) is replaced by extract_body_runs → nodes_to_body_runs
                     // which preserves inline structure. AC-002 / BC-3.05.001 PC-1.
                     // EC-004: pass hlink_map so Link nodes wire <a:hlinkClick>.
-                    let runs: Vec<Run> = extract_body_runs(blocks, hlink_map);
+                    let runs: Vec<Run> = extract_body_runs(blocks, hlink_map, self.lang.as_deref());
                     // AC-011 / ADR-015 §7 item 3: shared helper warns+omits when
                     // the layout has no idx=1 placeholder (F-038-P12-M1 fix).
                     let sp = self.build_body_shape_with_runs(
@@ -594,7 +618,7 @@ impl SlideSerializer {
                     // unified ADR-024 engine (nodes_to_body_runs) to preserve
                     // bold/italic/strikethrough in the PPTX output. The old
                     // extract_inline_text path (plain text only) is no longer used.
-                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map);
+                    let runs: Vec<Run> = nodes_to_body_runs(nodes, hlink_map, self.lang.as_deref());
                     // STORY-094 T-007 / BC-4.01.001 AC-002 — deduplicate body ph idx.
                     //
                     // TextRun frames must NOT emit <p:ph idx="1"/> when a Body frame has
@@ -906,21 +930,25 @@ fn validate_emu(
 ///
 /// `hlink_map` is the `(url, rId)` lookup table for External hyperlinks on this slide.
 /// Passed through to [`nodes_to_body_runs`] for EC-004 body-path hyperlink wiring. EC-004.
-fn extract_body_runs(blocks: &[ContentBlock], hlink_map: &[(String, String)]) -> Vec<Run> {
+fn extract_body_runs(
+    blocks: &[ContentBlock],
+    hlink_map: &[(String, String)],
+    lang: Option<&str>,
+) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     for block in blocks {
         match block {
             ContentBlock::Text(tb) => {
                 // ADR-024: use unified engine via nodes_to_body_runs.
-                runs.extend(nodes_to_body_runs(&tb.inlines, hlink_map));
+                runs.extend(nodes_to_body_runs(&tb.inlines, hlink_map, lang));
             },
             ContentBlock::Bullets(items) => {
                 for item in items {
                     // ADR-024: use unified engine for each item's inlines.
-                    runs.extend(nodes_to_body_runs(&item.inlines, hlink_map));
+                    runs.extend(nodes_to_body_runs(&item.inlines, hlink_map, lang));
                     // Nested children are rendered after the parent item.
                     for child in &item.children {
-                        runs.extend(nodes_to_body_runs(&child.inlines, hlink_map));
+                        runs.extend(nodes_to_body_runs(&child.inlines, hlink_map, lang));
                     }
                 }
             },
@@ -947,8 +975,13 @@ fn extract_body_runs(blocks: &[ContentBlock], hlink_map: &[(String, String)]) ->
 /// typed form for the slide-body serializer, delegating child-ordering enforcement
 /// to ooxmlsdk (ADR-024 INV-2 body variant).
 ///
+/// `lang` is a BCP-47 language tag (e.g. `"en-US"`) emitted as the `lang` attribute
+/// on every `<a:rPr>` element (AC-003 / STORY-096).  When `Some`, the tag is set on
+/// all runs including plain-text runs so spell-check and accessibility tools have a
+/// language anchor. When `None` no `lang` attribute is written.
+///
 /// The text is sanitized via [`strip_xml10_invalid_chars`] for XML 1.0 safety.
-fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun) -> Run {
+fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun, lang: Option<&str>) -> Run {
     let sanitized = strip_xml10_invalid_chars(&run.text);
 
     let has_properties = run.bold
@@ -960,7 +993,10 @@ fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun) -> Run {
         || run.hyperlink_rid.is_some();
 
     let run_properties = if has_properties {
-        let mut rpr = RunProperties::default();
+        let mut rpr = RunProperties {
+            language: lang.map(str::to_owned),
+            ..RunProperties::default()
+        };
         if run.bold {
             rpr.bold = Some(true);
         }
@@ -997,8 +1033,11 @@ fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun) -> Run {
         }
         Some(Box::new(rpr))
     } else {
-        // Plain run — default rPr for consistent baseline.
-        Some(Box::default())
+        // Plain run — emit rPr with lang so accessibility tools have a language anchor.
+        Some(Box::new(RunProperties {
+            language: lang.map(str::to_owned),
+            ..RunProperties::default()
+        }))
     };
 
     Run {
@@ -1017,7 +1056,14 @@ fn ooxml_run_to_ooxmlsdk(run: &OoxmlRun) -> Run {
 ///
 /// `hlink_map` is the `(url, rId)` lookup table for External hyperlinks on this slide.
 /// The resolver closure is constructed here from `hlink_map` and passed to the engine.
-fn nodes_to_body_runs(nodes: &[InlineNode], hlink_map: &[(String, String)]) -> Vec<Run> {
+///
+/// `lang` is a BCP-47 language tag forwarded to [`ooxml_run_to_ooxmlsdk`] for
+/// `<a:rPr lang="...">` emission (AC-003 / STORY-096). Pass `None` to omit.
+fn nodes_to_body_runs(
+    nodes: &[InlineNode],
+    hlink_map: &[(String, String)],
+    lang: Option<&str>,
+) -> Vec<Run> {
     let resolver = |url: &str| -> Option<String> {
         hlink_map
             .iter()
@@ -1025,7 +1071,10 @@ fn nodes_to_body_runs(nodes: &[InlineNode], hlink_map: &[(String, String)]) -> V
             .map(|(_, r)| r.clone())
     };
     match render_inline_nodes_to_runs(nodes, &resolver) {
-        Ok(ooxml_runs) => ooxml_runs.iter().map(ooxml_run_to_ooxmlsdk).collect(),
+        Ok(ooxml_runs) => ooxml_runs
+            .iter()
+            .map(|r| ooxml_run_to_ooxmlsdk(r, lang))
+            .collect(),
         Err(e) => {
             tracing::warn!(
                 error = %e,
@@ -2027,8 +2076,8 @@ mod tests {
     fn test_story_081_i1_pptx_math_in_body_returns_latex_run_no_panic() {
         let latex = "x^2 + y^2 = z^2";
         let math_node = make_math_node(latex);
-        // Drive through the production body-path engine (hlink_map = empty).
-        let runs = super::nodes_to_body_runs(&[math_node], &[]);
+        // Drive through the production body-path engine (hlink_map = empty, lang = None).
+        let runs = super::nodes_to_body_runs(&[math_node], &[], None);
         // EC-001 fallback: the unified engine emits the LaTeX source as a plain text run.
         assert_eq!(
             runs.len(),
@@ -2054,8 +2103,8 @@ mod tests {
         let bold_node = InlineNode::Bold(vec![InlineNode::Plain(Arc::from("bold"))]);
         let math_node = make_math_node("\\alpha");
 
-        let bold_runs = super::nodes_to_body_runs(&[bold_node], &[]);
-        let math_runs = super::nodes_to_body_runs(&[math_node], &[]);
+        let bold_runs = super::nodes_to_body_runs(&[bold_node], &[], None);
+        let math_runs = super::nodes_to_body_runs(&[math_node], &[], None);
 
         assert!(!bold_runs.is_empty(), "Bold must produce at least one run");
         let has_bold = bold_runs.iter().any(|r| {

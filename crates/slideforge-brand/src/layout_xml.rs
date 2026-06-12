@@ -534,10 +534,22 @@ const CLR_MAP_ATTRS: &[(&str, &str)] = &[
     ("folHlink", "folHlink"),
 ];
 
+/// Distance from the bottom of the slide to the top of the footer placeholder region.
+///
+/// Used by `serialize_master_to_xml` to compute `y` for footer-region placeholders
+/// (dt idx=10, ftr idx=11, sldNum idx=12) relative to the actual page height.
+/// Value = 571,500 EMU ≈ 0.625 inch — standard footer margin.
+///
+/// For 16:9 (height 5,143,500): `footer_y` = 5,143,500 - 571,500 = 4,572,000.
+/// For 4:3 (height 5,143,500, same height): `footer_y` = 4,572,000.
+const FOOTER_MARGIN_FROM_BOTTOM: i64 = 571_500;
+
 /// The 5 canonical master placeholder types required by ECMA-376 §19.3.1.27.
 ///
 /// Each entry is `(ph_type, idx, accessibility_name, x, y, cx, cy)` in EMU.
-/// Geometry matches standard 10-inch wide × 7.5-inch tall slide canvas (914400 EMU/inch).
+/// The `y` field for footer-region placeholders (idx >= 10) is a static placeholder value
+/// only — `serialize_master_to_xml` overrides these with a page-height-relative
+/// y computed from `FOOTER_MARGIN_FROM_BOTTOM` (STORY-096 AC-004).
 const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
     // title: full-width title region
     (
@@ -595,7 +607,10 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 ///
 /// The returned `Vec<u8>` is a valid `slideMaster1.xml` document containing:
 /// - `<p:sldMaster>` root with `PresentationML` + `DrawingML` namespace declarations.
-/// - `<p:cSld><p:spTree>` with 5 master placeholder shapes (title, body, dt, ftr, sldNum).
+/// - `<p:sldSz cx="W" cy="H"/>` derived from `page_size_emu` — must match `presentation.xml`
+///   (STORY-096 AC-001, BC-4.01.001 postcondition 2).
+/// - `<p:cSld><p:spTree>` with 5 master placeholder shapes (title, body, dt, ftr, sldNum)
+///   positioned within the page bounds declared by `page_size_emu`.
 /// - `<a:clrMap>` with all 12 OOXML color-map tokens (ECMA-376 §19.3.1.14).
 /// - `<p:sldLayoutIdLst>` with one `<p:sldLayoutId>` per layout in `template.layouts`
 ///   (IDs from `template.master_ids.layout_id_start` onwards).
@@ -605,12 +620,23 @@ const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
 /// Element order follows ECMA-376 §19.3.1.42 `CT_SlideMaster` sequence model:
 /// `cSld, clrMap, sldLayoutIdLst, hf, txStyles` (ADR-015 §A.3).
 ///
+/// ## Page size parameter (STORY-096 AC-001)
+///
+/// `page_size_emu` is `(width_emu, height_emu)` sourced from the `LaidOutDeck.page_size`
+/// at export time. The PPTX exporter threads this from `export_inner` through
+/// `build_master_parts`. Footer and slide-number placeholder positions are scaled so
+/// they remain within the page bounds for both 16:9 (9,144,000 × 5,143,500) and
+/// custom brand page sizes (BC-4.01.001 postcondition 4 / STORY-096 AC-004).
+///
 /// # Panics
 ///
 /// In practice this function never panics. `quick_xml::Writer` with an in-memory
 /// `Cursor<Vec<u8>>` does not return I/O errors.
 #[must_use]
-pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec<u8> {
+pub fn serialize_master_to_xml(
+    template: &crate::template::BrandTemplate,
+    page_size_emu: (i64, i64),
+) -> Vec<u8> {
     let buf = Cursor::new(Vec::new());
     let mut writer = Writer::new(buf);
 
@@ -632,6 +658,21 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
         .write_event(Event::Start(root))
         .expect("write sldMaster start");
 
+    // <p:sldSz cx="W" cy="H"/> — must match presentation.xml sldSz (STORY-096 AC-001).
+    // Derived from the LaidOutDeck.page_size threaded in from the PPTX exporter.
+    // Emitted before <p:cSld> so it is visible at the sldMaster level.
+    {
+        let (master_width, master_height) = page_size_emu;
+        let width_attr = master_width.to_string();
+        let height_attr = master_height.to_string();
+        let mut sld_sz = BytesStart::new("p:sldSz");
+        sld_sz.push_attribute(("cx", width_attr.as_str()));
+        sld_sz.push_attribute(("cy", height_attr.as_str()));
+        writer
+            .write_event(Event::Empty(sld_sz))
+            .expect("write sldSz");
+    }
+
     // <p:cSld>
     writer
         .write_event(Event::Start(BytesStart::new("p:cSld")))
@@ -645,11 +686,34 @@ pub fn serialize_master_to_xml(template: &crate::template::BrandTemplate) -> Vec
     write_nvgrpsppr(&mut writer);
     write_grpsppr(&mut writer);
 
-    // Write the 5 master placeholder shapes
-    for (sp_idx, (ph_type, idx, name, x, y, cx, cy)) in MASTER_PLACEHOLDER_DEFS.iter().enumerate() {
+    // Compute footer/date/slideNum y-position from page height so all placeholders
+    // remain within the declared page bounds (STORY-096 AC-004, BC-4.01.001 postcondition 4).
+    // Footer region sits 571,500 EMU from the bottom (approx 0.625 inch margin).
+    // This keeps y < page height for any standard page size.
+    let (_, page_height_emu) = page_size_emu;
+    let footer_y = page_height_emu - FOOTER_MARGIN_FROM_BOTTOM;
+
+    // Write the 5 master placeholder shapes; footer/date/slideNum use the
+    // page-height-derived y-position instead of the constant in MASTER_PLACEHOLDER_DEFS.
+    for (sp_idx, (ph_type, idx, name, x, static_y, cx, cy)) in
+        MASTER_PLACEHOLDER_DEFS.iter().enumerate()
+    {
         // sp id starts at 2 (1 reserved for group shape)
         let sp_id = u32::try_from(sp_idx + 2).expect("sp_id always fits");
-        write_master_placeholder(&mut writer, ph_type, *idx, name, sp_id, *x, *y, *cx, *cy);
+        // Footer-region placeholders (dt idx=10, ftr idx=11, sldNum idx=12) use the
+        // computed y; title (idx=0) and body (idx=1) use their static positions.
+        let effective_y = if *idx >= 10 { footer_y } else { *static_y };
+        write_master_placeholder(
+            &mut writer,
+            ph_type,
+            *idx,
+            name,
+            sp_id,
+            *x,
+            effective_y,
+            *cx,
+            *cy,
+        );
     }
 
     // </p:spTree>
@@ -1610,7 +1674,7 @@ mod tests {
     #[test]
     fn test_adr015_serialize_master_to_xml_produces_sld_master_root() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("<p:sldMaster"),
@@ -1623,7 +1687,7 @@ mod tests {
     #[test]
     fn test_adr015_serialize_master_to_xml_has_clr_map() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("<a:clrMap"),
@@ -1650,7 +1714,7 @@ mod tests {
     #[test]
     fn test_adr015_serialize_master_to_xml_has_sld_layout_id_lst() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
 
         // The container element must be present.
@@ -1673,7 +1737,7 @@ mod tests {
     #[test]
     fn test_adr015_serialize_master_to_xml_has_5_master_placeholder_types() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         for ph_type in &["title", "body", "dt", "ftr", "sldNum"] {
             assert!(
@@ -1689,7 +1753,7 @@ mod tests {
     #[test]
     fn test_adr015_serialize_master_to_xml_has_tx_styles_with_fonts() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         assert!(
             xml.contains("<p:txStyles"),
@@ -1708,7 +1772,7 @@ mod tests {
     fn test_adr015_serialize_master_to_xml_is_well_formed() {
         use quick_xml::Reader;
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
         let mut reader = Reader::from_str(xml);
         reader.config_mut().check_end_names = true;
@@ -1735,7 +1799,7 @@ mod tests {
     #[test]
     fn test_adr015_master_element_order_hf_before_tx_styles() {
         let template = minimal_brand_template();
-        let xml_bytes = serialize_master_to_xml(&template);
+        let xml_bytes = serialize_master_to_xml(&template, (9_144_000, 5_143_500));
         let xml = std::str::from_utf8(&xml_bytes).expect("output must be valid UTF-8");
 
         let clr_map_pos = xml
