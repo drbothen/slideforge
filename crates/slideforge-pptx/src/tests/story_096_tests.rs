@@ -306,20 +306,16 @@ fn collect_rpr_lang_values(xml: &str) -> Vec<String> {
 // Traces to BC-4.01.001 postcondition 2 (valid .pptx with correct geometry)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 (T-001 RED):
+/// BC-4.01.001 postcondition 2 / STORY-096 AC-001:
 ///
-/// `slideMaster1.xml` must declare `<p:sldSz cx="9144000" cy="5143500"/>` when the
-/// deck uses the default 16:9 page size. The current implementation does NOT emit
-/// `<p:sldSz>` in `serialize_master_to_xml` at all — footer and date placeholders
-/// are positioned at y=6,356,350 which is past the 16:9 height boundary of 5,143,500.
+/// Verifies that `slideMaster1.xml` declares `<p:sldSz cx="9144000" cy="5143500"/>`
+/// when the deck uses the default 16:9 page size (BC-4.01.001 postcondition 2).
 ///
-/// This test asserts the EXACT EMU values (LESSON-14), not mere element presence.
+/// `serialize_master_to_xml` must derive `cx`/`cy` from the deck's `page_size`
+/// (9,144,000 × 5,143,500 EMU for 16:9). Footer and date placeholders must be
+/// positioned within those bounds.
 ///
-/// RED: `serialize_master_to_xml` currently produces no `<p:sldSz>` element.
-/// The test fails because `parse_sldsz_cx_cy` returns `None` on the master XML.
-///
-/// GREEN after T-004: `serialize_master_to_xml` derives `cx`/`cy` from
-/// `brand.page_size.width_emu` / `brand.page_size.height_emu` (or deck page_size).
+/// Asserts the EXACT EMU values (LESSON-14), not mere element presence.
 #[test]
 fn test_BC_4_01_001_master_sldsz_matches_16x9_deck() {
     // Default page size = 16:9: cx=9,144,000 cy=5,143,500 (slideforge-layout defaults)
@@ -350,15 +346,14 @@ fn test_BC_4_01_001_master_sldsz_matches_16x9_deck() {
     );
 }
 
-/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 / EC-001 (RED):
+/// BC-4.01.001 postcondition 2 / STORY-096 AC-001 / EC-001:
 ///
-/// When the brand configures a 4:3 custom page size (`cx=6858000 cy=5143500`),
-/// `slideMaster1.xml` must declare `<p:sldSz cx="6858000" cy="5143500"/>`.
+/// Verifies that when the brand configures a 4:3 custom page size
+/// (`cx=6858000 cy=5143500`), `slideMaster1.xml` declares
+/// `<p:sldSz cx="6858000" cy="5143500"/>` (BC-4.01.001 postcondition 2).
 ///
-/// This is EC-001: custom brand page size — the master sldSz uses the brand's
-/// configured dimensions, not the 16:9 default and not hardcoded 4:3.
-///
-/// RED: `serialize_master_to_xml` currently produces no `<p:sldSz>` at all.
+/// EC-001: custom brand page size — `serialize_master_to_xml` must use the
+/// `LaidOutDeck.page_size` dimensions, not the 16:9 default and not hardcoded 4:3.
 #[test]
 fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
     // 4:3 custom page: width=6,858,000 height=5,143,500
@@ -393,25 +388,21 @@ fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
 // Traces to BC-4.01.001 postcondition 4 (openable without error dialogs)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-4.01.001 postcondition 4 / STORY-096 AC-004 (RED):
+/// BC-4.01.001 postcondition 4 / STORY-096 AC-004:
 ///
-/// With the master sldSz corrected to 16:9 (cy=5,143,500), every placeholder
-/// `<p:sp>` shape in `slideMaster1.xml` whose `<a:off>` `y` + `<a:ext>` `cy`
-/// lies within the slide height must NOT have a `y` coordinate exceeding
-/// 5,143,500 EMU.
+/// Verifies that every placeholder `<p:sp>` shape in `slideMaster1.xml` has
+/// an `<a:off y="...">` coordinate that does not exceed the 16:9 slide height
+/// boundary of 5,143,500 EMU (BC-4.01.001 postcondition 4).
 ///
-/// CURRENT DEFECT: `MASTER_PLACEHOLDER_DEFS` positions footer/date/slideNum at
-/// y=6,356,350 (>5,143,500). PowerPoint issues layout warnings when the master
-/// has a declared sldSz that conflicts with placeholder positions outside it.
+/// `MASTER_PLACEHOLDER_DEFS` must position footer/date/slideNum within the
+/// 9,144,000 × 5,143,500 EMU bounds so PowerPoint does not issue layout
+/// warnings about out-of-bounds placeholders.
 ///
 /// This test scans ALL `<a:off y="...">` occurrences in the master XML and
 /// asserts none exceeds the 16:9 height.
 ///
-/// RED: even after AC-001 adds `<p:sldSz>`, the placeholder positions remain
-/// at y=6,356,350 until T-004 also updates `MASTER_PLACEHOLDER_DEFS`.
-///
 /// LESSON-14: asserts the ACTUAL y-coordinate value, not merely that the master
-/// XML contains sldSz.
+/// XML contains `<p:sldSz>`.
 #[test]
 fn test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds() {
     // 16:9 page height in EMU.
@@ -440,11 +431,11 @@ fn test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds() {
 
     assert!(
         violations.is_empty(),
-        "AC-004 Red Gate: slideMaster1.xml has placeholder(s) with y-coordinate(s) \
+        "AC-004: slideMaster1.xml has placeholder(s) with y-coordinate(s) \
          exceeding the 16:9 height boundary ({MAX_Y_EMU} EMU).\n\
          Violating y values: {violations:?}\n\
-         These are footer/date/slideNum placeholders positioned for a 4:3 master; \
-         they must be repositioned within the 9144000 × 5143500 bounds.\n\
+         All footer/date/slideNum placeholders must be positioned within the \
+         9144000 × 5143500 bounds declared by <p:sldSz>.\n\
          master_xml excerpt (first 2000 chars):\n{}",
         &master_xml[..master_xml.len().min(2000)]
     );
@@ -455,26 +446,22 @@ fn test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds() {
 // Traces to BC-4.01.005 postcondition 4/5 (all 31 layouts present with keywords)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-4.01.005 postcondition 4 / STORY-096 AC-002 (T-002 RED):
+/// BC-4.01.005 postcondition 4 / STORY-096 AC-002:
 ///
-/// The PPTX layout hierarchy must include a layout XML file whose `<p:cSld>` has
-/// `name="progress_bar"` (or equivalent canonical name following the "SF " prefix
-/// convention). A deck containing a `progress_bar` slide must NOT route to the
-/// fallback layout (index 1, "Title and Content").
+/// Verifies that the PPTX layout hierarchy includes a layout XML file whose
+/// `<p:cSld>` has `name="progress_bar"` (or equivalent "SF Progress Bar"
+/// canonical name), so a `progress_bar` slide does NOT route to the fallback
+/// layout (index 1, "Title and Content") (BC-4.01.005 postcondition 4).
 ///
-/// CURRENT DEFECT: `generate_all_layouts` has no entry with
-/// `slide_type_keyword = Some("progress_bar")`. `find_layout_index` falls back to
-/// index 1 with a `tracing::warn!`. The PPTX's `slide1.xml` therefore references
-/// `slideLayout2.xml` instead of a named `progress_bar` layout.
+/// `generate_all_layouts` must include an entry with
+/// `slide_type_keyword = Some("progress_bar")`. `find_layout_index` must match
+/// it by keyword and return its dedicated index.
 ///
 /// Assertions (LESSON-14, LESSON-17 — no `#[should_panic]`):
 /// 1. A layout XML file in the ZIP has `<p:cSld name="progress_bar">` (or name
 ///    matching the canonical SF naming for progress_bar).
 /// 2. The slide's `.rels` relationship does NOT point to `slideLayout2.xml`
 ///    (which is the "Title and Content" fallback, 1-indexed).
-///
-/// RED: `generate_all_layouts` has no progress_bar entry; index 1 is returned
-/// by the fallback, so the slide rels reference `slideLayout2.xml`.
 #[test]
 fn test_BC_4_01_005_progress_bar_has_named_layout() {
     let mut laid_out = make_laid_out_deck(1);
@@ -514,29 +501,25 @@ fn test_BC_4_01_005_progress_bar_has_named_layout() {
 
     assert!(
         found_progress_bar_layout,
-        "AC-002 Red Gate: No slideLayout*.xml in the PPTX ZIP has a \
+        "AC-002: No slideLayout*.xml in the PPTX ZIP has a \
          <p:cSld name=\"progress_bar\"> (or \"SF Progress Bar\") attribute.\n\
          `generate_all_layouts` must include an entry with \
          slide_type_keyword = Some(\"progress_bar\") so the layout is synthesized \
-         and added to the ZIP.\n\
-         Current behavior: falls back to slideLayout2.xml (Title and Content) \
-         via tracing::warn! — no named progress_bar layout exists."
+         and added to the ZIP with its canonical name."
     );
 }
 
-/// BC-4.01.005 postcondition 5 / STORY-096 AC-002 / EC-004 (RED):
+/// BC-4.01.005 postcondition 5 / STORY-096 AC-002 / EC-004:
 ///
-/// `find_layout_index` must return an index other than 1 for `"progress_bar"`
-/// once AC-002 is fixed (i.e., the progress_bar layout is added at some canonical
-/// index >= 2 and != the Title and Content fallback index 1).
+/// Verifies that `find_layout_index` returns an index other than 1 for
+/// `"progress_bar"` — i.e., the progress_bar layout is resolved to its own
+/// dedicated slot (>= 2, not the Title and Content fallback at index 1)
+/// (BC-4.01.005 postcondition 5).
 ///
-/// This test also verifies EC-004: a `progress_bar` slide with a label field routes
+/// Also verifies EC-004: a `progress_bar` slide with a label field routes
 /// to the named layout correctly (the label field does NOT affect layout routing).
 ///
 /// LESSON-14: asserts the ACTUAL layout index, not merely that routing succeeds.
-///
-/// RED: `find_layout_index("progress_bar")` currently returns 1 (fallback)
-/// because `generate_all_layouts` has no progress_bar entry.
 #[test]
 fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
     use slideforge_brand::layout_xml::{
@@ -579,12 +562,11 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
     // 11-slot SL block + custom CL-01..CL-20 placement).
     assert_ne!(
         idx, 1,
-        "AC-002 Red Gate: find_layout_index(\"progress_bar\") must NOT return 1 \
+        "AC-002: find_layout_index(\"progress_bar\") must NOT return 1 \
          (the Title and Content fallback index). Got {idx}.\n\
          `generate_all_layouts` must include a progress_bar entry with \
          slide_type_keyword = Some(\"progress_bar\") so Phase 1 keyword matching \
-         returns its dedicated layout index.\n\
-         Current behavior: fallback returns 1 with tracing::warn! (no match found)."
+         returns its dedicated layout index."
     );
 
     // Verify the resolved index is within the valid 0..31 range.
@@ -601,12 +583,12 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
 // Traces to BC-5.01.005 postcondition 1 (lang propagates to PPTX rPr)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 / EC-002 (T-003 RED):
+/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 / EC-002:
 ///
-/// Every `<a:rPr>` element in `slide1.xml` must carry a `lang="en-US"` attribute
-/// when the deck's `metadata.lang` is `"en-US"` (the default). Runs without an
-/// explicit lang currently emit `<a:rPr/>` or `<a:rPr bold="1"/>` with no `lang`
-/// attribute — they must emit `lang="en-US"` after the fix.
+/// Verifies that every `<a:rPr>` element in `slide1.xml` carries a `lang="en-US"`
+/// attribute when the deck's `metadata.lang` is `"en-US"` (BC-5.01.005
+/// postcondition 1). `ooxml_run_to_ooxmlsdk` must set `rpr.lang` on every
+/// `RunProperties` from `deck.metadata.lang`.
 ///
 /// EC-002: deck with no explicit lang declaration defaults to "en-US". The
 /// `make_deck` fixture uses `lang: Some(Arc::from("en-US"))` — no lang declared
@@ -614,9 +596,6 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
 ///
 /// LESSON-14: asserts ACTUAL `lang` attribute values, not mere rPr presence.
 /// LESSON-17: does NOT use `#[should_panic]`.
-///
-/// RED: `ooxml_run_to_ooxmlsdk` in `slide_serializer.rs` builds `RunProperties`
-/// without setting `.lang`. Every `<a:rPr>` is emitted without a `lang` attribute.
 #[test]
 fn test_BC_5_01_005_run_has_lang_attribute_default_en_us() {
     // Build a deck with explicit en-US (default path / EC-002).
@@ -660,16 +639,17 @@ fn test_BC_5_01_005_run_has_lang_attribute_default_en_us() {
     }
 }
 
-/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 (RED) — fr-FR round-trip:
+/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 — fr-FR round-trip:
 ///
-/// When the deck declares `lang "fr-FR"`, every `<a:rPr>` in every slide XML
-/// must carry `lang="fr-FR"`. The lang value must be the exact BCP-47 tag from
-/// the deck declaration — not normalised to "fr", not modified in any way.
+/// Verifies that when the deck declares `lang "fr-FR"`, every `<a:rPr>` in
+/// slide XML carries `lang="fr-FR"` (BC-5.01.005 postcondition 1, canonical
+/// test vector: `lang "fr-FR"` → PPTX → `<a:rPr lang="fr-FR"/>`).
 ///
-/// LESSON-14: asserts the EXACT string "fr-FR" (round-trip test, BC-5.01.005
-/// canonical test vector: `lang "fr-FR"` → PPTX → `<a:rPr lang="fr-FR"/>`).
+/// The lang value must be the exact BCP-47 tag from the deck declaration —
+/// not normalised to "fr", not modified in any way (BC-5.01.005 invariant 1:
+/// lossless propagation).
 ///
-/// RED: `ooxml_run_to_ooxmlsdk` does not set `.lang` at all.
+/// LESSON-14: asserts the EXACT string "fr-FR", not mere attribute presence.
 #[test]
 fn test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip() {
     let mut laid_out = make_laid_out_deck(1);
@@ -724,16 +704,13 @@ fn test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip() {
 /// LESSON-17 compliance: this test does NOT use `#[should_panic]`. It asserts
 /// correctness of the empty-content path directly.
 ///
-/// RED: once `ooxml_run_to_ooxmlsdk` sets lang, all rPr elements will carry it.
-/// Before the fix: rPr elements (if any) lack lang — confirmed by collect_rpr_lang_values
-/// returning empty even when rPr elements exist.
+/// Contract: `ooxml_run_to_ooxmlsdk` sets `lang` on every `RunProperties` it
+/// builds, so all `<a:rPr>` elements carry the deck's declared lang value.
 ///
-/// NOTE: This test is expected to PASS for an empty slide (EC-003) even before
-/// the fix IF the empty slide produces zero rPr elements. It becomes a true Red
-/// Gate only if the title run produces an rPr. We include it here because the
-/// story spec requires coverage of EC-003. The test is load-bearing regardless:
-/// it guards against regressions where empty-slide export would panic when the
-/// lang-propagation code is added.
+/// NOTE: For a truly empty slide (zero frames → zero rPr elements) this test
+/// passes by definition — EC-003 is satisfied. The test is load-bearing
+/// regardless: it guards against regressions where empty-slide export panics
+/// or where `lang` is omitted from any `<a:rPr>` that is emitted.
 #[test]
 fn test_BC_5_01_005_ec003_empty_slide_no_rpr_error() {
     // EC-003: slide with no text frames at all.
