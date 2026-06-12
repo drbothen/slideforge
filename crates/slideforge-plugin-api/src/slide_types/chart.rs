@@ -3,11 +3,12 @@
 //! A `chart` slide renders a chart (bar, line, pie, scatter, etc.) from
 //! a data source using the `ChartRenderer` plugin. The `chart_type` field is
 //! required. The `data` field is **optional at field-schema level**: it is
-//! required at render time by the `ChartRenderer` plugin, but a chart slide
-//! may be declared without `data` when using a `@data` reference resolved at
-//! runtime or when rendering a layout preview. The `alt` field is optional per
-//! spec (it is part of common optional fields); `decorative` can suppress it
-//! when the chart is decorative only.
+//! not required by `FieldSchemaValidator` (no E-VAL-101), but a missing or
+//! empty `data` field IS caught at Stage 5 by `ChartEmptyDataValidator`, which
+//! emits E-LAY-003 (broken/exit-2 in strict mode, warning in --warn-only).
+//! Authors who need to iterate without data must use `--warn-only` mode.
+//! The `alt` field is optional per spec (it is part of common optional fields);
+//! `decorative` can suppress it when the chart is decorative only.
 //!
 //! Maps to the `"Title and Content"` PPTX layout.
 
@@ -25,10 +26,13 @@ use super::common_optional_fields;
 /// Required fields: `title`, `chart_type`.
 /// Optional fields: `data`, `report`, `detail`, plus common optional fields.
 ///
-/// Note: `data` is required at render time by the `ChartRenderer` plugin, but
-/// is declared optional at field-schema level to allow layout previews and
-/// `@data` runtime references without triggering E-VAL-101. Authors should
-/// always provide `data` for charts that will be exported.
+/// Note: `data` is optional at field-schema level (no E-VAL-101 for absence) to
+/// allow `@data` runtime references to be resolved at eval time without false
+/// positives. However, a missing or empty `data` field IS caught at Stage 5 by
+/// `ChartEmptyDataValidator`, which emits E-LAY-003 (broken/exit-2 in strict
+/// mode). To iterate on slides without data, use `--warn-only` mode; E-LAY-003
+/// will be emitted as a non-blocking warning. Authors must provide `data` for any
+/// chart that will be exported. (BC-1.11.002 v1.2, STORY-098 F-098-P1-007.)
 ///
 /// Note: `alt` is included via common optional fields. For WCAG AA compliance,
 /// authors should provide `alt` on every non-decorative chart.
@@ -50,17 +54,20 @@ impl ChartSlideType {
             // Polymorphic: data may be a List or a Str data-source reference.
             // Optional at field-schema level (STORY-089 architect decision):
             //   - `expected_type: None` to avoid false E-VAL-104 (BC-1.18.001 invariant 5).
-            //   - Required at render time by the ChartRenderer plugin (not enforced here).
-            //   - Declared optional to allow layout previews and @data runtime references.
+            //   - Optional at field-schema level to allow @data runtime references without
+            //     false E-VAL-101. Absence is caught by ChartEmptyDataValidator (E-LAY-003).
+            //   - Authors must provide `data` for export; use --warn-only to iterate without.
             // TODO(future story): Route A via Arc<PluginRegistry> would let ChartRenderer
             // verify data presence at a later pipeline stage without field-schema false positives.
             FieldDef {
                 name: Arc::from("data"),
                 description: Arc::from(
                     "Data source for the chart. May be an inline data block or a \
-                     `@data` reference to an external file. Required at render time \
-                     by the ChartRenderer plugin; optional at field-schema level to \
-                     support layout previews and runtime @data references.",
+                     `@data` reference to an external file. Optional at field-schema \
+                     level to avoid false E-VAL-101 for runtime @data references. \
+                     Absence or emptiness triggers E-LAY-003 via ChartEmptyDataValidator \
+                     (broken/exit-2 in strict mode; use --warn-only to iterate). \
+                     Authors must provide `data` for charts to be exported.",
                 ),
                 required: false,
                 default_value: None,

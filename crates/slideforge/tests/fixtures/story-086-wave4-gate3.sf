@@ -4,6 +4,10 @@
 # chart-with-alt builds cleanly under strict=true, all formats non-empty).
 #
 # This is the primary failing vector for Gate 3 and Gate 5.
+#
+# STORY-098 (F-098-P1-005): added data: field to chart slide —
+# ChartEmptyDataValidator now requires non-empty data; without it E-LAY-003
+# is emitted in strict mode, causing AC-018 to fail.
 
 slideforge_version "1"
 lang "en-US"
@@ -19,3 +23,4 @@ slide chart:
   title "Regional Breakdown"
   chart_type "bar"
   alt "Bar chart showing regional performance breakdown"
+  data ["North: 120", "South: 95", "East: 110"]

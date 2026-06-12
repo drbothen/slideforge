@@ -104,6 +104,9 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
+            // body: prose paragraph text in the content area (BC-4.01.001 v1.2 PC-11;
+            // STORY-098 F-098-P1-002: declared so body threading is not gated out for content).
+            "body",
             "bullets",
             "takeaway",
         ]),

@@ -1071,8 +1071,9 @@ mod tests {
     //
     // These tests exercise Route A (context-sensitive severity at accumulation time
     // in validate_fields): field key ∈ {"shape", "body"} AND strict mode → Error
-    // severity (broken/exit-2). Current code always emits Warning — tests FAIL at
-    // Red Gate. After implementation these tests must pass.
+    // severity (broken/exit-2) when the field appears on a slide type that does NOT
+    // declare it. Note: `content` slides now declare `body` as optional (STORY-098
+    // F-098-P1-002), so `body` on `content` is valid. Tests use `chart` for body tests.
     //
     // Test naming: test_BC_3_03_002_xxx (BC-3.03.002 = STORY-098 content-drop BC)
 
@@ -1155,66 +1156,60 @@ mod tests {
         );
     }
 
-    /// BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002 (T-004 RED):
+    /// BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002 (T-004):
     ///
-    /// `body` on a `content` slide (schema-invalid per content.rs — `body` is NOT
-    /// in content's optional or required fields) in strict mode must produce
-    /// W-VAL-103 with `DiagnosticSeverity::Error` (broken/exit-2).
+    /// `body` on a slide type that does NOT declare it must produce W-VAL-103
+    /// with `DiagnosticSeverity::Error` (broken/exit-2 in strict mode).
     ///
-    /// RED: Currently `validate_fields` emits `Warning` for `body` on `content`. This
-    /// test fails until the implementer adds the content-drop key set check.
+    /// ## STORY-098 resolution
     ///
-    /// This also closes the body/content schema drift (AC-002/AC-003): after this story,
-    /// `body` on `content` is consistently rejected by BOTH `validate_fields` AND the
-    /// threading pass (`field_to_block.rs:135` fix).
+    /// `content` slides now DECLARE `body` as an optional field (STORY-098
+    /// F-098-P1-002 resolution; BC-4.01.001 v1.2 PC-11), so `body` on `content`
+    /// is VALID — no W-VAL-103. This test now uses `chart` slides, which do NOT
+    /// declare `body`.
+    ///
+    /// For completeness, a second assertion verifies that `body` on `content`
+    /// produces NO W-VAL-103 (it's now a declared optional field).
     #[test]
     fn test_BC_3_03_002_body_on_content_strict_exits_2() {
         let reg = SlideTypeRegistry::default();
-        let slide_type = reg.lookup_by_keyword("content").unwrap();
-        // `content` slide: required field is `title`; optional include `bullets`, `takeaway`,
-        // and common optional fields. `body` is NOT in the schema.
-        // BC-3.03.002 EC-007: body on content type is schema-invalid.
-        let slide = make_slide(
-            "content",
-            vec![("title", "My Content Slide"), ("body", "some body text")],
-        );
-        let diags = validate_fields(&slide, slide_type);
 
-        // There must be a W-VAL-103 diagnostic for the unknown `body` field.
-        let w_val_103: Vec<_> = diags
+        // Part (a): `body` on `chart` slide → W-VAL-103 at Error severity.
+        // chart slides do NOT declare `body`; body is a CONTENT_DROP_KEY.
+        let chart_type = reg.lookup_by_keyword("chart").unwrap();
+        let chart_slide = make_slide(
+            "chart",
+            vec![
+                ("title", "My Chart Slide"),
+                ("chart_type", "bar"),
+                ("body", "some body text is invalid on chart slides"),
+            ],
+        );
+        let chart_diags = validate_fields(&chart_slide, chart_type);
+
+        let w_val_103_chart: Vec<_> = chart_diags
             .iter()
             .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
             .collect();
         assert!(
-            !w_val_103.is_empty(),
-            "STORY-098 AC-002: `body` on `content` slide must emit W-VAL-103 naming 'body'; \
-             got diags: {diags:?}"
+            !w_val_103_chart.is_empty(),
+            "STORY-098 AC-002: `body` on `chart` slide must emit W-VAL-103 naming 'body'; \
+             got diags: {chart_diags:?}"
         );
 
-        let body_diag = &w_val_103[0];
-
-        // RED GATE ASSERTION: content-drop W-VAL-103 for `body` must be Error in strict mode.
-        // Currently emits Warning — FAILS before implementation.
+        let body_diag = &w_val_103_chart[0];
         assert_eq!(
             body_diag.severity,
             DiagnosticSeverity::Error,
-            "BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002: W-VAL-103 for 'body' on 'content' \
-             slide MUST be Error severity (broken/exit-2 in strict mode); \
-             currently emits Warning — RED GATE: this assertion fails before implementation. \
+            "BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002: W-VAL-103 for 'body' on 'chart' \
+             slide MUST be Error severity (broken/exit-2 in strict mode). \
              Got severity: {:?}. Message: {}",
             body_diag.severity,
             body_diag.message
         );
-
-        // FU-DIAGNOSTIC-FIELD-PINNING: message format unchanged (Route A).
         assert!(
             body_diag.message.contains("Unknown field 'body'"),
             "W-VAL-103 message must contain \"Unknown field 'body'\"; got: {}",
-            body_diag.message
-        );
-        assert!(
-            body_diag.message.contains("content"),
-            "W-VAL-103 message must name the slide type 'content'; got: {}",
             body_diag.message
         );
         assert_eq!(
@@ -1222,6 +1217,28 @@ mod tests {
             "W-VAL-103",
             "Route A: code must remain W-VAL-103 (no E-VAL-105); got: {}",
             body_diag.code
+        );
+
+        // Part (b): `body` on `content` slide → NO W-VAL-103 (body is now valid).
+        // STORY-098 F-098-P1-002: body added to content's optional field schema.
+        let content_type = reg.lookup_by_keyword("content").unwrap();
+        let content_slide = make_slide(
+            "content",
+            vec![
+                ("title", "My Content Slide"),
+                ("body", "body text is now valid on content slides"),
+            ],
+        );
+        let content_diags = validate_fields(&content_slide, content_type);
+        let w_val_103_content: Vec<_> = content_diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
+            .collect();
+        assert!(
+            w_val_103_content.is_empty(),
+            "BC-3.03.002 AC-002 (b): `body` on `content` slide MUST NOT emit W-VAL-103 \
+             — body is now a declared optional field (STORY-098 F-098-P1-002). \
+             Got: {content_diags:?}"
         );
     }
 

@@ -38,8 +38,9 @@ use slideforge_diagrams::DiagramRendererImpl;
 
 // ── Surface 5: Validator ──────────────────────────────────────────────────────
 use slideforge_validate::{
-    AltTextValidator, CanvasOverflowValidator, FieldSchemaValidator, ImagePathValidator,
-    LabelCheckValidator, LangValidator, ValidationConfig, ValueRangeValidator, ZeroSlideValidator,
+    AltTextValidator, CanvasOverflowValidator, ChartEmptyDataValidator, FieldSchemaValidator,
+    ImagePathValidator, LabelCheckValidator, LangValidator, ValidationConfig, ValueRangeValidator,
+    ZeroSlideValidator,
 };
 
 // ── Surface 6: MathRenderer ───────────────────────────────────────────────────
@@ -112,7 +113,7 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     // ── Surface 4: DiagramRenderer (1 bundled implementation — mermaid-rs) ──
     builder.register_diagram_renderer(Box::new(DiagramRendererImpl::new()));
 
-    // ── Surface 5: Validator (8 bundled implementations) ─────────────────────
+    // ── Surface 5: Validator (9 bundled implementations) ─────────────────────
     builder.register_validator(Box::new(AltTextValidator));
     builder.register_validator(Box::new(ZeroSlideValidator));
     builder.register_validator(Box::new(CanvasOverflowValidator::from_config(
@@ -127,6 +128,11 @@ pub fn register_bundled_plugins(builder: &mut PluginRegistryBuilder) {
     // (unknown field), and E-VAL-104 (type mismatch / OneOf violation).
     // BC-1.18.001 postcondition 7; ADR-020 Decision 8; STORY-089 AC-009.
     builder.register_validator(Box::new(FieldSchemaValidator));
+    // ChartEmptyDataValidator: intercepts E-LAY-003 before ChartRenderer is called.
+    // Emits E-LAY-003 (Error) for chart slides whose `data` field is absent or
+    // evaluates to an empty collection. BC-1.11.002 v1.2 invariant 2; STORY-098
+    // AC-004, AC-005, F-098-P1-001, F-098-P1-007.
+    builder.register_validator(Box::new(ChartEmptyDataValidator));
 
     // ── Surface 6: MathRenderer (1 bundled implementation — pulldown-latex) ──
     builder.register_math_renderer(Box::new(MathRendererImpl::new()));

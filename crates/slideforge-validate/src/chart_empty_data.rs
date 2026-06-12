@@ -1,34 +1,33 @@
 //! Chart empty-data validator — intercepts `E-LAY-003` before `ChartRenderer` is called.
 //!
 //! [`ChartEmptyDataValidator`] is a Stage-5 (pre-layout) [`Validator`] that detects
-//! chart slides whose data binding has evaluated to an empty collection and emits
-//! `E-LAY-003` before the `ChartRenderer` plugin is invoked.
+//! chart slides whose data binding has evaluated to an empty collection OR whose
+//! `data` field is absent entirely and emits `E-LAY-003` before the `ChartRenderer`
+//! plugin is invoked.
 //!
-//! ## Architecture (BC-1.11.002 invariant 2)
+//! ## Architecture (BC-1.11.002 v1.2 invariant 2)
 //!
-//! BC-1.11.002 invariant 2: "The `ChartRenderer` plugin is never called with empty
-//! data — the validator intercepts before plugin invocation." This validator is the
-//! interception point. It inspects each `chart` slide's `data` field value. If the
-//! value is a `Value::List([])` or `Value::Map({})` (empty collection), it emits
-//! `E-LAY-003` and the pipeline gate (in strict mode) aborts before export.
+//! BC-1.11.002 v1.2 invariant 2: "The `ChartRenderer` plugin is never called with
+//! empty or absent data — the validator intercepts before plugin invocation." This
+//! validator is the interception point. It inspects each `chart` slide's `data`
+//! field value. Two conditions both trigger E-LAY-003 (BC-1.11.002 v1.2 EC-005,
+//! F-098-P1-007):
+//!   - `data:` field evaluates to `Value::List([])` or `Value::Map({})` (empty
+//!     collection).
+//!   - `data:` field is absent entirely (no binding in the slide block).
 //!
-//! ## STORY-098: Stub — not yet implemented
+//! ## E-LAY-003 message format (error-taxonomy v2.31)
 //!
-//! This struct is a compilable stub. `validate()` currently returns an empty `Vec`
-//! (no diagnostics). The tests in the test module will FAIL assertions because they
-//! expect `E-LAY-003` to be emitted. This is the Red Gate for AC-004 and AC-005.
+//! `[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder.`
 //!
-//! The implementer must:
-//!   1. Implement `validate()` to inspect `chart` slides for empty `data` field values.
-//!   2. Emit `E-LAY-003` with `DiagnosticSeverity::Error` when `data` is empty.
-//!   3. Add `pub use chart_empty_data::ChartEmptyDataValidator;` to `lib.rs`.
-//!   4. Register with the pipeline (wire into `build_inner`).
+//! The `[E-LAY-003]` self-prefix is part of the canonical message (taxonomy v2.31
+//! F-098-P1-003). The pipeline gate (not this function) handles warn-only demotion.
 //!
 //! ## Traceability
 //!
-//! - BC-1.11.002 (chart empty data → error-slide placeholder)
+//! - BC-1.11.002 v1.2 (chart empty or missing data → error-slide placeholder)
 //! - BC-3.03.002 v1.2 (strict mode exits non-zero on validation error)
-//! - STORY-098 AC-004, AC-005
+//! - STORY-098 AC-004, AC-005, F-098-P1-007
 
 use std::sync::Arc;
 
@@ -73,10 +72,14 @@ fn chart_data_is_empty(data: &Value) -> bool {
     }
 }
 
-/// Build the canonical E-LAY-003 diagnostic for an empty-data chart slide.
+/// Build the canonical E-LAY-003 diagnostic for an empty or absent chart data slide.
 ///
-/// Message format: `"Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
-/// Hint: `"Ensure '<expression>' contains at least one row."`
+/// Message format (error-taxonomy v2.31, self-prefixed):
+/// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+///
+/// The `[E-LAY-003]` self-prefix is required by taxonomy v2.31 (F-098-P1-003). The
+/// message is identical for both empty-evaluating-data and missing-data cases (BC-1.11.002
+/// v1.2 postcondition 1 / EC-005).
 ///
 /// Severity is always `Error`. The pipeline gate (not this function) handles warn-only demotion.
 fn build_e_lay_003(slide_title: &str, span: slideforge_types::SourceSpan) -> Diagnostic {
@@ -84,7 +87,7 @@ fn build_e_lay_003(slide_title: &str, span: slideforge_types::SourceSpan) -> Dia
         severity: DiagnosticSeverity::Error,
         code: Arc::from(E_LAY_003),
         message: Arc::from(format!(
-            "Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+            "[E-LAY-003] Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
         )),
         span,
         hint: Some(Arc::from(
@@ -98,11 +101,13 @@ impl Validator for ChartEmptyDataValidator {
         "chart-empty-data"
     }
 
-    /// Pre-layout pass: inspect every `chart` slide for an empty `data` field.
+    /// Pre-layout pass: inspect every `chart` slide for an empty or absent `data` field.
     ///
     /// For each slide whose `slide_type == "chart"`, reads the `data` field value.
-    /// When the value is `FieldValue::Literal(Value::List([]))` or
-    /// `FieldValue::Literal(Value::Map({}))`, emits `E-LAY-003` with Error severity.
+    /// Two conditions both trigger E-LAY-003 (BC-1.11.002 v1.2, F-098-P1-007):
+    /// - `data` is absent entirely (`None`) — missing data source.
+    /// - `data` is `FieldValue::Literal(Value::List([]))` or
+    ///   `FieldValue::Literal(Value::Map({}))` — empty collection.
     ///
     /// All chart slides are checked (DI-018: no bail-on-first).
     fn validate(&self, deck: &Deck, _opts: &ValidatorOptions) -> Vec<Diagnostic> {
@@ -114,11 +119,12 @@ impl Validator for ChartEmptyDataValidator {
             }
 
             // Read the evaluated `data` field from the slide.
+            // BC-1.11.002 v1.2 EC-005 (F-098-P1-007): absent `data:` field and
+            // empty-evaluating `data:` field are both equally broken — neither
+            // can produce a meaningful chart. Both emit E-LAY-003.
             let data_is_empty = match slide.fields.get("data") {
                 Some(FieldValue::Literal(value)) => chart_data_is_empty(value),
-                // No `data` field or non-Literal binding: empty by default.
-                // (A missing data binding is an eval-stage error; we treat it as
-                // empty here so the validator catches it before the renderer does.)
+                // No `data:` field: chart cannot render — E-LAY-003.
                 None => true,
                 // Unevaluated expressions (Expr, Interpolated) are skipped;
                 // they should be resolved by the eval stage before validators run.
@@ -203,6 +209,34 @@ mod tests {
         make_chart_slide_with_data(title, Value::List(vec![]))
     }
 
+    /// Make a chart slide with NO `data:` field at all (missing data source).
+    ///
+    /// BC-1.11.002 v1.2 EC-005 (F-098-P1-007): absent `data:` field triggers
+    /// E-LAY-003 identically to an empty-evaluating `data:` binding.
+    fn make_chart_slide_missing_data(title: &str) -> Slide {
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from(title))),
+        );
+        fields.insert(
+            Arc::from("chart_type"),
+            FieldValue::Literal(Value::Str(Arc::from("bar"))),
+        );
+        // No `data:` field — this is the missing-data case.
+        Slide {
+            slide_type: Arc::from("chart"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        }
+    }
+
     fn make_chart_slide_nonempty_data(title: &str) -> Slide {
         // EC-003: exactly 1 data row → non-empty → chart renders normally.
         let row = Value::Str(Arc::from("Q1: 100"));
@@ -215,17 +249,13 @@ mod tests {
 
     // ── AC-004: chart with empty data → E-LAY-003, Error severity (strict mode) ─
 
-    /// BC-1.11.002 postcondition 2 / AC-004 (T-005 RED):
+    /// BC-1.11.002 postcondition 2 / AC-004:
     ///
-    /// A `chart` slide whose `data` field evaluates to `Value::List([])` (empty collection)
-    /// must emit `E-LAY-003` with `DiagnosticSeverity::Error` severity.
+    /// A `chart` slide whose `data` field evaluates to `Value::List([])` (empty
+    /// collection) must emit `E-LAY-003` with `DiagnosticSeverity::Error` severity.
     ///
-    /// In strict mode, Error severity causes the pipeline gate to exit 2, no output.
-    ///
-    /// RED: `ChartEmptyDataValidator.validate()` is a stub returning `vec![]`. This
-    /// test FAILS at the first assertion ("must emit E-LAY-003; got diags: []").
-    ///
-    /// FU-DIAGNOSTIC-FIELD-PINNING: assert message text, code, severity, hint presence.
+    /// FU-DIAGNOSTIC-FIELD-PINNING: assert message text (with `[E-LAY-003]`
+    /// self-prefix per error-taxonomy v2.31 F-098-P1-003), code, severity, hint.
     #[test]
     fn test_BC_1_11_002_chart_empty_data_strict_exits_2() {
         let slide = make_chart_slide_empty_data("Revenue Chart");
@@ -233,7 +263,6 @@ mod tests {
         let diags = ChartEmptyDataValidator.validate(&deck, &default_opts());
 
         // Must emit exactly one E-LAY-003 diagnostic.
-        // RED: stub returns vec![] — this assertion FAILS.
         let e_lay_003: Vec<_> = diags
             .iter()
             .filter(|d| d.code.as_ref() == "E-LAY-003")
@@ -241,7 +270,6 @@ mod tests {
         assert!(
             !e_lay_003.is_empty(),
             "BC-1.11.002 AC-004: chart with empty data must emit E-LAY-003; \
-             STUB currently returns vec![] — RED GATE: this assertion fails before implementation. \
              got diags: {diags:?}"
         );
         assert_eq!(
@@ -263,12 +291,19 @@ mod tests {
             diag.severity
         );
 
-        // FU-DIAGNOSTIC-FIELD-PINNING: canonical message format (BC-1.11.002 postcondition 1).
-        // "Chart data is empty for slide '<title>'. Rendering error-slide placeholder."
+        // FU-DIAGNOSTIC-FIELD-PINNING: canonical message format (BC-1.11.002 postcondition 1,
+        // error-taxonomy v2.31 self-prefix rule F-098-P1-003).
+        // "[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."
         assert!(
             diag.message.contains("Revenue Chart"),
             "BC-1.11.002 postcondition 5: E-LAY-003 message must name the slide title; \
              got: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("[E-LAY-003]"),
+            "error-taxonomy v2.31 F-098-P1-003: E-LAY-003 message must carry the \
+             '[E-LAY-003]' self-prefix; got: {}",
             diag.message
         );
         assert!(
@@ -296,15 +331,13 @@ mod tests {
         );
     }
 
-    /// BC-1.11.002 postcondition 3 / AC-005 (T-006 RED):
+    /// BC-1.11.002 postcondition 3 / AC-005:
     ///
     /// In warn-only mode, E-LAY-003 is still emitted by the validator (always fires
     /// regardless of mode). The pipeline gate (not the validator) decides whether to
     /// block on Error severity. This test verifies the diagnostic IS emitted.
     ///
     /// In the pipeline: warn-only → gate skipped → exporter renders `ErrorSlidePlaceholder`.
-    ///
-    /// RED: stub returns vec![] — assertion "must emit E-LAY-003" FAILS.
     #[test]
     fn test_BC_1_11_002_chart_empty_data_warn_only_placeholder() {
         let slide = make_chart_slide_empty_data("Revenue Chart");
@@ -314,7 +347,6 @@ mod tests {
         // The pipeline gate in warn-only skips the Error check; the exporter renders placeholder.
         let diags = ChartEmptyDataValidator.validate(&deck, &default_opts());
 
-        // RED: stub returns vec![] — this assertion FAILS.
         let e_lay_003: Vec<&Diagnostic> = diags
             .iter()
             .filter(|d| d.code.as_ref() == "E-LAY-003")
@@ -323,7 +355,7 @@ mod tests {
             !e_lay_003.is_empty(),
             "BC-1.11.002 AC-005: E-LAY-003 must be emitted for empty-data chart \
              (validator fires regardless of warn-only mode; gate handles demotion); \
-             STUB currently returns vec![] — RED GATE. got diags: {diags:?}"
+             got diags: {diags:?}"
         );
         // Validator always emits Error — the pipeline gate converts to warn in warn-only.
         assert_eq!(
@@ -332,6 +364,111 @@ mod tests {
             "BC-1.11.002 AC-005: ChartEmptyDataValidator always emits Error severity; \
              warn-only demotion is the pipeline gate's responsibility; got: {:?}",
             e_lay_003[0].severity
+        );
+    }
+
+    // ── F-098-P1-007: missing data field (no `data:`) → E-LAY-003 ─────────────
+
+    /// BC-1.11.002 v1.2 EC-005 / F-098-P1-007 (PO-ADJUDICATED, BINDING):
+    ///
+    /// A `chart` slide with NO `data:` field at all must emit E-LAY-003 with
+    /// Error severity (identical to the empty-data case). The message format is
+    /// identical — the [E-LAY-003] self-prefix must be present.
+    ///
+    /// Strict mode: exit 2; no output.
+    /// Warn-only: exit 0 + placeholder (tested in
+    /// `test_chart_missing_data_warn_only_placeholder`).
+    #[test]
+    fn test_chart_missing_data_strict_exits_2() {
+        let slide = make_chart_slide_missing_data("Revenue Forecast");
+        let deck = make_deck(vec![slide]);
+        let diags = ChartEmptyDataValidator.validate(&deck, &default_opts());
+
+        let e_lay_003: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "E-LAY-003")
+            .collect();
+
+        assert!(
+            !e_lay_003.is_empty(),
+            "BC-1.11.002 v1.2 EC-005 (F-098-P1-007): chart with NO data: field must \
+             emit E-LAY-003 (missing data source is equally broken as empty data); \
+             got diags: {diags:?}"
+        );
+        assert_eq!(
+            e_lay_003.len(),
+            1,
+            "BC-1.11.002 v1.2 EC-005: exactly 1 E-LAY-003 for a single missing-data chart; \
+             got {} — all diags: {diags:?}",
+            e_lay_003.len()
+        );
+
+        let diag = e_lay_003[0];
+
+        assert_eq!(
+            diag.severity,
+            DiagnosticSeverity::Error,
+            "F-098-P1-007: E-LAY-003 for missing data must be Error severity (strict exit 2); \
+             got: {:?}",
+            diag.severity
+        );
+        assert_eq!(
+            diag.code.as_ref(),
+            "E-LAY-003",
+            "F-098-P1-007: diagnostic code must be exactly 'E-LAY-003'; got: {}",
+            diag.code
+        );
+        assert!(
+            diag.message.contains("[E-LAY-003]"),
+            "error-taxonomy v2.31 F-098-P1-003: E-LAY-003 message must carry '[E-LAY-003]' \
+             self-prefix; got: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("Revenue Forecast"),
+            "F-098-P1-007: E-LAY-003 message must name the slide title; got: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains("Rendering error-slide placeholder"),
+            "F-098-P1-007: message must contain canonical suffix; got: {}",
+            diag.message
+        );
+    }
+
+    /// BC-1.11.002 v1.2 EC-005 / F-098-P1-007 warn-only variant:
+    ///
+    /// A `chart` slide with NO `data:` field in warn-only mode: validator still
+    /// emits E-LAY-003 Error severity; pipeline gate is not applied; exporter
+    /// renders error-slide placeholder; exit 0.
+    #[test]
+    fn test_chart_missing_data_warn_only_placeholder() {
+        let slide = make_chart_slide_missing_data("Pipeline Chart");
+        let deck = make_deck(vec![slide]);
+        let diags = ChartEmptyDataValidator.validate(&deck, &default_opts());
+
+        let e_lay_003: Vec<&Diagnostic> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "E-LAY-003")
+            .collect();
+
+        assert!(
+            !e_lay_003.is_empty(),
+            "F-098-P1-007 warn-only: validator must emit E-LAY-003 for missing-data chart \
+             regardless of mode; gate handles demotion; got diags: {diags:?}"
+        );
+        assert_eq!(
+            e_lay_003[0].severity,
+            DiagnosticSeverity::Error,
+            "F-098-P1-007 warn-only: ChartEmptyDataValidator emits Error always; \
+             warn-only demotion is the pipeline gate's responsibility; got: {:?}",
+            e_lay_003[0].severity
+        );
+        assert!(
+            e_lay_003[0].message.contains("[E-LAY-003]"),
+            "F-098-P1-007 warn-only: message must carry '[E-LAY-003]' self-prefix; \
+             got: {}",
+            e_lay_003[0].message
         );
     }
 

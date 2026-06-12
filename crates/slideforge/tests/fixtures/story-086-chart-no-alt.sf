@@ -2,6 +2,10 @@
 #
 # Used by: AC-005 (strict + chart WITHOUT alt → Err(ValidationFailed) + E-A11-001).
 # In strict mode, this must return exactly one E-A11-001 diagnostic.
+#
+# STORY-098 (F-098-P1-005): added data: field — ChartEmptyDataValidator now
+# requires non-empty data; without it E-LAY-003 is emitted in addition to
+# E-A11-001, breaking the "exactly 1 E-A11-001" assertion.
 
 slideforge_version "1"
 lang "en-US"
@@ -9,3 +13,4 @@ lang "en-US"
 slide chart:
   title "Revenue"
   chart_type "bar"
+  data ["Q1: 80", "Q2: 90"]

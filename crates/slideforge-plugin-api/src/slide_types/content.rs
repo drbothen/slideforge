@@ -16,8 +16,11 @@ use super::common_optional_fields;
 /// The built-in `content` slide type.
 ///
 /// Required fields: `title`.
-/// Optional fields: `bullets`, `takeaway`, plus common optional fields
+/// Optional fields: `body`, `bullets`, `takeaway`, plus common optional fields
 /// (`notes`, `report`, `detail`, `tags`, `alt`, `lang`, `decorative`, `footer`, `logo`).
+///
+/// The `body` field provides prose paragraph(s) in the content area; `bullets` provides
+/// a bulleted list. Both may coexist on the same slide.
 ///
 /// Maps to the `"Title and Content"` OOXML layout.
 #[derive(Debug)]
@@ -33,6 +36,22 @@ impl ContentSlideType {
     #[must_use]
     pub fn new() -> Self {
         let mut optional = vec![
+            // body: prose paragraph(s) for the slide content area. Alternative to bullets
+            // for free-form body text. Both `body` and `bullets` may coexist on a content
+            // slide; body renders as a Normal paragraph in DOCX, and a Body placeholder
+            // text run in PPTX. (BC-4.01.001 v1.2 PC-11 / BC-4.02.001 v1.2 PC-10;
+            // STORY-098 F-098-P1-002: declared here so body threading is not gated out.)
+            FieldDef {
+                name: Arc::from("body"),
+                description: Arc::from(
+                    "Body paragraph text for the slide content area. Rendered as a Normal \
+                     paragraph in DOCX and a Body placeholder text run in PPTX. May coexist \
+                     with `bullets`.",
+                ),
+                required: false,
+                default_value: None,
+                expected_type: None,
+            },
             FieldDef {
                 name: Arc::from("bullets"),
                 description: Arc::from(

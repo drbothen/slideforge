@@ -16,6 +16,7 @@
 
 use std::sync::Arc;
 
+use slideforge_syntax::known_fields::known_fields as slide_type_known_fields;
 use slideforge_types::{
     Block, BulletItem, ColorBarSpec, ContentBlock, Deck, FieldValue, InlineNode, OrderedMap,
     SourceSpan, TextBlock, TextTag, Value,
@@ -185,21 +186,35 @@ fn thread_one_slide(slide: &mut slideforge_types::Slide) {
     // when body contains inline markup like `**bold body text**`). Previously
     // extract_str_field returned None for Inlines, silently dropping the body.
     // This is the primary failing path identified by adversary finding C2.
-    match slide.fields.get("body") {
-        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
-            slide
-                .blocks
-                .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
-        },
-        _ => {
-            if let Some(text) = extract_str_field(slide, "body")
-                && !text.trim().is_empty()
-            {
+    //
+    // F-098-P1-002 gate: only thread `body` when the slide type's schema declares
+    // `body` as a known field. For types that do NOT declare `body` (e.g., `content`,
+    // `chart`), `body` is an unknown field — `FieldSchemaValidator` emits W-VAL-103
+    // (promoted to Error for CONTENT_DROP_KEYS in strict mode). Threading it here
+    // would render body content that the slide type's layout does not support.
+    // In warn-only mode this would silently drop or corrupt layout output.
+    //
+    // If the slide type is unknown (not in `slide_type_known_fields`), we fall
+    // through and thread body unconditionally — safe default for future types.
+    let slide_type_supports_body = slide_type_known_fields(slide.slide_type.as_ref())
+        .is_none_or(|known| known.contains(&"body"));
+    if slide_type_supports_body {
+        match slide.fields.get("body") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
                 slide
                     .blocks
-                    .push(make_text_block_tagged(text, TextTag::Body));
-            }
-        },
+                    .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "body")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Body));
+                }
+            },
+        }
     }
 
     // ── 4a. Caption ──────────────────────────────────────────────────────

@@ -3,6 +3,9 @@
 # Used by: AC-004 (strict + chart WITH alt → Ok, PPTX carries descr).
 # The alt text "Bar chart showing Q3 revenue by region" must appear in the
 # PPTX slide XML as an accessibility description attribute.
+#
+# STORY-098 (F-098-P1-005): added data: field — ChartEmptyDataValidator now
+# requires non-empty data; without it E-LAY-003 is emitted in strict mode.
 
 slideforge_version "1"
 lang "en-US"
@@ -11,3 +14,4 @@ slide chart:
   title "Q3 Revenue"
   chart_type "bar"
   alt "Bar chart showing Q3 revenue by region"
+  data ["Q1: 100", "Q2: 120", "Q3: 140"]
