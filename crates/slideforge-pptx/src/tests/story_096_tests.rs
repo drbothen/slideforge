@@ -14,7 +14,7 @@
 //! | `test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds` | AC-004 | BC-4.01.001 postcondition 4 | RED |
 //! | `test_BC_4_01_005_progress_bar_has_named_layout` | AC-002 | BC-4.01.005 postcondition 4/5 | RED |
 //! | `test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback` | AC-002/EC-004 | BC-4.01.005 postcondition 5 | RED |
-//! | `test_BC_5_01_005_run_has_lang_attribute_default_en_us` | AC-003/EC-002 | BC-5.01.005 postcondition 1 | RED |
+//! | `test_BC_5_01_005_run_has_lang_attribute_explicit_en_us` | AC-003/EC-002 | BC-5.01.005 postcondition 1 | RED |
 //! | `test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip` | AC-003 | BC-5.01.005 postcondition 1 | RED |
 //! | `test_BC_5_01_005_ec003_empty_slide_no_rpr_emitted_no_error` | AC-003/EC-003 | BC-5.01.005 postcondition 1 | RED (LESSON-17: NOT #[should_panic]) |
 //! | `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface` | F-096-002 | BC-5.01.005 v1.3 | RED → GREEN |
@@ -610,8 +610,10 @@ fn test_BC_4_01_001_footer_y_saturating_on_tiny_page() {
 /// Assertions (LESSON-14, LESSON-17 — no `#[should_panic]`):
 /// 1. A layout XML file in the ZIP has `<p:cSld name="progress_bar">` (or name
 ///    matching the canonical SF naming for progress_bar).
-/// 2. The slide's `.rels` relationship does NOT point to `slideLayout2.xml`
-///    (which is the "Title and Content" fallback, 1-indexed).
+/// 2. The slide's `.rels` file (`ppt/slides/_rels/slide1.xml.rels`) contains a
+///    slideLayout relationship whose `Target` is `../slideLayouts/slideLayout31.xml`
+///    (progress_bar is at 0-based index 30, which maps to 1-based part 31).
+///    Asserts it is NOT `slideLayout2.xml` (the "Title and Content" fallback).
 #[test]
 fn test_BC_4_01_005_progress_bar_has_named_layout() {
     let mut laid_out = make_laid_out_deck(1);
@@ -656,6 +658,26 @@ fn test_BC_4_01_005_progress_bar_has_named_layout() {
          `generate_all_layouts` must include an entry with \
          slide_type_keyword = Some(\"progress_bar\") so the layout is synthesized \
          and added to the ZIP with its canonical name."
+    );
+
+    // Assertion 2: slide1.xml.rels routes to slideLayout31.xml (0-based index 30,
+    // 1-based ZIP part 31), NOT to slideLayout2.xml (Title and Content fallback).
+    // `progress_bar` index 30 → layout_num = 31 → file "slideLayout31.xml".
+    let slide1_rels = zip_read_entry(&pptx_bytes, "ppt/slides/_rels/slide1.xml.rels");
+    assert!(
+        slide1_rels.contains("slideLayout31.xml"),
+        "AC-002 assertion 2: ppt/slides/_rels/slide1.xml.rels must reference \
+         slideLayout31.xml (progress_bar is at 0-based index 30, 1-based part 31).\n\
+         Actual rels:\n{}",
+        &slide1_rels
+    );
+    assert!(
+        !slide1_rels.contains("slideLayout2.xml"),
+        "AC-002 assertion 2: ppt/slides/_rels/slide1.xml.rels must NOT reference \
+         slideLayout2.xml (\"Title and Content\" fallback). progress_bar has its own \
+         dedicated slot at slideLayout31.xml.\n\
+         Actual rels:\n{}",
+        &slide1_rels
     );
 }
 
@@ -742,7 +764,7 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
 /// LESSON-14: asserts ACTUAL `lang` attribute values, not mere rPr presence.
 /// LESSON-17: does NOT use `#[should_panic]`.
 #[test]
-fn test_BC_5_01_005_run_has_lang_attribute_default_en_us() {
+fn test_BC_5_01_005_run_has_lang_attribute_explicit_en_us() {
     // Build a deck with explicit en-US (explicit declaration path, not EC-002 default).
     let mut laid_out = make_laid_out_deck(1);
     laid_out.slides[0] = make_slide_with_body_text(0);

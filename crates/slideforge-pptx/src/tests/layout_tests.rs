@@ -879,10 +879,12 @@ fn test_BC_4_01_005_ac009_grid_maps_to_index_1_not_0() {
     );
 }
 
-/// AC-009 aggregate: verify NONE of the 9 unmapped keywords maps to index 0.
+/// AC-009 aggregate: verify NONE of the 8 unmapped keywords maps to index 0.
 ///
 /// This is an additional aggregate assertion on top of the per-keyword tests above.
-/// RED: if ANY of the 9 keywords maps to index 0, this test fails.
+/// RED: if ANY of the 8 keywords maps to index 0, this test fails.
+/// Note: `progress_bar` is intentionally excluded — it is mapped to index 30 per
+/// STORY-096 AC-002 and covered by `test_BC_4_01_005_ac009_progress_bar_maps_to_index_30`.
 #[test]
 fn test_BC_4_01_005_ac009_no_unmapped_keyword_maps_to_index_0() {
     let template = test_brand_template();
@@ -891,7 +893,6 @@ fn test_BC_4_01_005_ac009_no_unmapped_keyword_maps_to_index_0() {
         "card_rows",
         "horizontal_timeline",
         "status",
-        "progress_bar",
         "metric_tree",
         "formula",
         "weighted_composite",
