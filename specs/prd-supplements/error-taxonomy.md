@@ -2,7 +2,7 @@
 document_type: prd-supplement
 supplement_type: error-taxonomy
 level: L3
-version: "2.30"
+version: "2.31"
 status: active
 producer: product-owner
 timestamp: 2026-06-11T00:00:00
@@ -180,7 +180,7 @@ slideforge.toml to promote to a blocking error.
 |------|---------|----------------------|---------------|-----------|
 | E-LAY-001 | degraded | 2 (if strict-overflow) | `CanvasOverflow: slide '<title>' field '<field>' overflows by ~<N> EMU (~<M>pt). Consider reducing content or font size.` | CAP-022, DEC-013 |
 | E-LAY-002 | broken | 2 | `Zero-slide deck: no slide blocks found in '<file>'. A deck must contain at least one slide.` | CAP-022, DEC-011 |
-| E-LAY-003 | degraded | 2 (if strict-overflow) | `Chart data is empty for slide '<title>'. Rendering error-slide placeholder.` | CAP-013, DEC-014 |
+| E-LAY-003 | broken | 2 (strict, default) / 0 (--warn-only) | `[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder.` | CAP-013, DEC-014, BC-1.11.002, STORY-098, F-098-P1-003 |
 | E-LAY-004 | broken | 2 | `Shape at slide <source_slide_index> (<file>:<line>:<col>) has no alt text and is not marked decorative: true. Add alt "..." or decorative: true.` | BC-3.04.001 EC-001, DI-001, CAP-023 |
 | E-LAY-005 | broken | 2 | `Inline nesting depth exceeded at slide <source_slide_index>: depth <depth> exceeds maximum of 64. Flatten the inline tree.` | BC-3.05.001 EC-006, CAP-024 |
 | E-LAY-006 | broken | 2 | `Arithmetic overflow computing EMU for shape position at slide <source_slide_index> (<file>:<line>:<col>). Value <value> in <unit> exceeds i64 range after conversion. Use a value ≤ 9,007,199,254 inches (approximately 9.0 × 10⁹ in).` | BC-3.04.001 EC-014, EC-015, CAP-023 |
@@ -210,6 +210,31 @@ is NOT dead code); any implementation that marks it `#[allow(dead_code)]` or doc
 as "future strict-mode validator" is in direct violation of BC-3.04.001 invariant 8 and
 CLAUDE.md Rule 3 (no AI-added tech-debt register entries without explicit human direction).
 Adjudicated in adversary pass 2 on STORY-028, item M (2026-05-29).
+
+Note (E-LAY-003): **Reclassified v2.31 (F-098-P1-003 + F-098-P1-007 adjudication).** E-LAY-003 is
+`broken`, NOT `degraded`. It is NOT gated on `[build].strict_overflow` — it is gated on `--warn-only`.
+The `strict-overflow` gate applies ONLY to canvas-overflow conditions (E-LAY-001). Empty or missing
+chart data is a data-integrity failure, not an overflow condition.
+
+**Trigger conditions (both trigger E-LAY-003):**
+1. A `slide chart:` block has a `data:` binding that evaluates to an empty collection (zero rows,
+   empty list) — the empty-evaluating-binding case (BC-1.11.002 original scope).
+2. A `slide chart:` block has NO `data:` field at all (missing data source) — the missing-data case
+   (F-098-P1-007 adjudication). The REND-010 defect (chart with no data renders silently empty)
+   is in this case. Both are equally broken: the chart cannot render meaningful content.
+
+**Mode semantics:**
+- Strict mode (default): E-LAY-003 is `broken`; build exits 2; no output file is written.
+- `--warn-only` mode: E-LAY-003 emitted as warning; error-slide placeholder rendered at the chart
+  slide's position; build continues; exit 0.
+
+**Layout-preview note:** The `chart.rs` doc comment that permits data-less charts for "layout previews
+and @data runtime references" without error is INCORRECT as of v2.31. Layout previews MUST use
+`--warn-only` to suppress E-LAY-003. The implementer (STORY-098) must correct the `chart.rs` doc
+comment to remove or update this allowance.
+
+**ChartRenderer guard:** The ChartRenderer plugin is never called with empty or absent data — the
+validator intercepts at Stage 5 (pre-layout). Traces to BC-1.11.002, DI-017, DI-018.
 
 Note (E-LAY-007): `LayoutError::BulletDepthExceeded { source_slide_index: usize, depth: usize }`
 maps to E-LAY-007. This error guards the STRUCTURAL bullet-nesting depth (i.e., the depth of the
@@ -691,3 +716,4 @@ Per DI-018 and BC-1.15.002:
 | 2.28 | 2026-06-08 | product-owner | Pass-5 IMP-1 spec correction: **E-PAR-023 exit code corrected 2→1.** E-PAR-023 (`ParseError::EmptySectionGroupName`) is a parse-stage error. Per BC-1.15.003 three-tier exit-code model (parse errors → exit 1; strict-mode validation/eval errors → exit 2), and consistent with every other E-PAR row in the taxonomy, E-PAR-023 must exit 1. The v2.24 allocation incorrectly stated exit 2. Corrected in: (1) E-PAR table row Exit column 2→1; (2) Note (E-PAR-023) exit rationale rewritten; (3) v2.24 changelog row annotated with correction reference. OBS-1 also fixed: message format in the E-PAR-023 table row updated to include the `E-PAR-023:` code self-prefix (aligning with the emitter convention used across E-PAR codes; the Note now documents this prefix requirement). BC-4.01.003 updated to v1.4 in the same burst (PC-7 and EC-010 exit 2→1; changelog entry added). |
 | 2.29 | 2026-06-11 | product-owner | STORY-094 rendering-fix wave (REND-005, W-VAL-103 Route A): **W-VAL-103 content-drop severity promotion documented.** W-VAL-103 (`validate_fields` unknown-field warning) gains a context-sensitive severity path: when the unknown field key is `"shape"` or `"body"` on a slide type that does not support it (causing authored content to be silently dropped), W-VAL-103 is promoted from cosmetic to broken in strict mode (exit 2, no output). Non-content unknown fields remain cosmetic/exit-0 (unchanged). This aligns with the CLAUDE.md production-grade default (no silent dropping of authored content in strict mode) and DI-017 (all-or-nothing). Implementer action: STORY-098 (content-drop severity promotion in `validate_fields` for `"shape"` and `"body"` keys in strict mode). No new taxonomy code allocated. |
 | 2.30 | 2026-06-11 | product-owner | STORY-094 rendering-fix wave, F-094-P2-003: **E-LAY-008 allocated** (`LayoutError::BulletsOnContentlessSlideType`) — user-authoring error fired at layout time when a `bullets:` field targets a slide type whose region map defines no Body or Generic Empty region (e.g., `title`, `closing`, `section_break`, `blank`). Severity: broken. Exit: 2 (strict mode). Source span required: points at the `bullets:` keyword in the authored .sf file. Message template: `[E-LAY-008] Slide '<slide_type>' at <file>:<line>:<col> has no content region for 'bullets'. Slide type '<slide_type>' defines no Body or Generic Empty region. Use a slide type with a body region (e.g. 'content', 'detail', 'bullets_only') or remove the 'bullets:' field.` Correction hint embedded in message. Distinction from `LayoutError::InvalidBoundingBox` (internal invariant breach) and E-VAL-101/W-VAL-103 (schema validation, Stage 5) documented in Note. Pre-registration collision check: E-LAY-008 confirmed free — highest existing E-LAY code was E-LAY-007 (v2.5). Traces to CAP-022. |
+| 2.31 | 2026-06-11 | product-owner | STORY-098 adversary Pass-1 F-098-P1-003 (HIGH) + F-098-P1-007 (OBS adjudication): **E-LAY-003 reclassified `degraded` → `broken`; exit gate changed `strict-overflow` → `--warn-only`; trigger scope widened to cover missing `data:` field.** (1) Severity corrected from `degraded` to `broken` — BC-1.11.002 postcondition 2 specifies blocking error on empty data in default strict mode; DiagnosticSeverity::Error in STORY-098 implementation; the degraded/strict-overflow classification was incorrect and contradicted both the BC and the code. (2) Exit gate corrected: E-LAY-003 is NOT controlled by `[build].strict_overflow`; it is controlled by `--warn-only`. `strict-overflow` applies exclusively to canvas overflow (E-LAY-001). (3) Trigger scope widened (F-098-P1-007 adjudication, PO decision BINDING): a `slide chart:` block with NO `data:` field (missing data source) NOW triggers E-LAY-003 in addition to a `data:` binding that evaluates empty. Both conditions are equally broken — the chart cannot render meaningful content and previously rendered silently empty (the REND-010 defect class). The layout-preview allowance in `chart.rs` docs is INCORRECT and must be corrected by the implementer; layout previews must use `--warn-only`. Message template updated to add `[E-LAY-003]` self-prefix. Explanatory Note (E-LAY-003) added after E-LAY table. BC-1.11.002 updated to v1.2 in same burst (precondition 1 widened, description updated, new EC-005, version bump). |
