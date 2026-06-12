@@ -409,8 +409,8 @@ impl DocumentBodySerializer {
         // followed by manually-authored sections, in canonical order.
         // (SectionOrderer: auto before manual, per postcondition 5.)
         let orderer = SectionOrderer::new(deck);
-        let auto_ser = AutoSectionSerializer::new();
-        let manual_ser = ManualSectionSerializer::new();
+        let auto_ser = AutoSectionSerializer::new(&self.lang);
+        let manual_ser = ManualSectionSerializer::new(&self.lang);
 
         for section in orderer.ordered_sections() {
             use slideforge_layout::sections::SectionSource;

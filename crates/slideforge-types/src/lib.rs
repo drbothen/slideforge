@@ -75,3 +75,15 @@ pub use specs::{
 };
 pub use type_kind::TypeKind;
 pub use value::Value;
+
+/// Default BCP-47 language tag when a deck carries no `lang` declaration.
+///
+/// The canonical default is `"en"` per BC-5.01.004 — NOT `"en-US"`.
+/// This constant is the shared source of truth for the no-lang default across
+/// all exporter surfaces: `word/document.xml` run `<w:lang>`, `docProps/core.xml`
+/// `<dc:language>`, PPTX `<a:rPr lang="">`, and any future exporter surface that
+/// requires a language tag (BC-5.01.004 / BC-5.01.005).
+///
+/// Both `slideforge-docx` and `slideforge-pptx` import this constant so that a
+/// single edit propagates to all surfaces simultaneously (TD-VSDD-060).
+pub const DEFAULT_DECK_LANG: &str = "en";

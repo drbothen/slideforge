@@ -44,11 +44,13 @@ pub(crate) const LAYOUT_COUNT: usize = 31;
 
 /// Default BCP-47 language tag used when `deck.metadata.lang` is `None`.
 ///
-/// BC-5.01.004 injects `"en"` into `DeckMetadata.lang` when the DSL source
-/// contains no `lang` declaration. All surfaces (`<a:rPr lang>` in slide XML
-/// and `<dc:language>` in `docProps/core.xml`) derive their no-lang fallback
-/// from this single constant so they cannot diverge (BC-5.01.005 v1.3).
-pub(crate) const DEFAULT_DECK_LANG: &str = "en";
+/// Re-exported from [`slideforge_types::DEFAULT_DECK_LANG`] — the canonical
+/// shared source of truth (BC-5.01.004 / BC-5.01.005 / TD-VSDD-060).
+///
+/// The value is `"en"`. All surfaces (`<a:rPr lang>` in slide XML and
+/// `<dc:language>` in `docProps/core.xml`) derive their no-lang fallback from
+/// this single constant so they cannot diverge.
+pub(crate) use slideforge_types::DEFAULT_DECK_LANG;
 
 pub mod a11y;
 pub mod brand_adapter;

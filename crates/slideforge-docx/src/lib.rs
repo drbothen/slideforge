@@ -62,11 +62,13 @@ pub mod zip_assembler;
 
 /// Default BCP-47 language tag when the deck carries no `lang` declaration.
 ///
-/// The canonical default is `"en"` per BC-5.01.004 — NOT `"en-US"`. This
-/// constant is the single source of truth for the no-lang default across all
-/// DOCX surfaces: `word/document.xml` run `<w:lang>`, `docProps/core.xml`
-/// `<dc:language>`, and any future DOCX surfaces that require a language tag.
-pub const DEFAULT_DECK_LANG: &str = "en";
+/// Re-exported from [`slideforge_types::DEFAULT_DECK_LANG`] — the canonical
+/// shared source of truth (BC-5.01.004 / BC-5.01.005 / TD-VSDD-060).
+///
+/// The value is `"en"` — NOT `"en-US"`. All DOCX surfaces (`word/document.xml`
+/// run `<w:lang>`, `docProps/core.xml` `<dc:language>`) use this constant so
+/// that a single edit propagates everywhere.
+pub use slideforge_types::DEFAULT_DECK_LANG;
 
 #[cfg(test)]
 #[allow(
