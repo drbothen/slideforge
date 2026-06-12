@@ -474,7 +474,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
         // None of these three declare `body` — body is NOT in their field schemas.
         // A `body` field on any of these types is an unknown field and will trigger
         // W-VAL-103 (promoted to Error severity in strict mode because body is a
-        // CONTENT_DROP_KEY per BC-3.03.002 v1.2 Invariant 4).
+        // CONTENT_DROP_KEY per BC-3.03.002 v1.3 Invariant 4).
         "status" => Some(&[
             // Common
             "tags",

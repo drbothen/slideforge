@@ -201,7 +201,7 @@ impl Default for SlideTypeRegistry {
     }
 }
 
-/// BC-3.03.002 v1.2 Invariant 4 (Route A): unknown fields in this set promote
+/// BC-3.03.002 v1.3 Invariant 4 (Route A): unknown fields in this set promote
 /// `W-VAL-103` to Error severity (broken/exit-2 in strict mode) because they cause
 /// authored content to be silently dropped. Fields NOT in this set retain Warning
 /// (cosmetic/exit-0). Message format and code are UNCHANGED (no new E-VAL-105).
@@ -360,7 +360,7 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     let mut known_list: Vec<&str> = known.iter().map(std::convert::AsRef::as_ref).collect();
     known_list.sort_unstable();
     let known_list_str = known_list.join(", ");
-    // BC-3.03.002 v1.2 Invariant 4 (Route A): severity promoted to Error for
+    // BC-3.03.002 v1.3 Invariant 4 (Route A): severity promoted to Error for
     // content-drop keys — see module-level `CONTENT_DROP_KEYS` for the set.
     for key in slide.fields.keys() {
         if !known.contains(key.as_ref()) {
@@ -1064,7 +1064,7 @@ mod tests {
         }
     }
 
-    // ── STORY-098: W-VAL-103 content-drop severity promotion (BC-3.03.002 v1.2) ─
+    // ── STORY-098: W-VAL-103 content-drop severity promotion (BC-3.03.002 v1.3) ─
     //
     // FU-DIAGNOSTIC-FIELD-PINNING lesson: assert message TEXT and distinguishing
     // struct fields (severity, code, span presence), not just error-code presence.
@@ -1079,7 +1079,7 @@ mod tests {
     //
     // Test naming: test_BC_3_03_002_xxx (BC-3.03.002 = STORY-098 content-drop BC)
 
-    /// BC-3.03.002 v1.2 Invariant 4 / AC-001 (T-003 RED):
+    /// BC-3.03.002 v1.3 Invariant 4 / AC-001 (T-003 RED):
     ///
     /// `shape:` on a `title` slide (which does not support `shape:`) in strict mode
     /// must produce a W-VAL-103 diagnostic with `DiagnosticSeverity::Error` (broken),
@@ -1122,7 +1122,7 @@ mod tests {
         assert_eq!(
             shape_diag.severity,
             DiagnosticSeverity::Error,
-            "BC-3.03.002 v1.2 Invariant 4 / AC-001: W-VAL-103 for 'shape' on unsupported slide \
+            "BC-3.03.002 v1.3 Invariant 4 / AC-001: W-VAL-103 for 'shape' on unsupported slide \
              type MUST be Error severity (content-drop promotion — STORY-098). \
              Got severity: {:?}. Message: {}",
             shape_diag.severity,
@@ -1157,7 +1157,7 @@ mod tests {
         );
     }
 
-    /// BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002 (T-004):
+    /// BC-3.03.002 v1.3 Invariant 4 / EC-007 / AC-002 (T-004):
     ///
     /// `body` on a slide type that does NOT declare it must produce W-VAL-103
     /// with `DiagnosticSeverity::Error` (broken/exit-2 in strict mode).
@@ -1202,7 +1202,7 @@ mod tests {
         assert_eq!(
             body_diag.severity,
             DiagnosticSeverity::Error,
-            "BC-3.03.002 v1.2 Invariant 4 / EC-007 / AC-002: W-VAL-103 for 'body' on 'chart' \
+            "BC-3.03.002 v1.3 Invariant 4 / EC-007 / AC-002: W-VAL-103 for 'body' on 'chart' \
              slide MUST be Error severity (broken/exit-2 in strict mode). \
              Got severity: {:?}. Message: {}",
             body_diag.severity,
@@ -1322,7 +1322,7 @@ mod tests {
     ///
     /// `status`, `progress_bar`, and `weighted_composite` do NOT declare `body` in their
     /// field schemas. A `body` field on any of these must emit W-VAL-103 promoted to
-    /// Error severity because `body` is a `CONTENT_DROP_KEY` (BC-3.03.002 v1.2 Invariant 4).
+    /// Error severity because `body` is a `CONTENT_DROP_KEY` (BC-3.03.002 v1.3 Invariant 4).
     ///
     /// This is the registry-level half of the two-part fix:
     /// 1. `validate_fields` emits W-VAL-103/Error for unknown `body` (this test)
@@ -1384,7 +1384,7 @@ mod tests {
                 body_diags[0].severity,
                 DiagnosticSeverity::Error,
                 "F-098-P2-001: W-VAL-103 for `body` on `{type_kw}` must be Error severity \
-                 (CONTENT_DROP_KEY — broken/exit-2 in strict mode per BC-3.03.002 v1.2 Invariant 4). \
+                 (CONTENT_DROP_KEY — broken/exit-2 in strict mode per BC-3.03.002 v1.3 Invariant 4). \
                  Got: {:?}",
                 body_diags[0].severity
             );

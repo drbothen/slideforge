@@ -352,7 +352,7 @@ mod tests {
             chart_w_val_103[0].severity,
             DiagnosticSeverity::Error,
             "BC-3.03.002 AC-003 (b): W-VAL-103 for `body` on `chart` slide must be Error \
-             severity (content-drop set, BC-3.03.002 v1.2 Invariant 4). \
+             severity (content-drop set, BC-3.03.002 v1.3 Invariant 4). \
              Got: {:?}. Message: {}",
             chart_w_val_103[0].severity,
             chart_w_val_103[0].message

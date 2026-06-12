@@ -26,7 +26,7 @@
 //! ## Traceability
 //!
 //! - BC-1.11.002 v1.2 (chart empty or missing data → error-slide placeholder)
-//! - BC-3.03.002 v1.2 (strict mode exits non-zero on validation error)
+//! - BC-3.03.002 v1.3 (strict mode exits non-zero on validation error)
 //! - STORY-098 AC-004, AC-005, F-098-P1-007
 
 use std::sync::Arc;

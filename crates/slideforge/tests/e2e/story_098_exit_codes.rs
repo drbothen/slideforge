@@ -40,7 +40,7 @@ use crate::e2e::BrandTmpDir;
 
 // ── AC-001: body on non-supporting slide — strict mode → exit 2 ──────────────
 
-/// AC-001 / BC-3.03.002 v1.2 Invariant 4: `body` on a slide type that does NOT
+/// AC-001 / BC-3.03.002 v1.3 Invariant 4: `body` on a slide type that does NOT
 /// declare it must return `Err(BuildError::ValidationFailed)` in strict mode.
 ///
 /// `body` is a `CONTENT_DROP_KEY` — when it appears on a slide type that does not
@@ -119,7 +119,7 @@ fn test_f098_p1_004_ac001_body_on_unsupporting_type_strict_exits_2() {
 
 // ── AC-002: body on non-supporting slide — warn-only mode → exit 0 ───────────
 
-/// AC-002 / BC-3.03.002 v1.2 Route A: `body` on a slide type that does NOT
+/// AC-002 / BC-3.03.002 v1.3 Route A: `body` on a slide type that does NOT
 /// declare it MUST return `Ok(_)` in warn-only mode — W-VAL-103 is non-blocking.
 /// Body must NOT be threaded into the output slide blocks.
 ///

@@ -191,7 +191,7 @@ fn thread_one_slide(slide: &mut slideforge_types::Slide) {
     // `body` as a known field. For types that do NOT declare `body` (e.g., `chart`,
     // `status`, `progress_bar`, `weighted_composite`), `body` is an unknown field —
     // `FieldSchemaValidator` emits W-VAL-103 (promoted to Error for CONTENT_DROP_KEYS
-    // in strict mode per BC-3.03.002 v1.2 Invariant 4). Threading it here would render
+    // in strict mode per BC-3.03.002 v1.3 Invariant 4). Threading it here would render
     // body content that the slide type's layout does not support.
     // In warn-only mode this would silently produce a Body frame the layout ignores.
     //
