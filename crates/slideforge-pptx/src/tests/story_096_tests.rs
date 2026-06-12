@@ -957,8 +957,9 @@ fn find_dc_language(xml: &str) -> Option<String> {
 /// `export_inner` and `build_doc_props` must both derive from the same
 /// `DEFAULT_DECK_LANG` constant (value `"en"`) so the two surfaces cannot diverge.
 ///
-/// Red Gate: before the fix, `export_inner` defaults `deck_lang` to `"en-US"`
-/// while `build_doc_props` defaults to `"en"` — cross-surface divergence.
+/// Cross-surface identity guarantee: both `export_inner` and `build_doc_props`
+/// derive from the same `DEFAULT_DECK_LANG` constant, so the two surfaces are
+/// structurally prevented from diverging.
 #[test]
 fn test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface() {
     // Deck with lang = None — no declaration in DSL source.
