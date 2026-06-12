@@ -234,7 +234,7 @@ _STORY-090 created 2026-06-08 per S-7.02 cycle-closing checklist (PROC-GAP-PIPEL
 >
 > BC gaps resolved (PO burst 2026-06-11, product-owner commit d452c914):
 >   - STORY-097: BC-3.07.001 authored (takeaway bar rendering, canonical geometry, body compression)
->   - STORY-098: BC-3.03.002 v1.2 authored (Route A: W-VAL-103 content-drop = broken/exit-2 in strict mode; no E-VAL-105); error-taxonomy v2.29 (versions at commit d452c914; later bumped to BC-3.03.002 v1.3 / taxonomy v2.32 during STORY-098 adversarial cascade)
+>   - STORY-098: BC-3.03.002 v1.2 authored (Route A: W-VAL-103 content-drop = broken/exit-2 in strict mode; no E-VAL-105); error-taxonomy v2.29 (versions at commit d452c914; both artifacts were bumped further during the STORY-098 adversarial cascade — see the BC-3.03.002 and error-taxonomy changelogs for final versions)
 >   - STORY-101: BC-3.07.003 authored (normalize_parent() 4-case spec; empty-path diagnostic forbidden)
 >   - STORY-101: BC-3.07.002 authored (image binary embedding anchor); STORY-102 created to implement it
 >
