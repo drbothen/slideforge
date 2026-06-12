@@ -174,11 +174,18 @@ impl PptxExporter {
         // build_master_parts uses page_size_emu for placeholder geometry; the slide
         // serializer (lang on rPr) derives its lang from the deck at this point.
         let page_size_emu = (laid_out.page_size.width.0, laid_out.page_size.height.0);
-        let deck_lang: std::sync::Arc<str> = deck
-            .metadata
-            .lang
-            .clone()
-            .unwrap_or_else(|| std::sync::Arc::from(DEFAULT_DECK_LANG));
+
+        // SEC-096-001 / CWE-116 defense-in-depth: validate the raw lang value at
+        // export_inner entry — BEFORE constructing deck_lang and BEFORE any slide XML
+        // is generated.  This is the first layer; build_doc_props carries the second.
+        // A valid BCP-47 tag (ASCII alphanumeric + hyphen) always passes unchanged
+        // (lossless per BC-5.01.005 invariant 1). Values containing XML-1.0-illegal
+        // control characters (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE,
+        // U+FFFF) are rejected here with PptxError::InvalidLanguageTag before any
+        // ZIP part assembly begins.
+        let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
+        validate_lang_for_xml(lang_raw)?;
+        let deck_lang: std::sync::Arc<str> = std::sync::Arc::from(lang_raw);
 
         build_slide_parts(
             laid_out,

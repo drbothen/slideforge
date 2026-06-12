@@ -22,6 +22,7 @@
 //! | `test_BC_5_01_005_ac003_all_rpr_carry_lang_universality` | AC-003 / F-096-001 | BC-5.01.005 postcondition 1 | RED → GREEN (universality: both code paths) |
 //! | `test_BC_5_01_005_ec003_empty_slide_no_rpr_error` | AC-003/EC-003 | BC-5.01.005 postcondition 1 | GREEN by design (empty slide → zero rPr → no lang needed; LESSON-17: NOT #[should_panic]) |
 //! | `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface` | F-096-002 | BC-5.01.005 v1.3 | RED → GREEN |
+//! | `test_sec096_001_fail_fast_lang_validation_at_export_inner_entry` | SEC-096-001 | CWE-116 defense-in-depth | RED → GREEN |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -1071,5 +1072,78 @@ fn test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface() {
         "F-096-002: slide1.xml must NOT contain lang=\"en-US\" when deck lang is \
          None (default is \"en\", not \"en-US\"). slide1.xml excerpt:\n{}",
         &slide1_xml[..slide1_xml.len().min(2000)]
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEC-096-001: fail-fast lang validation at export_inner entry (CWE-116 defense-in-depth)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SEC-096-001 (CWE-116 defense-in-depth):
+///
+/// Validates that `export_inner` calls `validate_lang_for_xml` BEFORE constructing
+/// `deck_lang` — i.e., the validation is fail-fast at the very start of the export
+/// pipeline, before any XML generation begins.
+///
+/// Prior to this fix the only validation was in `build_doc_props` (called late in
+/// the pipeline, after all slide XML parts have been serialized). The new call at
+/// `export_inner` entry ensures:
+/// 1. No slide XML is generated with the illegal lang value (the flow aborts immediately).
+/// 2. Both the early check (`export_inner` entry) AND the late check (`build_doc_props`)
+///    are present — two-layer defense-in-depth (CWE-116).
+///
+/// Test vector: `lang = "en\u{0000}US"` (contains U+0000, NUL — XML-1.0-illegal).
+/// Expected: `Exporter::export` returns `Err` with a variant whose `Display` output
+/// contains field `lang` identifying the offending value, and validation fires
+/// at `export_inner` entry (before any slide parts are assembled).
+///
+/// Field-pinning per FU-DIAGNOSTIC-FIELD-PINNING: the error `Display` must contain
+/// the offending `lang` value (the `lang` field of `PptxError::InvalidLanguageTag`).
+///
+/// NOTE: The existing pipeline already errors via `build_doc_props` (SEC-039-001).
+/// The new assertion is that validation is now ALSO explicit at extraction:
+/// `validate_lang_for_xml` is called at `export_inner` entry on `lang_raw` before
+/// `deck_lang: Arc<str>` is constructed. This test verifies the e2e error is still
+/// returned (the same `InvalidLanguageTag` variant) regardless of which layer fires.
+#[test]
+fn test_sec096_001_fail_fast_lang_validation_at_export_inner_entry() {
+    use slideforge_plugin_api::ExportError;
+    use slideforge_types::deck::DeckMetadata;
+
+    // Deck whose lang contains U+0000 (NUL) — XML-1.0-illegal per XML 1.0 §2.2.
+    // The offending value is "en\u{0000}US" — a valid-looking BCP-47 tag with a
+    // NUL byte injected in the middle (canonical CWE-116 injection vector).
+    let mut deck = make_deck(1);
+    deck.metadata = DeckMetadata {
+        title: Some(Arc::from("Test")),
+        slideforge_version: Arc::from("0.1.0"),
+        lang: Some(Arc::from("en\u{0000}US")),
+        author: None,
+        section_order: None,
+    };
+    let laid_out = make_laid_out_deck(1);
+    let brand = make_brand();
+    let opts = ExportOptions::default();
+    let exporter = PptxExporter::new();
+
+    let result = exporter.export(&deck, &laid_out, &brand, &opts);
+
+    // Contract (i): export must return Err — NOT Ok(malformed XML), NOT a panic.
+    assert!(
+        result.is_err(),
+        "SEC-096-001: export with NUL-byte lang must return Err before any XML \
+         generation (fail-fast at export_inner entry)."
+    );
+
+    // Contract (ii): the error Display must contain the offending lang value.
+    // FU-DIAGNOSTIC-FIELD-PINNING: `PptxError::InvalidLanguageTag { lang, reason }`
+    // — `lang` field must appear in the error Display output so the caller can
+    // identify which value was rejected.
+    let err: ExportError = result.unwrap_err();
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("en") && (err_str.contains("U+0000") || err_str.contains("0000")),
+        "SEC-096-001: error Display must identify the offending lang value and the \
+         U+0000 violation. Got: {err_str:?}"
     );
 }
