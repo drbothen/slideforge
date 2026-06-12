@@ -1609,7 +1609,7 @@ fn test_f094_p3_001_field_to_block_uses_field_spans_for_bullets() {
 ///
 /// ## Traceability
 ///
-/// F-098-P1-002 (adversary pass-1 finding); BC-3.03.002 (`CONTENT_DROP_KEYS` Route B);
+/// F-098-P1-002 (adversary pass-1 finding); BC-3.03.002 (`CONTENT_DROP_KEYS` Route A);
 /// STORY-098 AC-002 (body not rendered on non-supporting type in warn-only).
 #[test]
 fn test_f098_p1_002_body_not_threaded_for_types_without_body_in_schema() {
@@ -1649,7 +1649,7 @@ fn test_f098_p1_002_body_not_threaded_for_types_without_body_in_schema() {
             body_blocks.is_empty(),
             "F-098-P1-002: slide type {:?} does not declare 'body' as a known field; \
              thread_one_slide must NOT produce ContentBlock::Text(Body) for it. \
-             Got {} body block(s). BC-3.03.002 Route B: content-drop keys must not \
+             Got {} body block(s). BC-3.03.002 Route A: content-drop keys must not \
              be threaded for unsupporting slide types.",
             slide_type,
             body_blocks.len()
