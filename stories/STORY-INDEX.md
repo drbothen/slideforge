@@ -173,7 +173,7 @@ stories_merged: 68
 | [STORY-096](stories/STORY-096-rend-pptx-master-geometry-lang.md) | EPIC-08 | REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang on runs | BC-4.01.001, BC-4.01.005, BC-5.01.005 | P0 | 5 | strict | draft |
 | [STORY-097](stories/STORY-097-rend-takeaway-on-slide.md) | EPIC-07 | REND-004: takeaway field renders as visible bar on PPTX/HTML/PDF slides | BC-3.07.001 | P0 | 8 | strict | draft |
 | [STORY-098](stories/STORY-098-rend-strict-mode-content-drop.md) | EPIC-04 | REND-005/010a: Strict-mode exit on W-VAL-103 content drop + chart no-data enforcement | BC-3.03.002, BC-1.11.002, BC-4.01.001 | P0 | 5 | strict | draft |
-| [STORY-099](stories/STORY-099-rend-docx-bullets-secpr-lang.md) | EPIC-09 | REND-006: DOCX bullet run content + numbering.xml + sectPr + lang on runs | BC-4.02.001, BC-3.05.001 | P0 | 8 | strict | draft |
+| [STORY-099](stories/STORY-099-rend-docx-bullets-secpr-lang.md) | EPIC-09 | REND-006: DOCX bullet run content + numbering.xml + sectPr + lang on runs | BC-4.02.001, BC-5.01.005 | P0 | 8 | strict | draft |
 | [STORY-100](stories/STORY-100-rend-html-chart-emu-bullets-image.md) | EPIC-14 | REND-008-html: HTML chart SVG EMU/px fix + image src + bullet list semantics | BC-4.03.003, BC-3.05.001 | P0 | 5 | strict | draft |
 | [STORY-101](stories/STORY-101-rend-cli-brand-path-pptx-chart-embed.md) | EPIC-15 | REND-009/010b: CLI bare-path brand discovery fix + PPTX chart SVG embedding | BC-4.01.001, BC-1.11.001, BC-3.07.003 | P0 | 8 | strict | draft |
 | [STORY-102](stories/STORY-102-rend-image-binary-pptx-pdf-embedding.md) | EPIC-08 | REND-010b: Image binary embedding in PPTX and PDF | BC-3.07.002 | P0 | 8 | strict | draft |

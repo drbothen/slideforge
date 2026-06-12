@@ -217,7 +217,7 @@ canonical — individual story files use these exact IDs.
 | STORY-096 | EPIC-08 | REND-007: PPTX slideMaster 16:9 geometry + progress_bar layout + lang | STORY-037, STORY-038 | — |
 | STORY-097 | EPIC-07 | REND-004: takeaway bar PPTX/HTML/PDF | STORY-073, STORY-037, STORY-046, STORY-043, STORY-086 | — |
 | STORY-098 | EPIC-04 | REND-005/010a: strict-mode W-VAL-103 exit + chart no-data | STORY-016, STORY-032, STORY-089 | — |
-| STORY-099 | EPIC-09 | REND-006: DOCX bullet run + numbering.xml + sectPr + lang | STORY-041, STORY-042, STORY-081 | — |
+| STORY-099 | EPIC-09 | REND-006: DOCX bullet run + numbering.xml + sectPr + lang | STORY-041, STORY-042, STORY-073, STORY-085 | — |
 | STORY-100 | EPIC-14 | REND-008-html: HTML chart EMU/px + image src + bullet semantics | STORY-046, STORY-031, STORY-081 | — |
 | STORY-101 | EPIC-15 | REND-009/010b: CLI bare-path fix + PPTX chart SVG embedding | STORY-055, STORY-031, STORY-037, STORY-038 | STORY-102 |
 | STORY-102 | EPIC-08 | REND-010b: Image binary embedding in PPTX and PDF | STORY-037, STORY-043, STORY-044, STORY-039, STORY-101 | — |
@@ -512,7 +512,7 @@ its dependencies. The dependency graph is a DAG.
 | BC-5.01.002 | STORY-015 | Full |
 | BC-5.01.003 | STORY-017 | Full |
 | BC-5.01.004 | STORY-017 | Full |
-| BC-5.01.005 | STORY-017, STORY-039 | Full |
+| BC-5.01.005 | STORY-017, STORY-039, STORY-096, STORY-099 | Full (STORY-017: lang validator; STORY-039: PPTX dc:language; STORY-096: PPTX a:rPr lang AC-003 — PC-2; STORY-099: DOCX w:lang AC-004 — PC-4) |
 | BC-5.02.001 | STORY-002, STORY-083, STORY-084, STORY-085, STORY-049 | Full |
 | BC-5.02.002 | STORY-002, STORY-085, STORY-049 | Full |
 | BC-5.03.001 | STORY-060 | Full |

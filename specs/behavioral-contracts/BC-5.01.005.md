@@ -110,7 +110,7 @@ semantic requirement, not a cosmetic one.
 | Capability Anchor Justification | CAP-020 ("Accessibility Validation") per capabilities.md §CAP-020 — language propagation to "PPTX Core Properties, PDF /Lang, HTML lang" is explicit in CAP-020 and DI-003 |
 | L2 Domain Invariants | DI-003 (deck language propagates to all output formats) |
 | Architecture Module | slideforge-pptx, slideforge-pdf, slideforge-html crates (filled by architect) |
-| Stories | (filled by story-writer) |
+| Stories | STORY-017 (lang validator), STORY-039 (PPTX dc:language — PC-1), STORY-096 (PPTX a:rPr lang — PC-2), STORY-099 (DOCX w:lang run-level — PC-4) |
 
 ## Related BCs
 
@@ -128,7 +128,7 @@ semantic requirement, not a cosmetic one.
 
 ## Story Anchor
 
-(filled by story-writer)
+STORY-017, STORY-039, STORY-096, STORY-099
 
 ## VP Anchors
 

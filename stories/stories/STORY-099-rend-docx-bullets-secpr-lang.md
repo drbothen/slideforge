@@ -9,15 +9,18 @@ points: 8
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.1"
+spec_version: "1.2"
 created: "2026-06-11"
 source_findings: [REND-006]
-behavioral_contracts: [BC-4.02.001, BC-3.05.001]
+behavioral_contracts: [BC-4.02.001, BC-5.01.005]
 # BC status: BC-4.02.001 (serialize deck to .docx with correct body paragraphs — bullets
 # emitted as empty <w:p/> is a postcondition violation; sectPr absence means DOCX
-# page dimensions are undefined). BC-3.05.001 (inline formatting correct per format —
-# lang dropped from DOCX runs is a postcondition violation for PC-3 text rendering).
-# Both BCs are authored.
+# page dimensions are undefined). BC-5.01.005 PC-4 (lang propagates to DOCX run-level
+# <w:rPr><w:lang> — lang dropped from DOCX runs is a postcondition 4 violation).
+# BC-3.05.001 REMOVED: no AC in this story traces to BC-3.05.001 postconditions.
+# The depends_on: STORY-085 link references the run-properties path established there
+# (a dependency reason), but the behavioral contract being closed here is BC-5.01.005
+# PC-4, not BC-3.05.001 PC-3 inline-format universality. Both BCs are authored.
 verification_properties: []
 nfr_refs: []
 closes_findings: [REND-006]
@@ -78,8 +81,9 @@ implemented InlineNode rendering. Four defects remain in the merged code:
 - Per BC-4.02.001 postcondition 2: .docx must pass OOXML schema validation and open in
   Word 365 without schema errors. Absent sectPr and stub numbering.xml both cause
   schema violations.
-- Per BC-3.05.001 PC-3 (DOCX surface): all inline node variants produce correct DOCX
-  output. A `Plain` run missing `<w:lang>` is a postcondition gap.
+- Per BC-5.01.005 PC-4 (DOCX run level): every `<w:rPr>` in `word/document.xml` must
+  carry `<w:lang w:val="LANG"/>`. A `<w:rPr>` missing `<w:lang>` is a postcondition 4
+  violation. Default when no lang declared: "en" (per BC-5.01.004) — NOT "en-US".
 - Per ADR-001: use ooxmlsdk types; no raw XML string injection.
 - `numbering.xml` must define at least one abstract numbering definition covering the
   bullet style. Multiple bullet levels (nested bullets, if supported) must each have a
@@ -153,7 +157,7 @@ Verified by: unit test; unzip .docx; parse `word/document.xml`; assert final ele
 `<w:sectPr>` containing `<w:pgSz w:w="..." w:h="..."/>`.
 
 ### AC-004: All DOCX text runs carry lang attribute
-(traces to BC-3.05.001 postcondition — lang propagates correctly for PC-3 DOCX surface)
+(traces to BC-5.01.005 PC-4 — every `<w:rPr>` in word/document.xml carries `<w:lang>`; default "en" per BC-5.01.004)
 
 Every `<w:rPr>` in `word/document.xml` carries `<w:lang w:val="LANG"/>` (or the deck's
 configured lang value) where LANG defaults to "en" when no lang is declared (per
@@ -201,9 +205,16 @@ Verified by: existing integration test in STORY-041/042 + new schema validation 
 | BC ID | Title | Covering ACs |
 |-------|-------|-------------|
 | BC-4.02.001 | Serialize Deck to .docx | AC-001, AC-002, AC-003, AC-005 |
-| BC-3.05.001 | All 12 inline formats correct per format | AC-004 |
+| BC-5.01.005 | lang Declaration Propagates to PPTX Core Properties, PPTX Run rPr, PDF /Lang, HTML lang Attr | AC-004 |
 
 ## Test Strategy
 
 TDD strict mode. Four failing tests first, one per defect area. These are independent
 fixes within `slideforge-docx` and can each be tackled in order.
+
+## Changelog
+
+| Version | Date | Author | Change |
+|---------|------|--------|--------|
+| 1.1 | 2026-06-11 | story-writer | Initial spec. |
+| 1.2 | 2026-06-12 | story-writer | F-099-002 semantic mis-anchor fix: AC-004 re-routed from BC-3.05.001 (inline formats) to BC-5.01.005 PC-4 (DOCX run-level lang universality). BC-3.05.001 removed from behavioral_contracts — no AC in this story traces to its postconditions; the depends_on: STORY-085 note is a dependency reason, not a BC being implemented here. BC-5.01.005 added to behavioral_contracts. Architecture Compliance Rules updated to cite BC-5.01.005 PC-4 directly. Behavioral Contracts Table row updated to map AC-004 → BC-5.01.005. |
