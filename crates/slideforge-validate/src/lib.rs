@@ -34,11 +34,10 @@
 
 mod alt_text;
 mod canvas_overflow;
-// STORY-098: chart empty-data validator (BC-1.11.002 invariant 2).
-// `ChartEmptyDataValidator` is not yet implemented — this module declaration
-// and the `pub use` below are intentionally present so that the test module
-// in chart_empty_data.rs can reference `crate::ChartEmptyDataValidator`,
-// causing a compile-time Red Gate failure until the implementer provides the struct.
+// `ChartEmptyDataValidator` — chart empty-data validator (BC-1.11.002 v1.2 invariant 2;
+// STORY-098 AC-004/AC-005). Intercepts E-LAY-003 before `ChartRenderer` is invoked for
+// chart slides whose `data` field is absent or evaluates to an empty collection.
+// Registered in `slideforge-validate` registry at `"chart-empty-data"` (registry.rs:135).
 mod chart_empty_data;
 mod error_slide;
 mod field_schema;
@@ -53,8 +52,8 @@ mod zero_slide;
 
 pub use alt_text::AltTextValidator;
 pub use canvas_overflow::CanvasOverflowValidator;
-// STORY-098 (BC-1.11.002 invariant 2): chart empty-data validator.
-// Stub implementation — returns vec![] — tests drive production implementation.
+// Re-exports `ChartEmptyDataValidator` (STORY-098 / BC-1.11.002 v1.2 invariant 2):
+// fully implemented, 8 unit tests + 2 e2e tests passing, registered as `"chart-empty-data"`.
 pub use chart_empty_data::ChartEmptyDataValidator;
 pub use error_slide::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
 pub use field_schema::FieldSchemaValidator;
