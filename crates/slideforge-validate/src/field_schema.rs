@@ -263,6 +263,119 @@ mod tests {
         );
     }
 
+    // ── STORY-098: W-VAL-103 content-drop + body acceptance consistency ──────────
+    //
+    // AC-003: ACCEPTANCE consistency — both validator and eval accept `body` on `content`.
+    //
+    // PO adjudication F-098-ADJ-BODY-CONTENT (BC-3.03.002 v1.3 Invariant 4): `body` is a
+    // declared known_field on `content` — W-VAL-103 is NOT emitted; the field is
+    // schema-VALID. The `known_fields()` function is the authority: if the slide type
+    // declares `body`, it is accepted by validator and threaded by eval.
+    //
+    // The CONTENT_DROP_KEYS guard applies to slide types that do NOT declare `body`
+    // (e.g., `chart`, `title`, `blank`). W-VAL-103 is promoted to Error for those.
+    //
+    // This test verifies acceptance consistency: (a) `body` on `content` emits NO W-VAL-103
+    // (validator accepts — body is a declared known_field); (b) `body` on `chart` emits
+    // W-VAL-103 at Error severity (content-drop key on a non-declaring type).
+    //
+    // FU-DIAGNOSTIC-FIELD-PINNING: assert message text, code, severity.
+
+    /// BC-3.03.002 AC-003 / BC-3.03.002 v1.3 Invariant 4 — body acceptance consistency
+    /// (post-PO adjudication F-098-ADJ-BODY-CONTENT).
+    ///
+    /// ## Part (a): `body` on `content` slide — ACCEPTANCE (NO W-VAL-103)
+    ///
+    /// `body` is declared as an optional field on `content` slides (content.rs, STORY-098).
+    /// `known_fields()` is the authority: `FieldSchemaValidator` must NOT emit W-VAL-103
+    /// for `body` on `content`. The field is schema-valid and accepted.
+    ///
+    /// ## Part (b): `body` on `chart` slide — REJECTION (W-VAL-103 at Error severity)
+    ///
+    /// `chart` slides do NOT declare `body` in `known_fields()`. `validate_fields` must emit
+    /// W-VAL-103 promoted to Error severity (`CONTENT_DROP_KEYS` → broken in strict mode,
+    /// BC-3.03.002 v1.3 Invariant 4). The authority is `known_fields()`, not a hardcoded
+    /// type list.
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_BC_3_03_002_body_content_schema_consistency() {
+        // Part (a): `body` on `content` slide — schema-VALID (acceptance), no W-VAL-103.
+        // content.rs declares body as optional (STORY-098 F-098-P1-002 / PO adjudication
+        // F-098-ADJ-BODY-CONTENT). known_fields("content") includes "body" → accepted.
+        let content_slide = make_slide(
+            "content",
+            vec![
+                ("title", Value::Str(Arc::from("My Content Slide"))),
+                ("body", Value::Str(Arc::from("Body text is valid here."))),
+            ],
+        );
+        let deck = make_deck(vec![content_slide]);
+        let diags = FieldSchemaValidator.validate(&deck, &default_opts());
+        let w_val_103_body: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("'body'"))
+            .collect();
+        assert!(
+            w_val_103_body.is_empty(),
+            "BC-3.03.002 AC-003 (a): `body` on `content` slide MUST NOT produce W-VAL-103 \
+             — body is declared in known_fields(\"content\") (PO adjudication \
+             F-098-ADJ-BODY-CONTENT; BC-3.03.002 v1.3 EC-007 reversed). Got: {diags:?}"
+        );
+
+        // Part (b): `body` on `chart` slide — REJECTED, W-VAL-103 at Error severity.
+        // chart.rs does NOT declare body in known_fields(); body is a CONTENT_DROP_KEY.
+        let chart_slide = make_slide(
+            "chart",
+            vec![
+                ("title", Value::Str(Arc::from("My Chart Slide"))),
+                ("chart_type", Value::Str(Arc::from("bar"))),
+                ("data", Value::List(vec![Value::Str(Arc::from("Q1: 100"))])),
+                (
+                    "body",
+                    Value::Str(Arc::from("body text is NOT valid on chart slides")),
+                ),
+            ],
+        );
+        let chart_deck = make_deck(vec![chart_slide]);
+        let chart_diags = FieldSchemaValidator.validate(&chart_deck, &default_opts());
+        let chart_w_val_103: Vec<_> = chart_diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("'body'"))
+            .collect();
+        assert!(
+            !chart_w_val_103.is_empty(),
+            "BC-3.03.002 AC-003 (b): `body` on `chart` slide MUST produce W-VAL-103 \
+             (chart does not declare body in known_fields(); CONTENT_DROP_KEYS → Error). \
+             Got: {chart_diags:?}"
+        );
+        assert_eq!(
+            chart_w_val_103[0].severity,
+            DiagnosticSeverity::Error,
+            "BC-3.03.002 AC-003 (b): W-VAL-103 for `body` on `chart` slide must be Error \
+             severity (content-drop set, BC-3.03.002 v1.3 Invariant 4). \
+             Got: {:?}. Message: {}",
+            chart_w_val_103[0].severity,
+            chart_w_val_103[0].message
+        );
+        // FU-DIAGNOSTIC-FIELD-PINNING: message format.
+        assert!(
+            chart_w_val_103[0].message.contains("Unknown field 'body'"),
+            "W-VAL-103 message must say \"Unknown field 'body'\"; got: {}",
+            chart_w_val_103[0].message
+        );
+        assert!(
+            chart_w_val_103[0].message.contains("chart"),
+            "W-VAL-103 message must name the slide type 'chart'; got: {}",
+            chart_w_val_103[0].message
+        );
+        assert_eq!(
+            chart_w_val_103[0].code.as_ref(),
+            "W-VAL-103",
+            "Route A: code must remain W-VAL-103; got: {}",
+            chart_w_val_103[0].code
+        );
+    }
+
     // ── Accumulation: multiple slides, each with issues ────────────────────────
 
     /// Multiple slides, each with type mismatches, produce diagnostics for ALL of

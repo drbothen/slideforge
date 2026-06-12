@@ -1,4 +1,4 @@
-//! Compile-time known-field registry for all 31 slideforge slide types.
+//! Compile-time known-field registry for all 34 slideforge slide types.
 //!
 //! [`known_fields`] returns the set of valid field names for a given slide type.
 //! This is used by the alias parser (STORY-008) to validate that alias bodies
@@ -11,7 +11,7 @@
 //! `&'static [&'static str]` slices — zero allocation, zero runtime overhead,
 //! and no new crate dependency. The values are compile-time constants.
 //!
-//! # All 31 Slide Types
+//! # All 34 Slide Types
 //!
 //! Per the `SlideTypeRegistry` in `slideforge-plugin-api` (single source of truth):
 //! - Core: `title`, `section_break`, `content`, `two_col`, `image`, `blank`
@@ -24,6 +24,7 @@
 //! - Data visualization: `chart`, `diagram`
 //! - Media/technical: `screenshot`, `code_sample`, `video`
 //! - Research/org: `survey_results`, `org_chart`, `roadmap`
+//! - Color-coded status (STORY-087): `status`, `progress_bar`, `weighted_composite`
 //! - Closing: `closing`
 //!
 //! Common fields shared by all slide types: `tags`, `notes`, `report`, `detail`,
@@ -48,7 +49,7 @@
 /// assert!(known_fields("content").unwrap().contains(&"bullets"));
 /// ```
 #[must_use]
-#[allow(clippy::too_many_lines)] // 31 slide types × ~10 fields each — exhaustive lookup table, not logic
+#[allow(clippy::too_many_lines)] // 34 slide types × ~10 fields each — exhaustive lookup table, not logic
 pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
     // Common fields that all slide types share.
     // These appear in every type's list below.
@@ -104,6 +105,9 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "footer",
             "logo",
             "title",
+            // body: prose paragraph text in the content area (BC-4.01.001 v1.2 PC-11;
+            // STORY-098 F-098-P1-002: declared so body threading is not gated out for content).
+            "body",
             "bullets",
             "takeaway",
         ]),
@@ -466,6 +470,61 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
             "title",
             "phases",
         ]),
+        // Color-coded status slide types (STORY-087 — BC-1.17.001/002/003).
+        // None of these three declare `body` — body is NOT in their field schemas.
+        // A `body` field on any of these types is an unknown field and will trigger
+        // W-VAL-103 (promoted to Error severity in strict mode because body is a
+        // CONTENT_DROP_KEY per BC-3.03.002 v1.3 Invariant 4).
+        "status" => Some(&[
+            // Common
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            // Type-specific (BC-1.17.001)
+            // Required: title, label (WCAG 1.4.1 co-encoding of color state)
+            "title",
+            "label",
+        ]),
+        "progress_bar" => Some(&[
+            // Common
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            // Type-specific (BC-1.17.002)
+            // Required: title, label, value (integer 0–100)
+            "title",
+            "label",
+            "value",
+        ]),
+        "weighted_composite" => Some(&[
+            // Common
+            "tags",
+            "notes",
+            "report",
+            "detail",
+            "alt",
+            "lang",
+            "decorative",
+            "footer",
+            "logo",
+            // Type-specific (BC-1.17.003)
+            // Required: title, label (aggregate), components (list of component maps)
+            "title",
+            "label",
+            "components",
+        ]),
         "closing" => Some(&[
             "tags",
             "notes",
@@ -484,7 +543,7 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// Return the list of all 31 built-in slide type names.
+/// Return the list of all 34 built-in slide type names.
 ///
 /// These match exactly the keywords registered in `SlideTypeRegistry::default()`
 /// in `slideforge-plugin-api`. This function is the compile-time counterpart of
@@ -492,6 +551,9 @@ pub fn known_fields(slide_type: &str) -> Option<&'static [&'static str]> {
 ///
 /// This is used for error messages (e.g., "Did you mean X?") and for
 /// iterating over all known types.
+///
+/// Count: 31 original types (STORY-003) + `status`, `progress_bar`,
+/// `weighted_composite` (color-coded types added in STORY-087).
 #[must_use]
 pub fn all_slide_types() -> &'static [&'static str] {
     &[
@@ -533,6 +595,10 @@ pub fn all_slide_types() -> &'static [&'static str] {
         "survey_results",
         "org_chart",
         "roadmap",
+        // Color-coded status (STORY-087 — BC-1.17.001/002/003)
+        "status",
+        "progress_bar",
+        "weighted_composite",
         // Closing
         "closing",
     ]
@@ -599,8 +665,9 @@ mod tests {
     }
 
     #[test]
-    fn test_bc_1_08_001_all_31_types_registered() {
-        // All 31 built-in slide types must have known fields.
+    fn test_bc_1_08_001_all_34_types_registered() {
+        // All 34 built-in slide types must have known fields.
+        // 31 original types (STORY-003) + status, progress_bar, weighted_composite (STORY-087).
         for &ty in all_slide_types() {
             assert!(
                 known_fields(ty).is_some(),
@@ -609,8 +676,93 @@ mod tests {
         }
         assert_eq!(
             all_slide_types().len(),
-            31,
-            "must have exactly 31 built-in slide types"
+            34,
+            "must have exactly 34 built-in slide types (31 original + 3 color-coded from STORY-087)"
+        );
+    }
+
+    /// F-098-P2-001: color-coded types must be in `known_fields` with their correct field sets.
+    ///
+    /// - `status`: title + label (NO body)
+    /// - `progress_bar`: title + label + value (NO body)
+    /// - `weighted_composite`: title + label + components (NO body)
+    ///
+    /// The absence of `body` is load-bearing: the body-threading gate in
+    /// `field_to_block.rs` uses `known_fields().contains("body")` to decide
+    /// whether to thread a body block. Body on these types is a W-VAL-103
+    /// `CONTENT_DROP_KEY` → Error in strict mode.
+    #[test]
+    fn test_f098_p2_001_color_coded_types_in_known_fields() {
+        for ty in &["status", "progress_bar", "weighted_composite"] {
+            assert!(
+                known_fields(ty).is_some(),
+                "color-coded type '{ty}' must be in known_fields (F-098-P2-001)"
+            );
+        }
+    }
+
+    /// F-098-P2-001: none of the 3 color-coded types declare `body`.
+    ///
+    /// Body on these types is an unknown `CONTENT_DROP_KEY` field. The body-threading
+    /// gate must NOT thread body blocks for these types in warn-only mode.
+    #[test]
+    fn test_f098_p2_001_color_coded_types_have_no_body() {
+        for ty in &["status", "progress_bar", "weighted_composite"] {
+            let fields = known_fields(ty)
+                .unwrap_or_else(|| panic!("color-coded type '{ty}' must be in known_fields"));
+            assert!(
+                !fields.contains(&"body"),
+                "color-coded type '{ty}' must NOT declare 'body' in known_fields — \
+                 body is unsupported for this layout; use label instead (F-098-P2-001)"
+            );
+        }
+    }
+
+    /// F-098-P2-001: `status` type declares exactly title + label + common fields.
+    #[test]
+    fn test_f098_p2_001_status_required_fields_in_known_fields() {
+        let fields = known_fields("status").expect("status must be in known_fields");
+        assert!(fields.contains(&"title"), "status must have 'title'");
+        assert!(fields.contains(&"label"), "status must have 'label'");
+        // Verify common fields
+        assert!(fields.contains(&"tags"), "status must have common 'tags'");
+        assert!(fields.contains(&"notes"), "status must have common 'notes'");
+        assert!(fields.contains(&"alt"), "status must have common 'alt'");
+    }
+
+    /// F-098-P2-001: `progress_bar` type declares exactly title + label + value + common fields.
+    #[test]
+    fn test_f098_p2_001_progress_bar_required_fields_in_known_fields() {
+        let fields = known_fields("progress_bar").expect("progress_bar must be in known_fields");
+        assert!(fields.contains(&"title"), "progress_bar must have 'title'");
+        assert!(fields.contains(&"label"), "progress_bar must have 'label'");
+        assert!(fields.contains(&"value"), "progress_bar must have 'value'");
+        assert!(
+            !fields.contains(&"body"),
+            "progress_bar must NOT have 'body'"
+        );
+    }
+
+    /// F-098-P2-001: `weighted_composite` type declares exactly title + label + components + common fields.
+    #[test]
+    fn test_f098_p2_001_weighted_composite_required_fields_in_known_fields() {
+        let fields =
+            known_fields("weighted_composite").expect("weighted_composite must be in known_fields");
+        assert!(
+            fields.contains(&"title"),
+            "weighted_composite must have 'title'"
+        );
+        assert!(
+            fields.contains(&"label"),
+            "weighted_composite must have 'label'"
+        );
+        assert!(
+            fields.contains(&"components"),
+            "weighted_composite must have 'components'"
+        );
+        assert!(
+            !fields.contains(&"body"),
+            "weighted_composite must NOT have 'body'"
         );
     }
 

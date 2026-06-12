@@ -3733,6 +3733,7 @@ dependencies = [
  "insta",
  "ordered-float",
  "slideforge-layout",
+ "slideforge-syntax",
  "slideforge-types",
  "strsim",
  "thiserror",

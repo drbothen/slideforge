@@ -352,61 +352,47 @@ fn test_BC_1_18_001_ac009_positive_control_valid_int_value_strict_ok() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Regression intent: chart without `data` builds Ok in strict mode (optional-reclassification)
+// Field-schema behavior: chart without `data` — E-VAL-101 is absent (optional field)
+// BC-1.11.002 v1.2 behavior: E-LAY-003 is emitted instead (missing data source)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// STORY-089 regression intent / architect decision:
+/// STORY-089 architect decision guard + STORY-098 BC-1.11.002 v1.2 contract:
+///
 /// `build()` in strict mode on a `chart` slide WITHOUT the `data` field MUST return
-/// `Ok` — the architect decided that `chart.data` should be reclassified as OPTIONAL
-/// (not required) to avoid spurious E-VAL-101 "Required field 'data' missing" errors
-/// for chart slides that use an @data reference resolved at runtime.
+/// `Err(ValidationFailed)` carrying `E-LAY-003` (NOT `E-VAL-101`).
 ///
-/// ## Why this test exists
+/// ## Two separate decisions at play
 ///
-/// This documents the architect's `chart.data → optional` decision as a build-level
-/// contract. Post-wiring, if the `FieldSchemaValidator` fires E-VAL-101 for absent
-/// `data` on a chart slide, this test FAILS — signaling that `chart.data` was left as
-/// required in the field schema when it should be optional.
+/// 1. **STORY-089 FieldSchemaValidator decision**: `chart.data` is OPTIONAL at
+///    field-schema level — `validate_fields` must NOT emit `E-VAL-101` for absent
+///    `data`. This allows `@data` runtime references without parse-time false positives.
 ///
-/// ## Historical pre-wiring behavior (Red Gate state)
+/// 2. **STORY-098 BC-1.11.002 v1.2 / F-098-P1-007**: `ChartEmptyDataValidator`
+///    catches missing `data` at Stage 5 and emits `E-LAY-003` (broken/exit-2 in
+///    strict mode). Missing `data` == empty `data` per PO adjudication BINDING.
 ///
-/// At the Red Gate, no `FieldSchemaValidator` was registered. `build()` did not call
-/// `validate_fields`. The build returned `Ok` (layout and export succeeded; no
-/// field-schema check ran). This assertion PASSED trivially for the wrong reason.
+/// ## Contract (post-STORY-098)
 ///
-/// ## Current post-wiring behavior (contract to preserve)
-///
-/// With `FieldSchemaValidator` now wired:
-/// - If `chart.data` is REQUIRED: `validate_fields` emits E-VAL-101 for the absent
-///   field → strict gate fires → `Err(ValidationFailed)` → this test FAILS.
-/// - If `chart.data` is OPTIONAL (architect decision, implemented in STORY-089):
-///   no E-VAL-101 for absent data → build returns `Ok` → this test PASSES.
-///
-/// `chart.data` was reclassified as optional during STORY-089 `FieldSchemaValidator`
-/// wiring. This test guards against regression to required.
+/// - `E-VAL-101` is ABSENT (chart.data is optional at field-schema level — STORY-089).
+/// - `E-LAY-003` IS PRESENT (ChartEmptyDataValidator catches it — STORY-098).
+/// - Result: `Err(ValidationFailed)` with E-LAY-003 (NOT E-VAL-101).
 ///
 /// ## Fixture: inline DSL source (no file needed)
 ///
-/// Uses an inline source with a `chart` slide that has `title` and `chart_type` but
-/// no `data` field. The `lang "en-US"` satisfies LangValidator. The `alt` field
-/// satisfies AltTextValidator (chart frame alt text).
+/// Chart slide with `title`, `chart_type`, `alt` but no `data` field.
+/// `lang` satisfies `LangValidator`; `alt` satisfies `AltTextValidator`.
 ///
-/// Traceability: STORY-089 architect decision (chart.data → optional);
-///               BC-1.18.001 invariant 2 (absent optional field → no E-VAL-104/101).
+/// Traceability: STORY-089 architect decision (chart.data → optional at field-schema);
+///               BC-1.11.002 v1.2 EC-005 (missing data → E-LAY-003, STORY-098).
 #[test]
-fn test_BC_1_18_001_ac009_regression_chart_no_data_strict_ok() {
+fn test_BC_1_18_001_ac009_regression_chart_no_data_emits_e_lay_003_not_e_val_101() {
     let brand = BrandTmpDir::new("s089_chart_no_data");
 
-    // Inline fixture: chart slide without `data` field.
-    // - title: required (provided)
-    // - chart_type: required (provided, value "bar" is in OneOf allowlist)
-    // - data: required in current schema, architect-decided optional (absent here)
-    // - alt: provided to satisfy AltTextValidator (chart frame alt text)
-    // - lang: provided to satisfy LangValidator
-    //
-    // NOTE: If this test fails post-wiring with E-VAL-101 (required field 'data' missing),
-    // the implementer must reclassify chart.data as optional in ChartSlideType::new().
-    // If it fails with E-VAL-104 on chart_type "bar", the OneOf allowlist check is broken.
+    // Chart slide without `data` field.
+    // - title + chart_type: required fields provided.
+    // - data: ABSENT — triggers E-LAY-003 (ChartEmptyDataValidator, STORY-098).
+    // - alt: provided to satisfy AltTextValidator (chart frame alt text post-layout).
+    // - lang: provided to satisfy LangValidator.
     let source = concat!(
         "slideforge_version \"1\"\n",
         "lang \"en-US\"\n",
@@ -420,23 +406,51 @@ fn test_BC_1_18_001_ac009_regression_chart_no_data_strict_ok() {
 
     let result = slideforge::build(source, &opts);
 
-    // Regression intent: chart without `data` must build Ok in strict mode.
-    //
-    // Pre-wiring: PASSES trivially (no FieldSchemaValidator → no E-VAL-101 for absent data).
-    // Post-wiring:
-    //   - PASSES if chart.data is reclassified optional (architect decision).
-    //   - FAILS if chart.data remains required (E-VAL-101 fires for absent data in strict mode).
-    //
-    // If this test fails post-wiring, the implementer must reclassify `chart.data`
-    // as optional in `ChartSlideType::new()` by changing `required: true` to
-    // `required: false` and removing it from `required_fields()`.
+    // Must be Err(ValidationFailed) — E-LAY-003 blocks in strict mode.
+    // (Previously: returned Ok because ChartEmptyDataValidator was absent.)
     assert!(
-        result.is_ok(),
-        "STORY-089 regression intent: build() in strict mode on a chart slide WITHOUT \
-         'data' must return Ok — architect decision: chart.data → optional (not required). \
-         \nIf this FAILS post-wiring with E-VAL-101 (required field 'data' missing), \
-         reclassify chart.data as optional in ChartSlideType::new(). \
-         \nIf this FAILS with E-VAL-104 on chart_type, the OneOf allowlist check is broken. \
+        matches!(
+            result,
+            Err(slideforge::error::BuildError::ValidationFailed { .. })
+        ),
+        "STORY-098 BC-1.11.002 v1.2: build() on chart with no data: field must return \
+         Err(ValidationFailed) — ChartEmptyDataValidator emits E-LAY-003 (broken/exit-2). \
          \nGot: {result:?}"
+    );
+
+    let Err(slideforge::error::BuildError::ValidationFailed {
+        ref diagnostics, ..
+    }) = result
+    else {
+        unreachable!("matched Err above")
+    };
+
+    // E-LAY-003 must be present (ChartEmptyDataValidator — STORY-098 F-098-P1-007).
+    let e_lay_003: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code.as_ref() == "E-LAY-003")
+        .collect();
+    assert!(
+        !e_lay_003.is_empty(),
+        "STORY-098 BC-1.11.002 v1.2: ValidationFailed must carry E-LAY-003 for \
+         chart with no data: field. Got codes: {:?}",
+        diagnostics
+            .iter()
+            .map(|d| d.code.as_ref())
+            .collect::<Vec<_>>()
+    );
+
+    // E-VAL-101 must be ABSENT — chart.data is OPTIONAL at field-schema level
+    // (STORY-089 architect decision). ChartEmptyDataValidator handles the runtime check.
+    let e_val_101: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code.as_ref() == "E-VAL-101")
+        .collect();
+    assert!(
+        e_val_101.is_empty(),
+        "STORY-089 regression guard: E-VAL-101 must be ABSENT for chart with no data: \
+         (chart.data is optional at field-schema level per STORY-089 architect decision). \
+         Got: {:?}",
+        e_val_101
     );
 }

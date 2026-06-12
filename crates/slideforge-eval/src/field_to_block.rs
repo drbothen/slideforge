@@ -16,6 +16,7 @@
 
 use std::sync::Arc;
 
+use slideforge_syntax::known_fields::known_fields as slide_type_known_fields;
 use slideforge_types::{
     Block, BulletItem, ColorBarSpec, ContentBlock, Deck, FieldValue, InlineNode, OrderedMap,
     SourceSpan, TextBlock, TextTag, Value,
@@ -185,21 +186,44 @@ fn thread_one_slide(slide: &mut slideforge_types::Slide) {
     // when body contains inline markup like `**bold body text**`). Previously
     // extract_str_field returned None for Inlines, silently dropping the body.
     // This is the primary failing path identified by adversary finding C2.
-    match slide.fields.get("body") {
-        Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
-            slide
-                .blocks
-                .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
-        },
-        _ => {
-            if let Some(text) = extract_str_field(slide, "body")
-                && !text.trim().is_empty()
-            {
+    //
+    // F-098-P1-002 gate: only thread `body` when the slide type's schema declares
+    // `body` as a known field. For types that do NOT declare `body` (e.g., `chart`,
+    // `status`, `progress_bar`, `weighted_composite`), `body` is an unknown field —
+    // `FieldSchemaValidator` emits W-VAL-103 (promoted to Error for CONTENT_DROP_KEYS
+    // in strict mode per BC-3.03.002 v1.3 Invariant 4). Threading it here would render
+    // body content that the slide type's layout does not support.
+    // In warn-only mode this would silently produce a Body frame the layout ignores.
+    //
+    // None-semantics (F-098-P2-001): `None` from `slide_type_known_fields` means the
+    // type is NOT a registered built-in — i.e., a user-defined plugin type. Plugin
+    // types are not in the compile-time table. For these we fall through and thread
+    // body unconditionally (`is_none_or` → true when `None`). This preserves the
+    // open-world assumption: a plugin may declare body support without appearing in
+    // the syntax crate's compile-time table.
+    //
+    // Coherence invariant: all 34 bundled types are present in `slide_type_known_fields`
+    // (enforced by `test_f098_p2_001_bundled_registry_coherence` in slideforge-plugin-api).
+    // So `None` is only reachable for genuine third-party plugin types.
+    let slide_type_supports_body = slide_type_known_fields(slide.slide_type.as_ref())
+        .is_none_or(|known| known.contains(&"body"));
+    if slide_type_supports_body {
+        match slide.fields.get("body") {
+            Some(FieldValue::Inlines(nodes)) if !nodes.is_empty() => {
                 slide
                     .blocks
-                    .push(make_text_block_tagged(text, TextTag::Body));
-            }
-        },
+                    .push(make_text_block_tagged_inlines(nodes.clone(), TextTag::Body));
+            },
+            _ => {
+                if let Some(text) = extract_str_field(slide, "body")
+                    && !text.trim().is_empty()
+                {
+                    slide
+                        .blocks
+                        .push(make_text_block_tagged(text, TextTag::Body));
+                }
+            },
+        }
     }
 
     // ── 4a. Caption ──────────────────────────────────────────────────────
@@ -1147,6 +1171,68 @@ mod tests {
             "second call appends (idempotency is not guaranteed — whole-deck \
              re-threading doubles blocks on already-threaded slides; \
              use thread_slide_fields_to_blocks for selective threading)"
+        );
+    }
+
+    // ── F-098-P3-004: eval gate `slide_type_supports_body` for color-coded types ─
+
+    /// F-098-P3-004 (STORY-098 adversary pass-3):
+    ///
+    /// A `progress_bar` slide carrying a `body:` field must NOT produce a
+    /// `TextTag::Body` block. `progress_bar` does not declare `body` in its
+    /// known-fields set (BC-1.17.002 / STORY-087), so the eval gate
+    /// `slide_type_supports_body` (`field_to_block.rs`) must return `false` and
+    /// the body field must be silently suppressed.
+    ///
+    /// Load-bearing: if the gate is removed or if `known_fields("progress_bar")`
+    /// erroneously includes `"body"`, this assertion fails (a Body block is present).
+    /// Mutation-survivable without this test.
+    #[test]
+    fn test_f098_p3_004_progress_bar_body_field_not_threaded() {
+        use slideforge_types::ContentBlock;
+
+        let mut fields = OrderedMap::new();
+        fields.insert(
+            Arc::from("title"),
+            FieldValue::Literal(Value::Str(Arc::from("Status Update"))),
+        );
+        fields.insert(
+            Arc::from("label"),
+            FieldValue::Literal(Value::Str(Arc::from("On Track"))),
+        );
+        fields.insert(Arc::from("value"), FieldValue::Literal(Value::Int(75)));
+        // This field must NOT produce a TextTag::Body block — progress_bar has no body.
+        fields.insert(
+            Arc::from("body"),
+            FieldValue::Literal(Value::Str(Arc::from("This should be suppressed"))),
+        );
+        let slide = Slide {
+            slide_type: Arc::from("progress_bar"),
+            fields,
+            blocks: vec![],
+            register: None,
+            tags: vec![],
+            source_span: SourceSpan::default(),
+            overlay: None,
+            register_content: vec![],
+            field_spans: OrderedMap::new(),
+        };
+        let mut deck = make_deck(vec![slide]);
+        thread_fields_to_blocks(&mut deck);
+
+        // F-098-P3-004: no TextTag::Body block must be present for progress_bar.
+        let has_body_block = deck.slides[0].blocks.iter().any(|b| {
+            matches!(
+                &b.content,
+                ContentBlock::Text(tb) if tb.tag == TextTag::Body
+            )
+        });
+        assert!(
+            !has_body_block,
+            "F-098-P3-004: progress_bar slide must NOT thread a TextTag::Body block \
+             (progress_bar does not declare 'body' per BC-1.17.002); \
+             blocks: {:?}",
+            deck.slides[0].blocks
         );
     }
 }

@@ -2,6 +2,9 @@
 #
 # Used by: AC-006 (decorative chart → strict Ok, empty descr / PDF Artifact).
 # In strict mode, this must return Ok (no E-A11-001 emitted).
+#
+# STORY-098 (F-098-P1-005): added data: field — ChartEmptyDataValidator now
+# requires non-empty data; without it E-LAY-003 is emitted in strict mode.
 
 slideforge_version "1"
 lang "en-US"
@@ -10,3 +13,4 @@ slide chart:
   title "Background"
   chart_type "area"
   decorative true
+  data ["baseline"]

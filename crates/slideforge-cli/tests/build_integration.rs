@@ -2334,3 +2334,292 @@ fn test_f094_p10_001_lay_008_warn_only_html_contains_error_code() {
         html_content
     );
 }
+
+// ── F-098-P3-001: E-LAY-003 warn-only → placeholder + exit 0 ─────────────────
+
+/// Write a `.sf` source with an empty-data chart slide (E-LAY-003).
+///
+/// The `chart` slide type requires a non-empty `data:` field. Providing an empty
+/// list triggers `E-LAY-003` at Stage-5 validation (ChartEmptyDataValidator).
+///
+/// This fixture is valid DSL syntax (parses and evaluates without error) so that
+/// only the E-LAY-003 validation error is present.
+fn write_e_lay_003_sf(path: &std::path::Path) {
+    let content = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide chart:\n",
+        "  title \"Revenue Chart\"\n",
+        "  chart_type \"bar\"\n",
+        "  alt \"Revenue bar chart\"\n",
+        "  data: []\n",
+    );
+    std::fs::write(path, content).expect("write E-LAY-003 empty-data chart .sf fixture");
+}
+
+/// Write a `.sf` source with a chart slide that has NO `data:` field (missing data).
+///
+/// BC-1.11.002 v1.2 EC-005 (F-098-P1-007): absent `data:` field triggers E-LAY-003
+/// identically to an empty-evaluating `data:` binding.
+fn write_e_lay_003_missing_data_sf(path: &std::path::Path) {
+    let content = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide chart:\n",
+        "  title \"Forecast Chart\"\n",
+        "  chart_type \"bar\"\n",
+        "  alt \"Forecast bar chart\"\n",
+    );
+    std::fs::write(path, content).expect("write E-LAY-003 missing-data chart .sf fixture");
+}
+
+/// F-098-P3-001 Prong 1: E-LAY-003 empty-data chart in strict mode must exit 2.
+///
+/// Error taxonomy row E-LAY-003: chart data is empty → `broken | 2`.
+/// In strict mode (default), the pipeline gate sees the E-LAY-003 Error diagnostic
+/// and exits 2 with no output.
+#[test]
+fn test_f098_p3_001_e_lay_003_empty_data_strict_exits_2() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("e_lay_003_strict.sf");
+    let out_dir = tmp.path().join("dist");
+    write_e_lay_003_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path,
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Pptx],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: false,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::from(2),
+        "F-098-P3-001: E-LAY-003 empty-data chart in strict mode must exit 2; got: {code:?}"
+    );
+    // No output must be written on strict failure.
+    assert!(
+        !out_dir.exists()
+            || out_dir
+                .read_dir()
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
+        "F-098-P3-001: no output must be written on E-LAY-003 in strict mode"
+    );
+}
+
+/// F-098-P3-001 Prong 2: E-LAY-003 empty-data chart with --warn-only must exit 0
+/// and produce output with an error-slide placeholder.
+///
+/// BC-1.11.002 v1.2 postcondition 3 / PC-3: in warn-only mode, the chart slide is
+/// replaced by an error-slide placeholder rendered at the chart slide's position;
+/// build continues; exit 0.
+///
+/// REND-010a: warn-only half — the error-slide placeholder must be rendered, not
+/// an empty chart frame.
+///
+/// RED Gate: this test FAILS before the fix because the pipeline currently skips
+/// the strict gate in warn-only mode but does NOT substitute a placeholder — the
+/// chart exporter sees an empty `FrameContent::Chart` and may produce a blank slide.
+#[test]
+fn test_f098_p3_001_e_lay_003_empty_data_warn_only_exits_0_placeholder() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("e_lay_003_warn.sf");
+    let out_dir = tmp.path().join("dist");
+    write_e_lay_003_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Html],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-098-P3-001 Prong 2: E-LAY-003 with --warn-only must exit 0 \
+         (error-slide placeholder rendered); got: {code:?}"
+    );
+
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    let html_path = out_dir.join(format!("{stem}.html"));
+    assert!(
+        html_path.exists(),
+        "F-098-P3-001 Prong 2: .html must be written under --warn-only for E-LAY-003"
+    );
+
+    let html_content =
+        std::fs::read_to_string(&html_path).expect("F-098-P3-001: failed to read .html output");
+
+    // The error-slide placeholder must be rendered with the E-LAY-003 code visible.
+    // A blank or empty-chart slide trivially passes file_size > 0 but not this check.
+    assert!(
+        html_content.contains("E-LAY-003"),
+        "F-098-P3-001 Prong 2: HTML output must contain 'E-LAY-003' \
+         at the affected slide position (error-slide placeholder must be RENDERED, \
+         not a blank chart); html snippet (first 4000 chars): {:.4000}",
+        html_content
+    );
+}
+
+/// F-098-P3-001 Prong 3: missing-data chart with --warn-only must exit 0
+/// and produce an error-slide placeholder (F-098-P1-007 case).
+///
+/// BC-1.11.002 v1.2 EC-005: absent `data:` field is equally broken as empty data.
+/// Both cases must produce an error-slide placeholder in warn-only mode.
+#[test]
+fn test_f098_p3_001_e_lay_003_missing_data_warn_only_exits_0_placeholder() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let src_path = tmp.path().join("e_lay_003_missing_warn.sf");
+    let out_dir = tmp.path().join("dist");
+    write_e_lay_003_missing_data_sf(&src_path);
+    write_brand_toml(tmp.path());
+
+    let args = BuildArgs {
+        source: src_path.clone(),
+        output_dir: out_dir.clone(),
+        format: vec![OutputFormat::Html],
+        variant: None,
+    };
+    let global = GlobalFlags {
+        warn_only: true,
+        ..default_global()
+    };
+
+    let code = run_build(&args, &global);
+
+    assert_eq!(
+        code,
+        ExitCode::SUCCESS,
+        "F-098-P3-001 Prong 3: E-LAY-003 missing-data with --warn-only must exit 0; \
+         got: {code:?}"
+    );
+
+    let stem = src_path.file_stem().unwrap().to_string_lossy();
+    let html_path = out_dir.join(format!("{stem}.html"));
+    let html_content =
+        std::fs::read_to_string(&html_path).expect("F-098-P3-001: failed to read .html output");
+
+    assert!(
+        html_content.contains("E-LAY-003"),
+        "F-098-P3-001 Prong 3: HTML output must contain 'E-LAY-003' \
+         (error-slide placeholder for missing-data chart); html snippet: {:.4000}",
+        html_content
+    );
+}
+
+/// F-098-P3-001 Prong 4: ChartRenderer MUST NOT be invoked for an empty-data chart
+/// in warn-only mode (BC-1.11.002 invariant 2).
+///
+/// After the demotion substitution, the `chart` slide is replaced with
+/// `__error_placeholder__` in the Deck. The LaidOutDeck must NOT contain any
+/// `FrameContent::Chart` frame for the affected slide — only the placeholder
+/// frame. This verifies invariant 2: ChartRenderer is never called with empty data.
+#[test]
+fn test_f098_p3_001_warn_only_no_chart_frame_in_laid_out_deck() {
+    use slideforge::FrameContent;
+    use slideforge::compile;
+    use slideforge_plugin_api::BrandSource;
+
+    // Build a minimal brand.toml + stub logo in a temp dir (same format as write_brand_toml).
+    use std::io::Write as _;
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    // Stub PNG (8-byte PNG magic header is enough for the logo path validator).
+    let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let logo_path = tmp.path().join("logo.png");
+    std::fs::File::create(&logo_path)
+        .and_then(|mut f| f.write_all(logo_bytes))
+        .expect("write logo.png");
+    let brand_path = tmp.path().join("brand.toml");
+    std::fs::write(
+        &brand_path,
+        concat!(
+            "[colors]\n",
+            "dk1 = \"#1F2937\"\n",
+            "acc1 = \"#3B82F6\"\n",
+            "\n",
+            "[fonts]\n",
+            "heading = \"Arial\"\n",
+            "body = \"Arial\"\n",
+            "\n",
+            "[logo]\n",
+            "path = \"logo.png\"\n",
+        ),
+    )
+    .expect("write brand.toml");
+
+    let source = concat!(
+        "slideforge_version \"1\"\n",
+        "lang \"en-US\"\n",
+        "slide chart:\n",
+        "  title \"Revenue Chart\"\n",
+        "  chart_type \"bar\"\n",
+        "  alt \"Revenue bar chart\"\n",
+        "  data: []\n",
+    );
+
+    let opts = slideforge::CompileOptions {
+        brand_source: Some(BrandSource::TomlFile(std::sync::Arc::from(
+            brand_path.to_string_lossy().as_ref(),
+        ))),
+        strict: false, // warn-only
+        active_variant: None,
+        source_name: Some(std::sync::Arc::from("test.sf")),
+    };
+
+    let compiled = compile(source, &opts).expect(
+        "F-098-P3-001 Prong 4: compile must succeed in warn-only mode for empty-data chart",
+    );
+
+    // BC-1.11.002 invariant 2: no FrameContent::Chart may appear in the LaidOutDeck.
+    // After demotion, the chart slide is __error_placeholder__, which produces
+    // FrameContent::Body (diagnostic message) — never FrameContent::Chart.
+    let has_chart_frame = compiled.laid_out.slides.iter().any(|s| {
+        s.frames
+            .iter()
+            .any(|f| matches!(f.content, FrameContent::Chart { .. }))
+    });
+    assert!(
+        !has_chart_frame,
+        "F-098-P3-001 Prong 4: LaidOutDeck must NOT contain FrameContent::Chart \
+         for an empty-data chart in warn-only mode (BC-1.11.002 invariant 2 — \
+         ChartRenderer must never be called with empty data); \
+         frames: {:?}",
+        compiled
+            .laid_out
+            .slides
+            .iter()
+            .flat_map(|s| s.frames.iter().map(|f| &f.content))
+            .collect::<Vec<_>>()
+    );
+
+    // The slide must have an ErrorSlidePlaceholder or Body frame instead.
+    let has_placeholder_or_body = compiled.laid_out.slides.iter().any(|s| {
+        s.frames.iter().any(|f| {
+            matches!(
+                f.content,
+                FrameContent::ErrorSlidePlaceholder { .. } | FrameContent::Body(_)
+            )
+        })
+    });
+    assert!(
+        has_placeholder_or_body,
+        "F-098-P3-001 Prong 4: LaidOutDeck must contain ErrorSlidePlaceholder or Body \
+         frame for the demoted chart slide; got no such frames"
+    );
+}

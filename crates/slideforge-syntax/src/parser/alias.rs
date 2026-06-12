@@ -430,6 +430,49 @@ mod tests {
         );
     }
 
+    // ── F-098-P3-003: E-PAR-011 on color-coded types (progress_bar / status / weighted_composite) ─
+
+    /// F-098-P3-003 (STORY-098 adversary pass-3): alias presetting an undeclared field
+    /// on a color-coded type must emit E-PAR-011.
+    ///
+    /// `progress_bar` does NOT declare `body` in its known-fields set (BC-1.17.002).
+    /// An alias that presets `body` on `progress_bar` must be rejected with E-PAR-011.
+    ///
+    /// This test covers the newly-reachable E-PAR-011 path (alias.rs:193) for the
+    /// color-coded slide types that were added in STORY-087.
+    ///
+    /// Load-bearing: if the `known_fields("progress_bar")` check is removed from
+    /// the E-PAR-011 guard, this test passes vacuously (no error emitted), masking
+    /// the mutation.
+    #[test]
+    fn test_f098_p3_003_e_par_011_color_coded_type_undeclared_field_rejected() {
+        // `progress_bar` does not declare `body` — presetting it must produce E-PAR-011.
+        let src = concat!(
+            "alias bar_with_body = progress_bar:\n",
+            "  body \"This field is not valid for progress_bar\"\n",
+            "slide progress_bar:\n",
+            "  title \"Status\"\n",
+            "  label \"On Track\"\n",
+            "  value 75\n",
+        );
+        let result = parse_deck(src);
+        assert!(
+            result.is_err(),
+            "F-098-P3-003: alias presetting 'body' on 'progress_bar' must produce E-PAR-011 \
+             (body is not a known field of progress_bar per BC-1.17.002)"
+        );
+        let errors = result.unwrap_err();
+        let has_par011 = errors.iter().any(|e| {
+            let msg = e.to_string();
+            msg.contains("E-PAR-011") || msg.contains("body") || msg.contains("valid field")
+        });
+        assert!(
+            has_par011,
+            "F-098-P3-003: error must reference E-PAR-011 or 'body' or 'valid field'; \
+             got: {errors:?}"
+        );
+    }
+
     // ── AC-013: alias name collides with built-in → E-PAR-006 ────────────────
 
     #[test]

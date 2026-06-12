@@ -353,6 +353,12 @@ pub use slideforge_types::SourceSpan;
 /// via the structured layout-error rendering path.
 pub use slideforge_layout::LayoutError;
 
+/// Re-export of [`slideforge_layout::FrameContent`].
+///
+/// Integration tests (and the CLI, if needed) can inspect `CompiledDeck.laid_out`
+/// frames without a direct dependency on `slideforge-layout`.
+pub use slideforge_layout::FrameContent;
+
 // ── Sort-key utilities for cross-stage source-order rendering ─────────────────
 
 /// Extract the source sort key `(file, line, col)` from a
@@ -602,6 +608,58 @@ pub fn export_format(
         bytes,
         extension: file_extension,
     })
+}
+
+// ── F-098-P3-001 / BC-1.11.002 PC-3: warn-only E-LAY-003 demotion helpers ────
+
+/// Collect the zero-based slide indices of all `chart` slides in `deck` that
+/// have empty or absent `data:` field values (E-LAY-003 condition).
+///
+/// This function re-inspects the deck in the same way `ChartEmptyDataValidator`
+/// does, so that warn-only demotion can identify WHICH slides need placeholder
+/// substitution without carrying indices through the `Diagnostic` struct.
+///
+/// Returns an empty `Vec` if no chart slides qualify.
+fn collect_e_lay_003_chart_indices(deck: &slideforge_types::Deck) -> Vec<usize> {
+    use slideforge_types::{FieldValue, Value};
+
+    deck.slides
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, slide)| {
+            if slide.slide_type.as_ref() != "chart" {
+                return None;
+            }
+            let is_empty_or_absent = match slide.fields.get("data") {
+                Some(FieldValue::Literal(Value::List(items))) => items.is_empty(),
+                Some(FieldValue::Literal(Value::Map(m))) => m.is_empty(),
+                None => true, // absent data field — BC-1.11.002 v1.2 EC-005
+                _ => false,
+            };
+            if is_empty_or_absent { Some(idx) } else { None }
+        })
+        .collect()
+}
+
+/// Build the canonical per-slide E-LAY-003 diagnostic message for a chart slide.
+///
+/// The message is embedded in the placeholder `body` field so it appears in
+/// all export formats at the affected slide position.
+///
+/// Format: `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+fn e_lay_003_placeholder_message(deck: &slideforge_types::Deck, slide_idx: usize) -> String {
+    use slideforge_types::{FieldValue, Value};
+    let title = if let Some(slide) = deck.slides.get(slide_idx) {
+        match slide.fields.get("title") {
+            Some(FieldValue::Literal(Value::Str(s))) => s.as_ref().to_owned(),
+            _ => slide.slide_type.as_ref().to_owned(),
+        }
+    } else {
+        "chart".to_owned()
+    };
+    format!(
+        "[E-LAY-003] Chart data is empty for slide '{title}'. Rendering error-slide placeholder."
+    )
 }
 
 // ── F-094-P9-001 Prong 2: warn-only layout-error demotion helpers ─────────────
@@ -1036,6 +1094,57 @@ fn compile_inner(
     // AFTER the validator loop so LangValidator can correctly detect absent lang.
     tracing::info!("compile_inner: injecting lang default (post-validate)");
     slideforge_validate::inject_lang_default(&mut deck);
+
+    // F-098-P3-001 / BC-1.11.002 PC-3: warn-only E-LAY-003 pre-layout demotion.
+    //
+    // The `ChartEmptyDataValidator` (Stage 5) emits E-LAY-003 with Error severity
+    // for every chart slide whose `data:` field is absent or empty.  In STRICT mode
+    // those errors will hit the combined gate (Stage 6c) and return
+    // `BuildError::ValidationFailed`.  In WARN-ONLY mode the gate is skipped, but
+    // Stage 6 layout would still produce `FrameContent::Chart` for the affected
+    // slides — violating BC-1.11.002 invariant 2 ("ChartRenderer is NEVER called
+    // with empty data") and emitting no visible error to the user.
+    //
+    // Fix: before Stage 6 layout, if we are in warn-only mode and ANY E-LAY-003
+    // diagnostics were emitted, substitute the affected chart slides with
+    // `error_slide_placeholder` (same IR type used by E-LAY-008), re-thread their
+    // fields, then let layout run normally on the substituted deck.
+    //
+    // This mirrors the E-LAY-008 demotion ordering exactly (substitute → re-thread
+    // → re-layout) and satisfies the same architectural contract (ADR-019: fields
+    // must be threaded to blocks before layout can produce non-empty frames).
+    if !options.strict {
+        let has_e_lay_003 = all_validator_diagnostics
+            .iter()
+            .any(|d| d.code.as_ref() == "E-LAY-003");
+        if has_e_lay_003 {
+            let e_lay_003_indices = collect_e_lay_003_chart_indices(&deck);
+            if !e_lay_003_indices.is_empty() {
+                tracing::warn!(
+                    count = e_lay_003_indices.len(),
+                    "compile_inner: warn-only mode — demoting E-LAY-003 \
+                     (empty-data chart) to error-slide placeholders \
+                     on slides {e_lay_003_indices:?}"
+                );
+                for &slide_idx in &e_lay_003_indices {
+                    if slide_idx < deck.slides.len() {
+                        let per_slide_msg = e_lay_003_placeholder_message(&deck, slide_idx);
+                        let placeholder = slideforge_validate::error_slide_placeholder(
+                            "E-LAY-003",
+                            &per_slide_msg,
+                            slide_idx + 1,
+                        );
+                        deck.slides[slide_idx] = placeholder;
+                    }
+                }
+                for &slide_idx in &e_lay_003_indices {
+                    if slide_idx < deck.slides.len() {
+                        thread_slide_fields_to_blocks(&mut deck.slides[slide_idx]);
+                    }
+                }
+            }
+        }
+    }
 
     // Stage 6: lay out the Deck.
     //
@@ -3714,5 +3823,265 @@ mod tests {
         // If we reached here without a panic, the pipeline handled the hostile name.
         // The unit test above (test_sec001_sanitize_source_name_replaces_control_chars_with_replacement_char)
         // covers the sanitization contract directly.
+    }
+
+    // ── F-098-P4-002: demotion selectivity — mixed deck ──────────────────────
+
+    /// F-098-P4-002 — `collect_e_lay_003_chart_indices` returns ONLY the indices
+    /// of chart slides with empty or absent data, not non-empty chart slides.
+    ///
+    /// Builds a Deck directly with three slides:
+    /// - Index 0: `chart` with empty `data: []`   → must be collected
+    /// - Index 1: `title` (non-chart)              → must NOT be collected
+    /// - Index 2: `chart` with non-empty `data: [1]` → must NOT be collected
+    ///
+    /// Verifies `collect_e_lay_003_chart_indices` returns only `[0]`.
+    #[test]
+    fn test_f098_p4_002_collect_e_lay_003_chart_indices_mixed_deck() {
+        use slideforge_types::{DeckMetadata, FieldValue, OrderedMap, Slide, SourceSpan, Value};
+
+        // Helper: build a minimal chart slide with the given data Value.
+        let make_chart_slide = |data: Value| -> Slide {
+            let mut fields: OrderedMap<std::sync::Arc<str>, FieldValue> = OrderedMap::new();
+            fields.insert(
+                std::sync::Arc::from("title"),
+                FieldValue::Literal(Value::Str(std::sync::Arc::from("Test Chart"))),
+            );
+            fields.insert(std::sync::Arc::from("data"), FieldValue::Literal(data));
+            Slide {
+                slide_type: std::sync::Arc::from("chart"),
+                fields,
+                blocks: vec![],
+                register: None,
+                tags: vec![],
+                source_span: SourceSpan::default(),
+                overlay: None,
+                register_content: vec![],
+                field_spans: OrderedMap::new(),
+            }
+        };
+
+        // Helper: build a title slide (non-chart).
+        let make_title_slide = || -> Slide {
+            let mut fields: OrderedMap<std::sync::Arc<str>, FieldValue> = OrderedMap::new();
+            fields.insert(
+                std::sync::Arc::from("title"),
+                FieldValue::Literal(Value::Str(std::sync::Arc::from("Title Slide"))),
+            );
+            Slide {
+                slide_type: std::sync::Arc::from("title"),
+                fields,
+                blocks: vec![],
+                register: None,
+                tags: vec![],
+                source_span: SourceSpan::default(),
+                overlay: None,
+                register_content: vec![],
+                field_spans: OrderedMap::new(),
+            }
+        };
+
+        // Index 0: empty-data chart — must be collected.
+        let empty_chart = make_chart_slide(Value::List(vec![]));
+        // Index 1: title slide (non-chart) — must NOT be collected.
+        let title_slide = make_title_slide();
+        // Index 2: non-empty chart (1 data point) — must NOT be collected.
+        let nonempty_chart = make_chart_slide(Value::List(vec![Value::Int(42)]));
+
+        let deck = Deck {
+            slides: vec![empty_chart, title_slide, nonempty_chart],
+            vars: OrderedMap::new(),
+            metadata: DeckMetadata {
+                title: Some(std::sync::Arc::from("Mixed Deck")),
+                slideforge_version: std::sync::Arc::from("0.1.0"),
+                lang: Some(std::sync::Arc::from("en-US")),
+                author: None,
+                section_order: None,
+            },
+            registers: OrderedMap::new(),
+            section_blocks: vec![],
+            slide_sections: vec![],
+        };
+
+        let indices = collect_e_lay_003_chart_indices(&deck);
+
+        assert_eq!(
+            indices,
+            vec![0],
+            "F-098-P4-002: collect_e_lay_003_chart_indices must return only the \
+             index of the empty-data chart ([0]), not the title slide or the \
+             non-empty chart; got: {indices:?}"
+        );
+    }
+
+    /// F-098-P4-002 — warn-only demotion selectivity: one EMPTY-data chart +
+    /// one NON-EMPTY chart → exactly one slide becomes an error-slide placeholder;
+    /// the non-empty chart slide is NOT demoted (no data loss).
+    ///
+    /// This test exercises the full `compile()` pipeline in warn-only mode
+    /// (strict=false). The deck contains:
+    /// - Slide 0: `chart` with empty `data: []`     → must be demoted to placeholder
+    /// - Slide 1: `chart` with non-empty `data: [1]` → must remain a chart slide
+    ///
+    /// Asserts:
+    /// 1. `compile()` returns `Ok(CompiledDeck)` (warn-only: no early exit).
+    /// 2. `compiled.deck.slides[0].slide_type == "__error_placeholder__"`.
+    /// 3. `compiled.deck.slides[1].slide_type == "chart"` (non-empty chart NOT touched).
+    /// 4. `compiled.laid_out` contains exactly one `FrameContent::ErrorSlidePlaceholder`
+    ///    and at least one `FrameContent::Chart` (non-empty chart laid out normally).
+    #[test]
+    fn test_f098_p4_002_warn_only_demotion_selectivity_one_empty_one_nonempty() {
+        use std::io::Write as _;
+
+        // ── Setup: brand.toml + logo ───────────────────────────────────────────
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "slideforge_f098_p4_002_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmp dir");
+
+        let logo_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // minimal PNG header
+        let logo_path = tmp_dir.join("logo.png");
+        {
+            let mut f = std::fs::File::create(&logo_path).expect("create logo.png");
+            f.write_all(logo_bytes).expect("write logo bytes");
+        }
+
+        let brand_toml_path = tmp_dir.join("brand.toml");
+        {
+            let mut f = std::fs::File::create(&brand_toml_path).expect("create brand.toml");
+            f.write_all(b"[logo]\npath = \"logo.png\"\n")
+                .expect("write brand.toml");
+        }
+
+        // ── DSL: two chart slides — first empty, second non-empty ─────────────
+        //
+        // Slide 1 (index 0): empty data `data: []` → E-LAY-003 → demoted.
+        // Slide 2 (index 1): non-empty data `data: [1]` → not demoted.
+        //
+        // `alt` is required by AltTextValidator; providing it avoids an unrelated
+        // E-A11-001 diagnostic that could obscure the test assertions.
+        let source = concat!(
+            "slideforge_version \"1\"\n",
+            "lang \"en-US\"\n",
+            "slide chart:\n",
+            "  title \"Empty Chart\"\n",
+            "  chart_type \"bar\"\n",
+            "  alt \"empty chart\"\n",
+            "  data: []\n",
+            "slide chart:\n",
+            "  title \"Non-empty Chart\"\n",
+            "  chart_type \"bar\"\n",
+            "  alt \"non-empty chart\"\n",
+            "  data: [\"Q1\"]\n",
+        );
+
+        let compile_opts = CompileOptions {
+            brand_source: Some(BrandSource::TomlFile(Arc::from(
+                brand_toml_path.to_string_lossy().as_ref(),
+            ))),
+            strict: false, // warn-only: E-LAY-003 must be demoted, not fatal
+            active_variant: None,
+            source_name: Some(Arc::from("mixed-chart-deck.sf")),
+        };
+
+        let result = compile(source, &compile_opts);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        // Must succeed in warn-only mode.
+        let compiled = result.expect(
+            "F-098-P4-002: compile() with one empty-data chart + one non-empty chart \
+             in warn-only mode must return Ok(CompiledDeck)",
+        );
+
+        // ── Assert slide-level demotion selectivity ────────────────────────────
+
+        assert_eq!(
+            compiled.deck.slides.len(),
+            2,
+            "F-098-P4-002: deck must have exactly 2 slides; got {}",
+            compiled.deck.slides.len()
+        );
+
+        // Slide 0 (was empty chart) must be demoted to __error_placeholder__.
+        assert_eq!(
+            compiled.deck.slides[0].slide_type.as_ref(),
+            slideforge_validate::ERROR_PLACEHOLDER_SLIDE_TYPE,
+            "F-098-P4-002: slide[0] (empty-data chart) must be demoted to \
+             '{}' in warn-only mode; got: '{}'",
+            slideforge_validate::ERROR_PLACEHOLDER_SLIDE_TYPE,
+            compiled.deck.slides[0].slide_type
+        );
+
+        // Slide 1 (was non-empty chart) must remain a chart slide — no demotion.
+        assert_eq!(
+            compiled.deck.slides[1].slide_type.as_ref(),
+            "chart",
+            "F-098-P4-002: slide[1] (non-empty chart) must NOT be demoted; \
+             got: '{}'",
+            compiled.deck.slides[1].slide_type
+        );
+
+        // ── Assert LaidOutDeck frame content ───────────────────────────────────
+        //
+        // The demoted chart slide (`__error_placeholder__`) produces
+        // `FrameContent::Body([E-LAY-003 diagnostic message])` + a Title frame
+        // when laid out (see regions.rs `__error_placeholder__` region map).
+        // The non-empty chart slide produces `FrameContent::Chart { alt }`.
+        //
+        // Check: at least one Body frame contains the E-LAY-003 code (confirming
+        // the demoted slide's diagnostic text was threaded), and at least one
+        // Chart frame exists (confirming the non-empty chart was NOT demoted).
+
+        let all_frames: Vec<_> = compiled
+            .laid_out
+            .slides
+            .iter()
+            .flat_map(|s| s.frames.iter().map(|f| &f.content))
+            .collect();
+
+        // The demoted placeholder renders as FrameContent::Body containing
+        // the "[E-LAY-003] Chart data is empty..." diagnostic message.
+        let has_e_lay_003_body = all_frames.iter().any(|c| {
+            if let FrameContent::Body(blocks) = c {
+                blocks.iter().any(|block| {
+                    if let slideforge_types::ContentBlock::Text(tb) = block {
+                        tb.inlines.iter().any(|inline| {
+                            if let slideforge_types::InlineNode::Plain(text) = inline {
+                                text.contains("E-LAY-003")
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_e_lay_003_body,
+            "F-098-P4-002: LaidOutDeck must contain a FrameContent::Body with \
+             the E-LAY-003 diagnostic message for the demoted chart; \
+             frames: {all_frames:?}"
+        );
+
+        // The non-empty chart must produce a FrameContent::Chart (no data loss).
+        let chart_frame_count = all_frames
+            .iter()
+            .filter(|c| matches!(c, FrameContent::Chart { .. }))
+            .count();
+        assert!(
+            chart_frame_count >= 1,
+            "F-098-P4-002: LaidOutDeck must contain at least one \
+             FrameContent::Chart for the non-empty chart (no data loss); \
+             frames: {all_frames:?}"
+        );
     }
 }

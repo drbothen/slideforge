@@ -201,6 +201,13 @@ impl Default for SlideTypeRegistry {
     }
 }
 
+/// BC-3.03.002 v1.3 Invariant 4 (Route A): unknown fields in this set promote
+/// `W-VAL-103` to Error severity (broken/exit-2 in strict mode) because they cause
+/// authored content to be silently dropped. Fields NOT in this set retain Warning
+/// (cosmetic/exit-0). Message format and code are UNCHANGED (no new E-VAL-105).
+/// STORY-098 AC-001/AC-002.
+const CONTENT_DROP_KEYS: &[&str] = &["shape", "body"];
+
 /// Validate a slide's fields against a slide type's schema.
 ///
 /// Accumulates **all** diagnostics before returning — does not stop at the
@@ -353,10 +360,17 @@ pub fn validate_fields(slide: &Slide, slide_type: &dyn SlideType) -> Vec<Diagnos
     let mut known_list: Vec<&str> = known.iter().map(std::convert::AsRef::as_ref).collect();
     known_list.sort_unstable();
     let known_list_str = known_list.join(", ");
+    // BC-3.03.002 v1.3 Invariant 4 (Route A): severity promoted to Error for
+    // content-drop keys — see module-level `CONTENT_DROP_KEYS` for the set.
     for key in slide.fields.keys() {
         if !known.contains(key.as_ref()) {
+            let severity = if CONTENT_DROP_KEYS.contains(&key.as_ref()) {
+                DiagnosticSeverity::Error
+            } else {
+                DiagnosticSeverity::Warning
+            };
             diags.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
+                severity,
                 code: Arc::from("W-VAL-103"),
                 message: Arc::from(format!(
                     "Unknown field '{key}' for slide type '{type_id}'. \
@@ -396,7 +410,11 @@ fn known_field_names(slide_type: &dyn SlideType) -> std::collections::HashSet<Ar
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(clippy::missing_docs_in_private_items, clippy::unwrap_used)]
+#[allow(
+    clippy::missing_docs_in_private_items,
+    clippy::unwrap_used,
+    non_snake_case // BC-traceability IDs: test_BC_S_SS_NNN_xxx
+)]
 mod tests {
     use super::*;
     use slideforge_types::{FieldValue, OrderedMap, Slide, SourceSpan, Value};
@@ -1044,5 +1062,450 @@ mod tests {
             layouts: vec![],
             span: SourceSpan::default(),
         }
+    }
+
+    // ── STORY-098: W-VAL-103 content-drop severity promotion (BC-3.03.002 v1.3) ─
+    //
+    // FU-DIAGNOSTIC-FIELD-PINNING lesson: assert message TEXT and distinguishing
+    // struct fields (severity, code, span presence), not just error-code presence.
+    //
+    // These tests exercise Route A (context-sensitive severity at accumulation time
+    // in validate_fields): field key ∈ {"shape", "body"} → Error severity
+    // (broken) UNCONDITIONALLY when the field appears on a slide type that does NOT
+    // declare it. Mode-sensitivity (strict → exit-2, warn-only → placeholder) is
+    // enforced at the pipeline gate, not inside validate_fields. Note: `content`
+    // slides now declare `body` as optional (STORY-098 F-098-P1-002), so `body` on
+    // `content` is valid. Tests use `chart` for body tests.
+    //
+    // Test naming: test_BC_3_03_002_xxx (BC-3.03.002 = STORY-098 content-drop BC)
+
+    /// BC-3.03.002 v1.3 Invariant 4 / AC-001 (T-003 RED):
+    ///
+    /// `shape:` on a `title` slide (which does not support `shape:`) in strict mode
+    /// must produce a W-VAL-103 diagnostic with `DiagnosticSeverity::Error` (broken),
+    /// not `DiagnosticSeverity::Warning` (cosmetic).
+    ///
+    /// RED: Currently `validate_fields` emits `Warning` for ALL unknown fields including
+    /// `shape`. This test fails until the implementer adds the content-drop key set check
+    /// `{"shape", "body"}` in `validate_fields` (registry.rs).
+    ///
+    /// Message format is UNCHANGED (per postcondition 3 / Route A):
+    /// `Unknown field 'shape' for slide type 'title'. Known fields: [...]`
+    #[test]
+    fn test_BC_3_03_002_shape_content_drop_strict_exits_2() {
+        let reg = SlideTypeRegistry::default();
+        let slide_type = reg.lookup_by_keyword("title").unwrap();
+        // title slide has required `title` field + known optional fields.
+        // `shape:` is NOT in the schema — it would cause authored content to be silently dropped.
+        let slide = make_slide(
+            "title",
+            vec![("title", "My Title"), ("shape", "some shape spec")],
+        );
+        let diags = validate_fields(&slide, slide_type);
+
+        // There must be a W-VAL-103 diagnostic for the unknown `shape` field.
+        let w_val_103: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103")
+            .collect();
+        assert!(
+            !w_val_103.is_empty(),
+            "STORY-098 AC-001: `shape` on `title` slide must emit W-VAL-103; got diags: {diags:?}"
+        );
+
+        // RED GATE ASSERTION: content-drop W-VAL-103 must be Error severity in strict mode.
+        // Current code emits Warning — this assertion FAILS before implementation.
+        let shape_diag = w_val_103
+            .iter()
+            .find(|d| d.message.contains("shape"))
+            .expect("W-VAL-103 must name the dropped field 'shape' in its message");
+        assert_eq!(
+            shape_diag.severity,
+            DiagnosticSeverity::Error,
+            "BC-3.03.002 v1.3 Invariant 4 / AC-001: W-VAL-103 for 'shape' on unsupported slide \
+             type MUST be Error severity (content-drop promotion — STORY-098). \
+             Got severity: {:?}. Message: {}",
+            shape_diag.severity,
+            shape_diag.message
+        );
+
+        // FU-DIAGNOSTIC-FIELD-PINNING: assert message format is UNCHANGED (Route A).
+        // The message must still use the canonical W-VAL-103 format.
+        assert!(
+            shape_diag.message.contains("Unknown field 'shape'"),
+            "BC-3.03.002 postcondition 3: W-VAL-103 message format is UNCHANGED; \
+             must contain \"Unknown field 'shape'\"; got: {}",
+            shape_diag.message
+        );
+        assert!(
+            shape_diag.message.contains("title"),
+            "W-VAL-103 message must name the slide type 'title'; got: {}",
+            shape_diag.message
+        );
+        assert!(
+            shape_diag.message.contains("Known fields:"),
+            "W-VAL-103 message must list known fields (canonical format); got: {}",
+            shape_diag.message
+        );
+        // Code must remain W-VAL-103 (no new E-VAL-105 introduced — Route A).
+        assert_eq!(
+            shape_diag.code.as_ref(),
+            "W-VAL-103",
+            "BC-3.03.002 Route A: no new error code — code must remain W-VAL-103; \
+             got: {}",
+            shape_diag.code
+        );
+    }
+
+    /// BC-3.03.002 v1.3 Invariant 4 / EC-007 / AC-002 (T-004):
+    ///
+    /// `body` on a slide type that does NOT declare it must produce W-VAL-103
+    /// with `DiagnosticSeverity::Error` (broken/exit-2 in strict mode).
+    ///
+    /// ## STORY-098 resolution
+    ///
+    /// `content` slides now DECLARE `body` as an optional field (STORY-098
+    /// F-098-P1-002 resolution; BC-4.01.001 v1.2 PC-11), so `body` on `content`
+    /// is VALID — no W-VAL-103. This test now uses `chart` slides, which do NOT
+    /// declare `body`.
+    ///
+    /// For completeness, a second assertion verifies that `body` on `content`
+    /// produces NO W-VAL-103 (it's now a declared optional field).
+    #[test]
+    fn test_BC_3_03_002_body_on_nondeclaring_type_exits_2_and_content_accepts_body() {
+        let reg = SlideTypeRegistry::default();
+
+        // Part (a): `body` on `chart` slide → W-VAL-103 at Error severity.
+        // chart slides do NOT declare `body`; body is a CONTENT_DROP_KEY.
+        let chart_type = reg.lookup_by_keyword("chart").unwrap();
+        let chart_slide = make_slide(
+            "chart",
+            vec![
+                ("title", "My Chart Slide"),
+                ("chart_type", "bar"),
+                ("body", "some body text is invalid on chart slides"),
+            ],
+        );
+        let chart_diags = validate_fields(&chart_slide, chart_type);
+
+        let w_val_103_chart: Vec<_> = chart_diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
+            .collect();
+        assert!(
+            !w_val_103_chart.is_empty(),
+            "STORY-098 AC-002: `body` on `chart` slide must emit W-VAL-103 naming 'body'; \
+             got diags: {chart_diags:?}"
+        );
+
+        let body_diag = &w_val_103_chart[0];
+        assert_eq!(
+            body_diag.severity,
+            DiagnosticSeverity::Error,
+            "BC-3.03.002 v1.3 Invariant 4 / EC-007 / AC-002: W-VAL-103 for 'body' on 'chart' \
+             slide MUST be Error severity (broken/exit-2 in strict mode). \
+             Got severity: {:?}. Message: {}",
+            body_diag.severity,
+            body_diag.message
+        );
+        assert!(
+            body_diag.message.contains("Unknown field 'body'"),
+            "W-VAL-103 message must contain \"Unknown field 'body'\"; got: {}",
+            body_diag.message
+        );
+        assert_eq!(
+            body_diag.code.as_ref(),
+            "W-VAL-103",
+            "Route A: code must remain W-VAL-103 (no E-VAL-105); got: {}",
+            body_diag.code
+        );
+
+        // Part (b): `body` on `content` slide → NO W-VAL-103 (body is now valid).
+        // STORY-098 F-098-P1-002: body added to content's optional field schema.
+        let content_type = reg.lookup_by_keyword("content").unwrap();
+        let content_slide = make_slide(
+            "content",
+            vec![
+                ("title", "My Content Slide"),
+                ("body", "body text is now valid on content slides"),
+            ],
+        );
+        let content_diags = validate_fields(&content_slide, content_type);
+        let w_val_103_content: Vec<_> = content_diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
+            .collect();
+        assert!(
+            w_val_103_content.is_empty(),
+            "BC-3.03.002 AC-002 (b): `body` on `content` slide MUST NOT emit W-VAL-103 \
+             — body is now a declared optional field (STORY-098 F-098-P1-002). \
+             Got: {content_diags:?}"
+        );
+    }
+
+    /// BC-3.03.002 Invariant 4 — EC-001 (non-content-drop unknown field stays cosmetic, exit 0).
+    ///
+    /// Regression guard: an unknown field that is NOT in the content-drop set
+    /// `{"shape", "body"}` must retain `Warning` severity (cosmetic/exit-0).
+    /// This ensures the implementer's change is strictly scoped to the content-drop key set.
+    ///
+    /// This test MAY PASS at Red Gate (current behavior: Warning for all unknown fields).
+    /// It is a regression guard that must CONTINUE PASSING after implementation.
+    #[test]
+    fn test_BC_3_03_002_non_content_drop_field_stays_cosmetic() {
+        let reg = SlideTypeRegistry::default();
+        let slide_type = reg.lookup_by_keyword("title").unwrap();
+        // `zzz_metadata_annotation` is unknown but not a content-bearing field.
+        // Must remain Warning (cosmetic/exit-0) — not promoted to Error.
+        let slide = make_slide(
+            "title",
+            vec![
+                ("title", "My Title"),
+                ("zzz_metadata_annotation", "some-value"),
+            ],
+        );
+        let diags = validate_fields(&slide, slide_type);
+        let zzz_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("zzz_metadata"))
+            .collect();
+        assert!(
+            !zzz_diags.is_empty(),
+            "EC-001 guard: unknown non-content-drop field must still produce W-VAL-103; \
+             got diags: {diags:?}"
+        );
+        // Must stay Warning — NOT promoted to Error.
+        assert_eq!(
+            zzz_diags[0].severity,
+            DiagnosticSeverity::Warning,
+            "EC-001 guard: non-content-drop unknown field must remain Warning (cosmetic/exit-0); \
+             got: {:?}. This would regress EC-001 behavior if it changes to Error.",
+            zzz_diags[0].severity
+        );
+    }
+
+    /// BC-3.03.002 Invariant 4 — EC-002 (shape on supporting slide type → no warning).
+    ///
+    /// Regression guard: a `shape:` field on a slide type that explicitly supports shapes
+    /// must NOT produce W-VAL-103. This confirms the key-set check is conditional on
+    /// the field being UNKNOWN (not in the schema), not unconditional.
+    ///
+    /// Uses `blank` slide type — it accepts common optional fields. `shape` is not
+    /// in `common_optional_fields` either, but this test documents the invariant that
+    /// a slide type DECLARING `shape` as optional/required must not trigger W-VAL-103.
+    ///
+    /// NOTE: No built-in slide type currently declares `shape` as a known optional field.
+    /// The implementer must create or register a slide type that does to satisfy this
+    /// fully. For now this test asserts the semantic invariant: if a field IS in the
+    /// known set, no W-VAL-103 is emitted.
+    ///
+    /// This test exercises the negative path — using a known field `title` on `title` type.
+    #[test]
+    fn test_BC_3_03_002_known_field_on_supporting_type_no_warning() {
+        let reg = SlideTypeRegistry::default();
+        let slide_type = reg.lookup_by_keyword("title").unwrap();
+        // `title` IS a known field for `title` slide type. Must produce zero W-VAL-103.
+        let slide = make_slide("title", vec![("title", "Hello World")]);
+        let diags = validate_fields(&slide, slide_type);
+        let w_val_103: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103")
+            .collect();
+        assert!(
+            w_val_103.is_empty(),
+            "EC-002 guard: known field 'title' on 'title' slide type must NOT produce W-VAL-103; \
+             got: {w_val_103:?}"
+        );
+    }
+
+    /// F-098-P2-001 regression guard: `body` on color-coded types → W-VAL-103 at Error severity.
+    ///
+    /// `status`, `progress_bar`, and `weighted_composite` do NOT declare `body` in their
+    /// field schemas. A `body` field on any of these must emit W-VAL-103 promoted to
+    /// Error severity because `body` is a `CONTENT_DROP_KEY` (BC-3.03.002 v1.3 Invariant 4).
+    ///
+    /// This is the registry-level half of the two-part fix:
+    /// 1. `validate_fields` emits W-VAL-103/Error for unknown `body` (this test)
+    /// 2. `field_to_block.rs` does NOT thread a Body frame for these types (eval-level)
+    ///
+    /// Regression target: before F-098-P2-001, `known_fields` returned `None` for these
+    /// types, causing `is_none_or(…)` to thread body unconditionally in warn-only mode.
+    #[test]
+    fn test_f098_p2_001_body_on_color_coded_types_is_content_drop_error() {
+        let reg = SlideTypeRegistry::default();
+
+        for type_kw in &["status", "progress_bar", "weighted_composite"] {
+            let slide_type = reg
+                .lookup_by_keyword(type_kw)
+                .unwrap_or_else(|| panic!("type '{type_kw}' must be in registry"));
+
+            // Construct a minimal valid slide (required fields) + an invalid `body` field.
+            let (required_fields, type_desc): (&[(&str, &str)], &str) = match *type_kw {
+                "status" => (
+                    &[("title", "Project Alpha"), ("label", "On Track")],
+                    "status (required: title + label)",
+                ),
+                "progress_bar" => (
+                    &[
+                        ("title", "Sprint Completion"),
+                        ("label", "75% complete"),
+                        ("value", "75"),
+                    ],
+                    "progress_bar (required: title + label + value)",
+                ),
+                _ /* weighted_composite */ => (
+                    &[
+                        ("title", "Vendor Scorecard"),
+                        ("label", "Overall: Good (78/100)"),
+                        ("components", "placeholder"),
+                    ],
+                    "weighted_composite (required: title + label + components)",
+                ),
+            };
+
+            let mut fields: Vec<(&str, &str)> = required_fields.to_vec();
+            fields.push(("body", "this body text is invalid on a color-coded slide"));
+
+            let slide = make_slide(type_kw, fields);
+            let diags = validate_fields(&slide, slide_type);
+
+            let body_diags: Vec<_> = diags
+                .iter()
+                .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
+                .collect();
+
+            assert!(
+                !body_diags.is_empty(),
+                "F-098-P2-001: `body` on `{type_kw}` ({type_desc}) must emit W-VAL-103; \
+                 got diags: {diags:?}"
+            );
+
+            assert_eq!(
+                body_diags[0].severity,
+                DiagnosticSeverity::Error,
+                "F-098-P2-001: W-VAL-103 for `body` on `{type_kw}` must be Error severity \
+                 (CONTENT_DROP_KEY — broken/exit-2 in strict mode per BC-3.03.002 v1.3 Invariant 4). \
+                 Got: {:?}",
+                body_diags[0].severity
+            );
+        }
+    }
+
+    /// F-098-P2-001 coherence test (process-gap killer): every bundled registry type has an
+    /// entry in `slideforge_syntax::known_fields::known_fields()`, and every field declared
+    /// by the type's required+optional schema is present in `known_fields()`.
+    ///
+    /// This test permanently prevents the 31-vs-34 class of drift: whenever a new bundled
+    /// slide type is added to `SlideTypeRegistry::default()` without a corresponding entry
+    /// in `known_fields()`, this test fails immediately.
+    ///
+    /// Two-part assertion:
+    /// 1. Every keyword in `SlideTypeRegistry::all_keywords()` has `Some(...)` from `known_fields()`.
+    /// 2. Every field name in `required_fields() + optional_fields()` for that type appears
+    ///    in the `known_fields()` slice for that type.
+    ///
+    /// Part 2 uses `⊇` semantics: `known_fields` is allowed to declare MORE fields than the
+    /// registry schema (e.g., an alias preset field not in the base type's schema). But
+    /// every field the registry DECLARES must be accessible.
+    #[test]
+    fn test_f098_p2_001_bundled_registry_coherence() {
+        use slideforge_syntax::known_fields::known_fields;
+
+        let reg = SlideTypeRegistry::default();
+
+        for kw in reg.all_keywords() {
+            let kw_str: &str = kw.as_ref();
+
+            // Part 1: every keyword must have a known_fields entry.
+            let kf = known_fields(kw_str).unwrap_or_else(|| {
+                panic!(
+                    "F-098-P2-001 coherence: bundled registry type '{kw_str}' has NO entry in \
+                     slideforge_syntax::known_fields::known_fields(). Add it with its correct \
+                     field set (required + optional, NO `body` unless the layout supports it)."
+                )
+            });
+
+            // Part 2: every field declared in required_fields() + optional_fields()
+            // must appear in known_fields().
+            let slide_type = reg
+                .lookup_by_keyword(kw_str)
+                .unwrap_or_else(|| panic!("registry type '{kw_str}' must be lookupable"));
+
+            for field_def in slide_type
+                .required_fields()
+                .iter()
+                .chain(slide_type.optional_fields().iter())
+            {
+                let field_name: &str = field_def.name.as_ref();
+                assert!(
+                    kf.contains(&field_name),
+                    "F-098-P2-001 coherence: type '{kw_str}' declares field '{field_name}' in its \
+                     schema (required_fields/optional_fields) but '{field_name}' is NOT present in \
+                     known_fields('{kw_str}'). known_fields must be a superset of the declared schema."
+                );
+            }
+        }
+    }
+
+    /// BC-3.03.002 Invariant 1 (DI-017) + DI-018 / EC-004 (multiple errors incl. content-drop):
+    ///
+    /// When a deck has multiple W-VAL-103 content-drop errors AND other validation errors,
+    /// ALL must be reported (error accumulation, DI-018) and the content-drop W-VAL-103
+    /// must be Error severity.
+    ///
+    /// RED: Currently `shape` W-VAL-103 is Warning. The Error assertion on `shape` fails.
+    #[test]
+    fn test_BC_3_03_002_multiple_errors_all_reported_content_drop_is_error() {
+        let reg = SlideTypeRegistry::default();
+        let slide_type = reg.lookup_by_keyword("title").unwrap();
+        // Slide has: required `title` field (present), plus TWO unknown fields:
+        //   - `shape` (content-drop set → must be Error in strict mode)
+        //   - `zzz_unknown_meta` (non-content-drop → must remain Warning)
+        let slide = make_slide(
+            "title",
+            vec![
+                ("title", "Deck Title"),
+                ("shape", "some_shape_spec"),
+                ("zzz_unknown_meta", "ignored-value"),
+            ],
+        );
+        let diags = validate_fields(&slide, slide_type);
+
+        // DI-018: both W-VAL-103 diagnostics must be emitted (accumulation, not bail-on-first).
+        let w_val_103: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code.as_ref() == "W-VAL-103")
+            .collect();
+        assert!(
+            w_val_103.len() >= 2,
+            "EC-004 / DI-018: both unknown fields must produce W-VAL-103 diagnostics (no bail-on-first); \
+             got {} W-VAL-103 diags — all diags: {diags:?}",
+            w_val_103.len()
+        );
+
+        // `shape` must be Error (content-drop set).
+        let shape_diag = w_val_103
+            .iter()
+            .find(|d| d.message.contains("'shape'"))
+            .expect("must have a W-VAL-103 for 'shape'");
+        assert_eq!(
+            shape_diag.severity,
+            DiagnosticSeverity::Error,
+            "EC-004: W-VAL-103 for 'shape' must be Error (content-drop, broken); \
+             got: {:?}. RED GATE: fails before implementation.",
+            shape_diag.severity
+        );
+
+        // `zzz_unknown_meta` must remain Warning (non-content-drop).
+        let meta_diag = w_val_103
+            .iter()
+            .find(|d| d.message.contains("zzz_unknown_meta"))
+            .expect("must have a W-VAL-103 for 'zzz_unknown_meta'");
+        assert_eq!(
+            meta_diag.severity,
+            DiagnosticSeverity::Warning,
+            "EC-004: non-content-drop W-VAL-103 must remain Warning; got: {:?}",
+            meta_diag.severity
+        );
     }
 }

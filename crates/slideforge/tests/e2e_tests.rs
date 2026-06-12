@@ -116,3 +116,13 @@ mod e2e_story_088_bullets_list_literal;
 // RED GATE: C2 (body Inlines dropped) + C3 (PPTX Body flattens) block ALL format assertions.
 #[path = "e2e/story_081_inline_markup_e2e.rs"]
 mod e2e_story_081_inline_markup;
+
+// STORY-098 — F-098-P1-004 + PO adjudication F-098-ADJ-BODY-CONTENT exit-code E2E tests.
+// AC-001: body on non-declaring type (chart), strict → Err(ValidationFailed) + W-VAL-103 as Error.
+// AC-001 warn-only: body on non-declaring type (chart), warn-only → Ok (W-VAL-103 non-blocking).
+// AC-002: body on content slide (schema-VALID), strict → Ok + LaidOutDeck contains Body frame.
+// AC-001 regression guard: body on quote slide (non-declaring), strict → Err + W-VAL-103.
+// AC-004: chart with no data, strict → Err(ValidationFailed) + E-LAY-003.
+// AC-005: chart with no data, warn-only → Ok (E-LAY-003 non-blocking).
+#[path = "e2e/story_098_exit_codes.rs"]
+mod e2e_story_098_exit_codes;

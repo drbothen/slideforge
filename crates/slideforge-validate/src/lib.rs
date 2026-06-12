@@ -34,6 +34,11 @@
 
 mod alt_text;
 mod canvas_overflow;
+// `ChartEmptyDataValidator` — chart empty-data validator (BC-1.11.002 v1.2 invariant 2;
+// STORY-098 AC-004/AC-005). Intercepts E-LAY-003 before `ChartRenderer` is invoked for
+// chart slides whose `data` field is absent or evaluates to an empty collection.
+// Registered in the `slideforge` crate's plugin registry (`crates/slideforge/src/registry.rs`).
+mod chart_empty_data;
 mod error_slide;
 mod field_schema;
 mod image_path;
@@ -47,6 +52,10 @@ mod zero_slide;
 
 pub use alt_text::AltTextValidator;
 pub use canvas_overflow::CanvasOverflowValidator;
+// Re-exports `ChartEmptyDataValidator` (STORY-098 / BC-1.11.002 v1.2 invariant 2):
+// unit tests in `chart_empty_data.rs`; e2e coverage in the STORY-098 e2e suite;
+// registered as `"chart-empty-data"` in the `slideforge` crate's plugin registry.
+pub use chart_empty_data::ChartEmptyDataValidator;
 pub use error_slide::{ERROR_PLACEHOLDER_SLIDE_TYPE, error_slide_placeholder};
 pub use field_schema::FieldSchemaValidator;
 pub use image_path::{E_VAL_012, ImagePathValidator};

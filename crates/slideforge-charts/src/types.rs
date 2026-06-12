@@ -216,23 +216,38 @@ pub enum ChartError {
 
     /// Chart data evaluated to an empty collection before `render()` was called.
     ///
-    /// Maps to error code `E-LAY-003`. This variant is produced by the
-    /// empty-data guard in `crate::validation` when [`slideforge_types::Value::List`]
-    /// is empty. The guard runs BEFORE [`crate::ChartRendererImpl::dispatch_and_process`]
-    /// to satisfy BC-1.11.002 invariant 2 (renderer is never called with empty data).
+    /// Maps to error code `[E-LAY-003]`. This variant flows through a 3-layer
+    /// defense-in-depth:
+    ///
+    /// 1. **`ChartEmptyDataValidator`** (`slideforge-validate`) — intercepts at the
+    ///    validation stage and emits an `[E-LAY-003]` diagnostic before the layout
+    ///    engine is entered, causing the build to fail (strict mode) or be demoted
+    ///    to an error-slide placeholder (warn-only mode).
+    /// 2. **Pipeline demotion** (`slideforge-layout`) — the slide is tagged as
+    ///    `FrameContent::ErrorSlidePlaceholder` when the validator fires in warn-only
+    ///    mode, preventing a blank slide from reaching exporters.
+    /// 3. **`dispatch_and_process` guard** (`crate::ChartRendererImpl`) — final
+    ///    defensive check inside the chart renderer itself: returns `ChartError::EmptyData`
+    ///    immediately when `spec.data` is empty, satisfying BC-1.11.002 invariant 2
+    ///    (renderer is never called with empty data).
+    ///
+    /// The deleted `crate::validation` module (removed in STORY-098) no longer exists;
+    /// its responsibilities are now distributed across these three layers.
     ///
     /// In strict mode: this error causes the build to fail (exit code 2, no output).
     /// In warn-only mode: the caller produces a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`.
     ///
-    /// ## Canonical Display format (HIGH-004)
+    /// ## Canonical Display format (error-taxonomy v2.31 / F-098-P1-003, BC-1.11.002 PC-1)
     ///
-    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
+    /// The `[E-LAY-003]` self-prefix is the canonical bracketed form (taxonomy v2.31 / F-098-P1-003);
+    /// the colon→bracket alignment in this Display was driven by cascade finding F-098-P4-001.
     /// The `expression` field is available to callers that need it (e.g., for building
     /// diagnostics), but is NOT inlined in the Display string — miette renders the
     /// `span` source pointer separately.
     #[error(
-        "E-LAY-003: Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
+        "[E-LAY-003] Chart data is empty for slide '{slide_title}'. Rendering error-slide placeholder."
     )]
     EmptyData {
         /// The title of the chart slide where empty data was detected.
@@ -337,7 +352,9 @@ mod tests {
     /// BC-1.11.002 — `ChartError::EmptyData` variant exists with the correct fields.
     ///
     /// Red Gate: passes at stub time because the variant is a type-level stub
-    /// (it compiles). The real value is tested in `validation.rs` tests.
+    /// (it compiles). The `[E-LAY-003]` Display format and guard behavior are
+    /// tested in `slideforge_validate` (`ChartEmptyDataValidator`) and in
+    /// `crate::lib` (`dispatch_and_process` guard tests).
     #[test]
     fn test_bc_1_11_002_chart_error_empty_data_variant_exists() {
         use slideforge_types::SourceSpan;
@@ -362,8 +379,8 @@ mod tests {
     ///
     /// Traceability anchor: the named test for test vector 19 in STORY-032.
     ///
-    /// HIGH-004 (adversarial pass): the canonical Display format is:
-    /// `"E-LAY-003: Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
+    /// Canonical Display format (error-taxonomy v2.31 / F-098-P1-003, cascade-aligned by F-098-P4-001):
+    /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
     /// The `expression` field is NOT inlined in the message body; it is available on
     /// the variant for callers that need it. Miette renders the `span` source pointer
@@ -387,8 +404,11 @@ mod tests {
             "ChartError::EmptyData Display must include the slide title; got: {display}"
         );
         // HIGH-004: expression is NOT in the Display string (it is in the span/field).
-        // The canonical message is: "E-LAY-003: Chart data is empty for slide '<title>'.
+        // The canonical message is: "[E-LAY-003] Chart data is empty for slide '<title>'.
         // Rendering error-slide placeholder."
+        // Note: the bracket form `[E-LAY-003]` is the canonical self-prefix per
+        // PREFIX RULE provenance: error-taxonomy v2.31 / F-098-P1-003. Cascade alignment
+        // (colon→bracket) was driven by F-098-P4-001. The colon form ("E-LAY-003:") is stale.
         assert!(
             display.contains("Rendering error-slide placeholder"),
             "ChartError::EmptyData Display must include the canonical suffix; got: {display}"
