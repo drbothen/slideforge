@@ -17,6 +17,7 @@
 //! | `test_BC_5_01_005_run_has_lang_attribute_default_en_us` | AC-003/EC-002 | BC-5.01.005 postcondition 1 | RED |
 //! | `test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip` | AC-003 | BC-5.01.005 postcondition 1 | RED |
 //! | `test_BC_5_01_005_ec003_empty_slide_no_rpr_emitted_no_error` | AC-003/EC-003 | BC-5.01.005 postcondition 1 | RED (LESSON-17: NOT #[should_panic]) |
+//! | `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface` | F-096-002 | BC-5.01.005 v1.3 | RED → GREEN |
 
 #![allow(non_snake_case)]
 #![allow(clippy::unwrap_used)]
@@ -70,6 +71,16 @@ fn make_deck(n: usize) -> Deck {
         section_blocks: vec![],
         slide_sections: vec![],
     }
+}
+
+/// Build a minimal valid `Deck` with `lang: None` (no declaration in the DSL source).
+///
+/// Used by F-096-002 tests to verify BC-5.01.005 v1.3: both `<a:rPr lang>` and
+/// `<dc:language>` must default to `"en"` when no lang is declared.
+fn make_deck_no_lang(n: usize) -> Deck {
+    let mut deck = make_deck(n);
+    deck.metadata.lang = None;
+    deck
 }
 
 /// Build a minimal valid `Deck` with an explicit `lang` value.
@@ -911,4 +922,100 @@ fn test_BC_5_01_005_ec003_empty_slide_no_rpr_error() {
         }
     }
     // If rpr_count == 0 (truly empty slide), the test passes — EC-003 satisfied.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// F-096-002: no-lang default must be "en" on ALL surfaces (BC-5.01.005 v1.3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract the text content of a `<dc:language>` element from a core.xml string.
+///
+/// Returns `Some(text)` if the element is found with non-empty content, else `None`.
+fn find_dc_language(xml: &str) -> Option<String> {
+    let open = "<dc:language>";
+    let close = "</dc:language>";
+    let start = xml.find(open)?;
+    let content_start = start + open.len();
+    let end = xml[content_start..].find(close)?;
+    let text = xml[content_start..content_start + end].to_owned();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+/// BC-5.01.005 v1.3 / F-096-002 — cross-surface "en" default:
+///
+/// When `deck.metadata.lang` is `None` (no `lang` declaration in the DSL source),
+/// the PPTX exporter must emit the identical string `"en"` on every surface:
+///
+/// 1. Every `<a:rPr lang="...">` in `slide1.xml` carries `lang="en"`.
+/// 2. `docProps/core.xml` contains `<dc:language>en</dc:language>`.
+/// 3. No `lang="en-US"` appears anywhere in `slide1.xml`.
+///
+/// BC-5.01.004 injects `"en"` into `DeckMetadata.lang` for absent declarations;
+/// `export_inner` and `build_doc_props` must both derive from the same
+/// `DEFAULT_DECK_LANG` constant (value `"en"`) so the two surfaces cannot diverge.
+///
+/// Red Gate: before the fix, `export_inner` defaults `deck_lang` to `"en-US"`
+/// while `build_doc_props` defaults to `"en"` — cross-surface divergence.
+#[test]
+fn test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface() {
+    // Deck with lang = None — no declaration in DSL source.
+    let deck = make_deck_no_lang(1);
+    let mut laid_out = make_laid_out_deck(1);
+    laid_out.slides[0] = make_slide_with_body_text(0);
+
+    let pptx_bytes = build_pptx_with_deck(&deck, &laid_out);
+
+    // ── Surface 1: docProps/core.xml dc:language ──────────────────────────────
+    let core_xml = zip_read_entry(&pptx_bytes, "docProps/core.xml");
+    let dc_lang = find_dc_language(&core_xml).unwrap_or_else(|| {
+        panic!(
+            "F-096-002: docProps/core.xml must contain <dc:language> even when \
+             deck has no lang declaration. core.xml:\n{core_xml}"
+        )
+    });
+    assert_eq!(
+        dc_lang, "en",
+        "F-096-002: dc:language must be \"en\" (not \"en-US\") when no lang is \
+         declared (BC-5.01.005 v1.3 / BC-5.01.004 default). Got: {dc_lang:?}"
+    );
+
+    // ── Surface 2: slide1.xml <a:rPr lang="..."> ──────────────────────────────
+    let slide1_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    // Prerequisite: the slide must have rPr elements (body text is present).
+    assert!(
+        slide1_xml.contains("<a:rPr"),
+        "F-096-002 prerequisite: slide1.xml must contain at least one <a:rPr> \
+         element (slide has body text runs)"
+    );
+
+    let lang_values = collect_rpr_lang_values(&slide1_xml);
+    let rpr_total = slide1_xml.matches("<a:rPr").count();
+
+    // Every rPr must carry a lang attribute (universality — AC-003 contract).
+    assert_eq!(
+        lang_values.len(),
+        rpr_total,
+        "F-096-002: all {rpr_total} <a:rPr> elements must carry lang=\"en\"; \
+         only {} carry a lang attribute",
+        lang_values.len()
+    );
+
+    // Every lang must be exactly "en", not "en-US".
+    for lang in &lang_values {
+        assert_eq!(
+            lang.as_str(),
+            "en",
+            "F-096-002: <a:rPr lang> must be \"en\" when no lang is declared \
+             (BC-5.01.005 v1.3); got \"{lang}\""
+        );
+    }
+
+    // Negative assertion: "en-US" must not appear at all in slide1.xml.
+    assert!(
+        !slide1_xml.contains("lang=\"en-US\""),
+        "F-096-002: slide1.xml must NOT contain lang=\"en-US\" when deck lang is \
+         None (default is \"en\", not \"en-US\"). slide1.xml excerpt:\n{}",
+        &slide1_xml[..slide1_xml.len().min(2000)]
+    );
 }

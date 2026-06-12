@@ -42,6 +42,14 @@
 /// F-038-P2 follow-up).
 pub(crate) const LAYOUT_COUNT: usize = 31;
 
+/// Default BCP-47 language tag used when `deck.metadata.lang` is `None`.
+///
+/// BC-5.01.004 injects `"en"` into `DeckMetadata.lang` when the DSL source
+/// contains no `lang` declaration. All surfaces (`<a:rPr lang>` in slide XML
+/// and `<dc:language>` in `docProps/core.xml`) derive their no-lang fallback
+/// from this single constant so they cannot diverge (BC-5.01.005 v1.3).
+pub(crate) const DEFAULT_DECK_LANG: &str = "en";
+
 pub mod a11y;
 pub mod brand_adapter;
 pub mod clrmapovr;
@@ -170,7 +178,7 @@ impl PptxExporter {
             .metadata
             .lang
             .clone()
-            .unwrap_or_else(|| std::sync::Arc::from("en-US"));
+            .unwrap_or_else(|| std::sync::Arc::from(DEFAULT_DECK_LANG));
 
         build_slide_parts(
             laid_out,
@@ -261,8 +269,9 @@ impl PptxExporter {
 /// ## Run language threading (STORY-096 AC-003)
 ///
 /// `deck_lang` is the BCP-47 language tag from `deck.metadata.lang` (defaulting to
-/// `"en-US"`). It is threaded into `SlideSerializer` so every `<a:rPr>` element
-/// in every slide XML carries `lang="..."` (BC-5.01.005 postcondition 1).
+/// [`DEFAULT_DECK_LANG`] = `"en"` when absent). It is threaded into `SlideSerializer`
+/// so every `<a:rPr>` element in every slide XML carries `lang="..."` (BC-5.01.005
+/// postcondition 1).
 fn build_slide_parts(
     laid_out: &LaidOutDeck,
     brand_template: &BrandTemplate,
@@ -907,7 +916,7 @@ fn validate_lang_for_xml(lang: &str) -> Result<(), PptxError> {
 /// the OPC core properties namespace is not covered by `ooxmlsdk` schemas in
 /// this story's scope. Escaping + validation is the correct mitigation.
 fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
-    let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en");
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
     // SEC-039-001: validate before escaping — fail safe on XML-1.0-illegal chars.
     validate_lang_for_xml(lang_raw)?;
     // F-037-006: XML-escape the lang value before interpolating into the XML body.
