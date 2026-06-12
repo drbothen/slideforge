@@ -98,7 +98,9 @@ pub struct SlideSerializer {
 
     /// BCP-47 language tag to set on every `<a:rPr lang="...">` (STORY-096 AC-003).
     ///
-    /// Populated by `with_lang` from `deck.metadata.lang` (defaulting to `"en-US"`).
+    /// Populated by `with_lang` from `deck.metadata.lang`; `with_lang` applies no
+    /// default itself — the no-lang default (`DEFAULT_DECK_LANG`, `"en"`) is applied
+    /// by the caller in `export_inner` before invoking `with_lang`.
     /// When `None` (default from `new()`), `<a:rPr>` elements are emitted without
     /// a `lang` attribute (pre-STORY-096 behavior preserved for backward compatibility
     /// in any test that does not call `with_lang`).
@@ -131,9 +133,10 @@ impl SlideSerializer {
 
     /// Set the BCP-47 language tag to emit on every `<a:rPr lang="...">` element.
     ///
-    /// Called by `build_slide_parts` with `deck.metadata.lang` (defaulting to
-    /// `"en-US"` when unset) so every text run in the PPTX carries the correct
-    /// language attribute for spell-check and accessibility (STORY-096 AC-003,
+    /// Called by `build_slide_parts` with `deck.metadata.lang` (already resolved
+    /// to `DEFAULT_DECK_LANG` `"en"` by `export_inner` when the deck carries no
+    /// explicit `lang`) so every text run in the PPTX carries the correct language
+    /// attribute for spell-check and accessibility (STORY-096 AC-003,
     /// BC-5.01.005 postcondition 1).
     #[must_use]
     pub fn with_lang(mut self, lang: &std::sync::Arc<str>) -> Self {

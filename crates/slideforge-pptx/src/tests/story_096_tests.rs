@@ -38,8 +38,10 @@ use crate::PptxExporter;
 
 /// Build a minimal valid `Deck` with `n` slides.
 ///
-/// The default lang is `"en-US"` matching the story's AC-003 default-lang
-/// edge case (EC-002: deck with no explicit lang declaration uses "en-US").
+/// Sets `lang` to an explicit `"en-US"` declaration (not the no-lang default).
+/// The no-lang default is `"en"` (BC-5.01.005 v1.3 / story EC-002), applied by
+/// `export_inner` via `DEFAULT_DECK_LANG`; that path is exercised by
+/// `make_deck_no_lang` + `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface`.
 fn make_deck(n: usize) -> Deck {
     use slideforge_types::deck::DeckMetadata;
     use slideforge_types::ordered_map::OrderedMap;
@@ -701,22 +703,23 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
 // Traces to BC-5.01.005 postcondition 1 (lang propagates to PPTX rPr)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 / EC-002:
+/// BC-5.01.005 postcondition 1 / STORY-096 AC-003:
 ///
 /// Verifies that every `<a:rPr>` element in `slide1.xml` carries a `lang="en-US"`
-/// attribute when the deck's `metadata.lang` is `"en-US"` (BC-5.01.005
+/// attribute when the deck's `metadata.lang` is explicitly `"en-US"` (BC-5.01.005
 /// postcondition 1). `ooxml_run_to_ooxmlsdk` must set `rpr.lang` on every
 /// `RunProperties` from `deck.metadata.lang`.
 ///
-/// EC-002: deck with no explicit lang declaration defaults to "en-US". The
-/// `make_deck` fixture uses `lang: Some(Arc::from("en-US"))` — no lang declared
-/// in the DSL sources, default applied by `build_doc_props`.
+/// This fixture exercises an EXPLICIT `lang "en-US"` declaration, not the EC-002
+/// no-lang default path. The no-lang default is `"en"` (BC-5.01.005 v1.3); that
+/// path is covered by `make_deck_no_lang` +
+/// `test_BC_5_01_005_f096_002_no_lang_defaults_to_en_cross_surface`.
 ///
 /// LESSON-14: asserts ACTUAL `lang` attribute values, not mere rPr presence.
 /// LESSON-17: does NOT use `#[should_panic]`.
 #[test]
 fn test_BC_5_01_005_run_has_lang_attribute_default_en_us() {
-    // Build a deck with explicit en-US (default path / EC-002).
+    // Build a deck with explicit en-US (explicit declaration path, not EC-002 default).
     let mut laid_out = make_laid_out_deck(1);
     laid_out.slides[0] = make_slide_with_body_text(0);
 
