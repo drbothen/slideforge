@@ -237,11 +237,12 @@ pub enum ChartError {
     /// In strict mode: this error causes the build to fail (exit code 2, no output).
     /// In warn-only mode: the caller produces a `slideforge_layout::FrameContent::ErrorSlidePlaceholder`.
     ///
-    /// ## Canonical Display format (error-taxonomy v2.32, BC-1.11.002 PC-1)
+    /// ## Canonical Display format (error-taxonomy v2.31 / F-098-P1-003, BC-1.11.002 PC-1)
     ///
     /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
-    /// The `[E-LAY-003]` self-prefix is the canonical bracketed form (taxonomy v2.32 / F-098-P4-001).
+    /// The `[E-LAY-003]` self-prefix is the canonical bracketed form (taxonomy v2.31 / F-098-P1-003);
+    /// the colon→bracket alignment in this Display was driven by cascade finding F-098-P4-001.
     /// The `expression` field is available to callers that need it (e.g., for building
     /// diagnostics), but is NOT inlined in the Display string — miette renders the
     /// `span` source pointer separately.
@@ -378,7 +379,7 @@ mod tests {
     ///
     /// Traceability anchor: the named test for test vector 19 in STORY-032.
     ///
-    /// Canonical Display format (error-taxonomy v2.32, F-098-P4-001):
+    /// Canonical Display format (error-taxonomy v2.31 / F-098-P1-003, cascade-aligned by F-098-P4-001):
     /// `"[E-LAY-003] Chart data is empty for slide '<title>'. Rendering error-slide placeholder."`
     ///
     /// The `expression` field is NOT inlined in the message body; it is available on
@@ -406,7 +407,8 @@ mod tests {
         // The canonical message is: "[E-LAY-003] Chart data is empty for slide '<title>'.
         // Rendering error-slide placeholder."
         // Note: the bracket form `[E-LAY-003]` is the canonical self-prefix per
-        // error-taxonomy v2.32 / F-098-P4-001. The colon form ("E-LAY-003:") is stale.
+        // PREFIX RULE provenance: error-taxonomy v2.31 / F-098-P1-003. Cascade alignment
+        // (colon→bracket) was driven by F-098-P4-001. The colon form ("E-LAY-003:") is stale.
         assert!(
             display.contains("Rendering error-slide placeholder"),
             "ChartError::EmptyData Display must include the canonical suffix; got: {display}"
