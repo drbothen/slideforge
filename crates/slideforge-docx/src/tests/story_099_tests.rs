@@ -239,9 +239,9 @@ fn read_zip_member(docx_bytes: &[u8], name: &str) -> String {
 ///   1. `<w:pPr><w:numPr>…</w:numPr></w:pPr>` — list-style paragraph properties.
 ///   2. `<w:r><w:t>Point A</w:t></w:r>` — a non-empty run with the bullet text.
 ///
-/// Failure mode caught: the prior implementation emitted TextRun frames as
-/// Normal-styled paragraphs with run content but WITHOUT `<w:numPr>`, so
-/// the output was not recognised as a list by Word 365.
+/// Contract: bullet paragraphs must carry `<w:pPr><w:numPr>` so that Word 365
+/// recognises them as list items — paragraphs without `<w:numPr>` are treated
+/// as Normal-styled body text and lose all list formatting.
 #[test]
 fn test_BC_4_02_001_bullets_have_run_content() {
     let deck = deck_with_lang(Some("en"));
@@ -255,8 +255,8 @@ fn test_BC_4_02_001_bullets_have_run_content() {
     assert!(
         doc_xml.contains("<w:t>Point A</w:t>") || doc_xml.contains(">Point A<"),
         "AC-001 RED GATE: word/document.xml must contain run text 'Point A' for the \
-         first bullet; current implementation emits TextRun frames without <w:numPr>. \
-         Got (first 3000 chars):\n{}",
+         first bullet (BC-4.02.001 postcondition 7 — each bullet paragraph carries a \
+         non-empty <w:r><w:t> run). Got (first 3000 chars):\n{}",
         &doc_xml[..doc_xml.len().min(3000)]
     );
     assert!(
@@ -272,8 +272,8 @@ fn test_BC_4_02_001_bullets_have_run_content() {
     assert!(
         doc_xml.contains("<w:numPr>") || doc_xml.contains("<w:numPr "),
         "AC-001 RED GATE: word/document.xml must contain <w:numPr> on bullet paragraphs \
-         (BC-4.02.001 postcondition 7). Current implementation emits Normal paragraphs \
-         with no list marker. Got (first 3000 chars):\n{}",
+         (BC-4.02.001 postcondition 7 — list-style paragraphs require <w:pPr><w:numPr>). \
+         Got (first 3000 chars):\n{}",
         &doc_xml[..doc_xml.len().min(3000)]
     );
 
@@ -313,8 +313,8 @@ fn test_BC_4_02_001_bullets_have_run_content() {
 ///
 /// The `<w:num>` ID is what bullet paragraphs reference via `<w:numId w:val="N"/>`.
 ///
-/// Failure mode caught: the current implementation emits
-/// `<w:numbering … />` (empty self-closing tag) — no definitions at all.
+/// Verified contract: `word/numbering.xml` must carry a fully populated
+/// `<w:abstractNum>` with `<w:lvl>` children — never an empty self-closing stub.
 #[test]
 fn test_BC_4_02_001_numbering_xml_has_abstract_num() {
     let deck = deck_with_lang(Some("en"));
@@ -328,8 +328,8 @@ fn test_BC_4_02_001_numbering_xml_has_abstract_num() {
     assert!(
         numbering_xml.contains("<w:abstractNum") && !numbering_xml.contains("<w:abstractNum/>"),
         "AC-002 RED GATE: word/numbering.xml must contain a non-empty <w:abstractNum> \
-         element (BC-4.02.001 postcondition 2). Current implementation emits a \
-         self-closing empty stub. Got:\n{numbering_xml}"
+         element (BC-4.02.001 postcondition 2 — abstract numbering defines the list \
+         style hierarchy). Got:\n{numbering_xml}"
     );
 
     // ── Assert <w:lvl> children covering levels 0–2 ──────────────────────────
@@ -399,9 +399,9 @@ fn test_BC_4_02_001_numbering_xml_has_abstract_num() {
 ///   - width_twips  = 9_144_000 / 635 = 14_400 (exact, no remainder)
 ///   - height_twips = 5_143_500 / 635 =  8_100 (exact, no remainder)
 ///
-/// Failure mode caught: `<w:sectPr>` is entirely absent from the current
-/// implementation. Word cannot determine page dimensions; layout collapses to
-/// the default US Letter A4 fallback which does not match the brand canvas.
+/// Contract: `<w:sectPr>` must be present as the final child of `<w:body>`,
+/// carrying `<w:pgSz>` attributes that match the brand canvas dimensions.
+/// Without it, Word falls back to its built-in US Letter page size.
 #[test]
 fn test_BC_4_02_001_document_xml_has_secpr() {
     let deck = deck_with_lang(Some("en"));
@@ -416,8 +416,8 @@ fn test_BC_4_02_001_document_xml_has_secpr() {
     assert!(
         doc_xml.contains("<w:sectPr") || doc_xml.contains("<w:sectPr>"),
         "AC-003 RED GATE: word/document.xml must contain a <w:sectPr> element as the \
-         final child of <w:body>. Current implementation omits sectPr entirely, leaving \
-         page dimensions undefined for Word. Got (first 3000 chars):\n{}",
+         final child of <w:body> (BC-4.02.001 postcondition 2 — sectPr defines page \
+         dimensions for Word). Got (first 3000 chars):\n{}",
         &doc_xml[..doc_xml.len().min(3000)]
     );
 
@@ -485,8 +485,8 @@ fn test_BC_4_02_001_document_xml_has_secpr() {
 /// `<w:rPr>` in `word/document.xml`. The default is `"en"` per BC-5.01.004 —
 /// NOT `"en-US"`.
 ///
-/// Failure mode caught: the current implementation emits `<w:rPr>` without any
-/// `<w:lang>` child element.
+/// Contract: every `<w:rPr>` must carry a `<w:lang>` child element with
+/// the deck's declared language (or the default `"en"` when none is declared).
 #[test]
 fn test_BC_3_05_001_runs_have_lang_attribute_default_en() {
     // No lang declared → must default to "en" on all runs (BC-5.01.005 EC-003).
@@ -507,7 +507,7 @@ fn test_BC_3_05_001_runs_have_lang_attribute_default_en() {
         doc_xml.contains("<w:lang w:val=\"en\"") || doc_xml.contains("<w:lang w:val='en'"),
         "AC-004 / EC-003 RED GATE: word/document.xml must carry <w:lang w:val=\"en\"/> \
          (NOT \"en-US\") when no lang is declared (BC-5.01.005 PC-4 / BC-5.01.004 \
-         default). Current implementation omits <w:lang> from all <w:rPr> blocks. \
+         default — every <w:rPr> block requires a <w:lang> child). \
          Got (first 3000 chars):\n{}",
         &doc_xml[..doc_xml.len().min(3000)]
     );
