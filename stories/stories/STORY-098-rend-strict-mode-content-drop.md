@@ -9,7 +9,7 @@ points: 5
 priority: P0
 tdd_mode: strict
 status: draft
-spec_version: "1.2"
+spec_version: "1.3"
 # Changelog:
 # v1.1 (2026-06-11): Fix path mis-anchor F-098-P1-006 — body/content drift site is
 #   crates/slideforge-eval/src/field_to_block.rs (thread_one_slide ~188-203), NOT
@@ -23,19 +23,31 @@ spec_version: "1.2"
 #   AC-002 now verifies that body prose renders on a content slide (no W-VAL-103 emitted).
 #   AC-003 now verifies consistent schema-valid behavior (both validator and eval accept
 #   body on content).
+# v1.3 (2026-06-11): Adversary pass-7 fix-burst F-098-P7-001..004.
+#   F-098-P7-001: source_findings + closes_findings: REND-010 → REND-010a (compound
+#     finding; 010b owned by STORY-102).
+#   F-098-P7-002: BC-3.03.001 removed from behavioral_contracts (false comment — that BC
+#     is Canvas Overflow, unrelated to schema drift; it had no body table row or AC trace).
+#   F-098-P7-003: BC-4.01.001 added to behavioral_contracts (house convention: all BCs
+#     cited in AC traces must appear in frontmatter + body table; "see also" pattern not
+#     used in sibling stories — STORY-094, STORY-096, STORY-097 all include every traced
+#     BC in frontmatter). AC-002 trace rewording matches convention.
+#   F-098-P7-004: Stale version labels swept: BC-3.03.002 v1.2 → v1.3 (all occurrences);
+#     error-taxonomy v2.29 → v2.32 (all occurrences).
 created: "2026-06-11"
-source_findings: [REND-005, REND-010]
-behavioral_contracts: [BC-3.03.002, BC-1.11.002, BC-3.03.001]
-# BC-3.03.002 v1.2 (rendering-fix wave 2026-06-11): W-VAL-103 content-drop sub-case
+source_findings: [REND-005, REND-010a]
+behavioral_contracts: [BC-3.03.002, BC-1.11.002, BC-4.01.001]
+# BC-3.03.002 v1.3 (rendering-fix wave 2026-06-11): W-VAL-103 content-drop sub-case
 # promoted to broken/exit-2 in strict mode per Invariant 4 (Route A). Error taxonomy
-# v2.29 confirms: no new E-VAL-105 code — same W-VAL-103 message, context-sensitive
+# v2.32 confirms: no new E-VAL-105 code — same W-VAL-103 message, context-sensitive
 # severity based on key in {"shape", "body"}.
 # Implementer action site: validate_fields in
 # crates/slideforge-plugin-api/src/slide_types/registry.rs
-# BC-1.11.002 all BCs are authored. BC-3.03.001 referenced for body/content schema drift.
+# BC-1.11.002: chart empty-data enforcement (AC-004, AC-005).
+# BC-4.01.001: body placeholder rendering contract (AC-002 PC-11 — where body prose lands).
 verification_properties: []
 nfr_refs: []
-closes_findings: [REND-005, REND-010]
+closes_findings: [REND-005, REND-010a]
 depends_on:
   - STORY-016
   - STORY-032
@@ -93,16 +105,16 @@ Two post-merge defects remain:
 
 ## Architecture Compliance Rules
 
-- **Route A is confirmed (error-taxonomy v2.29):** No new E-VAL-105 code. W-VAL-103 uses
+- **Route A is confirmed (error-taxonomy v2.32):** No new E-VAL-105 code. W-VAL-103 uses
   context-sensitive severity. When the unknown field key is `"shape"` or `"body"` AND the
   build mode is `strict`, accumulate W-VAL-103 with `broken` severity (exit 2). In
   `--warn-only`, accumulate as `cosmetic` regardless of key. All other unknown-field keys:
   `cosmetic` always (unchanged from v2.20).
-- **Implementer action site (BC-3.03.002 v1.2 Invariant 4):** In `validate_fields` in
+- **Implementer action site (BC-3.03.002 v1.3 Invariant 4):** In `validate_fields` in
   `crates/slideforge-plugin-api/src/slide_types/registry.rs`, add the key-set check
   `{"shape", "body"}` at the W-VAL-103 accumulation point. No other files need changing
   to implement the severity promotion.
-- Per BC-3.03.002 v1.2 postcondition 3: the W-VAL-103 message format is UNCHANGED.
+- Per BC-3.03.002 v1.3 postcondition 3: the W-VAL-103 message format is UNCHANGED.
   Severity is determined at accumulation time by the field-key check.
 - Per BC-3.03.002 invariant 1 (DI-017): all-or-nothing in strict mode.
 - Per BC-1.11.002 invariant 2: the ChartRenderer plugin MUST NOT be called with empty
@@ -150,7 +162,7 @@ Files to modify:
 ## Acceptance Criteria
 
 ### AC-001: Strict mode exits non-zero when shape: field is silently dropped (W-VAL-103 content-drop sub-case)
-(traces to BC-3.03.002 v1.2 postcondition 3 + Invariant 4 — Route A: W-VAL-103 {shape} sub-case = broken/exit-2 in strict mode; error-taxonomy v2.29)
+(traces to BC-3.03.002 v1.3 postcondition 3 + Invariant 4 — Route A: W-VAL-103 {shape} sub-case = broken/exit-2 in strict mode; error-taxonomy v2.32)
 
 `slideforge build deck.sf` (strict mode, default) where `deck.sf` contains a `shape:`
 field on a slide type that does not support it exits with code 2, NOT code 0.
@@ -158,13 +170,13 @@ The W-VAL-103 message format is unchanged: `Unknown field 'shape' for slide type
 The severity is `broken` because the field key is `"shape"` (in the content-drop set
 `{"shape", "body"}`). This is Route A: context-sensitive severity at accumulation time
 in `validate_fields` (`crates/slideforge-plugin-api/src/slide_types/registry.rs`).
-No new error code E-VAL-105 is introduced (Route B was rejected — see error-taxonomy v2.29).
+No new error code E-VAL-105 is introduced (Route B was rejected — see error-taxonomy v2.32).
 
 Verified by: unit test in `slideforge-validate`; build a deck with `shape:` on a slide type
 that does not support it; assert exit 2; assert W-VAL-103 message in stderr with unchanged format.
 
 ### AC-002: body field on content slide renders prose content (schema-VALID — PO adjudication F-098-ADJ-BODY-CONTENT)
-(traces to BC-3.03.002 v1.3 EC-007 REVERSED + BC-4.01.001 v1.2 PC-11)
+(traces to BC-3.03.002 v1.3 EC-007 REVERSED + BC-4.01.001 v1.3 PC-11 — body placeholder rendering contract: where body prose lands in .pptx)
 
 `slideforge build deck.sf` (strict mode) where a `content:` slide has a `body:` field
 builds successfully: exit 0, output written, NO W-VAL-103 emitted. The `body` prose text
@@ -187,7 +199,7 @@ behavior is unchanged and tested by AC-001 (shape: case) and the separate known-
 test required by this story.
 
 ### AC-003: body field on content slide is consistent across validator and eval — resolution (a) confirmed
-(traces to BC-3.03.002 v1.3 Invariant 4 — known_fields() is the authority)
+(traces to BC-3.03.002 v1.3 Invariant 4 — known_fields() is the authority; schema consistency enforced across both validator and eval codepaths)
 
 PO adjudication F-098-ADJ-BODY-CONTENT resolves this to option (a): `body` is
 schema-valid for `content`. Both codepaths now accept `body` on `content`:
@@ -269,6 +281,7 @@ same assertions.
 |-------|-------|-------------|
 | BC-3.03.002 | Strict Mode Produces No Output on Validation Error | AC-001, AC-002, AC-003 |
 | BC-1.11.002 | Chart with Empty Data Produces Error-Slide Placeholder | AC-004, AC-005 |
+| BC-4.01.001 | Serialize LaidOutDeck to Valid .pptx with Correct Placeholder Inheritance | AC-002 (PC-11: body placeholder rendering) |
 
 ## Test Strategy
 
