@@ -23,7 +23,7 @@
 //! | `test_BC_4_01_005_ac009_card_rows_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_horizontal_timeline_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_status_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
-//! | `test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
+//! | `test_BC_4_01_005_ac009_progress_bar_maps_to_index_30` | AC-002/STORY-096 | postcondition 5 | GREEN (STORY-096 AC-002 fix) |
 //! | `test_BC_4_01_005_ac009_metric_tree_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_formula_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
 //! | `test_BC_4_01_005_ac009_weighted_composite_maps_to_index_1_not_0` | AC-009 | postcondition 5 | RED |
@@ -793,18 +793,29 @@ fn test_BC_4_01_005_ac009_status_maps_to_index_1_not_0() {
     );
 }
 
-/// AC-009: `progress_bar` must map to index 1 (not 0).
+/// AC-002 (STORY-096): `progress_bar` must resolve to 0-based index 30 (SF Progress Bar).
+///
+/// Before STORY-096 this keyword had no named layout and fell back to index 1.
+/// After STORY-096, CL-20 (1-based index 31, 0-based index 30) is "SF Progress Bar"
+/// with `slide_type_keyword = Some("progress_bar")`, so Phase 1 keyword lookup
+/// resolves it to index 30 instead of falling back to 1.
 #[test]
-fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_1_not_0() {
+fn test_BC_4_01_005_ac009_progress_bar_maps_to_index_30() {
     let template = test_brand_template();
     let idx = crate::find_layout_index(&template, "progress_bar");
     assert_ne!(
         idx, 0,
-        "AC-009: 'progress_bar' must NOT map to layout index 0; got {idx}"
+        "STORY-096 AC-002: 'progress_bar' must NOT map to layout index 0; got {idx}"
+    );
+    assert_ne!(
+        idx, 1,
+        "STORY-096 AC-002: 'progress_bar' must NOT fall back to index 1 (Title and Content); \
+         it must resolve to its named SF Progress Bar layout at index 30. Got {idx}."
     );
     assert_eq!(
-        idx, 1,
-        "AC-009: 'progress_bar' must fall back to index 1; got {idx}"
+        idx, 30,
+        "STORY-096 AC-002: 'progress_bar' must map to 0-based index 30 (SF Progress Bar, \
+         1-based layout 31). Got {idx}."
     );
 }
 
@@ -868,10 +879,12 @@ fn test_BC_4_01_005_ac009_grid_maps_to_index_1_not_0() {
     );
 }
 
-/// AC-009 aggregate: verify NONE of the 9 unmapped keywords maps to index 0.
+/// AC-009 aggregate: verify NONE of the 8 unmapped keywords maps to index 0.
 ///
 /// This is an additional aggregate assertion on top of the per-keyword tests above.
-/// RED: if ANY of the 9 keywords maps to index 0, this test fails.
+/// RED: if ANY of the 8 keywords maps to index 0, this test fails.
+/// Note: `progress_bar` is intentionally excluded — it is mapped to index 30 per
+/// STORY-096 AC-002 and covered by `test_BC_4_01_005_ac009_progress_bar_maps_to_index_30`.
 #[test]
 fn test_BC_4_01_005_ac009_no_unmapped_keyword_maps_to_index_0() {
     let template = test_brand_template();
@@ -880,7 +893,6 @@ fn test_BC_4_01_005_ac009_no_unmapped_keyword_maps_to_index_0() {
         "card_rows",
         "horizontal_timeline",
         "status",
-        "progress_bar",
         "metric_tree",
         "formula",
         "weighted_composite",

@@ -42,6 +42,14 @@
 /// F-038-P2 follow-up).
 pub(crate) const LAYOUT_COUNT: usize = 31;
 
+/// Default BCP-47 language tag used when `deck.metadata.lang` is `None`.
+///
+/// BC-5.01.004 injects `"en"` into `DeckMetadata.lang` when the DSL source
+/// contains no `lang` declaration. All surfaces (`<a:rPr lang>` in slide XML
+/// and `<dc:language>` in `docProps/core.xml`) derive their no-lang fallback
+/// from this single constant so they cannot diverge (BC-5.01.005 v1.3).
+pub(crate) const DEFAULT_DECK_LANG: &str = "en";
+
 pub mod a11y;
 pub mod brand_adapter;
 pub mod clrmapovr;
@@ -77,6 +85,7 @@ mod tests {
     mod notes_tests;
     mod sections_tests;
     mod story_072_gradient_tests;
+    mod story_096_tests;
 }
 
 use content_types::ContentTypesBuilder;
@@ -161,13 +170,36 @@ impl PptxExporter {
             })
             .collect();
 
-        build_slide_parts(laid_out, &brand_template, &slides_with_notes, &mut parts)?;
+        // Extract page size once for master and slide serializers.
+        // build_master_parts uses page_size_emu for placeholder geometry; the slide
+        // serializer (lang on rPr) derives its lang from the deck at this point.
+        let page_size_emu = (laid_out.page_size.width.0, laid_out.page_size.height.0);
+
+        // SEC-096-001 / CWE-116 defense-in-depth: validate the raw lang value at
+        // export_inner entry — BEFORE constructing deck_lang and BEFORE any slide XML
+        // is generated.  This is the first layer; build_doc_props carries the second.
+        // A valid BCP-47 tag (ASCII alphanumeric + hyphen) always passes unchanged
+        // (lossless per BC-5.01.005 invariant 1). Values containing XML-1.0-illegal
+        // control characters (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE,
+        // U+FFFF) are rejected here with PptxError::InvalidLanguageTag before any
+        // ZIP part assembly begins.
+        let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
+        validate_lang_for_xml(lang_raw)?;
+        let deck_lang: std::sync::Arc<str> = std::sync::Arc::from(lang_raw);
+
+        build_slide_parts(
+            laid_out,
+            &brand_template,
+            &slides_with_notes,
+            &deck_lang,
+            &mut parts,
+        )?;
         build_presentation_xml(laid_out, brand, &slide_rel_ids, &mut parts)?;
         parts.push(ZipPart {
             path: "ppt/_rels/presentation.xml.rels".to_string(),
             bytes: prs_rels_bytes,
         });
-        build_master_parts(&brand_template, &mut parts)?;
+        build_master_parts(&brand_template, page_size_emu, &mut parts)?;
         build_layout_parts(&brand_template, &mut parts)?;
         build_theme_part(&brand_template, &mut parts);
         build_notes_handout_masters(&brand_template, &mut parts)?;
@@ -240,10 +272,18 @@ impl PptxExporter {
 /// For each slide in `slides_with_notes`, a `rel_types::NOTES_SLIDE` relationship
 /// is added to the slide's `.rels` file so `PowerPoint` can discover the slide's
 /// notesSlide part. Without this the notesSlide is orphaned even if it exists.
+///
+/// ## Run language threading (STORY-096 AC-003)
+///
+/// `deck_lang` is the BCP-47 language tag from `deck.metadata.lang` (defaulting to
+/// [`DEFAULT_DECK_LANG`] = `"en"` when absent). It is threaded into `SlideSerializer`
+/// so every `<a:rPr>` element in every slide XML carries `lang="..."` (BC-5.01.005
+/// postcondition 1).
 fn build_slide_parts(
     laid_out: &LaidOutDeck,
     brand_template: &BrandTemplate,
     slides_with_notes: &std::collections::HashSet<usize>,
+    deck_lang: &std::sync::Arc<str>,
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
     let mut media_idx = 1_usize;
@@ -310,10 +350,13 @@ fn build_slide_parts(
         // <p:pic> shapes via typed ooxmlsdk builders (ADR-001, F-037-005).
         // AC-011: thread the resolved layout's placeholder info into the serializer
         // so it can perform idx-chain verification (ADR-015 §7).
+        // STORY-096 AC-003: thread deck_lang so every <a:rPr> carries lang="...".
         let serializer = if let Some(layout) = brand_template.layouts.get(layout_index) {
-            SlideSerializer::new(is_dark_layout, layout_index).with_layout(layout)
-        } else {
             SlideSerializer::new(is_dark_layout, layout_index)
+                .with_layout(layout)
+                .with_lang(deck_lang)
+        } else {
+            SlideSerializer::new(is_dark_layout, layout_index).with_lang(deck_lang)
         };
         let (slide_xml_bytes, _warnings) =
             serializer.build(slide, i, &layout_rel_id, &diagram_rids, &hlink_map)?;
@@ -597,6 +640,14 @@ fn build_presentation_xml(
 /// ADR-015 §2: uses `serialize_master_to_xml` from `slideforge-brand` to
 /// produce a schema-valid master with `<a:clrMap>`, `<p:sldLayoutIdLst>`,
 /// `<p:txStyles>`, 5 master placeholder shapes, and `<p:hf>` flags.
+/// `CT_SlideMaster` does not include `<p:sldSz>` (ECMA-376 §19.3.1.42);
+/// slide size is carried exclusively by `presentation.xml` (STORY-096 AC-001 v1.2).
+///
+/// ## Page size threading
+///
+/// `page_size_emu` is `(width_emu, height_emu)` sourced from `LaidOutDeck.page_size`
+/// in `export_inner`. It is threaded here so that footer and slide-number placeholder
+/// positions remain within the declared page bounds (BC-4.01.001 postcondition 4 / AC-004).
 ///
 /// The master `.rels` file references:
 /// - rId1: the theme
@@ -606,11 +657,12 @@ fn build_presentation_xml(
 /// (which use r:id="rId2".."rId32").
 fn build_master_parts(
     brand_template: &BrandTemplate,
+    page_size_emu: (i64, i64),
     parts: &mut Vec<ZipPart>,
 ) -> Result<(), PptxError> {
     parts.push(ZipPart {
         path: "ppt/slideMasters/slideMaster1.xml".to_string(),
-        bytes: serialize_master_to_xml(brand_template),
+        bytes: serialize_master_to_xml(brand_template, page_size_emu),
     });
 
     let mut master_rels = RelsBuilder::new();
@@ -873,7 +925,7 @@ fn validate_lang_for_xml(lang: &str) -> Result<(), PptxError> {
 /// the OPC core properties namespace is not covered by `ooxmlsdk` schemas in
 /// this story's scope. Escaping + validation is the correct mitigation.
 fn build_doc_props(deck: &Deck, parts: &mut Vec<ZipPart>) -> Result<(), PptxError> {
-    let lang_raw = deck.metadata.lang.as_deref().unwrap_or("en");
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
     // SEC-039-001: validate before escaping — fail safe on XML-1.0-illegal chars.
     validate_lang_for_xml(lang_raw)?;
     // F-037-006: XML-escape the lang value before interpolating into the XML body.
