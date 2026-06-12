@@ -77,6 +77,7 @@ mod tests {
     mod notes_tests;
     mod sections_tests;
     mod story_072_gradient_tests;
+    mod story_096_tests;
 }
 
 use content_types::ContentTypesBuilder;
