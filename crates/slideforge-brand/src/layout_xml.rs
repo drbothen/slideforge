@@ -544,12 +544,27 @@ const CLR_MAP_ATTRS: &[(&str, &str)] = &[
 /// For 4:3 (height 5,143,500, same height): `footer_y` = 4,572,000.
 const FOOTER_MARGIN_FROM_BOTTOM: i64 = 571_500;
 
+/// Static `y` position for the body placeholder in `MASTER_PLACEHOLDER_DEFS`.
+///
+/// Used by `serialize_master_to_xml` to compute a page-height-constrained `cy`
+/// for the body placeholder: `cy = (footer_zone_top - BODY_PLACEHOLDER_Y).max(0)`.
+/// This ensures the body bottom edge never exceeds the page height (F-096-003).
+const BODY_PLACEHOLDER_Y: i64 = 1_600_200;
+
 /// The 5 canonical master placeholder types required by ECMA-376 §19.3.1.27.
 ///
 /// Each entry is `(ph_type, idx, accessibility_name, x, y, cx, cy)` in EMU.
-/// The `y` field for footer-region placeholders (idx >= 10) is a static placeholder value
-/// only — `serialize_master_to_xml` overrides these with a page-height-relative
-/// y computed from `FOOTER_MARGIN_FROM_BOTTOM` (STORY-096 AC-004).
+///
+/// Two fields are overridden at runtime by `serialize_master_to_xml`:
+/// - `y` for footer-region placeholders (`idx >= 10`): computed from
+///   `(page_height - FOOTER_MARGIN_FROM_BOTTOM).max(0)` so the top edge
+///   remains non-negative and within the declared page bounds
+///   (STORY-096 AC-004 / F-096-004).
+/// - `cy` for the body placeholder (`idx == 1`): computed as
+///   `(footer_zone_top - BODY_PLACEHOLDER_Y).max(0)` so the bottom edge
+///   `(body_y + body_cy)` never exceeds the page height (F-096-003).
+///   The static value `4,525,963` is retained here for documentation only and
+///   is NOT used at runtime for 16:9 or custom page sizes.
 const MASTER_PLACEHOLDER_DEFS: &[(&str, u32, &str, i64, i64, i64, i64)] = &[
     // title: full-width title region
     (
@@ -688,13 +703,29 @@ pub fn serialize_master_to_xml(
 
     // Compute footer/date/slideNum y-position from page height so all placeholders
     // remain within the declared page bounds (STORY-096 AC-004, BC-4.01.001 postcondition 4).
-    // Footer region sits 571,500 EMU from the bottom (approx 0.625 inch margin).
-    // This keeps y < page height for any standard page size.
+    // Footer region sits FOOTER_MARGIN_FROM_BOTTOM EMU from the bottom (~0.625 inch).
+    //
+    // F-096-004: clamp footer_zone_top to a non-negative floor so pathological
+    // tiny page heights (page_height < FOOTER_MARGIN_FROM_BOTTOM) produce
+    // footer_y = 0 rather than a negative EMU offset.  Negative <a:off y>
+    // values are out-of-spec for slide coordinates and cause renderer errors.
+    // Using `.max(0)` is the correct idiom for i64: `saturating_sub` for i64
+    // saturates at i64::MIN (overflow only), not at 0.
     let (_, page_height_emu) = page_size_emu;
-    let footer_y = page_height_emu - FOOTER_MARGIN_FROM_BOTTOM;
+    let footer_zone_top: i64 = (page_height_emu - FOOTER_MARGIN_FROM_BOTTOM).max(0);
+
+    // F-096-003: derive the body placeholder height from the footer zone top so
+    // its bottom edge (body_y + body_cy) never exceeds the page height.
+    //
+    // Derivation: body_cy = footer_zone_top - BODY_PLACEHOLDER_Y
+    //   - For 16:9 (height 5,143,500): footer_zone_top = 4,572,000;
+    //     BODY_PLACEHOLDER_Y = 1,600,200; body_cy = 2,971,800.
+    //   - The static value 4,525,963 overflows (bottom = 6,126,163 > 5,143,500).
+    //   - `.max(0)` guards against the degenerate case where footer_zone_top
+    //     < BODY_PLACEHOLDER_Y (clamps to 0; renderer clips the zero-height shape).
 
     // Write the 5 master placeholder shapes; footer/date/slideNum use the
-    // page-height-derived y-position instead of the constant in MASTER_PLACEHOLDER_DEFS.
+    // page-height-derived y-position; the body placeholder uses a derived cy.
     for (sp_idx, (ph_type, idx, name, x, static_y, cx, cy)) in
         MASTER_PLACEHOLDER_DEFS.iter().enumerate()
     {
@@ -702,7 +733,19 @@ pub fn serialize_master_to_xml(
         let sp_id = u32::try_from(sp_idx + 2).expect("sp_id always fits");
         // Footer-region placeholders (dt idx=10, ftr idx=11, sldNum idx=12) use the
         // computed y; title (idx=0) and body (idx=1) use their static positions.
-        let effective_y = if *idx >= 10 { footer_y } else { *static_y };
+        let top = if *idx >= 10 {
+            footer_zone_top
+        } else {
+            *static_y
+        };
+        // Body placeholder (idx=1): derive height from footer_zone_top so the bottom
+        // edge (body_y + body_height) stays within the page bounds (F-096-003).
+        // All other placeholders use their static cy from MASTER_PLACEHOLDER_DEFS.
+        let height = if *idx == 1 {
+            (footer_zone_top - BODY_PLACEHOLDER_Y).max(0)
+        } else {
+            *cy
+        };
         write_master_placeholder(
             &mut writer,
             ph_type,
@@ -710,9 +753,9 @@ pub fn serialize_master_to_xml(
             name,
             sp_id,
             *x,
-            effective_y,
+            top,
             *cx,
-            *cy,
+            height,
         );
     }
 

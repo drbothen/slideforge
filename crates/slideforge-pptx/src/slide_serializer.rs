@@ -511,6 +511,9 @@ impl SlideSerializer {
                         frame.bbox.width.0,
                         frame.bbox.height.0,
                         t.as_ref(),
+                        // AC-003 / F-096-001: thread deck lang so the title run
+                        // carries the same language anchor as body runs.
+                        self.lang.as_deref(),
                     );
                     shape_tree
                         .shape_tree_choice
@@ -542,6 +545,9 @@ impl SlideSerializer {
                         frame.bbox.width.0,
                         frame.bbox.height.0,
                         t.as_ref(),
+                        // AC-003 / F-096-001: thread deck lang so the subtitle run
+                        // carries the same language anchor as body runs.
+                        self.lang.as_deref(),
                     );
                     shape_tree
                         .shape_tree_choice
@@ -1268,6 +1274,12 @@ enum ShapeKind {
 }
 
 /// Build a single `<p:sp>` shape for a placeholder.
+///
+/// `lang` is a BCP-47 language tag emitted as the `lang` attribute on the
+/// `<a:rPr>` element for the text run (AC-003 / STORY-096 F-096-001).
+/// When `Some`, every `<a:rPr>` carries the language anchor for spell-check
+/// and accessibility tools. When `None`, `<a:rPr>` is emitted with no `lang`
+/// attribute (used only in tests that pre-date AC-003).
 fn build_shape(
     shape_id: u32,
     kind: ShapeKind,
@@ -1276,6 +1288,7 @@ fn build_shape(
     cx: i64,
     cy: i64,
     text: &str,
+    lang: Option<&str>,
 ) -> Shape {
     // Non-visual shape properties.
     let cnv_pr = NonVisualDrawingProperties {
@@ -1377,8 +1390,15 @@ fn build_shape(
     // U+FFFE, U+FFFF) would produce malformed XML and enable XML injection.
     // Mirrors the DOCX SEC-002 fix in slideforge-docx/src/document_body.rs.
     let sanitized_text = strip_xml10_invalid_chars(text);
+    // AC-003 / F-096-001: thread lang into RunProperties so the title/subtitle
+    // plain-string path carries the same language anchor as the body run path.
+    // `ooxml_run_to_ooxmlsdk` handles the inline run path; this handles the
+    // plain-string path used by FrameContent::Title and FrameContent::Subtitle.
     let run = Run {
-        run_properties: Some(Box::default()),
+        run_properties: Some(Box::new(RunProperties {
+            language: lang.map(str::to_owned),
+            ..RunProperties::default()
+        })),
         text: sanitized_text,
         xmlns: vec![],
         xml_other_children: vec![],

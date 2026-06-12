@@ -391,53 +391,166 @@ fn test_BC_4_01_001_master_sldsz_matches_custom_brand_page_size() {
 /// BC-4.01.001 postcondition 4 / STORY-096 AC-004:
 ///
 /// Verifies that every placeholder `<p:sp>` shape in `slideMaster1.xml` has
-/// an `<a:off y="...">` coordinate that does not exceed the 16:9 slide height
-/// boundary of 5,143,500 EMU (BC-4.01.001 postcondition 4).
+/// both its top edge (`off.y`) AND its bottom edge (`off.y + ext.cy`) within
+/// the 16:9 slide height boundary of 5,143,500 EMU
+/// (BC-4.01.001 postcondition 4).
 ///
-/// `MASTER_PLACEHOLDER_DEFS` must position footer/date/slideNum within the
-/// 9,144,000 × 5,143,500 EMU bounds so PowerPoint does not issue layout
-/// warnings about out-of-bounds placeholders.
+/// `MASTER_PLACEHOLDER_DEFS` must size and position the body placeholder so
+/// its bottom edge does not extend past the page height. The body placeholder
+/// at `static_y=1_600_200, cy=4_525_963` overflows the 16:9 boundary
+/// (bottom = 6,126,163 > 5,143,500); `cy` must be derived from the footer
+/// zone top rather than using an unchecked static value.
 ///
-/// This test scans ALL `<a:off y="...">` occurrences in the master XML and
-/// asserts none exceeds the 16:9 height.
+/// Footer/date/slideNum placeholders use a page-height-derived `y` via
+/// `serialize_master_to_xml`, so their tops stay within bounds; this test
+/// verifies BOTH top-edge AND bottom-edge invariants for ALL master shapes.
 ///
-/// LESSON-14: asserts the ACTUAL y-coordinate value, not merely that the master
-/// XML contains `<p:sldSz>`.
+/// LESSON-14: asserts ACTUAL coordinate arithmetic, not merely that the
+/// master XML contains `<p:sldSz>`.
+/// F-096-003: strengthened to check `off.y + ext.cy <= page_height`
+/// (bottom-edge invariant) in addition to the pre-existing top-edge check.
 #[test]
 fn test_BC_4_01_001_footer_date_placeholders_within_16x9_bounds() {
     // 16:9 page height in EMU.
-    const MAX_Y_EMU: i64 = 5_143_500;
+    const PAGE_HEIGHT: i64 = 5_143_500;
 
     let laid_out = make_laid_out_deck(1);
     let pptx_bytes = build_pptx(&laid_out);
     let master_xml = zip_read_entry(&pptx_bytes, "ppt/slideMasters/slideMaster1.xml");
 
-    // Collect all <a:off y="..."> values from the master XML.
-    // These are the top-edge y-coordinates of placeholder shapes.
-    let mut violations: Vec<i64> = Vec::new();
+    // Parse (off.y, ext.cy) pairs from each <a:xfrm> block in the master XML.
+    // Each <a:xfrm> contains <a:off> followed by <a:ext>; we collect them as
+    // pairs to check BOTH top-edge and bottom-edge invariants.
+    let mut top_violations: Vec<i64> = Vec::new();
+    let mut bottom_violations: Vec<(i64, i64)> = Vec::new(); // (y, cy) pairs
+
     let mut rest = master_xml.as_str();
+    while let Some(xfrm_pos) = rest.find("<a:xfrm") {
+        let after_xfrm = &rest[xfrm_pos..];
+        // Find the end of the xfrm block (up to </a:xfrm>).
+        let xfrm_end = after_xfrm.find("</a:xfrm>").unwrap_or(after_xfrm.len());
+        let xfrm_block = &after_xfrm[..xfrm_end];
+
+        // Extract off.y from <a:off y="..."> within this xfrm block.
+        let off_y: Option<i64> = xfrm_block.find("<a:off").and_then(|p| {
+            let tag_start = &xfrm_block[p..];
+            let tag_end = tag_start.find('>').unwrap_or(tag_start.len());
+            extract_attr_i64(&tag_start[..=tag_end], "y")
+        });
+
+        // Extract ext.cy from <a:ext cy="..."> within this xfrm block.
+        let ext_cy: Option<i64> = xfrm_block.find("<a:ext").and_then(|p| {
+            let tag_start = &xfrm_block[p..];
+            let tag_end = tag_start.find('>').unwrap_or(tag_start.len());
+            extract_attr_i64(&tag_start[..=tag_end], "cy")
+        });
+
+        if let Some(y) = off_y {
+            // Top-edge: y must not exceed page height.
+            if y > PAGE_HEIGHT {
+                top_violations.push(y);
+            }
+            // Bottom-edge: y + cy must not exceed page height.
+            if let Some(cy) = ext_cy.filter(|&h| y + h > PAGE_HEIGHT) {
+                bottom_violations.push((y, cy));
+            }
+        }
+
+        rest = &rest[xfrm_pos + "<a:xfrm".len()..];
+    }
+
+    assert!(
+        top_violations.is_empty(),
+        "AC-004 top-edge: slideMaster1.xml has placeholder(s) with top-edge y \
+         exceeding the 16:9 height boundary ({PAGE_HEIGHT} EMU).\n\
+         Violating top-edge y values: {top_violations:?}\n\
+         master_xml excerpt (first 2000 chars):\n{}",
+        &master_xml[..master_xml.len().min(2000)]
+    );
+
+    assert!(
+        bottom_violations.is_empty(),
+        "AC-004 bottom-edge / F-096-003: slideMaster1.xml has placeholder(s) whose \
+         bottom edge (off.y + ext.cy) exceeds the 16:9 height boundary \
+         ({PAGE_HEIGHT} EMU).\n\
+         Violating (y, cy) pairs: {bottom_violations:?}\n\
+         The body placeholder cy must be derived from the footer zone top so its \
+         bottom edge fits within the page: cy = footer_zone_top - body_y - margin.\n\
+         master_xml excerpt (first 2000 chars):\n{}",
+        &master_xml[..master_xml.len().min(2000)]
+    );
+}
+
+/// BC-4.01.001 postcondition 4 / STORY-096 AC-004 / F-096-004:
+///
+/// Pathological page height guard: when `page_height < FOOTER_MARGIN_FROM_BOTTOM`
+/// (e.g., a 100,000 EMU tall slide), `footer_y` must not underflow to a negative
+/// value. `serialize_master_to_xml` must clamp `footer_y` to a non-negative floor
+/// (saturating_sub semantics) so no `<a:off y="...">` emits a negative offset.
+///
+/// This test exercises the edge case directly by calling `serialize_master_to_xml`
+/// with a pathological tiny height and asserting that NO `<a:off y="...">` in the
+/// output is negative.
+#[test]
+fn test_BC_4_01_001_footer_y_saturating_on_tiny_page() {
+    use slideforge_brand::layout_xml::serialize_master_to_xml;
+    use slideforge_brand::layout_xml::{
+        HANDOUT_MASTER_STUB, NOTES_MASTER_STUB, generate_content_types_layout_entries,
+    };
+    use slideforge_brand::layouts::generate_all_layouts;
+    use slideforge_brand::template::{BrandFonts as BTFonts, ColorSlot, ColorValue, MasterIds};
+    use slideforge_brand::toml_schema::BrandConfig;
+
+    let config = BrandConfig::default_minimal();
+    let layouts = generate_all_layouts(&config);
+    let template = slideforge_brand::BrandTemplate {
+        colors: std::array::from_fn(|i| ColorSlot {
+            name: Arc::from(slideforge_brand::template::COLOR_SLOT_NAMES[i]),
+            value: ColorValue::Hex(Arc::from("003087")),
+            is_derived: false,
+        }),
+        fonts: BTFonts {
+            heading: Arc::from("Calibri"),
+            body: Arc::from("Calibri"),
+        },
+        logo: None,
+        footer_text: None,
+        footer_flags: slideforge_brand::FooterFlags::default(),
+        layout_names: vec![],
+        layouts,
+        notes_master_stub: NOTES_MASTER_STUB.to_vec(),
+        handout_master_stub: HANDOUT_MASTER_STUB.to_vec(),
+        master_ids: MasterIds::default(),
+        content_types_layout_entries: Arc::from(
+            generate_content_types_layout_entries(crate::LAYOUT_COUNT).as_str(),
+        ),
+    };
+
+    // Pathological tiny page height — less than FOOTER_MARGIN_FROM_BOTTOM (571,500 EMU).
+    // Without clamping: footer_y = 100_000 - 571_500 = -471_500 (underflow).
+    let xml_bytes = serialize_master_to_xml(&template, (1_000_000, 100_000));
+    let xml = std::str::from_utf8(&xml_bytes).expect("valid UTF-8");
+
+    // Scan all <a:off y="..."> values; none must be negative.
+    let mut negative_ys: Vec<i64> = Vec::new();
+    let mut rest = xml;
     while let Some(pos) = rest.find("<a:off") {
         let after = &rest[pos..];
         let end = after.find('>').unwrap_or(after.len());
         let tag_content = &after[..=end];
-
-        if let Some(y_val) = extract_attr_i64(tag_content, "y")
-            && y_val > MAX_Y_EMU
-        {
-            violations.push(y_val);
+        if let Some(y) = extract_attr_i64(tag_content, "y").filter(|&v| v < 0) {
+            negative_ys.push(y);
         }
         rest = &rest[pos + "<a:off".len()..];
     }
 
     assert!(
-        violations.is_empty(),
-        "AC-004: slideMaster1.xml has placeholder(s) with y-coordinate(s) \
-         exceeding the 16:9 height boundary ({MAX_Y_EMU} EMU).\n\
-         Violating y values: {violations:?}\n\
-         All footer/date/slideNum placeholders must be positioned within the \
-         9144000 × 5143500 bounds declared by <p:sldSz>.\n\
-         master_xml excerpt (first 2000 chars):\n{}",
-        &master_xml[..master_xml.len().min(2000)]
+        negative_ys.is_empty(),
+        "F-096-004: serialize_master_to_xml with pathological tiny page height \
+         (100,000 EMU < FOOTER_MARGIN_FROM_BOTTOM 571,500 EMU) must not emit \
+         negative <a:off y=\"...\"> values. Got negative y values: {negative_ys:?}.\n\
+         footer_zone_top must be clamped: \
+         (page_height - FOOTER_MARGIN_FROM_BOTTOM).max(0)."
     );
 }
 
@@ -557,24 +670,18 @@ fn test_BC_4_01_005_progress_bar_slide_resolves_named_layout_not_fallback() {
 
     let idx = crate::find_layout_index(&brand_template, "progress_bar");
 
-    // After AC-002 fix: progress_bar must NOT fall back to index 1.
-    // It must resolve to its own named layout index (>= 2, per the standard
-    // 11-slot SL block + custom CL-01..CL-20 placement).
-    assert_ne!(
-        idx, 1,
-        "AC-002: find_layout_index(\"progress_bar\") must NOT return 1 \
-         (the Title and Content fallback index). Got {idx}.\n\
-         `generate_all_layouts` must include a progress_bar entry with \
-         slide_type_keyword = Some(\"progress_bar\") so Phase 1 keyword matching \
-         returns its dedicated layout index."
-    );
-
-    // Verify the resolved index is within the valid 0..31 range.
-    assert!(
-        idx < crate::LAYOUT_COUNT,
-        "AC-002: resolved layout index {idx} must be < LAYOUT_COUNT ({}) \
-         (within the 31-layout hierarchy)",
-        crate::LAYOUT_COUNT
+    // AC-002 / F-096-005: progress_bar must resolve to its dedicated index 30
+    // (CL-20, SF Progress Bar, the 31st layout in the 0-based 0..30 range).
+    // Index 30 is the exact slot defined in `generate_all_layouts` for the
+    // progress_bar DSL keyword (Q2 built-in type). Asserting the exact index
+    // is load-bearing: `!= 1` would pass for any non-fallback hit, masking
+    // accidental slot collisions or keyword-matching regressions.
+    assert_eq!(
+        idx, 30,
+        "AC-002 / F-096-005: find_layout_index(\"progress_bar\") must return exactly 30 \
+         (CL-20, SF Progress Bar, 0-based). Got {idx}.\n\
+         `generate_all_layouts` must place progress_bar at index 30 via Phase 1 \
+         keyword match (slide_type_keyword = Some(\"progress_bar\"))."
     );
 }
 
@@ -684,6 +791,58 @@ fn test_BC_5_01_005_run_has_lang_attribute_fr_fr_round_trip() {
             "AC-003 Red Gate (fr-FR round-trip): <a:rPr lang> must be exactly \
              \"fr-FR\" (BC-5.01.005 invariant 1: lossless propagation); \
              got \"{lang}\""
+        );
+    }
+}
+
+/// BC-5.01.005 postcondition 1 / STORY-096 AC-003 / F-096-001 — universality:
+///
+/// Verifies that EVERY `<a:rPr>` element in `slide1.xml` carries `lang="en-US"`,
+/// not just body runs. Title and Subtitle frames use `build_shape` which previously
+/// hardcoded `run_properties: Some(Box::default())` (RunProperties with `language:
+/// None`), so the title run emitted `<a:rPr></a:rPr>` with NO lang attribute.
+///
+/// Universality contract (AC-003): `collect_rpr_lang_values(xml).len()` must
+/// equal `xml.matches("<a:rPr").count()` — every single rPr element must carry
+/// the lang tag, regardless of which frame type produced it.
+///
+/// This test uses a slide with BOTH a Title frame (plain string → `build_shape`)
+/// AND a Body frame (inline nodes → `ooxml_run_to_ooxmlsdk`) to ensure both
+/// code paths are exercised.
+#[test]
+fn test_BC_5_01_005_ac003_all_rpr_carry_lang_universality() {
+    // make_slide_with_body_text includes both a Title frame and a Body frame.
+    let mut laid_out = make_laid_out_deck(1);
+    laid_out.slides[0] = make_slide_with_body_text(0);
+
+    let deck = make_deck_with_lang(1, "en-US");
+    let pptx_bytes = build_pptx_with_deck(&deck, &laid_out);
+    let slide1_xml = zip_read_entry(&pptx_bytes, "ppt/slides/slide1.xml");
+
+    let rpr_total = slide1_xml.matches("<a:rPr").count();
+    let lang_values = collect_rpr_lang_values(&slide1_xml);
+
+    assert!(
+        rpr_total > 0,
+        "F-096-001 prerequisite: slide1.xml must contain at least one <a:rPr> element; \
+         the slide has a Title and a Body frame"
+    );
+
+    assert_eq!(
+        lang_values.len(),
+        rpr_total,
+        "F-096-001 / AC-003 universality: EVERY <a:rPr> must carry a lang attribute. \
+         Found {rpr_total} <a:rPr> elements but only {} carry lang=\"...\". \
+         The title run path (build_shape) must thread lang into RunProperties, \
+         not use Box::default().",
+        lang_values.len()
+    );
+
+    for lang in &lang_values {
+        assert_eq!(
+            lang.as_str(),
+            "en-US",
+            "F-096-001: every <a:rPr lang> must be \"en-US\"; got \"{lang}\""
         );
     }
 }
