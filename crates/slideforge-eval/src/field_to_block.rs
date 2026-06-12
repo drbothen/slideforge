@@ -188,14 +188,23 @@ fn thread_one_slide(slide: &mut slideforge_types::Slide) {
     // This is the primary failing path identified by adversary finding C2.
     //
     // F-098-P1-002 gate: only thread `body` when the slide type's schema declares
-    // `body` as a known field. For types that do NOT declare `body` (e.g., `content`,
-    // `chart`), `body` is an unknown field — `FieldSchemaValidator` emits W-VAL-103
-    // (promoted to Error for CONTENT_DROP_KEYS in strict mode). Threading it here
-    // would render body content that the slide type's layout does not support.
-    // In warn-only mode this would silently drop or corrupt layout output.
+    // `body` as a known field. For types that do NOT declare `body` (e.g., `chart`,
+    // `status`, `progress_bar`, `weighted_composite`), `body` is an unknown field —
+    // `FieldSchemaValidator` emits W-VAL-103 (promoted to Error for CONTENT_DROP_KEYS
+    // in strict mode per BC-3.03.002 v1.2 Invariant 4). Threading it here would render
+    // body content that the slide type's layout does not support.
+    // In warn-only mode this would silently produce a Body frame the layout ignores.
     //
-    // If the slide type is unknown (not in `slide_type_known_fields`), we fall
-    // through and thread body unconditionally — safe default for future types.
+    // None-semantics (F-098-P2-001): `None` from `slide_type_known_fields` means the
+    // type is NOT a registered built-in — i.e., a user-defined plugin type. Plugin
+    // types are not in the compile-time table. For these we fall through and thread
+    // body unconditionally (`is_none_or` → true when `None`). This preserves the
+    // open-world assumption: a plugin may declare body support without appearing in
+    // the syntax crate's compile-time table.
+    //
+    // Coherence invariant: all 34 bundled types are present in `slide_type_known_fields`
+    // (enforced by `test_f098_p2_001_bundled_registry_coherence` in slideforge-plugin-api).
+    // So `None` is only reachable for genuine third-party plugin types.
     let slide_type_supports_body = slide_type_known_fields(slide.slide_type.as_ref())
         .is_none_or(|known| known.contains(&"body"));
     if slide_type_supports_body {

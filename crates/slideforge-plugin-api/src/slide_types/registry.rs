@@ -1171,7 +1171,7 @@ mod tests {
     /// For completeness, a second assertion verifies that `body` on `content`
     /// produces NO W-VAL-103 (it's now a declared optional field).
     #[test]
-    fn test_BC_3_03_002_body_on_content_strict_exits_2() {
+    fn test_BC_3_03_002_body_on_nondeclaring_type_exits_2_and_content_accepts_body() {
         let reg = SlideTypeRegistry::default();
 
         // Part (a): `body` on `chart` slide → W-VAL-103 at Error severity.
@@ -1315,6 +1315,135 @@ mod tests {
             "EC-002 guard: known field 'title' on 'title' slide type must NOT produce W-VAL-103; \
              got: {w_val_103:?}"
         );
+    }
+
+    /// F-098-P2-001 regression guard: `body` on color-coded types → W-VAL-103 at Error severity.
+    ///
+    /// `status`, `progress_bar`, and `weighted_composite` do NOT declare `body` in their
+    /// field schemas. A `body` field on any of these must emit W-VAL-103 promoted to
+    /// Error severity because `body` is a `CONTENT_DROP_KEY` (BC-3.03.002 v1.2 Invariant 4).
+    ///
+    /// This is the registry-level half of the two-part fix:
+    /// 1. `validate_fields` emits W-VAL-103/Error for unknown `body` (this test)
+    /// 2. `field_to_block.rs` does NOT thread a Body frame for these types (eval-level)
+    ///
+    /// Regression target: before F-098-P2-001, `known_fields` returned `None` for these
+    /// types, causing `is_none_or(…)` to thread body unconditionally in warn-only mode.
+    #[test]
+    fn test_f098_p2_001_body_on_color_coded_types_is_content_drop_error() {
+        let reg = SlideTypeRegistry::default();
+
+        for type_kw in &["status", "progress_bar", "weighted_composite"] {
+            let slide_type = reg
+                .lookup_by_keyword(type_kw)
+                .unwrap_or_else(|| panic!("type '{type_kw}' must be in registry"));
+
+            // Construct a minimal valid slide (required fields) + an invalid `body` field.
+            let (required_fields, type_desc): (&[(&str, &str)], &str) = match *type_kw {
+                "status" => (
+                    &[("title", "Project Alpha"), ("label", "On Track")],
+                    "status (required: title + label)",
+                ),
+                "progress_bar" => (
+                    &[
+                        ("title", "Sprint Completion"),
+                        ("label", "75% complete"),
+                        ("value", "75"),
+                    ],
+                    "progress_bar (required: title + label + value)",
+                ),
+                _ /* weighted_composite */ => (
+                    &[
+                        ("title", "Vendor Scorecard"),
+                        ("label", "Overall: Good (78/100)"),
+                        ("components", "placeholder"),
+                    ],
+                    "weighted_composite (required: title + label + components)",
+                ),
+            };
+
+            let mut fields: Vec<(&str, &str)> = required_fields.to_vec();
+            fields.push(("body", "this body text is invalid on a color-coded slide"));
+
+            let slide = make_slide(type_kw, fields);
+            let diags = validate_fields(&slide, slide_type);
+
+            let body_diags: Vec<_> = diags
+                .iter()
+                .filter(|d| d.code.as_ref() == "W-VAL-103" && d.message.contains("body"))
+                .collect();
+
+            assert!(
+                !body_diags.is_empty(),
+                "F-098-P2-001: `body` on `{type_kw}` ({type_desc}) must emit W-VAL-103; \
+                 got diags: {diags:?}"
+            );
+
+            assert_eq!(
+                body_diags[0].severity,
+                DiagnosticSeverity::Error,
+                "F-098-P2-001: W-VAL-103 for `body` on `{type_kw}` must be Error severity \
+                 (CONTENT_DROP_KEY — broken/exit-2 in strict mode per BC-3.03.002 v1.2 Invariant 4). \
+                 Got: {:?}",
+                body_diags[0].severity
+            );
+        }
+    }
+
+    /// F-098-P2-001 coherence test (process-gap killer): every bundled registry type has an
+    /// entry in `slideforge_syntax::known_fields::known_fields()`, and every field declared
+    /// by the type's required+optional schema is present in `known_fields()`.
+    ///
+    /// This test permanently prevents the 31-vs-34 class of drift: whenever a new bundled
+    /// slide type is added to `SlideTypeRegistry::default()` without a corresponding entry
+    /// in `known_fields()`, this test fails immediately.
+    ///
+    /// Two-part assertion:
+    /// 1. Every keyword in `SlideTypeRegistry::all_keywords()` has `Some(...)` from `known_fields()`.
+    /// 2. Every field name in `required_fields() + optional_fields()` for that type appears
+    ///    in the `known_fields()` slice for that type.
+    ///
+    /// Part 2 uses `⊇` semantics: `known_fields` is allowed to declare MORE fields than the
+    /// registry schema (e.g., an alias preset field not in the base type's schema). But
+    /// every field the registry DECLARES must be accessible.
+    #[test]
+    fn test_f098_p2_001_bundled_registry_coherence() {
+        use slideforge_syntax::known_fields::known_fields;
+
+        let reg = SlideTypeRegistry::default();
+
+        for kw in reg.all_keywords() {
+            let kw_str: &str = kw.as_ref();
+
+            // Part 1: every keyword must have a known_fields entry.
+            let kf = known_fields(kw_str).unwrap_or_else(|| {
+                panic!(
+                    "F-098-P2-001 coherence: bundled registry type '{kw_str}' has NO entry in \
+                     slideforge_syntax::known_fields::known_fields(). Add it with its correct \
+                     field set (required + optional, NO `body` unless the layout supports it)."
+                )
+            });
+
+            // Part 2: every field declared in required_fields() + optional_fields()
+            // must appear in known_fields().
+            let slide_type = reg
+                .lookup_by_keyword(kw_str)
+                .unwrap_or_else(|| panic!("registry type '{kw_str}' must be lookupable"));
+
+            for field_def in slide_type
+                .required_fields()
+                .iter()
+                .chain(slide_type.optional_fields().iter())
+            {
+                let field_name: &str = field_def.name.as_ref();
+                assert!(
+                    kf.contains(&field_name),
+                    "F-098-P2-001 coherence: type '{kw_str}' declares field '{field_name}' in its \
+                     schema (required_fields/optional_fields) but '{field_name}' is NOT present in \
+                     known_fields('{kw_str}'). known_fields must be a superset of the declared schema."
+                );
+            }
+        }
     }
 
     /// BC-3.03.002 Invariant 1 (DI-017) + DI-018 / EC-004 (multiple errors incl. content-drop):

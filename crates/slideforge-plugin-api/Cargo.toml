@@ -29,3 +29,7 @@ insta = { workspace = true }
 ordered-float = { workspace = true }
 # tracing-test: load-bearing test capturing tracing::debug! for Footnote deferral log (F-010 / STORY-085)
 tracing-test = "=0.2.5"
+# slideforge-syntax: needed for coherence test verifying that every bundled registry type
+# has an entry in known_fields() (F-098-P2-001 process-gap killer test).
+# Dev-dep only — no circular dependency (slideforge-syntax does NOT depend on slideforge-plugin-api).
+slideforge-syntax = { workspace = true }

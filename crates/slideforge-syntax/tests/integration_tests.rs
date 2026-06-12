@@ -666,9 +666,9 @@ fn test_ec001_empty_sink_on_valid_source() {
 
 // ── F-WG-001: known_fields keyword count matches registry ────────────────────
 
-/// F-WG-001: `all_slide_types()` must return exactly 31 types that all have
-/// known fields. Also verifies the specific registry types called out in the
-/// wave-gate finding.
+/// F-WG-001 / F-098-P2-001: `all_slide_types()` must return exactly 34 types that
+/// all have known fields. Also verifies the specific registry types called out in
+/// the wave-gate finding, including the 3 color-coded types added in STORY-087.
 #[test]
 fn test_slide_type_keywords_match_known_fields() {
     use slideforge_syntax::known_fields::{all_slide_types, known_fields};
@@ -677,8 +677,9 @@ fn test_slide_type_keywords_match_known_fields() {
     let kf_types: HashSet<&str> = all_slide_types().iter().copied().collect();
     assert_eq!(
         kf_types.len(),
-        31,
-        "all_slide_types() must return exactly 31 types; got {}",
+        34,
+        "all_slide_types() must return exactly 34 types \
+         (31 original + status/progress_bar/weighted_composite from STORY-087); got {}",
         kf_types.len()
     );
 
@@ -697,6 +698,10 @@ fn test_slide_type_keywords_match_known_fields() {
         "stat_callout",
         "process_flow",
         "executive_summary",
+        // F-098-P2-001: color-coded types must be present
+        "status",
+        "progress_bar",
+        "weighted_composite",
     ] {
         assert!(
             kf_types.contains(expected),
