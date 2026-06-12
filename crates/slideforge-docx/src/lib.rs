@@ -80,7 +80,7 @@ mod tests;
 
 use slideforge_layout::LaidOutDeck;
 use slideforge_plugin_api::{ExportOptions, Exporter};
-use slideforge_types::{Brand, Deck};
+use slideforge_types::{Brand, Deck, validate_xml_lang};
 use tracing::instrument;
 
 use crate::document_body::DocumentBodySerializer;
@@ -135,10 +135,32 @@ impl Exporter for DocxExporter {
 /// Separated from the trait impl so errors use the richer local
 /// [`ExportError`] type until the final conversion.
 ///
+/// ## XML-1.0 control-character validation (SEC-099-001 / CWE-116)
+///
+/// The deck's `lang` value is validated against the XML-1.0 legal character
+/// set BEFORE any ZIP part is assembled. A lang value containing U+0000–U+0008,
+/// U+000B, U+000C, U+000E–U+001F, U+FFFE, or U+FFFF returns
+/// [`ExportError::InvalidLanguageTag`] immediately (fail-fast). Valid BCP-47
+/// tags (ASCII alphanumeric + hyphen) pass through unchanged (lossless —
+/// BC-5.01.005 invariant 1). The shared validator lives in `slideforge-types`
+/// so the same logic covers every exporter (SEC-099-001 / SEC-039-001).
+///
 /// # Errors
 ///
 /// Returns [`ExportError`] on any assembly failure.
 fn build_docx(deck: &Deck, laid_out: &LaidOutDeck, brand: &Brand) -> Result<Vec<u8>, ExportError> {
+    // SEC-099-001 / CWE-116: validate lang at export entry — before any XML part
+    // is assembled. The shared `validate_xml_lang` (slideforge-types) returns the
+    // first illegal char on failure; wrap it into the DOCX-specific error variant.
+    let lang_raw = deck.metadata.lang.as_deref().unwrap_or(DEFAULT_DECK_LANG);
+    validate_xml_lang(lang_raw).map_err(|ch| {
+        let code = ch as u32;
+        ExportError::InvalidLanguageTag {
+            lang: lang_raw.to_owned(),
+            reason: format!("contains XML-1.0-illegal control character U+{code:04X}"),
+        }
+    })?;
+
     let mut asm = DocxZipAssembler::new();
 
     // ── `[Content_Types].xml` ─────────────────────────────────────────────

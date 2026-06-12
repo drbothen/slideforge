@@ -19,6 +19,8 @@
 //! | `test_BC_4_02_001_ec005_empty_bullet_string_preserved` | BC-4.02.001 postcondition 7 | EC-005 |
 //! | `test_BC_5_01_005_section_runs_have_lang_universality` | BC-5.01.005 PC-4 universality incl. sections | adversary F-099-001 [HIGH] |
 //! | `test_BC_5_01_005_no_lang_docprops_default_en_cross_surface` | BC-5.01.005 PC-6 cross-surface default | adversary OBS-099-001 [MED] |
+//! | `test_SEC_099_001_lang_control_char_rejected` | SEC-099-001 / CWE-116 / BC-5.01.005 | SEC-099-001 fail-fast |
+//! | `test_SEC_099_001_valid_bcp47_lang_accepted` | SEC-099-001 / BC-5.01.005 invariant 1 | SEC-099-001 control |
 //!
 //! # Twips arithmetic for AC-003
 //!
@@ -934,5 +936,81 @@ fn test_BC_5_01_005_no_lang_docprops_default_en_cross_surface() {
          when no lang is declared; canonical default is \"en\" (BC-5.01.005 PC-6). \
          Got (first 3000 chars):\n{}",
         &doc_xml[..doc_xml.len().min(3000)]
+    );
+}
+
+// ─── SEC-099-001: fail-fast lang validation (CWE-116) ─────────────────────────
+
+/// SEC-099-001 / CWE-116 / BC-5.01.005 — DOCX export must reject lang values
+/// that contain XML-1.0-illegal control characters.
+///
+/// A deck whose `lang` field contains `U+0007` (BELL, an XML-1.0-illegal control
+/// character in the range U+0000–U+0008) must cause `DocxExporter::export` to
+/// return an error rather than silently emitting malformed XML.
+///
+/// The error must:
+///   1. Be an `Err(...)` — export must NOT return `Ok(bytes)`.
+///   2. Carry an `InvalidLanguageTag` variant whose `lang` field equals the
+///      offending value `"en\u{0007}"`.
+///   3. Carry the offending code point in `reason` as `"U+0007"`.
+///
+/// This mirrors the PPTX guard at `export_inner` (SEC-096-001 / SEC-039-001).
+/// The guard must fire BEFORE any ZIP part is assembled (fail-fast).
+///
+/// Contract source: SEC-099-001 (IMPORTANT, CWE-116), BC-5.01.005 invariant 1.
+#[test]
+fn test_SEC_099_001_lang_control_char_rejected() {
+    // "en\u{0007}" — ASCII BEL is XML-1.0-illegal (range U+0000–U+0008).
+    // This simulates a user-supplied lang value that slipped a control character past
+    // the DSL parser (or was injected via API).
+    let deck = deck_with_lang(Some("en\u{0007}"));
+    let laid_out = make_laid_out_deck(vec![]);
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+
+    let result = DocxExporter.export(&deck, &laid_out, &brand, &opts);
+
+    assert!(
+        result.is_err(),
+        "SEC-099-001 RED GATE: DOCX export with lang containing U+0007 must return Err; \
+         got Ok(bytes) instead. A lang value with XML-1.0-illegal control characters \
+         must be rejected at export entry before any ZIP part assembly (CWE-116 / \
+         SEC-099-001)."
+    );
+
+    // Pin the error message to confirm the variant shape and code-point field
+    // (FU-DIAGNOSTIC-FIELD-PINNING).
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("en\u{0007}") || err_msg.contains("U+0007"),
+        "SEC-099-001 RED GATE: the error message must identify the offending lang value \
+         or code point. Expected the string to contain the offending lang value \
+         (\"en\\u{{0007}}\") or the code point (\"U+0007\"). \
+         Got: {err_msg}"
+    );
+}
+
+/// SEC-099-001 control test — valid BCP-47 tag must be accepted unchanged.
+///
+/// A deck declaring `lang "fr-FR"` (a valid BCP-47 tag, ASCII alphanumeric + `-`)
+/// must export successfully. This verifies the validator does NOT reject normal
+/// language tags (BC-5.01.005 invariant 1 — lossless pass-through for valid tags).
+///
+/// This is the companion control for `test_SEC_099_001_lang_control_char_rejected`.
+#[test]
+fn test_SEC_099_001_valid_bcp47_lang_accepted() {
+    let deck = deck_with_lang(Some("fr-FR"));
+    let laid_out = make_laid_out_deck(vec![]);
+    let brand = minimal_brand();
+    let opts = ExportOptions::default();
+
+    let result = DocxExporter.export(&deck, &laid_out, &brand, &opts);
+
+    assert!(
+        result.is_ok(),
+        "SEC-099-001 control: DOCX export with valid BCP-47 lang \"fr-FR\" must succeed \
+         (BC-5.01.005 invariant 1 — lossless pass-through). \
+         Got error: {:?}",
+        result.err()
     );
 }

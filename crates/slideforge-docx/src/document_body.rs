@@ -426,8 +426,9 @@ impl DocumentBodySerializer {
         // carrying <w:pgSz w:w="W" w:h="H"/> so Word 365 knows the page canvas.
         // Dimensions are converted from EMU to twentieths-of-a-point (twips):
         //   twips = EMU × 1440 / 914_400 = EMU / 635  (exact for standard sizes)
-        // EMU values are always positive (validated by the layout engine), so
-        // the try_from conversion from i64 to u32 is always successful in practice.
+        // `u32::try_from` may fail if the layout engine produces a non-positive or
+        // oversized EMU value; `unwrap_or` falls back to the standard widescreen
+        // dimensions (14_400 × 8_100 twips) rather than panicking.
         let width_twips = u32::try_from(deck.page_size.width.0 / 635).unwrap_or(14_400);
         let height_twips = u32::try_from(deck.page_size.height.0 / 635).unwrap_or(8_100);
         let sect_pr = SectionProperties {

@@ -877,30 +877,25 @@ fn build_notes_handout_masters(
 
 /// Validate that `lang` contains no XML-1.0-illegal control characters.
 ///
+/// Delegates to [`slideforge_types::validate_xml_lang`] — the shared core
+/// validator in the leaf crate — and wraps any failure into the PPTX-specific
+/// [`PptxError::InvalidLanguageTag`] variant. Keeping the wrapper here avoids
+/// changing all call sites in this file (SEC-039-001 / SEC-099-001 / CWE-116).
+///
 /// XML 1.0 §2.2 defines legal characters as:
-/// `#x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]`
+/// `#x9 | #xA | #xD | [#x20–#xD7FF] | [#xE000–#xFFFD] | [#x10000–#x10FFFF]`
 ///
-/// The illegal ranges relevant here are: U+0000–U+0008, U+000B, U+000C,
-/// U+000E–U+001F, U+FFFE, U+FFFF. A valid BCP-47 tag (ASCII alphanumeric + `-`)
-/// always passes unchanged (lossless per BC-5.01.005 invariant 1).
-///
-/// On success the original `lang` string is returned unmodified (lossless).
-/// On failure a [`PptxError::InvalidLanguageTag`] is returned (SEC-039-001 / CWE-116).
+/// Illegal ranges: U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE,
+/// U+FFFF. A valid BCP-47 tag (ASCII alphanumeric + `-`) always passes
+/// unchanged (lossless per BC-5.01.005 invariant 1).
 fn validate_lang_for_xml(lang: &str) -> Result<(), PptxError> {
-    for ch in lang.chars() {
+    slideforge_types::validate_xml_lang(lang).map_err(|ch| {
         let code = ch as u32;
-        let illegal = matches!(
-            code,
-            0x0000..=0x0008 | 0x000B | 0x000C | 0x000E..=0x001F | 0xFFFE | 0xFFFF
-        );
-        if illegal {
-            return Err(PptxError::InvalidLanguageTag {
-                lang: lang.to_owned(),
-                reason: format!("contains XML-1.0-illegal control character U+{code:04X}"),
-            });
+        PptxError::InvalidLanguageTag {
+            lang: lang.to_owned(),
+            reason: format!("contains XML-1.0-illegal control character U+{code:04X}"),
         }
-    }
-    Ok(())
+    })
 }
 
 /// Build `docProps/core.xml` and `docProps/app.xml`.
