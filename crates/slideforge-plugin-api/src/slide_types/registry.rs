@@ -1070,10 +1070,12 @@ mod tests {
     // struct fields (severity, code, span presence), not just error-code presence.
     //
     // These tests exercise Route A (context-sensitive severity at accumulation time
-    // in validate_fields): field key ∈ {"shape", "body"} AND strict mode → Error
-    // severity (broken/exit-2) when the field appears on a slide type that does NOT
-    // declare it. Note: `content` slides now declare `body` as optional (STORY-098
-    // F-098-P1-002), so `body` on `content` is valid. Tests use `chart` for body tests.
+    // in validate_fields): field key ∈ {"shape", "body"} → Error severity
+    // (broken) UNCONDITIONALLY when the field appears on a slide type that does NOT
+    // declare it. Mode-sensitivity (strict → exit-2, warn-only → placeholder) is
+    // enforced at the pipeline gate, not inside validate_fields. Note: `content`
+    // slides now declare `body` as optional (STORY-098 F-098-P1-002), so `body` on
+    // `content` is valid. Tests use `chart` for body tests.
     //
     // Test naming: test_BC_3_03_002_xxx (BC-3.03.002 = STORY-098 content-drop BC)
 
@@ -1121,8 +1123,7 @@ mod tests {
             shape_diag.severity,
             DiagnosticSeverity::Error,
             "BC-3.03.002 v1.2 Invariant 4 / AC-001: W-VAL-103 for 'shape' on unsupported slide \
-             type MUST be Error severity (broken/exit-2 in strict mode); \
-             currently emits Warning — RED GATE: this assertion fails before implementation. \
+             type MUST be Error severity (content-drop promotion — STORY-098). \
              Got severity: {:?}. Message: {}",
             shape_diag.severity,
             shape_diag.message
